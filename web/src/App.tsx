@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleMap,
   useJsApiLoader,
@@ -13,6 +13,10 @@ import { useGeolocation } from "@/hooks/useGeolocation";
 import { useSettings } from "@/hooks/useSettings";
 import { ReportAlertPanel } from "@/components/ReportAlertPanel";
 import { AlertDetailPanel } from "@/components/AlertDetailPanel";
+// Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
+const LiveVehicleDetection = lazy(() =>
+  import("@/components/LiveVehicleDetection").then((m) => ({ default: m.LiveVehicleDetection }))
+);
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
 import "./App.css";
 
@@ -43,6 +47,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<AlertDoc[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<AlertDoc | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [detectionOpen, setDetectionOpen] = useState(false);
 
   const [destination, setDestination] = useState<google.maps.LatLngLiteral | null>(null);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
@@ -186,8 +191,22 @@ export default function App() {
         +
       </button>
 
+      <button
+        className="fab fab-secondary"
+        onClick={() => setDetectionOpen(true)}
+        aria-label="Live vehicle detection"
+      >
+        🎥
+      </button>
+
       {reportOpen && (
         <ReportAlertPanel onShare={onShareAlert} onClose={() => setReportOpen(false)} />
+      )}
+
+      {detectionOpen && (
+        <Suspense fallback={<div className="detection-loading">Loading detection model…</div>}>
+          <LiveVehicleDetection onClose={() => setDetectionOpen(false)} />
+        </Suspense>
       )}
 
       {selectedAlert && (

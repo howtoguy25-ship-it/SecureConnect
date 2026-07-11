@@ -76,3 +76,21 @@
   cursor: pointer;
   z-index: 10;
 }
+
+.fab-secondary {
+  bottom: 96px;
+  background: #111827;
+  font-size: 22px;
+}
+
+.detection-loading {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, sans-serif;
+  z-index: 2000;
+}

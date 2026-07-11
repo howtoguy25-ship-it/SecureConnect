@@ -8,12 +8,20 @@ mobile app's `react-native-maps` doesn't run in a browser).
 ## What's here vs. the mobile app
 
 Included: live map, current location, nearby alert pins (report / delete-if-owner /
-hide-if-not / confirm), destination search with routing.
+hide-if-not / confirm), destination search with routing, and a live-camera vehicle
+detector (tap the 🎥 button) that draws a box around any car/truck/bus/motorcycle in
+frame using TensorFlow.js + COCO-SSD.
+
+**About the vehicle detector**: it labels boxes generically as "Vehicle," not "police
+car" or "ambulance." COCO-SSD (the pretrained model it runs) only knows generic object
+classes — it has no concept of emergency-vehicle subtypes. Actually distinguishing
+police/ambulance from a regular car would need a custom-trained model with real
+labeled training data, which is a separate, much larger effort.
 
 Not included (phone-only features that don't translate well to a browser tab):
-turn-by-turn voice guidance, and the EV Radar siren detection (needs native audio +
-TFLite; a browser tab also can't reliably listen in the background once you switch
-away from it).
+turn-by-turn voice guidance, and the EV Radar *siren* (audio) detection (needs native
+audio + TFLite; a browser tab also can't reliably listen in the background once you
+switch away from it).
 
 ## Setup
 
