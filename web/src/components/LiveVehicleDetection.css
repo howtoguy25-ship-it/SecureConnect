@@ -59,3 +59,16 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+.detection-switch {
+  position: absolute;
+  bottom: 28px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 24px;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111827;
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as tf from "@tensorflow/tfjs";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import "./LiveVehicleDetection.css";
@@ -8,6 +8,8 @@ import "./LiveVehicleDetection.css";
 // Labeling boxes as anything more specific than "Vehicle" would be a false claim of
 // capability the model doesn't have.
 const VEHICLE_CLASSES = new Set(["car", "truck", "bus", "motorcycle"]);
+
+type FacingMode = "environment" | "user";
 
 interface Props {
   onClose: () => void;
@@ -24,20 +26,36 @@ export function LiveVehicleDetection({ onClose }: Props) {
     "loading-model"
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Back camera by default (better for spotting vehicles out the windshield); front camera
+  // is the fallback on laptops/desktops that don't have a rear-facing one at all.
+  const [facingMode, setFacingMode] = useState<FacingMode>("environment");
+  const [canSwitchCamera, setCanSwitchCamera] = useState(false);
+
+  useEffect(() => {
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((devices) => {
+        const cameraCount = devices.filter((d) => d.kind === "videoinput").length;
+        setCanSwitchCamera(cameraCount > 1);
+      })
+      .catch(() => setCanSwitchCamera(false));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function start() {
       try {
-        await tf.ready();
-        const model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
-        if (cancelled) return;
-        modelRef.current = model;
+        if (!modelRef.current) {
+          await tf.ready();
+          modelRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+          if (cancelled) return;
+        }
 
         setStatus("requesting-camera");
+        streamRef.current?.getTracks().forEach((t) => t.stop());
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          video: { facingMode },
           audio: false,
         });
         if (cancelled) {
@@ -100,8 +118,17 @@ export function LiveVehicleDetection({ onClose }: Props) {
     return () => {
       cancelled = true;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [facingMode]);
+
+  useEffect(() => {
+    return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
+  }, []);
+
+  const switchCamera = useCallback(() => {
+    setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
   }, []);
 
   return (
@@ -114,9 +141,16 @@ export function LiveVehicleDetection({ onClose }: Props) {
       <div className="detection-banner">
         {status === "loading-model" && "Loading detection model…"}
         {status === "requesting-camera" && "Requesting camera access…"}
-        {status === "running" && "Detecting vehicles — boxes show any car/truck/bus/motorcycle in view, not specifically police or ambulance."}
+        {status === "running" &&
+          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — boxes show any car/truck/bus/motorcycle in view, not specifically police or ambulance.`}
         {status === "error" && (errorMessage ?? "Something went wrong starting the camera.")}
       </div>
+
+      {canSwitchCamera && (
+        <button className="detection-switch" onClick={switchCamera} aria-label="Switch camera">
+          🔄 Switch camera
+        </button>
+      )}
 
       <button className="detection-close" onClick={onClose}>
         Close
