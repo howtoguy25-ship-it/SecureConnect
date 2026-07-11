@@ -60,6 +60,29 @@
   gap: 4px;
 }
 
+.radius-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.street3d-exit {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 10px 16px;
+  border-radius: 20px;
+  border: none;
+  background: rgba(17, 24, 39, 0.85);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  z-index: 15;
+}
+
 .route-actions {
   position: absolute;
   bottom: 28px;

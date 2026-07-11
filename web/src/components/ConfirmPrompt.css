@@ -1,0 +1,47 @@
+.confirm-prompt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% - 48px);
+  max-width: 360px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  z-index: 25;
+  font-family: system-ui, sans-serif;
+}
+
+.confirm-prompt-message {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.confirm-prompt-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-prompt-no,
+.confirm-prompt-yes {
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirm-prompt-no {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.confirm-prompt-yes {
+  background: #2563eb;
+  color: #fff;
+}

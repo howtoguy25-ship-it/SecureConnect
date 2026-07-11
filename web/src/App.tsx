@@ -8,13 +8,21 @@ import {
 } from "@react-google-maps/api";
 import type { User } from "firebase/auth";
 import { ensureSignedIn } from "@/services/firebase";
-import { subscribeNearbyAlerts, reportAlert, deleteAlert, hideAlertForUser, confirmAlert } from "@/services/alerts";
+import {
+  subscribeNearbyAlerts,
+  subscribeAllAlerts,
+  reportAlert,
+  deleteAlert,
+  hideAlertForUser,
+  confirmAlert,
+} from "@/services/alerts";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { useSettings } from "@/hooks/useSettings";
 import { ReportAlertPanel } from "@/components/ReportAlertPanel";
 import { AlertDetailPanel } from "@/components/AlertDetailPanel";
 import { PlacementBar } from "@/components/PlacementBar";
 import { NavigationCard } from "@/components/NavigationCard";
+import { ConfirmPrompt } from "@/components/ConfirmPrompt";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
   import("@/components/LiveVehicleDetection").then((m) => ({ default: m.LiveVehicleDetection }))
@@ -48,7 +56,7 @@ export default function App() {
   });
 
   const { location, error: locationError } = useGeolocation();
-  const { settings, setAlertRadiusKm } = useSettings();
+  const { settings, setAlertRadiusKm, setRegionWide, setFixedZone } = useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -75,7 +83,19 @@ export default function App() {
   // "follow" = tilted, rotating, close-up camera that tracks your heading (driving view);
   // "overview" = flat, north-up, zoomed out to show the entire route start-to-finish.
   const [navViewMode, setNavViewMode] = useState<"follow" | "overview">("follow");
+  const [distanceToManeuverM, setDistanceToManeuverM] = useState<number | null>(null);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
+
+  // Max-zoom "view in 3D?" prompt
+  const [maxZoomHere, setMaxZoomHere] = useState<number | null>(null);
+  const [show3DPrompt, setShow3DPrompt] = useState(false);
+  const [street3DMode, setStreet3DMode] = useState(false);
+  const promptedAtMaxZoomRef = useRef(false);
+
+  // Fixed alert zone
+  const [zoneCenter, setZoneCenter] = useState<google.maps.LatLngLiteral | null>(null);
+  const [showLeaveZonePrompt, setShowLeaveZonePrompt] = useState(false);
+  const leaveZonePromptedRef = useRef(false);
 
   useEffect(() => {
     ensureSignedIn()
@@ -88,16 +108,59 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!location || !user) return;
-    const unsubscribe = subscribeNearbyAlerts(
-      location.lat,
-      location.lng,
+    if (!user) return;
+
+    if (settings.regionWide) {
+      return subscribeAllAlerts(user.uid, setAlerts);
+    }
+
+    const queryCenter = settings.fixedZone ? zoneCenter ?? location : location;
+    if (!queryCenter) return;
+
+    return subscribeNearbyAlerts(
+      queryCenter.lat,
+      queryCenter.lng,
       settings.alertRadiusKm,
       user.uid,
       setAlerts
     );
-    return unsubscribe;
-  }, [location?.lat, location?.lng, settings.alertRadiusKm, user?.uid]);
+  }, [
+    location?.lat,
+    location?.lng,
+    settings.alertRadiusKm,
+    settings.regionWide,
+    settings.fixedZone,
+    zoneCenter?.lat,
+    zoneCenter?.lng,
+    user?.uid,
+  ]);
+
+  // Seed the fixed zone's center the moment it's turned on; clear it when turned off so
+  // it re-seeds fresh next time instead of reusing a stale spot.
+  useEffect(() => {
+    if (settings.fixedZone && !zoneCenter && location) {
+      setZoneCenter(location);
+      leaveZonePromptedRef.current = false;
+    }
+    if (!settings.fixedZone && zoneCenter) {
+      setZoneCenter(null);
+      setShowLeaveZonePrompt(false);
+    }
+  }, [settings.fixedZone, zoneCenter, location]);
+
+  // Watch for drifting outside the fixed zone's radius and prompt once per "leaving" event.
+  useEffect(() => {
+    if (!settings.fixedZone || !zoneCenter || !location) return;
+    const distFromZoneKm = distanceKm(zoneCenter.lat, zoneCenter.lng, location.lat, location.lng);
+    if (distFromZoneKm > settings.alertRadiusKm) {
+      if (!leaveZonePromptedRef.current) {
+        leaveZonePromptedRef.current = true;
+        setShowLeaveZonePrompt(true);
+      }
+    } else {
+      leaveZonePromptedRef.current = false;
+    }
+  }, [location?.lat, location?.lng, settings.fixedZone, settings.alertRadiusKm, zoneCenter]);
 
   // Compute/refresh directions. While navigating, this also acts as live re-routing: it
   // re-fires whenever routeOrigin moves (see the drift-triggered update further down).
@@ -143,6 +206,7 @@ export default function App() {
     if (currentStep) {
       const stepEnd = currentStep.end_location;
       const distToStepEndKm = distanceKm(location.lat, location.lng, stepEnd.lat(), stepEnd.lng());
+      setDistanceToManeuverM(Math.round(distToStepEndKm * 1000));
       if (distToStepEndKm < 0.03 && activeStepIndex < steps.length - 1) {
         setActiveStepIndex((i) => i + 1);
       }
@@ -175,6 +239,50 @@ export default function App() {
       if (bounds) map.fitBounds(bounds, 80);
     }
   }, [navViewMode, navigating, directions]);
+
+  // Look up the real max zoom Google has imagery for at this location (varies by area —
+  // dense cities go much deeper than rural roads), so the "view in 3D?" prompt triggers
+  // at an actually-meaningful "you've zoomed in as far as this place goes" point instead
+  // of a guessed constant.
+  useEffect(() => {
+    if (!location || !isLoaded) return;
+    const maxZoomService = new google.maps.MaxZoomService();
+    maxZoomService.getMaxZoomAtLatLng(location, (result) => {
+      if (result.status === "OK") setMaxZoomHere(result.zoom);
+    });
+  }, [location?.lat, location?.lng, isLoaded]);
+
+  const onZoomChanged = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || maxZoomHere === null) return;
+    const zoom = map.getZoom();
+    if (zoom === undefined) return;
+
+    if (zoom >= maxZoomHere) {
+      if (!promptedAtMaxZoomRef.current && !street3DMode) {
+        promptedAtMaxZoomRef.current = true;
+        setShow3DPrompt(true);
+      }
+    } else {
+      promptedAtMaxZoomRef.current = false;
+    }
+  }, [maxZoomHere, street3DMode]);
+
+  const enterStreet3D = useCallback(() => {
+    setShow3DPrompt(false);
+    setStreet3DMode(true);
+    mapRef.current?.setTilt(67.5);
+  }, []);
+
+  const declineStreet3D = useCallback(() => {
+    setShow3DPrompt(false);
+  }, []);
+
+  const exitStreet3D = useCallback(() => {
+    setStreet3DMode(false);
+    mapRef.current?.setTilt(0);
+    mapRef.current?.setHeading(0);
+  }, []);
 
   const onPlaceChanged = useCallback(() => {
     const place = autocompleteRef.current?.getPlace();
@@ -277,8 +385,9 @@ export default function App() {
         center={center}
         zoom={location ? 15 : 11}
         heading={navigating && navViewMode === "follow" ? heading : 0}
-        tilt={navigating && navViewMode === "follow" ? 67.5 : 0}
+        tilt={(navigating && navViewMode === "follow") || street3DMode ? 67.5 : 0}
         mapContainerClassName="map-container"
+        onZoomChanged={onZoomChanged}
         options={{
           disableDefaultUI: true,
           zoomControl: !navigating,
@@ -363,9 +472,27 @@ export default function App() {
               type="range"
               min={1}
               max={15}
+              disabled={settings.regionWide}
               value={settings.alertRadiusKm}
               onChange={(e) => setAlertRadiusKm(Number(e.target.value))}
             />
+          </label>
+          <label className="radius-checkbox">
+            <input
+              type="checkbox"
+              checked={settings.regionWide}
+              onChange={(e) => setRegionWide(e.target.checked)}
+            />
+            Show all alerts region-wide (e.g. all of Australia)
+          </label>
+          <label className="radius-checkbox">
+            <input
+              type="checkbox"
+              disabled={settings.regionWide}
+              checked={settings.fixedZone}
+              onChange={(e) => setFixedZone(e.target.checked)}
+            />
+            Lock alert zone to current spot
           </label>
         </div>
       )}
@@ -385,6 +512,7 @@ export default function App() {
         <>
           <NavigationCard
             step={navSteps[activeStepIndex] ?? null}
+            distanceToManeuverM={distanceToManeuverM}
             etaText={navLeg.duration?.text ?? ""}
             distanceRemainingText={navSteps
               .slice(activeStepIndex)
@@ -440,6 +568,31 @@ export default function App() {
             ➤
           </button>
         </>
+      )}
+
+      {street3DMode && (
+        <button className="street3d-exit" onClick={exitStreet3D} aria-label="Exit 3D view">
+          ✕ Exit 3D
+        </button>
+      )}
+
+      {show3DPrompt && (
+        <ConfirmPrompt
+          message="You've zoomed all the way in — do you want to view 3D?"
+          onYes={enterStreet3D}
+          onNo={declineStreet3D}
+        />
+      )}
+
+      {showLeaveZonePrompt && (
+        <ConfirmPrompt
+          message={`Leaving zone — you've moved past your ${settings.alertRadiusKm} km alert zone limit. Adjust to view all alerts around your current surroundings?`}
+          onYes={() => {
+            setShowLeaveZonePrompt(false);
+            setFixedZone(false);
+          }}
+          onNo={() => setShowLeaveZonePrompt(false)}
+        />
       )}
 
       {reportOpen && (

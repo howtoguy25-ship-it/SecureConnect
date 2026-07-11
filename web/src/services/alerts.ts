@@ -108,6 +108,25 @@ export function subscribeNearbyAlerts(
   return () => unsubscribes.forEach((unsub) => unsub());
 }
 
+/**
+ * Live subscription to every non-expired alert regardless of distance — used for
+ * "region-wide" visibility (e.g. all of Australia sees the same alerts) instead of the
+ * tight nearby-radius view. Firestore doesn't need a geo filter here since alerts already
+ * self-expire (45min-24hr), keeping the collection small enough for a plain live query.
+ */
+export function subscribeAllAlerts(
+  currentUid: string,
+  onChange: (alerts: AlertDoc[]) => void
+): Unsubscribe {
+  return onSnapshot(query(collection(db, ALERTS_COLLECTION)), (snap) => {
+    const now = Date.now();
+    const alerts = snap.docs
+      .map((d) => toAlertDoc(d.id, d.data()))
+      .filter((alert) => alert.expiresAt > now && !alert.hiddenBy.includes(currentUid));
+    onChange(alerts);
+  });
+}
+
 export async function deleteAlert(alertId: string): Promise<void> {
   await deleteDoc(doc(db, ALERTS_COLLECTION, alertId));
 }
