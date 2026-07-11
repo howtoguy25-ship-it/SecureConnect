@@ -72,6 +72,9 @@ export default function App() {
   const [navigating, setNavigating] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [heading, setHeading] = useState(0);
+  // "follow" = tilted, rotating, close-up camera that tracks your heading (driving view);
+  // "overview" = flat, north-up, zoomed out to show the entire route start-to-finish.
+  const [navViewMode, setNavViewMode] = useState<"follow" | "overview">("follow");
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
 
   useEffect(() => {
@@ -149,8 +152,29 @@ export default function App() {
       setRouteOrigin(location);
     }
 
-    mapRef.current?.panTo(location);
-  }, [location?.lat, location?.lng, navigating]);
+    if (navViewMode === "follow") {
+      mapRef.current?.panTo(location);
+    }
+  }, [location?.lat, location?.lng, navigating, navViewMode]);
+
+  // Switch between the tilted "follow" driving view and the flat "overview" of the
+  // whole route whenever the toggle changes (or a fresh route comes in while already
+  // in overview mode).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !navigating) return;
+
+    if (navViewMode === "follow") {
+      map.setTilt(67.5);
+      map.setZoom(18);
+      if (location) map.panTo(location);
+    } else {
+      map.setTilt(0);
+      map.setHeading(0);
+      const bounds = directions?.routes[0]?.bounds;
+      if (bounds) map.fitBounds(bounds, 80);
+    }
+  }, [navViewMode, navigating, directions]);
 
   const onPlaceChanged = useCallback(() => {
     const place = autocompleteRef.current?.getPlace();
@@ -203,10 +227,11 @@ export default function App() {
 
   const startNavigation = useCallback(() => {
     setNavigating(true);
+    setNavViewMode("follow");
     setActiveStepIndex(0);
     setRouteOrigin(location);
     lastLocationRef.current = location;
-    mapRef.current?.setTilt(45);
+    mapRef.current?.setTilt(67.5);
     mapRef.current?.setZoom(18);
   }, [location]);
 
@@ -217,6 +242,19 @@ export default function App() {
     mapRef.current?.setHeading(0);
     mapRef.current?.setZoom(15);
   }, []);
+
+  const clearRoute = useCallback(() => {
+    setDestination(null);
+    setDirections(null);
+    setRouteOrigin(null);
+    if (navigating) endNavigation();
+  }, [navigating, endNavigation]);
+
+  const recenter = useCallback(() => {
+    if (!location) return;
+    mapRef.current?.panTo(location);
+    if (!navigating) mapRef.current?.setZoom(15);
+  }, [location, navigating]);
 
   const center = useMemo(() => location ?? DEFAULT_CENTER, [location]);
 
@@ -238,10 +276,20 @@ export default function App() {
         }}
         center={center}
         zoom={location ? 15 : 11}
-        heading={navigating ? heading : 0}
-        tilt={navigating ? 45 : 0}
+        heading={navigating && navViewMode === "follow" ? heading : 0}
+        tilt={navigating && navViewMode === "follow" ? 67.5 : 0}
         mapContainerClassName="map-container"
-        options={{ disableDefaultUI: true, zoomControl: !navigating, clickableIcons: false }}
+        options={{
+          disableDefaultUI: true,
+          zoomControl: !navigating,
+          clickableIcons: false,
+          // A vector-rendered Map ID is required for tilt/heading (the "3D follow" driving
+          // view) to actually render — without one, Google Maps silently ignores tilt on
+          // regular roadmap tiles. Create one at console.cloud.google.com/google/maps-apis/studio/maps
+          // (render type: Vector) and set VITE_GOOGLE_MAPS_MAP_ID; falls back to a flat
+          // map if unset.
+          mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
+        }}
         onClick={(e) => {
           if (pendingType && e.latLng) {
             setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
@@ -323,22 +371,46 @@ export default function App() {
       )}
 
       {directions && !navigating && !pendingType && (
-        <button className="start-nav-button" onClick={startNavigation}>
-          Start navigation · ETA {navLeg?.duration?.text}
-        </button>
+        <div className="route-actions">
+          <button className="start-nav-button" onClick={startNavigation}>
+            Start navigation · ETA {navLeg?.duration?.text}
+          </button>
+          <button className="clear-route-button" onClick={clearRoute} aria-label="Remove route">
+            ✕
+          </button>
+        </div>
       )}
 
       {navigating && navLeg && (
-        <NavigationCard
-          step={navSteps[activeStepIndex] ?? null}
-          etaText={navLeg.duration?.text ?? ""}
-          distanceRemainingText={navSteps
-            .slice(activeStepIndex)
-            .reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) < 1000
-            ? `${navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0)} m`
-            : `${(navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) / 1000).toFixed(1)} km`}
-          onExit={endNavigation}
-        />
+        <>
+          <NavigationCard
+            step={navSteps[activeStepIndex] ?? null}
+            etaText={navLeg.duration?.text ?? ""}
+            distanceRemainingText={navSteps
+              .slice(activeStepIndex)
+              .reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) < 1000
+              ? `${navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0)} m`
+              : `${(navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) / 1000).toFixed(1)} km`}
+            onExit={endNavigation}
+          />
+          <div className="nav-view-toggle">
+            <button
+              className={navViewMode === "follow" ? "nav-view-active" : ""}
+              onClick={() => setNavViewMode("follow")}
+            >
+              3D Follow
+            </button>
+            <button
+              className={navViewMode === "overview" ? "nav-view-active" : ""}
+              onClick={() => setNavViewMode("overview")}
+            >
+              Full Route
+            </button>
+          </div>
+          <button className="clear-route-button nav-clear-button" onClick={clearRoute} aria-label="Remove route">
+            ✕
+          </button>
+        </>
       )}
 
       {pendingType && pendingLocation && (
@@ -357,6 +429,15 @@ export default function App() {
             aria-label="Live vehicle detection"
           >
             🎥
+          </button>
+
+          <button
+            className="fab fab-tertiary"
+            onClick={recenter}
+            disabled={!location}
+            aria-label="Recenter on my location"
+          >
+            ➤
           </button>
         </>
       )}
