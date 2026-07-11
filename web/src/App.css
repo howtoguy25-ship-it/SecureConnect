@@ -60,6 +60,25 @@
   gap: 4px;
 }
 
+.start-nav-button {
+  position: absolute;
+  bottom: 28px;
+  left: 16px;
+  right: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 14px;
+  border-radius: 14px;
+  border: none;
+  background: #16a34a;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
 .fab {
   position: absolute;
   bottom: 28px;

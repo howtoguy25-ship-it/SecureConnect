@@ -1,0 +1,31 @@
+.detail-sheet {
+  padding: 0;
+  overflow: hidden;
+}
+
+.detail-map-thumb {
+  display: block;
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  background: #e5e7eb;
+}
+
+.detail-sheet .detail-header {
+  margin-bottom: 0;
+  padding: 16px 20px;
+}
+
+.detail-sheet .detail-icon {
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 24px;
+}
+
+.detail-sheet .detail-title,
+.detail-sheet .detail-subtitle {
+  color: #fff;
+}
+
+.detail-body {
+  padding: 16px 20px 20px;
+}

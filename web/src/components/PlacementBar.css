@@ -1,0 +1,45 @@
+.placement-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 16px;
+  right: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  z-index: 15;
+  font-family: system-ui, sans-serif;
+}
+
+.placement-text {
+  font-size: 14px;
+  color: #374151;
+  margin-bottom: 12px;
+}
+
+.placement-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.placement-cancel,
+.placement-confirm {
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.placement-cancel {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.placement-confirm {
+  background: #2563eb;
+  color: #fff;
+}

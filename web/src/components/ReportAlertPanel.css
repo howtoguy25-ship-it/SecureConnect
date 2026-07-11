@@ -49,6 +49,27 @@
   background: #f9fafb;
 }
 
+.type-button-selected {
+  border-width: 3px;
+}
+
+.place-button {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.place-button:disabled {
+  background: #93a3b8;
+  cursor: not-allowed;
+}
+
 .type-emoji {
   font-size: 26px;
 }
