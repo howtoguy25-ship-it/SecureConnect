@@ -9,11 +9,16 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
+export type NavViewMode = "follow" | "street" | "overview";
+
 interface Props {
   step: google.maps.DirectionsStep | null;
   distanceToManeuverM: number | null;
   etaText: string;
   distanceRemainingText: string;
+  navViewMode: NavViewMode;
+  onSetNavViewMode: (mode: NavViewMode) => void;
+  onClearRoute: () => void;
   onExit: () => void;
 }
 
@@ -22,6 +27,9 @@ export function NavigationCard({
   distanceToManeuverM,
   etaText,
   distanceRemainingText,
+  navViewMode,
+  onSetNavViewMode,
+  onClearRoute,
   onExit,
 }: Props) {
   const instruction = step ? stripHtml(step.instructions) : "Recalculating…";
@@ -32,9 +40,32 @@ export function NavigationCard({
 
   return (
     <div className="nav-card">
+      <button className="nav-card-clear" onClick={onClearRoute} aria-label="Remove route">
+        ✕
+      </button>
       <div className="nav-card-instruction">{headline}</div>
       <div className="nav-card-meta">
         ETA {etaText} · {distanceRemainingText} remaining
+      </div>
+      <div className="nav-card-view-toggle">
+        <button
+          className={navViewMode === "follow" ? "nav-view-active" : ""}
+          onClick={() => onSetNavViewMode("follow")}
+        >
+          3D Follow
+        </button>
+        <button
+          className={navViewMode === "street" ? "nav-view-active" : ""}
+          onClick={() => onSetNavViewMode("street")}
+        >
+          Street View
+        </button>
+        <button
+          className={navViewMode === "overview" ? "nav-view-active" : ""}
+          onClick={() => onSetNavViewMode("overview")}
+        >
+          Full Route
+        </button>
       </div>
       <button className="nav-card-exit" onClick={onExit}>
         End navigation

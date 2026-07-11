@@ -21,8 +21,11 @@ import { useSettings } from "@/hooks/useSettings";
 import { ReportAlertPanel } from "@/components/ReportAlertPanel";
 import { AlertDetailPanel } from "@/components/AlertDetailPanel";
 import { PlacementBar } from "@/components/PlacementBar";
-import { NavigationCard } from "@/components/NavigationCard";
+import { NavigationCard, type NavViewMode } from "@/components/NavigationCard";
+import { RouteOptionsCard } from "@/components/RouteOptionsCard";
+import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
+import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
   import("@/components/LiveVehicleDetection").then((m) => ({ default: m.LiveVehicleDetection }))
@@ -67,6 +70,12 @@ export default function App() {
 
   const [destination, setDestination] = useState<google.maps.LatLngLiteral | null>(null);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const [routeOptions, setRouteOptions] = useState<Record<RouteKey, google.maps.DirectionsResult | null>>({
+    best: null,
+    fast: null,
+    comfort: null,
+  });
+  const [selectedRouteKey, setSelectedRouteKey] = useState<RouteKey>("best");
   const [routeOrigin, setRouteOrigin] = useState<google.maps.LatLngLiteral | null>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -81,9 +90,11 @@ export default function App() {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [heading, setHeading] = useState(0);
   // "follow" = tilted, rotating, close-up camera that tracks your heading (driving view);
+  // "street" = real Google Street View imagery facing your direction of travel (front/driver view);
   // "overview" = flat, north-up, zoomed out to show the entire route start-to-finish.
-  const [navViewMode, setNavViewMode] = useState<"follow" | "overview">("follow");
+  const [navViewMode, setNavViewMode] = useState<NavViewMode>("follow");
   const [distanceToManeuverM, setDistanceToManeuverM] = useState<number | null>(null);
+  const [streetViewUnavailable, setStreetViewUnavailable] = useState(false);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
 
   // Max-zoom "view in 3D?" prompt
@@ -162,29 +173,90 @@ export default function App() {
     }
   }, [location?.lat, location?.lng, settings.fixedZone, settings.alertRadiusKm, zoneCenter]);
 
-  // Compute/refresh directions. While navigating, this also acts as live re-routing: it
-  // re-fires whenever routeOrigin moves (see the drift-triggered update further down).
+  // Compute/refresh directions. Before navigating, this fetches three real, distinctly
+  // -constrained routes (Best/Fast/Comfort) so the route picker has real options to show.
+  // While navigating, it only re-fetches whichever profile is already selected — live
+  // re-routing (see the drift-triggered update further down) shouldn't silently swap the
+  // route's character mid-drive, and refetching all three every reroute would be wasteful.
   useEffect(() => {
     const origin = routeOrigin ?? location;
     if (!origin || !destination) {
+      setRouteOptions({ best: null, fast: null, comfort: null });
       setDirections(null);
       return;
     }
     const directionsService = new google.maps.DirectionsService();
-    directionsService.route(
-      {
-        origin,
-        destination,
-        travelMode: google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status === "OK" && result) {
-          setDirections(result);
-          setActiveStepIndex(0);
+
+    if (navigating) {
+      const profile = ROUTE_PROFILES[selectedRouteKey];
+      directionsService.route(
+        {
+          origin,
+          destination,
+          travelMode: google.maps.TravelMode.DRIVING,
+          avoidHighways: profile.avoidHighways,
+          avoidTolls: profile.avoidTolls,
+        },
+        (result, status) => {
+          if (status === "OK" && result) {
+            setDirections(result);
+            setRouteOptions((prev) => ({ ...prev, [selectedRouteKey]: result }));
+            setActiveStepIndex(0);
+          }
         }
+      );
+      return;
+    }
+
+    let cancelled = false;
+    const keys = Object.keys(ROUTE_PROFILES) as RouteKey[];
+    Promise.all(
+      keys.map(
+        (key) =>
+          new Promise<[RouteKey, google.maps.DirectionsResult | null]>((resolve) => {
+            const profile = ROUTE_PROFILES[key];
+            directionsService.route(
+              {
+                origin,
+                destination,
+                travelMode: google.maps.TravelMode.DRIVING,
+                avoidHighways: profile.avoidHighways,
+                avoidTolls: profile.avoidTolls,
+              },
+              (result, status) => resolve([key, status === "OK" ? result : null])
+            );
+          })
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      const next = { best: null, fast: null, comfort: null } as Record<
+        RouteKey,
+        google.maps.DirectionsResult | null
+      >;
+      for (const [key, result] of results) next[key] = result;
+      setRouteOptions(next);
+      const chosen = next[selectedRouteKey] ?? next.best ?? next.fast ?? next.comfort;
+      if (chosen) {
+        setDirections(chosen);
+        setActiveStepIndex(0);
       }
-    );
-  }, [routeOrigin?.lat, routeOrigin?.lng, location?.lat, location?.lng, destination]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeOrigin?.lat, routeOrigin?.lng, location?.lat, location?.lng, destination, navigating]);
+
+  // Switching which route card is selected (before navigation starts) just swaps in the
+  // already-fetched route — no need to hit the Directions API again.
+  useEffect(() => {
+    if (navigating) return;
+    const chosen = routeOptions[selectedRouteKey];
+    if (chosen) {
+      setDirections(chosen);
+      setActiveStepIndex(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRouteKey]);
 
   // Live tracking while navigating: advance to the next step as you approach it, rotate
   // the map to face your direction of travel, and trigger a re-route if you've drifted
@@ -223,7 +295,8 @@ export default function App() {
 
   // Switch between the tilted "follow" driving view and the flat "overview" of the
   // whole route whenever the toggle changes (or a fresh route comes in while already
-  // in overview mode).
+  // in overview mode). "street" mode swaps in a full-screen Street View overlay instead
+  // (see the StreetViewNav render below) and doesn't move the map camera underneath it.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !navigating) return;
@@ -232,13 +305,24 @@ export default function App() {
       map.setTilt(67.5);
       map.setZoom(18);
       if (location) map.panTo(location);
-    } else {
+    } else if (navViewMode === "overview") {
       map.setTilt(0);
       map.setHeading(0);
       const bounds = directions?.routes[0]?.bounds;
       if (bounds) map.fitBounds(bounds, 80);
     }
   }, [navViewMode, navigating, directions]);
+
+  const onStreetViewNoCoverage = useCallback(() => {
+    setStreetViewUnavailable(true);
+    setNavViewMode("follow");
+  }, []);
+
+  useEffect(() => {
+    if (!streetViewUnavailable) return;
+    const timer = setTimeout(() => setStreetViewUnavailable(false), 4000);
+    return () => clearTimeout(timer);
+  }, [streetViewUnavailable]);
 
   // Look up the real max zoom Google has imagery for at this location (varies by area —
   // dense cities go much deeper than rural roads), so the "view in 3D?" prompt triggers
@@ -354,6 +438,8 @@ export default function App() {
   const clearRoute = useCallback(() => {
     setDestination(null);
     setDirections(null);
+    setRouteOptions({ best: null, fast: null, comfort: null });
+    setSelectedRouteKey("best");
     setRouteOrigin(null);
     if (navigating) endNavigation();
   }, [navigating, endNavigation]);
@@ -498,47 +584,38 @@ export default function App() {
       )}
 
       {directions && !navigating && !pendingType && (
-        <div className="route-actions">
-          <button className="start-nav-button" onClick={startNavigation}>
-            Start navigation · ETA {navLeg?.duration?.text}
-          </button>
-          <button className="clear-route-button" onClick={clearRoute} aria-label="Remove route">
-            ✕
-          </button>
-        </div>
+        <RouteOptionsCard
+          routeOptions={routeOptions}
+          selectedRouteKey={selectedRouteKey}
+          onSelect={setSelectedRouteKey}
+          onStart={startNavigation}
+          onClear={clearRoute}
+        />
+      )}
+
+      {navigating && navViewMode === "street" && location && (
+        <StreetViewNav position={location} heading={heading} onNoCoverage={onStreetViewNoCoverage} />
       )}
 
       {navigating && navLeg && (
-        <>
-          <NavigationCard
-            step={navSteps[activeStepIndex] ?? null}
-            distanceToManeuverM={distanceToManeuverM}
-            etaText={navLeg.duration?.text ?? ""}
-            distanceRemainingText={navSteps
-              .slice(activeStepIndex)
-              .reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) < 1000
-              ? `${navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0)} m`
-              : `${(navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) / 1000).toFixed(1)} km`}
-            onExit={endNavigation}
-          />
-          <div className="nav-view-toggle">
-            <button
-              className={navViewMode === "follow" ? "nav-view-active" : ""}
-              onClick={() => setNavViewMode("follow")}
-            >
-              3D Follow
-            </button>
-            <button
-              className={navViewMode === "overview" ? "nav-view-active" : ""}
-              onClick={() => setNavViewMode("overview")}
-            >
-              Full Route
-            </button>
-          </div>
-          <button className="clear-route-button nav-clear-button" onClick={clearRoute} aria-label="Remove route">
-            ✕
-          </button>
-        </>
+        <NavigationCard
+          step={navSteps[activeStepIndex] ?? null}
+          distanceToManeuverM={distanceToManeuverM}
+          etaText={navLeg.duration?.text ?? ""}
+          distanceRemainingText={navSteps
+            .slice(activeStepIndex)
+            .reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) < 1000
+            ? `${navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0)} m`
+            : `${(navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) / 1000).toFixed(1)} km`}
+          navViewMode={navViewMode}
+          onSetNavViewMode={setNavViewMode}
+          onClearRoute={clearRoute}
+          onExit={endNavigation}
+        />
+      )}
+
+      {streetViewUnavailable && (
+        <div className="status-banner">No street-level imagery here — showing 3D Follow instead.</div>
       )}
 
       {pendingType && pendingLocation && (
