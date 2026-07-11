@@ -40,9 +40,10 @@ export default function App() {
     libraries: LIBRARIES,
   });
 
-  const { location } = useGeolocation();
+  const { location, error: locationError } = useGeolocation();
   const { settings, setAlertRadiusKm } = useSettings();
   const [user, setUser] = useState<User | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const [alerts, setAlerts] = useState<AlertDoc[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<AlertDoc | null>(null);
@@ -56,7 +57,12 @@ export default function App() {
   useEffect(() => {
     ensureSignedIn()
       .then(setUser)
-      .catch((err) => console.warn("[auth] anonymous sign-in failed", err));
+      .catch((err) => {
+        console.warn("[auth] anonymous sign-in failed", err);
+        setAuthError(
+          "Couldn't sign in (Firebase Anonymous Authentication may be disabled for this project)."
+        );
+      });
   }, []);
 
   useEffect(() => {
@@ -97,7 +103,14 @@ export default function App() {
 
   const onShareAlert = useCallback(
     async (type: AlertType) => {
-      if (!location || !user) return;
+      if (!location) {
+        alert("Still waiting on your location — allow location access and try again.");
+        return;
+      }
+      if (!user) {
+        alert("Not signed in yet — check the banner at the top of the page.");
+        return;
+      }
       await reportAlert(type, location, user.uid);
       setReportOpen(false);
     },
@@ -128,8 +141,12 @@ export default function App() {
     return <div className="loading-screen">Loading map…</div>;
   }
 
+  const statusMessage = authError ?? locationError ?? null;
+
   return (
     <div className="app-root">
+      {statusMessage && <div className="status-banner">{statusMessage}</div>}
+
       <GoogleMap
         center={center}
         zoom={location ? 15 : 11}

@@ -83,6 +83,20 @@
   font-size: 22px;
 }
 
+.status-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #dc2626;
+  color: #fff;
+  padding: 10px 16px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  text-align: center;
+  z-index: 20;
+}
+
 .detection-loading {
   position: fixed;
   inset: 0;
