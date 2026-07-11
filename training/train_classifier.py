@@ -83,11 +83,19 @@ def main():
     model = build_model(len(CLASS_NAMES))
     model.summary()
 
+    # This dataset is small enough that the model overfits well before epoch 15 (training
+    # accuracy hits 100% while val accuracy peaks early then drifts back down) -- restore
+    # the best-val-accuracy weights instead of just saving whatever the last epoch lands on.
+    early_stop = tf.keras.callbacks.EarlyStopping(
+        monitor="val_accuracy", patience=5, restore_best_weights=True
+    )
+
     history = model.fit(
         train_ds,
         validation_data=val_ds,
         epochs=EPOCHS,
         class_weight=class_weight,
+        callbacks=[early_stop],
     )
 
     final_val_acc = history.history["val_accuracy"][-1]
