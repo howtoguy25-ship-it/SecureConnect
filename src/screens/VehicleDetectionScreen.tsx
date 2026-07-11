@@ -77,7 +77,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
     return (
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionText}>
-          SecureConnect needs camera access to detect vehicles in view.
+          FleetTrack needs camera access to detect vehicles in view.
         </Text>
         <Pressable style={styles.permissionButton} onPress={requestPermission}>
           <Text style={styles.permissionButtonText}>Grant camera access</Text>

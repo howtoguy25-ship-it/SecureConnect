@@ -1,7 +1,7 @@
 {
   "name": "yamnet-siren",
   "version": "1.0.0",
-  "description": "Local Expo Module: on-device YAMNet siren classification for SecureConnect EV Radar.",
+  "description": "Local Expo Module: on-device YAMNet siren classification for FleetTrack EV Radar.",
   "main": "index.ts",
   "types": "index.ts",
   "license": "UNLICENSED",

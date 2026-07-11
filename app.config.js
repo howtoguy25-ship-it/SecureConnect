@@ -3,8 +3,8 @@ require("dotenv/config");
 /** @type {import('@expo/config-types').ExpoConfig} */
 module.exports = {
   expo: {
-    name: "SecureConnect",
-    slug: "secureconnect",
+    name: "FleetTrack",
+    slug: "fleettrack",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -17,17 +17,17 @@ module.exports = {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.secureconnect.navigate",
+      bundleIdentifier: "com.fleettrack.navigate",
       config: {
         googleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          "SecureConnect uses your location to show your position on the map and provide turn-by-turn navigation.",
+          "FleetTrack uses your location to show your position on the map and provide turn-by-turn navigation.",
         NSLocationAlwaysAndWhenInUseUsageDescription:
-          "SecureConnect can track your location in the background to keep navigation and nearby-alert notifications accurate.",
+          "FleetTrack can track your location in the background to keep navigation and nearby-alert notifications accurate.",
         NSMicrophoneUsageDescription:
-          "SecureConnect listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
+          "FleetTrack listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
         UIBackgroundModes: ["audio", "location", "fetch"],
       },
     },
@@ -36,7 +36,7 @@ module.exports = {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#0B1220",
       },
-      package: "com.secureconnect.navigate",
+      package: "com.fleettrack.navigate",
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -55,14 +55,14 @@ module.exports = {
         "expo-location",
         {
           locationAlwaysAndWhenInUsePermission:
-            "SecureConnect uses your location for live navigation and to show/report nearby alerts.",
+            "FleetTrack uses your location for live navigation and to show/report nearby alerts.",
         },
       ],
       [
         "expo-av",
         {
           microphonePermission:
-            "SecureConnect listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
+            "FleetTrack listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
         },
       ],
     ],

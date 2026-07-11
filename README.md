@@ -1,4 +1,4 @@
-# SecureConnect — Navigation + Emergency Vehicle Alert App
+# FleetTrack — Navigation + Emergency Vehicle Alert App
 
 Waze-style live navigation with turn-by-turn voice guidance, on-device emergency-vehicle
 siren detection ("EV Radar"), and community hazard alerts.

@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultVoiceEnabled: true,
 };
 
-const STORAGE_KEY = "@secureconnect/settings";
+const STORAGE_KEY = "@fleettrack/settings";
 
 export async function loadSettings(): Promise<AppSettings> {
   try {

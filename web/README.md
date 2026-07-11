@@ -1,6 +1,6 @@
-# SecureConnect Web
+# FleetTrack Web
 
-A browser-based companion to the SecureConnect mobile app. Shares the same Firebase
+A browser-based companion to the FleetTrack mobile app. Shares the same Firebase
 project (`fleettrack-9f894`), so alerts reported here show up in the mobile app and vice
 versa. Built with Vite + React + TypeScript, using the Google Maps JavaScript API (the
 mobile app's `react-native-maps` doesn't run in a browser).
