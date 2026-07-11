@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
 import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { detectVehiclesInPhoto, warmUpModel, type VehicleBox } from "@/services/vehicleDetection";
+import { detectVehiclesInPhoto, warmUpModel } from "@/services/vehicleDetection";
+import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 
 const CAPTURE_INTERVAL_MS = 1200;
 
@@ -15,13 +16,14 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   const [facing, setFacing] = useState<CameraType>("back");
   const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [boxes, setBoxes] = useState<VehicleBox[]>([]);
+  const [boxes, setBoxes] = useState<TrackedBox[]>([]);
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null);
 
   const cameraRef = useRef<CameraView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const capturingRef = useRef(false);
+  const speedTrackerRef = useRef(createSpeedTracker());
 
   useEffect(() => {
     warmUpModel()
@@ -40,7 +42,8 @@ export function VehicleDetectionScreen({ onClose }: Props) {
       if (!photo) return;
       setPhotoSize({ width: photo.width, height: photo.height });
       const detected = await detectVehiclesInPhoto(photo.uri);
-      setBoxes(detected);
+      const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
+      setBoxes(tracked);
     } catch (err) {
       console.warn("[vehicle-detection] capture/detect failed", err);
     } finally {
@@ -99,11 +102,19 @@ export function VehicleDetectionScreen({ onClose }: Props) {
 
       {photoSize &&
         containerSize &&
-        boxes.map((box, i) => {
+        boxes.map((box) => {
           const [x, y, w, h] = box.bbox;
+          const speedText =
+            box.speedKmh === null
+              ? ""
+              : box.speedKmh > 3
+                ? ` · ~${Math.round(box.speedKmh)} km/h approaching`
+                : box.speedKmh < -3
+                  ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
+                  : " · steady";
           return (
             <View
-              key={i}
+              key={box.id}
               style={[
                 styles.box,
                 {
@@ -115,7 +126,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
               ]}
             >
               <Text style={styles.boxLabel}>
-                {box.label} {Math.round(box.score * 100)}%
+                Vehicle {Math.round(box.score * 100)}%{speedText}
               </Text>
             </View>
           );
@@ -131,7 +142,8 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         {status === "running" && (
           <Text style={styles.bannerText}>
             Detecting vehicles ({facing === "back" ? "back" : "front"} camera) — boxes show any
-            car/truck/bus/motorcycle in view, not specifically police or ambulance.
+            car/truck/bus/motorcycle, not specifically police or ambulance. Speed is a rough
+            estimate (assumes average car width, no calibration) — not radar-accurate.
           </Text>
         )}
         {status === "error" && (

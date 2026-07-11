@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as tf from "@tensorflow/tfjs";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
+import { createSpeedTracker } from "@/utils/speedTracker";
 import "./LiveVehicleDetection.css";
 
 // COCO-SSD (the pretrained model this runs) only knows generic COCO classes — it has no
@@ -21,6 +22,7 @@ export function LiveVehicleDetection({ onClose }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+  const speedTrackerRef = useRef(createSpeedTracker());
 
   const [status, setStatus] = useState<"loading-model" | "requesting-camera" | "running" | "error">(
     "loading-model"
@@ -93,15 +95,27 @@ export function LiveVehicleDetection({ onClose }: Props) {
       if (!ctx) return;
 
       model.detect(video).then((predictions) => {
+        const vehicleDetections = predictions
+          .filter((p) => VEHICLE_CLASSES.has(p.class))
+          .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score }));
+        const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        for (const pred of predictions) {
-          if (!VEHICLE_CLASSES.has(pred.class)) continue;
-          const [x, y, w, h] = pred.bbox;
+        for (const box of tracked) {
+          const [x, y, w, h] = box.bbox;
           ctx.strokeStyle = "#F59E0B";
           ctx.lineWidth = 3;
           ctx.strokeRect(x, y, w, h);
 
-          const label = `Vehicle ${Math.round(pred.score * 100)}%`;
+          const speedText =
+            box.speedKmh === null
+              ? ""
+              : box.speedKmh > 3
+                ? ` · ~${Math.round(box.speedKmh)} km/h approaching`
+                : box.speedKmh < -3
+                  ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
+                  : " · steady";
+          const label = `Vehicle ${Math.round(box.score * 100)}%${speedText}`;
           ctx.font = "16px system-ui, sans-serif";
           const textWidth = ctx.measureText(label).width;
           ctx.fillStyle = "#F59E0B";
@@ -142,7 +156,7 @@ export function LiveVehicleDetection({ onClose }: Props) {
         {status === "loading-model" && "Loading detection model…"}
         {status === "requesting-camera" && "Requesting camera access…"}
         {status === "running" &&
-          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — boxes show any car/truck/bus/motorcycle in view, not specifically police or ambulance.`}
+          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — boxes show any car/truck/bus/motorcycle, not specifically police or ambulance. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
         {status === "error" && (errorMessage ?? "Something went wrong starting the camera.")}
       </div>
 
