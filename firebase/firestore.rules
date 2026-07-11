@@ -1,0 +1,58 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(createdBy) {
+      return isSignedIn() && request.auth.uid == createdBy;
+    }
+
+    match /alerts/{alertId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.confirmCount == 0
+        && request.resource.data.hiddenBy == []
+        && request.resource.data.type in ['police', 'emergency_vehicle', 'hazard', 'camera', 'crash']
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number
+        && request.resource.data.geohash is string;
+
+      // Creator can delete their own alert outright (global delete).
+      allow delete: if isOwner(resource.data.createdBy);
+
+      // Anyone signed in can update — but only to add themselves to hiddenBy or bump
+      // confirmCount by exactly 1; every other field must stay untouched. This is what
+      // keeps "Hide" a per-user, non-destructive action for non-owners.
+      allow update: if isSignedIn()
+        && onlyHideOrConfirmChanged()
+        && (hiddenByAddsSelfOnly() || confirmCountIncrementedByOne());
+    }
+
+    function onlyHideOrConfirmChanged() {
+      // affectedKeys() already only contains keys whose value actually changed, so
+      // restricting it to these two fields guarantees every other field is untouched.
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hiddenBy', 'confirmCount']);
+    }
+
+    function hiddenByAddsSelfOnly() {
+      return request.resource.data.hiddenBy == resource.data.hiddenBy.concat([request.auth.uid])
+        && request.resource.data.confirmCount == resource.data.confirmCount;
+    }
+
+    function confirmCountIncrementedByOne() {
+      return request.resource.data.confirmCount == resource.data.confirmCount + 1
+        && request.resource.data.hiddenBy == resource.data.hiddenBy;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+  }
+}

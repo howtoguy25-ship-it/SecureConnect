@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["YamnetSirenModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.yamnetsiren.YamnetSirenModule"]
+  }
+}
