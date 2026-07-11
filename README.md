@@ -13,6 +13,10 @@ siren detection ("EV Radar"), and community hazard alerts.
 - A local Expo Module (`modules/yamnet-siren`) wrapping Google's pretrained YAMNet
   TFLite model for siren classification
 
+There's also a browser companion app in `web/` (Vite + React + Google Maps JS API,
+sharing the same Firebase backend) — see `web/README.md`. It covers the map/alerts/
+routing experience but not voice guidance or siren detection; see that README for why.
+
 ## Project layout
 
 ```
