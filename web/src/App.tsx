@@ -59,9 +59,8 @@ export default function App() {
       .then(setUser)
       .catch((err) => {
         console.warn("[auth] anonymous sign-in failed", err);
-        setAuthError(
-          "Couldn't sign in (Firebase Anonymous Authentication may be disabled for this project)."
-        );
+        const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
+        setAuthError(`Couldn't sign in: ${code ?? (err instanceof Error ? err.message : String(err))}`);
       });
   }, []);
 
