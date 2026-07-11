@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, StyleSheet, Pressable, Platform } from "react-native";
+import { View, StyleSheet, Pressable, Platform, Modal } from "react-native";
 import MapView, { PROVIDER_GOOGLE, Polyline } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
@@ -28,6 +28,7 @@ import {
   confirmAlert,
 } from "@/services/alerts";
 import { sirenDetection } from "@/services/sirenDetection";
+import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import type { AlertDoc, AlertType } from "@/types/alert";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 
@@ -50,6 +51,7 @@ export function MapScreen() {
 
   const [bannerVisible, setBannerVisible] = useState(false);
   const [bannerMessage, setBannerMessage] = useState("");
+  const [detectionOpen, setDetectionOpen] = useState(false);
 
   const currentLatLng = useMemo(
     () =>
@@ -227,6 +229,18 @@ export function MapScreen() {
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </Pressable>
 
+      <Pressable
+        style={styles.fabSecondary}
+        onPress={() => setDetectionOpen(true)}
+        accessibilityLabel="Live vehicle detection"
+      >
+        <Ionicons name="videocam" size={24} color="#FFFFFF" />
+      </Pressable>
+
+      <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
+        <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
+      </Modal>
+
       <AlertReportSheet ref={reportSheetRef} onShare={onShareAlert} />
       <AlertDetailSheet
         ref={detailSheetRef}
@@ -269,6 +283,22 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 29,
     backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  fabSecondary: {
+    position: "absolute",
+    bottom: 102,
+    right: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",

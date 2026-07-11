@@ -18,6 +18,13 @@
     "expo-speech": "~12.0.2",
     "expo-location": "~17.0.1",
     "expo-av": "~14.0.7",
+    "expo-camera": "~15.0.16",
+    "expo-gl": "~14.0.2",
+    "expo-file-system": "~17.0.1",
+    "@tensorflow/tfjs": "^4.20.0",
+    "@tensorflow/tfjs-react-native": "^1.0.0",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "react-native-fs": "^2.20.0",
     "expo-task-manager": "~11.8.2",
     "expo-modules-core": "~1.12.11",
     "@firebase/auth": "1.7.9",
@@ -45,5 +52,11 @@
     "babel-plugin-module-resolver": "^5.0.2",
     "dotenv": "^16.4.5",
     "typescript": "~5.3.3"
+  },
+  "overrides": {
+    "@tensorflow/tfjs-react-native": {
+      "expo-camera": "$expo-camera",
+      "expo-gl": "$expo-gl"
+    }
   }
 }
