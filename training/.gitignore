@@ -1,0 +1,6 @@
+# Raw/derived training data and Keras checkpoints are large and regeneratable via
+# prepare_crops.py + train_classifier.py — only the final exported TFJS model (small,
+# needed at runtime) gets committed, in model/tfjs/.
+dataset/
+crops/
+model/*.keras
