@@ -8,19 +8,21 @@ here," then this model classifies what kind.
 ## Data
 
 Source: [Roboflow "Emergency vehicles" dataset](https://universe.roboflow.com/traffic-rbwic/emergency-vehicles-snzgj)
-(CC BY 4.0), 242 images / 544 labeled boxes. Real counts, not inflated:
+(CC BY 4.0), 242 images / 544 labeled boxes. Real crop counts after
+`prepare_crops.py`:
 
 | class | train | valid |
 |---|---|---|
-| ambulance | ~190 | ~26 |
-| police-car | ~115 | ~16 |
-| firetruck | ~86 | ~12 |
-| other (car/bus/truck/van/motorcycle merged) | ~90 | ~14 |
+| ambulance | 189 | 27 |
+| police-car | 120 | 11 |
+| firetruck | 87 | 11 |
+| other (car/bus/truck/van/motorcycle merged) | 97 | 7 |
 
 This is a modest dataset — good enough for a real first version, not a
-production-grade, thousands-of-images model. Expect the reported validation
-accuracy (see `model/ACCURACY.txt` after training) to reflect that; the app UI
-should show this as a confidence level, not an infallible ID.
+production-grade, thousands-of-images model. The currently-trained model hits
+**85.7% validation accuracy** (see `model/ACCURACY.txt` for the up-to-date
+number after any retrain) — real, not inflated, and the app UI shows this as
+a confidence level, not an infallible ID.
 
 ## Pipeline
 
@@ -29,10 +31,10 @@ cd training
 pip install tensorflow-cpu pillow numpy tensorflowjs
 
 python3 prepare_crops.py      # crops labeled boxes into crops/{train,valid}/{class}/
-python3 train_classifier.py   # trains + saves model/vehicle_classifier.keras
+python3 train_classifier.py   # trains + saves model/vehicle_classifier.h5
 
 tensorflowjs_converter --input_format=keras \
-  model/vehicle_classifier.keras model/tfjs
+  model/vehicle_classifier.h5 model/tfjs
 ```
 
 `model/tfjs/` (the converted output — `model.json` + weight shard files) is what

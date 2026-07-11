@@ -107,9 +107,11 @@ def main():
     print(f"Best val accuracy seen during training: {best_val_acc:.3f}")
 
     os.makedirs(MODEL_OUT_DIR, exist_ok=True)
-    keras_path = os.path.join(MODEL_OUT_DIR, "vehicle_classifier.keras")
-    model.save(keras_path)
-    print(f"Saved Keras model to {keras_path}")
+    # Saved as legacy HDF5 (.h5), not the newer native ".keras" zip format -- tensorflowjs
+    # 4.20's --input_format=keras converter only reads the HDF5 layout.
+    h5_path = os.path.join(MODEL_OUT_DIR, "vehicle_classifier.h5")
+    model.save(h5_path)
+    print(f"Saved Keras model to {h5_path}")
 
     with open(os.path.join(MODEL_OUT_DIR, "class_names.json"), "w") as f:
         import json

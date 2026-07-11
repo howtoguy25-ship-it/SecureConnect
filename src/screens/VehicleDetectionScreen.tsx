@@ -104,6 +104,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         containerSize &&
         boxes.map((box) => {
           const [x, y, w, h] = box.bbox;
+          const isEmergency = box.label !== "Vehicle";
           const speedText =
             box.speedKmh === null
               ? ""
@@ -117,6 +118,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
               key={box.id}
               style={[
                 styles.box,
+                isEmergency && styles.boxEmergency,
                 {
                   left: x * scale + offsetX,
                   top: y * scale + offsetY,
@@ -125,8 +127,8 @@ export function VehicleDetectionScreen({ onClose }: Props) {
                 },
               ]}
             >
-              <Text style={styles.boxLabel}>
-                Vehicle {Math.round(box.score * 100)}%{speedText}
+              <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
+                {box.label} {Math.round((box.confidence ?? box.score) * 100)}%{speedText}
               </Text>
             </View>
           );
@@ -141,9 +143,12 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         )}
         {status === "running" && (
           <Text style={styles.bannerText}>
-            Detecting vehicles ({facing === "back" ? "back" : "front"} camera) — boxes show any
-            car/truck/bus/motorcycle, not specifically police or ambulance. Speed is a rough
-            estimate (assumes average car width, no calibration) — not radar-accurate.
+            Detecting vehicles ({facing === "back" ? "back" : "front"} camera) — a
+            custom-trained model guesses ambulance/fire truck/police car (red box, shown
+            with its confidence %) when confident enough, generic "Vehicle" (amber box)
+            otherwise. It's trained on a modest ~500-image dataset — a real but imperfect
+            guess, not certified identification. Speed is a rough estimate (assumes average
+            car width, no calibration) — not radar-accurate.
           </Text>
         )}
         {status === "error" && (
@@ -200,6 +205,9 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#F59E0B",
   },
+  boxEmergency: {
+    borderColor: "#DC2626",
+  },
   boxLabel: {
     position: "absolute",
     top: -22,
@@ -210,6 +218,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     paddingHorizontal: 6,
     paddingVertical: 2,
+  },
+  boxLabelEmergency: {
+    backgroundColor: "#DC2626",
+    color: "#fff",
   },
   banner: {
     position: "absolute",

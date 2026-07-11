@@ -3,4 +3,4 @@
 # needed at runtime) gets committed, in model/tfjs/.
 dataset/
 crops/
-model/*.keras
+model/*.h5

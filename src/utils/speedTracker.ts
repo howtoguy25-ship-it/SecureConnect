@@ -16,6 +16,8 @@ export interface TrackedBox {
   id: number;
   bbox: [number, number, number, number];
   score: number;
+  label: string;
+  confidence?: number;
   speedKmh: number | null;
 }
 
@@ -41,7 +43,12 @@ export function createSpeedTracker() {
   let nextId = 1;
 
   function update(
-    detections: { bbox: [number, number, number, number]; score: number }[],
+    detections: {
+      bbox: [number, number, number, number];
+      score: number;
+      label: string;
+      confidence?: number;
+    }[],
     imageWidthPx: number,
     nowMs: number
   ): TrackedBox[] {
@@ -79,11 +86,25 @@ export function createSpeedTracker() {
           speedKmh = best.speedKmh;
         }
         nextTracks.push({ id: best.id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh });
-        result.push({ id: best.id, bbox: det.bbox, score: det.score, speedKmh });
+        result.push({
+          id: best.id,
+          bbox: det.bbox,
+          score: det.score,
+          label: det.label,
+          confidence: det.confidence,
+          speedKmh,
+        });
       } else {
         const id = nextId++;
         nextTracks.push({ id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh: null });
-        result.push({ id, bbox: det.bbox, score: det.score, speedKmh: null });
+        result.push({
+          id,
+          bbox: det.bbox,
+          score: det.score,
+          label: det.label,
+          confidence: det.confidence,
+          speedKmh: null,
+        });
       }
     }
 

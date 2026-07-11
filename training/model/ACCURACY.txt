@@ -1,0 +1,2 @@
+Saved model's val accuracy: 0.857
+Trained on 493 cropped images across 4 classes: {'ambulance': 189, 'firetruck': 87, 'other': 97, 'police-car': 120}

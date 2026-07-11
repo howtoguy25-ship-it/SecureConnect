@@ -2,13 +2,28 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as tf from "@tensorflow/tfjs";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createSpeedTracker } from "@/utils/speedTracker";
+import {
+  warmUpClassifier,
+  classifyVehicleCrop,
+  type ClassificationResult,
+  type VehicleClass,
+} from "@/services/vehicleClassifier";
 import "./LiveVehicleDetection.css";
 
 // COCO-SSD (the pretrained model this runs) only knows generic COCO classes — it has no
-// concept of "police car" or "ambulance", just "car" / "truck" / "bus" / "motorcycle".
-// Labeling boxes as anything more specific than "Vehicle" would be a false claim of
-// capability the model doesn't have.
+// concept of "police car" or "ambulance", just "car" / "truck" / "bus" / "motorcycle". A
+// second, custom-trained classifier (see training/README.md) runs behind it on each box to
+// take a real guess at ambulance/firetruck/police-car -- trained on a modest ~500-image
+// dataset, so it's shown as a confidence score, not a certified ID, and falls back to the
+// generic "Vehicle" label whenever it isn't confident enough.
 const VEHICLE_CLASSES = new Set(["car", "truck", "bus", "motorcycle"]);
+
+const CLASS_DISPLAY_NAMES: Record<VehicleClass, string> = {
+  ambulance: "Ambulance",
+  firetruck: "Fire truck",
+  "police-car": "Police car",
+  other: "Vehicle",
+};
 
 type FacingMode = "environment" | "user";
 
@@ -23,6 +38,11 @@ export function LiveVehicleDetection({ onClose }: Props) {
   const rafRef = useRef<number | null>(null);
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
   const speedTrackerRef = useRef(createSpeedTracker());
+  // Keyed by the speed tracker's per-vehicle track id: classify each tracked vehicle once
+  // and cache the result (a car doesn't change type mid-track), instead of re-running the
+  // classifier on every single frame.
+  const classificationsRef = useRef(new Map<number, ClassificationResult>());
+  const classifyingRef = useRef(new Set<number>());
 
   const [status, setStatus] = useState<"loading-model" | "requesting-camera" | "running" | "error">(
     "loading-model"
@@ -52,6 +72,7 @@ export function LiveVehicleDetection({ onClose }: Props) {
           await tf.ready();
           modelRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
           if (cancelled) return;
+          warmUpClassifier();
         }
 
         setStatus("requesting-camera");
@@ -103,7 +124,21 @@ export function LiveVehicleDetection({ onClose }: Props) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         for (const box of tracked) {
           const [x, y, w, h] = box.bbox;
-          ctx.strokeStyle = "#F59E0B";
+
+          if (!classificationsRef.current.has(box.id) && !classifyingRef.current.has(box.id)) {
+            classifyingRef.current.add(box.id);
+            classifyVehicleCrop(video, box.bbox)
+              .then((result) => {
+                if (result) classificationsRef.current.set(box.id, result);
+              })
+              .finally(() => classifyingRef.current.delete(box.id));
+          }
+
+          const classification = classificationsRef.current.get(box.id);
+          const isEmergencyVehicle = classification && classification.label !== "other";
+          const boxColor = isEmergencyVehicle ? "#DC2626" : "#F59E0B";
+
+          ctx.strokeStyle = boxColor;
           ctx.lineWidth = 3;
           ctx.strokeRect(x, y, w, h);
 
@@ -115,10 +150,12 @@ export function LiveVehicleDetection({ onClose }: Props) {
                 : box.speedKmh < -3
                   ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
                   : " · steady";
-          const label = `Vehicle ${Math.round(box.score * 100)}%${speedText}`;
+          const label = isEmergencyVehicle
+            ? `${CLASS_DISPLAY_NAMES[classification.label]} ${Math.round(classification.confidence * 100)}%${speedText}`
+            : `Vehicle ${Math.round(box.score * 100)}%${speedText}`;
           ctx.font = "16px system-ui, sans-serif";
           const textWidth = ctx.measureText(label).width;
-          ctx.fillStyle = "#F59E0B";
+          ctx.fillStyle = boxColor;
           ctx.fillRect(x, Math.max(0, y - 22), textWidth + 10, 22);
           ctx.fillStyle = "#111827";
           ctx.fillText(label, x + 5, Math.max(16, y - 6));
@@ -156,7 +193,7 @@ export function LiveVehicleDetection({ onClose }: Props) {
         {status === "loading-model" && "Loading detection model…"}
         {status === "requesting-camera" && "Requesting camera access…"}
         {status === "running" &&
-          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — boxes show any car/truck/bus/motorcycle, not specifically police or ambulance. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
+          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
         {status === "error" && (errorMessage ?? "Something went wrong starting the camera.")}
       </div>
 
