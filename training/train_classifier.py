@@ -98,10 +98,13 @@ def main():
         callbacks=[early_stop],
     )
 
-    final_val_acc = history.history["val_accuracy"][-1]
+    # history.history logs each epoch's own metrics, but restore_best_weights already
+    # swapped `model`'s weights back to the best epoch -- re-evaluate those actual saved
+    # weights directly instead of trusting history's last (possibly worse, overfit) entry.
+    _, saved_val_acc = model.evaluate(val_ds)
     best_val_acc = max(history.history["val_accuracy"])
-    print(f"\nFinal val accuracy: {final_val_acc:.3f}")
-    print(f"Best val accuracy across training: {best_val_acc:.3f}")
+    print(f"\nSaved model's val accuracy: {saved_val_acc:.3f}")
+    print(f"Best val accuracy seen during training: {best_val_acc:.3f}")
 
     os.makedirs(MODEL_OUT_DIR, exist_ok=True)
     keras_path = os.path.join(MODEL_OUT_DIR, "vehicle_classifier.keras")
@@ -115,8 +118,7 @@ def main():
 
     with open(os.path.join(MODEL_OUT_DIR, "ACCURACY.txt"), "w") as f:
         f.write(
-            f"Final val accuracy: {final_val_acc:.3f}\n"
-            f"Best val accuracy: {best_val_acc:.3f}\n"
+            f"Saved model's val accuracy: {saved_val_acc:.3f}\n"
             f"Trained on {total} cropped images across {len(CLASS_NAMES)} classes: {counts}\n"
         )
 
