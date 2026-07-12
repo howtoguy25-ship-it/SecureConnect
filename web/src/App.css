@@ -263,6 +263,14 @@
   cursor: pointer;
 }
 
+/* Google's invisible reCAPTCHA (used by phone sign-in) injects this fixed-position badge
+   itself -- it's required to stay visible per Google's terms, so it can't be hidden, only
+   moved. Default bottom-right collides with the FAB column in that same corner; push it up
+   above the FAB stack instead. */
+.grecaptcha-badge {
+  bottom: 300px !important;
+}
+
 .detection-loading {
   position: fixed;
   inset: 0;

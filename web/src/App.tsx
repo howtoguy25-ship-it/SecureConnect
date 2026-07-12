@@ -143,14 +143,13 @@ export default function App() {
   const osmFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOsmBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
 
-  // "View in 3D?" prompt — triggers either by double-clicking the map or by reaching max
-  // zoom. Declining arms a one-shot "next single click zooms out" mode instead of making
-  // every click zoom out (which would fight with pin/stop placement); double-clicking
-  // again always re-asks regardless of that armed state.
+  // "View in 3D?" prompt — triggers automatically on reaching max zoom for this location
+  // (native double-click-to-zoom-in is left on, so a double-click here counts too). A plain
+  // single click while already at max zoom (see onClick below) just zooms back out again,
+  // no priming/arming step needed.
   const [maxZoomHere, setMaxZoomHere] = useState<number | null>(null);
   const [show3DPrompt, setShow3DPrompt] = useState(false);
   const [street3DMode, setStreet3DMode] = useState(false);
-  const [zoomOutArmed, setZoomOutArmed] = useState(false);
   const promptedAtMaxZoomRef = useRef(false);
 
   // Fixed alert zone
@@ -577,25 +576,18 @@ export default function App() {
 
   const enterStreet3D = useCallback(() => {
     setShow3DPrompt(false);
-    setZoomOutArmed(false);
     setStreet3DMode(true);
     mapRef.current?.setTilt(67.5);
   }, []);
 
   const declineStreet3D = useCallback(() => {
     setShow3DPrompt(false);
-    setZoomOutArmed(true);
   }, []);
 
   const exitStreet3D = useCallback(() => {
     setStreet3DMode(false);
     mapRef.current?.setTilt(0);
     mapRef.current?.setHeading(0);
-  }, []);
-
-  const onMapDblClick = useCallback(() => {
-    setZoomOutArmed(false);
-    setShow3DPrompt(true);
   }, []);
 
   const rotateStreet3D = useCallback((deltaDeg: number) => {
@@ -771,6 +763,12 @@ export default function App() {
     );
   }
 
+  // Hides the browse-mode chrome (search bar, radius panel, about button, FABs) whenever
+  // any full-panel overlay is open on top of it, instead of letting them show through
+  // behind/around the panel.
+  const chromeHidden =
+    pendingType !== null || navigating || aboutOpen || phoneAuthOpen || adminOpen || reportOpen || detectionOpen;
+
   const statusMessage = authError ?? locationError ?? null;
   const navSteps = directions?.routes[0]?.legs[0]?.steps ?? [];
   const navLeg = directions?.routes[0]?.legs[0];
@@ -827,13 +825,12 @@ export default function App() {
         mapContainerClassName="map-container"
         onZoomChanged={onZoomChanged}
         onIdle={onMapIdle}
-        onDblClick={onMapDblClick}
         options={{
           disableDefaultUI: true,
           zoomControl: true,
-          // Double-click is repurposed below to open the "view in 3D?" prompt instead of
-          // Google's default double-click-to-zoom-in.
-          disableDoubleClickZoom: true,
+          // Moved off the default bottom-right so it doesn't stack on top of the FAB
+          // column (report/detection/recenter/hide-trace), which lives in that corner.
+          zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
           // Enables tapping businesses/POIs for the details panel (hours/rating/reviews) --
           // see the onClick handler below, which still lets placement/zoom modes take
           // priority over a POI tap.
@@ -856,14 +853,18 @@ export default function App() {
           } else if (addingStop && e.latLng) {
             setStopLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
             setAddingStop(false);
-          } else if (zoomOutArmed) {
-            const map = mapRef.current;
-            const currentZoom = map?.getZoom() ?? 15;
-            map?.setZoom(Math.max(3, currentZoom - 4));
-            setZoomOutArmed(false);
           } else if (placeEvent.placeId) {
             placeEvent.stop();
             setSelectedPlaceId(placeEvent.placeId);
+          } else {
+            // Plain click on the map itself: if already zoomed all the way in here, treat
+            // it as "zoom back out" (matching Google/Apple Maps' click-to-zoom-out at max
+            // zoom) instead of doing nothing.
+            const map = mapRef.current;
+            const currentZoom = map?.getZoom();
+            if (map && currentZoom !== undefined && maxZoomHere !== null && currentZoom >= maxZoomHere) {
+              map.setZoom(Math.max(3, currentZoom - 4));
+            }
           }
         }}
       >
@@ -952,13 +953,13 @@ export default function App() {
         )}
       </GoogleMap>
 
-      {!pendingType && !navigating && (
+      {!chromeHidden && (
         <button className="about-button" onClick={() => setAboutOpen(true)} aria-label="About TrackLine">
           <img src="/logo.png" alt="" />
         </button>
       )}
 
-      {!pendingType && !navigating && (
+      {!chromeHidden && (
         <div className="top-bar">
           <Autocomplete
             onLoad={(ac) => {
@@ -972,7 +973,7 @@ export default function App() {
         </div>
       )}
 
-      {!pendingType && !navigating && (
+      {!chromeHidden && (
         <div className="radius-control">
           <label>
             Alert radius: {settings.alertRadiusKm} km
@@ -1052,7 +1053,7 @@ export default function App() {
         </div>
       )}
 
-      {!pendingType && !navigating && (
+      {!chromeHidden && (
         <>
           <button className="fab" onClick={() => setReportOpen(true)} aria-label="Report an alert">
             +
