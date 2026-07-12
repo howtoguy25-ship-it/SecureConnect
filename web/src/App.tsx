@@ -39,7 +39,8 @@ const LiveVehicleDetection = lazy(() =>
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
 import { bearingDegrees, distanceKm } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
-import { DARK_MAP_STYLE } from "@/utils/mapStyles";
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "@/utils/mapStyles";
+import { calculateSunTimes } from "@/utils/sunTimes";
 import { fetchOsmTrafficData, type OsmPoint } from "@/services/osmTrafficData";
 import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
 import "./App.css";
@@ -180,6 +181,45 @@ export default function App() {
   }, [settings.theme]);
 
   const isDarkTheme = settings.theme === "dark" || (settings.theme === "system" && systemPrefersDark);
+
+  // Offers real night-mode map switching keyed to actual local sunset at the user's
+  // location (see utils/sunTimes.ts), not just OS dark-mode preference -- a phone can be in
+  // light mode all day while it's genuinely dark outside. Asks at most once per sunset ->
+  // sunrise cycle (remembered in localStorage by that sunset's date so it naturally resets
+  // every day); skipped entirely once the theme is already explicitly set to dark.
+  const [showNightPrompt, setShowNightPrompt] = useState(false);
+  const nightPromptCycleRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const loc = location;
+    if (!loc || settings.theme === "dark") return;
+
+    function checkSunset() {
+      const now = new Date();
+      const times = calculateSunTimes(loc!.lat, loc!.lng, now);
+      if (!times || (now >= times.sunrise && now <= times.sunset)) return; // daytime, or polar edge case
+      const cycleKey = times.sunset.toDateString();
+      if (localStorage.getItem("trackline.nightPromptDismissedFor") === cycleKey) return;
+      nightPromptCycleRef.current = cycleKey;
+      setShowNightPrompt(true);
+    }
+
+    checkSunset();
+    const interval = setInterval(checkSunset, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [location?.lat, location?.lng, settings.theme]);
+
+  const acceptNightMode = useCallback(() => {
+    setTheme("dark");
+    setShowNightPrompt(false);
+  }, [setTheme]);
+
+  const declineNightMode = useCallback(() => {
+    if (nightPromptCycleRef.current) {
+      localStorage.setItem("trackline.nightPromptDismissedFor", nightPromptCycleRef.current);
+    }
+    setShowNightPrompt(false);
+  }, []);
 
   useEffect(() => {
     ensureSignedIn()
@@ -842,9 +882,13 @@ export default function App() {
           // map if unset.
           mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
           // Inline styles are ignored on Map ID-based vector maps (Google requires a
-          // separately-configured dark Map ID for that case instead) -- only apply the
-          // dark tile style here when there's no Map ID to conflict with.
-          styles: isDarkTheme && !import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ? DARK_MAP_STYLE : undefined,
+          // separately-configured dark/light Map ID for that case instead) -- only apply
+          // these here when there's no Map ID to conflict with.
+          styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
+            ? undefined
+            : isDarkTheme
+              ? DARK_MAP_STYLE
+              : LIGHT_MAP_STYLE,
         }}
         onClick={(e) => {
           const placeEvent = e as google.maps.MapMouseEvent & { placeId?: string };
@@ -1106,6 +1150,16 @@ export default function App() {
 
       {show3DPrompt && (
         <ConfirmPrompt message="Do you want to view 3D?" onYes={enterStreet3D} onNo={declineStreet3D} />
+      )}
+
+      {showNightPrompt && !aboutOpen && !phoneAuthOpen && !adminOpen && !reportOpen && !detectionOpen && (
+        <ConfirmPrompt
+          message="It's sunset — switch the map to night mode?"
+          yesLabel="Night mode"
+          noLabel="Stay day"
+          onYes={acceptNightMode}
+          onNo={declineNightMode}
+        />
       )}
 
       {showLeaveZonePrompt && (

@@ -4,6 +4,16 @@
 // Map ID ignores inline `styles` entirely (Google requires configuring a dark variant of
 // the Map ID itself in Cloud Console for that case), so this is applied conditionally in
 // App.tsx only when no VITE_GOOGLE_MAPS_MAP_ID is set.
+// Darkens street/road name labels in day mode — Google's default road-label gray reads too
+// washed-out against light road fills at a glance while driving. Everything else is left
+// at Google's normal default styling; only the label text/outline colors are touched.
+export const LIGHT_MAP_STYLE: google.maps.MapTypeStyle[] = [
+  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#33383f" }] },
+  { featureType: "road", elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#1f2430" }] },
+  { featureType: "road.highway", elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
+];
+
 export const DARK_MAP_STYLE: google.maps.MapTypeStyle[] = [
   { elementType: "geometry", stylers: [{ color: "#1d2330" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#1d2330" }] },

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as tf from "@tensorflow/tfjs";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createSpeedTracker } from "@/utils/speedTracker";
+import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import {
   warmUpClassifier,
   classifyVehicleCrop,
@@ -188,6 +189,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           .filter((p) => VEHICLE_CLASSES.has(p.class))
           .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score }));
         const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
+        pruneLightbarTracks(new Set(tracked.map((b) => b.id)));
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -211,7 +213,14 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
 
           const classification = classificationsRef.current.get(box.id);
           const isEmergencyVehicle = classification && classification.label !== "other";
-          const boxColor = isEmergencyVehicle ? "#DC2626" : "#F59E0B";
+          // Runs independently of the trained classifier above -- it's a real-time pixel
+          // heuristic for an actively strobing red/blue light (see lightbarDetector.ts),
+          // not a "this car is unmarked police" model. Only flagged when the vehicle isn't
+          // already confidently classified as a marked emergency vehicle, so a normal
+          // marked police car with its lights on just keeps its usual red "Police car" box.
+          const lightsActive = sampleLightbarActivity(video, box.id, box.bbox, performance.now());
+          const isUnmarkedCandidate = !isEmergencyVehicle && lightsActive;
+          const boxColor = isEmergencyVehicle ? "#DC2626" : isUnmarkedCandidate ? "#7C3AED" : "#F59E0B";
 
           ctx.strokeStyle = boxColor;
           ctx.lineWidth = 3;
@@ -227,12 +236,16 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
                   : " · steady";
           const label = isEmergencyVehicle
             ? `${CLASS_DISPLAY_NAMES[classification.label]} ${Math.round(classification.confidence * 100)}%${speedText}`
-            : `Vehicle ${Math.round(box.score * 100)}%${speedText}`;
+            : isUnmarkedCandidate
+              ? `Unmarked police? (lights active)${speedText}`
+              : `Vehicle ${Math.round(box.score * 100)}%${speedText}`;
           ctx.font = "16px system-ui, sans-serif";
           const textWidth = ctx.measureText(label).width;
           ctx.fillStyle = boxColor;
           ctx.fillRect(x, Math.max(0, y - 22), textWidth + 10, 22);
-          ctx.fillStyle = "#111827";
+          // The violet "unmarked" box is darker than the amber/red ones, so it needs light
+          // text instead of the usual dark text to stay readable.
+          ctx.fillStyle = isUnmarkedCandidate ? "#ffffff" : "#111827";
           ctx.fillText(label, x + 5, Math.max(16, y - 6));
         }
         rafRef.current = requestAnimationFrame(detectLoop);
@@ -280,7 +293,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         )}
         {status === "running" &&
           !navContext &&
-          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
+          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
         {status === "error" && (errorMessage ?? "Something went wrong starting the camera.")}
       </div>
 
