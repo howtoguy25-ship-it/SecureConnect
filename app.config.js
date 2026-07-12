@@ -54,6 +54,8 @@ module.exports = {
       },
     },
     plugins: [
+      "expo-font",
+      "expo-asset",
       [
         "expo-location",
         {
@@ -62,7 +64,7 @@ module.exports = {
         },
       ],
       [
-        "expo-av",
+        "expo-audio",
         {
           microphonePermission:
             "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",

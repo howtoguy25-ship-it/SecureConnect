@@ -1,4 +1,4 @@
-import { Audio } from "expo-av";
+import { AudioModule, RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync } from "expo-audio";
 import { YamnetSiren, isYamnetAvailable } from "@/native/yamnetNative";
 
 const WINDOW_MS = 1000;
@@ -8,7 +8,7 @@ const SIREN_LABELS = new Set(["Siren", "Emergency vehicle", "Police car (siren)"
 export type SirenDetectionListener = (event: { confidence: number; label: string }) => void;
 
 class SirenDetectionEngine {
-  private recording: Audio.Recording | null = null;
+  private recorder: InstanceType<typeof AudioModule.AudioRecorder> | null = null;
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private consecutiveHits = 0;
   private listeners = new Set<SirenDetectionListener>();
@@ -27,7 +27,7 @@ class SirenDetectionEngine {
   async start(): Promise<void> {
     if (this.running) return;
 
-    const { status } = await Audio.requestPermissionsAsync();
+    const { status } = await requestRecordingPermissionsAsync();
     if (status !== "granted") {
       console.warn("[siren] Microphone permission denied; EV Radar disabled.");
       return;
@@ -43,10 +43,10 @@ class SirenDetectionEngine {
 
     await YamnetSiren.loadModel();
 
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
+    await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
     });
 
     this.running = true;
@@ -64,13 +64,13 @@ class SirenDetectionEngine {
       clearInterval(this.pollHandle);
       this.pollHandle = null;
     }
-    if (this.recording) {
+    if (this.recorder) {
       try {
-        await this.recording.stopAndUnloadAsync();
+        await this.recorder.stop();
       } catch {
         // already stopped
       }
-      this.recording = null;
+      this.recorder = null;
     }
     this.consecutiveHits = 0;
   }
@@ -79,13 +79,13 @@ class SirenDetectionEngine {
     // Capture a short recording, hand its raw PCM samples to the native classifier, then
     // discard the audio immediately — nothing is ever written to persistent storage or
     // uploaded, matching the "no recording stored" promise shown in the mic permission prompt.
-    const recording = new Audio.Recording();
-    await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-    await recording.startAsync();
+    const recorder = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
+    await recorder.prepareToRecordAsync();
+    recorder.record();
     await new Promise((resolve) => setTimeout(resolve, WINDOW_MS));
-    await recording.stopAndUnloadAsync();
+    await recorder.stop();
 
-    const uri = recording.getURI();
+    const uri = recorder.uri;
     if (!uri) return;
 
     const pcmSamples = await readPcmSamplesFromUri(uri);

@@ -13,8 +13,8 @@ npm-debug.*
 .env
 .env.local
 *.tsbuildinfo
-android/
-ios/
+/android/
+/ios/
 .metro-health-check*
 firebase-debug.log
 firestore-debug.log
