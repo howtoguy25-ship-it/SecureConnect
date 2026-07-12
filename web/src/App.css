@@ -211,11 +211,26 @@
   right: 0;
   background: #dc2626;
   color: #fff;
-  padding: 10px 16px;
+  padding: 10px 44px 10px 16px;
   font-family: system-ui, sans-serif;
   font-size: 13px;
   text-align: center;
   z-index: 20;
+}
+
+.status-banner-close {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .stop-placement-bar {

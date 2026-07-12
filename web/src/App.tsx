@@ -72,6 +72,12 @@ export default function App() {
     useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // A newly-arrived error should always show, even if the user dismissed a previous one.
+  useEffect(() => {
+    setBannerDismissed(false);
+  }, [authError, locationError]);
 
   const [alerts, setAlerts] = useState<AlertDoc[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<AlertDoc | null>(null);
@@ -118,6 +124,11 @@ export default function App() {
   const [distanceToManeuverM, setDistanceToManeuverM] = useState<number | null>(null);
   const [streetViewUnavailable, setStreetViewUnavailable] = useState(false);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
+  // Joystick-driven adjustments to the 3D Follow camera, layered on top of the
+  // auto-computed travel heading/default tilt so the driver can nudge the view to
+  // wherever feels comfortable. Reset via the recenter button.
+  const [manualHeadingOffset, setManualHeadingOffset] = useState(0);
+  const [manualTiltOverride, setManualTiltOverride] = useState<number | null>(null);
 
   // "View in 3D?" prompt — triggers either by double-clicking the map or by reaching max
   // zoom. Declining arms a one-shot "next single click zooms out" mode instead of making
@@ -368,10 +379,12 @@ export default function App() {
     if (!navigating || !location || !directions) return;
 
     const last = lastLocationRef.current;
+    let currentHeading = heading;
     if (last) {
       const movedKm = distanceKm(last.lat, last.lng, location.lat, location.lng);
       if (movedKm > 0.003) {
-        setHeading(bearingDegrees(last.lat, last.lng, location.lat, location.lng));
+        currentHeading = bearingDegrees(last.lat, last.lng, location.lat, location.lng);
+        setHeading(currentHeading);
       }
     }
     lastLocationRef.current = location;
@@ -391,10 +404,23 @@ export default function App() {
       setRouteOrigin(location);
     }
 
+    // Reasserted every tick (not just on mode change) so the 3D camera can't get stuck
+    // flattened out -- Google's renderer silently drops tilt below a certain zoom level,
+    // and a wide zoom-out (deliberate or accidental) would otherwise never self-correct
+    // while stationary, since nothing else would re-trigger it.
     if (navViewMode === "follow") {
-      mapRef.current?.panTo(location);
+      const map = mapRef.current;
+      if (map) {
+        map.panTo(location);
+        const currentZoom = map.getZoom();
+        if (currentZoom !== undefined && currentZoom < 16) {
+          map.setZoom(18);
+        }
+        map.setTilt(manualTiltOverride ?? 67.5);
+        map.setHeading((currentHeading + manualHeadingOffset + 360) % 360);
+      }
     }
-  }, [location?.lat, location?.lng, navigating, navViewMode]);
+  }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride]);
 
   // Switch between the tilted "follow" driving view and the flat "overview" of the
   // whole route whenever the toggle changes (or a fresh route comes in while already
@@ -533,6 +559,17 @@ export default function App() {
     map.setTilt(Math.max(0, Math.min(67.5, current + deltaDeg)));
   }, []);
 
+  // 3D Follow's joystick: unlike Street 3D's, these persist as state (not just direct map
+  // calls) since the per-tick tracking effect reasserts the camera every location update
+  // and would otherwise immediately overwrite a direct map.setHeading/setTilt call.
+  const rotateFollow = useCallback((deltaDeg: number) => {
+    setManualHeadingOffset((prev) => (prev + deltaDeg + 360) % 360);
+  }, []);
+
+  const tiltFollow = useCallback((deltaDeg: number) => {
+    setManualTiltOverride((prev) => Math.max(0, Math.min(67.5, (prev ?? 67.5) + deltaDeg)));
+  }, []);
+
   const onPlaceChanged = useCallback(() => {
     const place = autocompleteRef.current?.getPlace();
     const loc = place?.geometry?.location;
@@ -661,7 +698,13 @@ export default function App() {
   const recenter = useCallback(() => {
     if (!location) return;
     mapRef.current?.panTo(location);
-    if (!navigating) mapRef.current?.setZoom(15);
+    if (!navigating) {
+      mapRef.current?.setZoom(15);
+    } else {
+      // Also doubles as "reset the 3D Follow view" -- clears any joystick adjustment.
+      setManualHeadingOffset(0);
+      setManualTiltOverride(null);
+    }
   }, [location, navigating]);
 
   const center = useMemo(() => location ?? DEFAULT_CENTER, [location]);
@@ -711,7 +754,14 @@ export default function App() {
 
   return (
     <div className="app-root">
-      {statusMessage && <div className="status-banner">{statusMessage}</div>}
+      {statusMessage && !bannerDismissed && (
+        <div className="status-banner">
+          <span>{statusMessage}</span>
+          <button className="status-banner-close" onClick={() => setBannerDismissed(true)} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       <GoogleMap
         onLoad={(map) => {
@@ -973,6 +1023,10 @@ export default function App() {
           </button>
           <Street3DJoystick onRotate={rotateStreet3D} onTilt={tiltStreet3D} />
         </>
+      )}
+
+      {navigating && navViewMode === "follow" && (
+        <Street3DJoystick onRotate={rotateFollow} onTilt={tiltFollow} />
       )}
 
       {show3DPrompt && (

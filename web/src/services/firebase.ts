@@ -61,8 +61,9 @@ export function ensureSignedIn(): Promise<User> {
 // Links the given OAuth provider to the current (usually anonymous) session so existing
 // alerts/ownership carry over under the same uid, instead of starting a brand-new account.
 // Falls back to signing straight into the existing real account if that Google/Apple
-// identity already belongs to one (e.g. they signed in before on another device) --
-// Firebase surfaces that case as `auth/credential-already-in-use` with a reusable
+// identity already belongs to one (e.g. they signed in before on another device, or the
+// same email is already used by a different provider) -- Firebase surfaces both cases
+// (`auth/credential-already-in-use` and `auth/email-already-in-use`) with a reusable
 // credential attached to the error.
 async function linkOrSignIn(provider: AuthProvider): Promise<User> {
   const current = auth.currentUser;
@@ -75,13 +76,18 @@ async function linkOrSignIn(provider: AuthProvider): Promise<User> {
     return cred.user;
   } catch (err) {
     const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
-    if (code === "auth/credential-already-in-use") {
+    if (code === "auth/credential-already-in-use" || code === "auth/email-already-in-use") {
       const existingCred =
         GoogleAuthProvider.credentialFromError(err as any) ??
         OAuthProvider.credentialFromError(err as any);
       if (existingCred) {
         const cred = await signInWithCredential(auth, existingCred);
         return cred.user;
+      }
+      if (code === "auth/email-already-in-use") {
+        throw new Error(
+          "That email is already used by a different sign-in method on this project. Try signing in with the original method instead."
+        );
       }
     }
     throw err;
@@ -113,13 +119,13 @@ function pseudoEmailForPhone(phoneE164: string): string {
   return `phone-${phoneE164.replace(/[^0-9]/g, "")}@trackline.phoneauth.internal`;
 }
 
-let recaptchaVerifier: RecaptchaVerifier | null = null;
-
-function getRecaptchaVerifier(containerId: string): RecaptchaVerifier {
-  if (!recaptchaVerifier) {
-    recaptchaVerifier = new RecaptchaVerifier(auth, containerId, { size: "invisible" });
-  }
-  return recaptchaVerifier;
+// A fresh RecaptchaVerifier is created per attempt rather than cached at module level --
+// caching it meant a second attempt (e.g. after closing and reopening the sign-in panel)
+// reused a verifier bound to a DOM container that had since been unmounted, throwing
+// "reCAPTCHA client element has been removed". Recreating it each time always binds to
+// whatever container is actually mounted right now.
+function createRecaptchaVerifier(containerId: string): RecaptchaVerifier {
+  return new RecaptchaVerifier(auth, containerId, { size: "invisible" });
 }
 
 // Sends a real SMS code to the given phone number (E.164 format, e.g. "+61474011265").
@@ -130,7 +136,7 @@ export async function sendPhoneVerificationCode(
   phoneE164: string,
   recaptchaContainerId: string
 ): Promise<ConfirmationResult> {
-  const verifier = getRecaptchaVerifier(recaptchaContainerId);
+  const verifier = createRecaptchaVerifier(recaptchaContainerId);
   const current = auth.currentUser;
   if (current?.isAnonymous) {
     try {
