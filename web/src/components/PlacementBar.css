@@ -5,7 +5,7 @@
   right: 16px;
   max-width: 480px;
   margin: 0 auto;
-  background: #fff;
+  background: var(--surface);
   border-radius: 16px;
   padding: 16px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
@@ -15,7 +15,7 @@
 
 .placement-text {
   font-size: 14px;
-  color: #374151;
+  color: var(--surface-text);
   margin-bottom: 12px;
 }
 
@@ -35,8 +35,8 @@
 }
 
 .placement-cancel {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--input-bg);
+  color: var(--surface-text);
 }
 
 .placement-confirm {

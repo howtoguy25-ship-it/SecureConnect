@@ -1,8 +1,50 @@
+/* Light is the default; :root also carries the values so anything rendered before the
+   theme effect runs (loading screen) still gets sane colors. The in-navigation surfaces
+   (nav card, AI Detection panels) stay permanently dark regardless of theme -- that's a
+   deliberate driving-visibility choice most map apps make, not a light/dark preference. */
+:root,
+:root[data-theme="light"] {
+  --surface: #ffffff;
+  --surface-text: #111827;
+  --surface-text-muted: #6b7280;
+  --surface-border: #e5e7eb;
+  --input-bg: #ffffff;
+  --app-bg: #f9fafb;
+  --fab-surface: #ffffff;
+  --fab-icon: #111827;
+}
+
+:root[data-theme="dark"] {
+  --surface: #1f2430;
+  --surface-text: #f3f4f6;
+  --surface-text-muted: #9ca3af;
+  --surface-border: #374151;
+  --input-bg: #262b38;
+  --app-bg: #0b0f19;
+  --fab-surface: #1f2430;
+  --fab-icon: #f3f4f6;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Only applies when no explicit choice has been saved yet (see useTheme.ts). */
+  :root:not([data-theme]) {
+    --surface: #1f2430;
+    --surface-text: #f3f4f6;
+    --surface-text-muted: #9ca3af;
+    --surface-border: #374151;
+    --input-bg: #262b38;
+    --app-bg: #0b0f19;
+    --fab-surface: #1f2430;
+    --fab-icon: #f3f4f6;
+  }
+}
+
 .app-root {
   position: relative;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background: var(--app-bg);
 }
 
 .map-container {
@@ -19,7 +61,8 @@
   justify-content: center;
   gap: 14px;
   font-family: system-ui, sans-serif;
-  color: #6b7280;
+  color: var(--surface-text-muted);
+  background: var(--app-bg);
 }
 
 .loading-logo {
@@ -46,20 +89,22 @@
   font-size: 15px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
+  background: var(--input-bg);
+  color: var(--surface-text);
 }
 
 .radius-control {
   position: absolute;
   top: 76px;
   left: 16px;
-  background: #fff;
+  background: var(--surface);
   padding: 10px 14px;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   z-index: 10;
   font-family: system-ui, sans-serif;
   font-size: 13px;
-  color: #374151;
+  color: var(--surface-text-muted);
 }
 
 .radius-control label {
@@ -116,8 +161,8 @@
 
 .fab-tertiary {
   bottom: 164px;
-  background: #fff;
-  color: #111827;
+  background: var(--fab-surface);
+  color: var(--fab-icon);
   font-size: 20px;
 }
 
@@ -128,8 +173,8 @@
 
 .fab-quaternary {
   bottom: 232px;
-  background: #fff;
-  color: #111827;
+  background: var(--fab-surface);
+  color: var(--fab-icon);
   font-size: 20px;
 }
 
@@ -146,7 +191,7 @@
   height: 40px;
   border-radius: 20px;
   border: none;
-  background: #fff;
+  background: var(--fab-surface);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   padding: 0;
   z-index: 10;

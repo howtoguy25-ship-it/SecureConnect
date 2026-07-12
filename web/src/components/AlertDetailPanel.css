@@ -8,7 +8,7 @@
   width: 100%;
   height: 140px;
   object-fit: cover;
-  background: #e5e7eb;
+  background: var(--surface-border);
 }
 
 .detail-sheet .detail-header {

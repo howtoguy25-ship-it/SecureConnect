@@ -8,7 +8,7 @@ import {
   type ClassificationResult,
   type VehicleClass,
 } from "@/services/vehicleClassifier";
-import { normalizeAngleDeg } from "@/utils/navFormat";
+import { normalizeAngleDeg, formatDistance } from "@/utils/navFormat";
 import { NavActionsRow } from "@/components/NavActionsRow";
 import "./LiveVehicleDetection.css";
 
@@ -271,7 +271,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           <>
             <strong>
               {navContext.distanceToManeuverM !== null
-                ? `In ${navContext.distanceToManeuverM < 1000 ? `${Math.round(navContext.distanceToManeuverM / 10) * 10} m` : `${(navContext.distanceToManeuverM / 1000).toFixed(1)} km`}, `
+                ? `In ${formatDistance(navContext.distanceToManeuverM)}, `
                 : ""}
               {navContext.instructionText}
             </strong>

@@ -13,6 +13,12 @@ export interface WebSettings {
   // vehicle detection, without the extra overlay. Only affects that camera view; the
   // actual route on the main map is untouched either way.
   hideDetectionTrace: boolean;
+  // "system" follows the OS/browser's prefers-color-scheme; "light"/"dark" is an explicit
+  // override. Note: only affects the app's own UI chrome. The map tiles themselves only
+  // switch to a dark style too when no custom Map ID is configured (see App.tsx) -- Google
+  // ignores inline tile styling on Map ID-based vector maps, so a custom Map ID would need
+  // its own dark variant configured in Cloud Console to fully match.
+  theme: "system" | "light" | "dark";
 }
 
 const DEFAULT_SETTINGS: WebSettings = {
@@ -20,6 +26,7 @@ const DEFAULT_SETTINGS: WebSettings = {
   regionWide: false,
   fixedZone: false,
   hideDetectionTrace: false,
+  theme: "system",
 };
 const STORAGE_KEY = "tracklive.settings";
 
@@ -44,5 +51,6 @@ export function useSettings() {
     setFixedZone: (fixedZone: boolean) => setSettings((s) => ({ ...s, fixedZone })),
     setHideDetectionTrace: (hideDetectionTrace: boolean) =>
       setSettings((s) => ({ ...s, hideDetectionTrace })),
+    setTheme: (theme: WebSettings["theme"]) => setSettings((s) => ({ ...s, theme })),
   };
 }

@@ -5,7 +5,7 @@
   transform: translate(-50%, -50%);
   width: calc(100% - 48px);
   max-width: 360px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 16px;
   padding: 20px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
@@ -16,7 +16,7 @@
 .confirm-prompt-message {
   font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--surface-text);
   margin-bottom: 16px;
   text-align: center;
 }
@@ -37,8 +37,8 @@
 }
 
 .confirm-prompt-no {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--input-bg);
+  color: var(--surface-text);
 }
 
 .confirm-prompt-yes {

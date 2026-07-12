@@ -32,7 +32,7 @@ export function ReportAlertPanel({ onPlaceOnMap, onClose }: Props) {
                 className={`type-button${isSelected ? " type-button-selected" : ""}`}
                 style={{
                   borderColor: ALERT_COLORS[type],
-                  backgroundColor: isSelected ? `${ALERT_COLORS[type]}22` : "#fff",
+                  backgroundColor: isSelected ? `${ALERT_COLORS[type]}22` : undefined,
                 }}
                 onClick={() => setSelected(type)}
               >

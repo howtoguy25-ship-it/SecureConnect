@@ -34,7 +34,8 @@ const LiveVehicleDetection = lazy(() =>
 );
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
 import { bearingDegrees, distanceKm } from "@/utils/geo";
-import { stripHtml, formatDistance, formatArrivalClock } from "@/utils/navFormat";
+import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
+import { DARK_MAP_STYLE } from "@/utils/mapStyles";
 import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
 import "./App.css";
 
@@ -63,7 +64,8 @@ export default function App() {
   });
 
   const { location, error: locationError } = useGeolocation();
-  const { settings, setAlertRadiusKm, setRegionWide, setFixedZone, setHideDetectionTrace } = useSettings();
+  const { settings, setAlertRadiusKm, setRegionWide, setFixedZone, setHideDetectionTrace, setTheme } =
+    useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -120,6 +122,30 @@ export default function App() {
   const [zoneCenter, setZoneCenter] = useState<google.maps.LatLngLiteral | null>(null);
   const [showLeaveZonePrompt, setShowLeaveZonePrompt] = useState(false);
   const leaveZonePromptedRef = useRef(false);
+
+  // Theme: "system" tracks the OS/browser preference live; "light"/"dark" is a saved
+  // override. The actual color swap happens via CSS variables keyed off a data-theme
+  // attribute on <html> (see App.css) so it applies instantly with no re-render needed.
+  const [systemPrefersDark, setSystemPrefersDark] = useState(
+    () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+
+  useEffect(() => {
+    if (settings.theme === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", settings.theme);
+    }
+  }, [settings.theme]);
+
+  const isDarkTheme = settings.theme === "dark" || (settings.theme === "system" && systemPrefersDark);
 
   useEffect(() => {
     ensureSignedIn()
@@ -604,6 +630,10 @@ export default function App() {
           // (render type: Vector) and set VITE_GOOGLE_MAPS_MAP_ID; falls back to a flat
           // map if unset.
           mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
+          // Inline styles are ignored on Map ID-based vector maps (Google requires a
+          // separately-configured dark Map ID for that case instead) -- only apply the
+          // dark tile style here when there's no Map ID to conflict with.
+          styles: isDarkTheme && !import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ? DARK_MAP_STYLE : undefined,
         }}
         onClick={(e) => {
           if (pendingType && e.latLng) {
@@ -853,7 +883,9 @@ export default function App() {
         </Suspense>
       )}
 
-      {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
+      {aboutOpen && (
+        <AboutPanel theme={settings.theme} onSetTheme={setTheme} onClose={() => setAboutOpen(false)} />
+      )}
 
       {selectedAlert && (
         <AlertDetailPanel

@@ -5,7 +5,7 @@
   right: 16px;
   max-width: 480px;
   margin: 0 auto;
-  background: #fff;
+  background: var(--surface);
   border-radius: 16px;
   padding: 14px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
@@ -19,7 +19,7 @@
   justify-content: space-between;
   font-size: 13px;
   font-weight: 700;
-  color: #6b7280;
+  color: var(--surface-text-muted);
   margin-bottom: 8px;
 }
 
@@ -28,8 +28,8 @@
   height: 28px;
   border-radius: 14px;
   border: none;
-  background: #f3f4f6;
-  color: #111827;
+  background: var(--input-bg);
+  color: var(--surface-text);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -44,16 +44,16 @@
 
 .route-option-row {
   text-align: left;
-  border: 2px solid #e5e7eb;
+  border: 2px solid var(--surface-border);
   border-radius: 12px;
   padding: 10px 12px;
-  background: #f9fafb;
+  background: var(--input-bg);
   cursor: pointer;
 }
 
 .route-option-selected {
   border-color: #2563eb;
-  background: #eff6ff;
+  background: rgba(37, 99, 235, 0.14);
 }
 
 .route-option-title {
@@ -61,7 +61,7 @@
   align-items: baseline;
   justify-content: space-between;
   font-weight: 700;
-  color: #111827;
+  color: var(--surface-text);
   font-size: 15px;
 }
 
@@ -73,7 +73,7 @@
 .route-option-subtitle {
   margin-top: 2px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--surface-text-muted);
 }
 
 .start-nav-button {
