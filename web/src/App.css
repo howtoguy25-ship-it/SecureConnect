@@ -78,6 +78,21 @@
   right: 16px;
   max-width: 420px;
   z-index: 10;
+  transition: top 0.15s ease;
+}
+
+/* The status banner sits above everything else (z-index 20) at the very top of the screen
+   and can wrap to two lines on narrow phones -- without this, it visually collides with (or
+   hides behind) the search bar/about button/radius control that are all anchored near top:0
+   independently of it. Pushed down by a fixed, generous offset rather than measuring the
+   banner's real height, since its text length varies. */
+.top-bar.chrome-shifted,
+.about-button.chrome-shifted {
+  top: 60px;
+}
+
+.radius-control.chrome-shifted {
+  top: 120px;
 }
 
 .search-input {
@@ -138,7 +153,7 @@
 
 .fab {
   position: absolute;
-  bottom: 28px;
+  bottom: calc(28px + env(safe-area-inset-bottom, 0px));
   right: 20px;
   width: 56px;
   height: 56px;
@@ -154,13 +169,13 @@
 }
 
 .fab-secondary {
-  bottom: 96px;
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   background: #111827;
   font-size: 22px;
 }
 
 .fab-tertiary {
-  bottom: 164px;
+  bottom: calc(164px + env(safe-area-inset-bottom, 0px));
   background: var(--fab-surface);
   color: var(--fab-icon);
   font-size: 20px;
@@ -172,7 +187,7 @@
 }
 
 .fab-quaternary {
-  bottom: 232px;
+  bottom: calc(232px + env(safe-area-inset-bottom, 0px));
   background: var(--fab-surface);
   color: var(--fab-icon);
   font-size: 20px;
@@ -235,7 +250,7 @@
 
 .stop-placement-bar {
   position: absolute;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   left: 16px;
   right: 16px;
   max-width: 420px;

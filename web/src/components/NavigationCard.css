@@ -40,6 +40,14 @@
   margin-top: 6px;
 }
 
+.nav-card-view-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-align: center;
+}
+
 .nav-card-view-toggle {
   display: flex;
   gap: 6px;

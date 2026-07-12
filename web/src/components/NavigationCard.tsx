@@ -9,7 +9,7 @@ interface Props {
   distanceToManeuverM: number | null;
   etaText: string;
   distanceRemainingText: string;
-  navViewMode: NavViewMode;
+  navViewMode: NavViewMode | null;
   onSetNavViewMode: (mode: NavViewMode) => void;
   onClearRoute: () => void;
   onExit: () => void;
@@ -59,6 +59,7 @@ export function NavigationCard({
         onOpenDetection={onOpenDetection}
       />
 
+      {navViewMode === null && <div className="nav-card-view-hint">Choose a driving view</div>}
       <div className="nav-card-view-toggle">
         <button
           className={navViewMode === "follow" ? "nav-view-active" : ""}

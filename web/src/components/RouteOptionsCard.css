@@ -1,6 +1,6 @@
 .route-options-card {
   position: absolute;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   left: 16px;
   right: 16px;
   max-width: 480px;

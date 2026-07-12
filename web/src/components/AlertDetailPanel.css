@@ -1,6 +1,11 @@
 .detail-sheet {
   padding: 0;
-  overflow: hidden;
+  /* .sheet sets max-height + overflow-y: auto (scrollable, still clips the flush image's
+     top corners to the panel's border-radius) -- must not fall back to plain "hidden" here,
+     or tall content (image + long address + confirm/delete/hide buttons) gets cut off
+     instead of scrolling on short screens. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .detail-map-thumb {

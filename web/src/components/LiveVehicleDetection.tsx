@@ -21,6 +21,14 @@ import "./LiveVehicleDetection.css";
 // generic "Vehicle" label whenever it isn't confident enough.
 const VEHICLE_CLASSES = new Set(["car", "truck", "bus", "motorcycle"]);
 
+// Cap detection passes instead of running one every single animation frame -- COCO-SSD
+// inference (plus the per-box classifier and lightbar sampling riding on top of it) is heavy
+// enough that running it unthrottled pegs the CPU/GPU the whole time this view is open, which
+// is what actually reads as "lag" (jank, heat, battery drain) even though each individual
+// frame renders fine. ~8 detections/sec is still smooth for bounding boxes that track a moving
+// vehicle from a phone/laptop camera.
+const MIN_DETECT_INTERVAL_MS = 120;
+
 const CLASS_DISPLAY_NAMES: Record<VehicleClass, string> = {
   ambulance: "Ambulance",
   firetruck: "Fire truck",
@@ -167,6 +175,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const lastDetectMsRef = useRef(0);
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
   const speedTrackerRef = useRef(createSpeedTracker());
   // Keyed by the speed tracker's per-vehicle track id: classify each tracked vehicle once
@@ -243,6 +252,13 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         rafRef.current = requestAnimationFrame(detectLoop);
         return;
       }
+
+      const nowMs = performance.now();
+      if (nowMs - lastDetectMsRef.current < MIN_DETECT_INTERVAL_MS) {
+        rafRef.current = requestAnimationFrame(detectLoop);
+        return;
+      }
+      lastDetectMsRef.current = nowMs;
 
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;

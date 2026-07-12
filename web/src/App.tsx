@@ -41,15 +41,16 @@ import { bearingDegrees, distanceKm } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "@/utils/mapStyles";
 import { calculateSunTimes } from "@/utils/sunTimes";
-import { fetchOsmTrafficData, type OsmPoint } from "@/services/osmTrafficData";
+import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmPoint } from "@/services/osmTrafficData";
+import { SpeedLimitSign } from "@/components/SpeedLimitSign";
 import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
 import "./App.css";
 
 const LIBRARIES: "places"[] = ["places"];
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
-// Touch devices get one-finger-drag look-around during 3D Follow instead of the on-screen
-// joystick (see the touch-listener effect below) -- desktop/mouse users keep the joystick
-// since there's no drag-to-rotate gesture to replace it with there.
+// Touch devices get two-finger-drag look-around during 3D Follow instead of the on-screen
+// joystick (see the touch-listener effect below) -- one finger is left free for normal map
+// panning. Desktop/mouse users keep the joystick since there's no touch gesture to give them.
 const IS_TOUCH_DEVICE =
   typeof window !== "undefined" && (navigator.maxTouchPoints > 0 || "ontouchstart" in window);
 // Re-fetch directions from the live position while navigating once you've drifted this
@@ -57,16 +58,38 @@ const IS_TOUCH_DEVICE =
 // without hammering the Directions API on every GPS tick.
 const REROUTE_THRESHOLD_KM = 0.05;
 
-function markerIcon(color: string, scale = 12): google.maps.Symbol {
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    fillColor: color,
-    fillOpacity: 1,
-    strokeColor: "#ffffff",
-    strokeWeight: 2,
-    scale,
-  };
+// Cached by "color:scale" so repeated calls return the *same* object reference instead of a
+// fresh one on every render -- markers (alerts + every OSM traffic light/speed camera, which
+// can number in the hundreds at street zoom) were otherwise getting a new `icon` prop on every
+// App re-render, forcing Google Maps to re-diff/re-paint every marker on each keystroke or GPS
+// tick even though the icon itself never actually changes.
+const markerIconCache = new Map<string, google.maps.Symbol>();
+function markerIcon(color: string, scale = 12, strokeWeight = 2): google.maps.Symbol {
+  const key = `${color}:${scale}:${strokeWeight}`;
+  let icon = markerIconCache.get(key);
+  if (!icon) {
+    icon = {
+      path: google.maps.SymbolPath.CIRCLE,
+      fillColor: color,
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight,
+      scale,
+    };
+    markerIconCache.set(key, icon);
+  }
+  return icon;
 }
+
+// Static (never changes), so build it once instead of a fresh object literal on every render.
+const CURRENT_LOCATION_ICON: google.maps.Symbol = {
+  path: google.maps.SymbolPath.CIRCLE,
+  fillColor: "#2563EB",
+  fillOpacity: 1,
+  strokeColor: "#ffffff",
+  strokeWeight: 3,
+  scale: 8,
+};
 
 // Only fetch OpenStreetMap traffic-signal/speed-camera data once zoomed in to roughly
 // street level -- both to keep the Overpass query area (and thus load) reasonable, and
@@ -132,9 +155,14 @@ export default function App() {
   // "follow" = tilted, rotating, close-up camera that tracks your heading (driving view);
   // "street" = real Google Street View imagery facing your direction of travel (front/driver view);
   // "overview" = flat, north-up, zoomed out to show the entire route start-to-finish.
-  const [navViewMode, setNavViewMode] = useState<NavViewMode>("follow");
+  // Starts unset each time navigation begins -- the driver picks a view instead of one being
+  // forced on them, so none of the three toggle buttons shows as pre-selected.
+  const [navViewMode, setNavViewMode] = useState<NavViewMode | null>(null);
   const [distanceToManeuverM, setDistanceToManeuverM] = useState<number | null>(null);
   const [streetViewUnavailable, setStreetViewUnavailable] = useState(false);
+  const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
+  const lastSpeedLimitFetchRef = useRef<google.maps.LatLngLiteral | null>(null);
+  const speedLimitFetchInFlightRef = useRef(false);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
   // Joystick-driven adjustments to the 3D Follow camera, layered on top of the
   // auto-computed travel heading/default tilt so the driver can nudge the view to
@@ -479,6 +507,26 @@ export default function App() {
     }
   }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride]);
 
+  // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
+  // maxspeed tags (see osmTrafficData.ts) -- refetched only after moving ~50m so a live GPS
+  // track doesn't hammer the Overpass API every tick, and skipped entirely while a fetch is
+  // already in flight.
+  useEffect(() => {
+    if (!navigating || !location) return;
+    const last = lastSpeedLimitFetchRef.current;
+    if (last && distanceKm(last.lat, last.lng, location.lat, location.lng) < 0.05) return;
+    if (speedLimitFetchInFlightRef.current) return;
+
+    lastSpeedLimitFetchRef.current = location;
+    speedLimitFetchInFlightRef.current = true;
+    fetchSpeedLimitNear(location.lat, location.lng)
+      .then((result) => setSpeedLimitKmh(result?.kmh ?? null))
+      .catch(() => setSpeedLimitKmh(null))
+      .finally(() => {
+        speedLimitFetchInFlightRef.current = false;
+      });
+  }, [navigating, location?.lat, location?.lng]);
+
   // Switch between the tilted "follow" driving view and the flat "overview" of the
   // whole route whenever the toggle changes (or a fresh route comes in while already
   // in overview mode). "street" mode swaps in a full-screen Street View overlay instead
@@ -660,13 +708,13 @@ export default function App() {
     setManualTiltOverride((prev) => Math.max(0, Math.min(67.5, (prev ?? 67.5) + deltaDeg)));
   }, []);
 
-  // One-finger look-around during 3D Follow, replacing the on-screen joystick on touch
-  // devices: a single-finger drag adjusts heading/tilt (feeding the same manual offsets the
-  // joystick buttons do) instead of panning the map, since panning the center during
-  // auto-follow would just get overwritten by the per-tick recenter effect anyway. Two-finger
-  // pinch is untouched -- this only ever looks at single-touch drags -- so zoom keeps working
-  // exactly as normal. Native map dragging is turned off for this mode via the `draggable`
-  // map option below, freeing up one-finger drag for this instead of fighting Maps' own pan.
+  // Two-finger look-around during 3D Follow, replacing the on-screen joystick entirely:
+  // a two-finger drag adjusts heading/tilt (feeding the same manual offsets the old joystick
+  // buttons did) -- horizontal movement rotates the view, vertical movement ("lift" the
+  // fingers up/down) digs the camera deeper into/out of the tilt angle. One finger is left
+  // completely alone so it keeps doing normal native map panning/dragging, exactly like the
+  // home map screen -- only a *second* simultaneous touch engages look-around, so there's no
+  // ambiguity between "I'm panning" and "I'm looking around".
   useEffect(() => {
     if (!navigating || navViewMode !== "follow") return;
     const map = mapRef.current;
@@ -676,28 +724,34 @@ export default function App() {
     let lastX: number | null = null;
     let lastY: number | null = null;
 
+    function midpoint(touches: TouchList): { x: number; y: number } {
+      const a = touches[0];
+      const b = touches[1];
+      return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+    }
+
     function onTouchStart(e: TouchEvent) {
-      if (e.touches.length !== 1) {
+      if (e.touches.length !== 2) {
         lastX = null;
         lastY = null;
         return;
       }
-      lastX = e.touches[0].clientX;
-      lastY = e.touches[0].clientY;
+      const mid = midpoint(e.touches);
+      lastX = mid.x;
+      lastY = mid.y;
     }
     function onTouchMove(e: TouchEvent) {
-      if (e.touches.length !== 1 || lastX === null || lastY === null) return;
-      const x = e.touches[0].clientX;
-      const y = e.touches[0].clientY;
-      const dx = x - lastX;
-      const dy = y - lastY;
-      lastX = x;
-      lastY = y;
+      if (e.touches.length !== 2 || lastX === null || lastY === null) return;
+      const mid = midpoint(e.touches);
+      const dx = mid.x - lastX;
+      const dy = mid.y - lastY;
+      lastX = mid.x;
+      lastY = mid.y;
       rotateFollow(dx * 0.3);
       tiltFollow(-dy * 0.3);
     }
     function onTouchEnd(e: TouchEvent) {
-      if (e.touches.length === 0) {
+      if (e.touches.length < 2) {
         lastX = null;
         lastY = null;
       }
@@ -781,17 +835,16 @@ export default function App() {
 
   const startNavigation = useCallback(() => {
     setNavigating(true);
-    setNavViewMode("follow");
+    setNavViewMode(null);
     setActiveStepIndex(0);
     setRouteOrigin(location);
     lastLocationRef.current = location;
-    mapRef.current?.setTilt(67.5);
-    mapRef.current?.setZoom(18);
   }, [location]);
 
   const endNavigation = useCallback(() => {
     setNavigating(false);
     setHeading(0);
+    setSpeedLimitKmh(null);
     mapRef.current?.setTilt(0);
     mapRef.current?.setHeading(0);
     mapRef.current?.setZoom(15);
@@ -903,9 +956,11 @@ export default function App() {
         }
       : null;
 
+  const bannerVisible = Boolean(statusMessage) && !bannerDismissed;
+
   return (
     <div className="app-root">
-      {statusMessage && !bannerDismissed && (
+      {bannerVisible && (
         <div className="status-banner">
           <span>{statusMessage}</span>
           <button className="status-banner-close" onClick={() => setBannerDismissed(true)} aria-label="Dismiss">
@@ -928,11 +983,7 @@ export default function App() {
         options={{
           disableDefaultUI: true,
           zoomControl: true,
-          // Native one-finger drag-to-pan is turned off only during 3D Follow -- that's
-          // when the touch-listener effect above takes over one-finger drag for look-around
-          // instead (panning the center during auto-follow would just get overwritten by
-          // the per-tick recenter anyway). Pinch-to-zoom is untouched either way.
-          draggable: !(navigating && navViewMode === "follow"),
+          draggable: true,
           // Moved off the default bottom-right so it doesn't stack on top of the FAB
           // column (report/detection/recenter/hide-trace), which lives in that corner.
           zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
@@ -978,17 +1029,7 @@ export default function App() {
         }}
       >
         {location && (
-          <Marker
-            position={location}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: "#2563EB",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 3,
-              scale: 8,
-            }}
-          />
+          <Marker position={location} icon={CURRENT_LOCATION_ICON} />
         )}
 
         {alerts.map((alert) => (
@@ -1028,14 +1069,7 @@ export default function App() {
             onDragEnd={(e) => {
               if (e.latLng) setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
             }}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: pendingType ? ALERT_COLORS[pendingType] : "#2563EB",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 3,
-              scale: 14,
-            }}
+            icon={markerIcon(pendingType ? ALERT_COLORS[pendingType] : "#2563EB", 14, 3)}
             zIndex={999}
           />
         )}
@@ -1045,14 +1079,7 @@ export default function App() {
             position={stopLocation}
             onClick={() => setStopLocation(null)}
             title="Stop (click to remove)"
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: "#F59E0B",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 3,
-              scale: 10,
-            }}
+            icon={markerIcon("#F59E0B", 10, 3)}
             zIndex={998}
           />
         )}
@@ -1063,13 +1090,17 @@ export default function App() {
       </GoogleMap>
 
       {!chromeHidden && (
-        <button className="about-button" onClick={() => setAboutOpen(true)} aria-label="About TrackLine">
+        <button
+          className={`about-button${bannerVisible ? " chrome-shifted" : ""}`}
+          onClick={() => setAboutOpen(true)}
+          aria-label="About TrackLine"
+        >
           <img src="/logo.png" alt="" />
         </button>
       )}
 
       {!chromeHidden && (
-        <div className="top-bar">
+        <div className={`top-bar${bannerVisible ? " chrome-shifted" : ""}`}>
           <Autocomplete
             onLoad={(ac) => {
               autocompleteRef.current = ac;
@@ -1083,7 +1114,7 @@ export default function App() {
       )}
 
       {!chromeHidden && (
-        <div className="radius-control">
+        <div className={`radius-control${bannerVisible ? " chrome-shifted" : ""}`}>
           <label>
             Alert radius: {settings.alertRadiusKm} km
             <input
@@ -1126,8 +1157,15 @@ export default function App() {
       )}
 
       {navigating && navViewMode === "street" && location && (
-        <StreetViewNav position={location} heading={heading} onNoCoverage={onStreetViewNoCoverage} />
+        <StreetViewNav
+          position={location}
+          heading={heading}
+          destination={destination}
+          onNoCoverage={onStreetViewNoCoverage}
+        />
       )}
+
+      {navigating && speedLimitKmh !== null && <SpeedLimitSign kmh={speedLimitKmh} />}
 
       {navigating && navLeg && (
         <NavigationCard
