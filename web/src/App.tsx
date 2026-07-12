@@ -7,7 +7,8 @@ import {
   DirectionsRenderer,
 } from "@react-google-maps/api";
 import type { User } from "firebase/auth";
-import { ensureSignedIn } from "@/services/firebase";
+import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
+import { upsertSignedInProfile } from "@/services/userProfile";
 import {
   subscribeNearbyAlerts,
   subscribeAllAlerts,
@@ -26,6 +27,7 @@ import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
 import { AboutPanel } from "@/components/AboutPanel";
+import { AdminPanel } from "@/components/AdminPanel";
 import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
@@ -75,6 +77,7 @@ export default function App() {
   const [reportOpen, setReportOpen] = useState(false);
   const [detectionOpen, setDetectionOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   // Business/POI detail panel (hours, rating, reviews) -- fetched via Places whenever a
   // clickable map icon is tapped outside of any placement/zoom mode.
@@ -161,6 +164,41 @@ export default function App() {
         const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
         setAuthError(`Couldn't sign in: ${code ?? (err instanceof Error ? err.message : String(err))}`);
       });
+  }, []);
+
+  // Records name/email/provider for the admin panel -- never a password, since Firebase
+  // never gives that to the client either way. No-ops for anonymous "Guest" sessions.
+  useEffect(() => {
+    if (user && !user.isAnonymous) {
+      upsertSignedInProfile(user).catch((err) => console.warn("[auth] profile sync failed", err));
+    }
+  }, [user]);
+
+  const handleSignInGoogle = useCallback(async () => {
+    try {
+      setUser(await signInWithGoogle());
+    } catch (err) {
+      console.warn("[auth] Google sign-in failed", err);
+      setAuthError(err instanceof Error ? err.message : "Google sign-in failed.");
+    }
+  }, []);
+
+  const handleSignInApple = useCallback(async () => {
+    try {
+      setUser(await signInWithApple());
+    } catch (err) {
+      console.warn("[auth] Apple sign-in failed", err);
+      setAuthError(err instanceof Error ? err.message : "Apple sign-in failed.");
+    }
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    await signOutUser();
+    try {
+      setUser(await ensureSignedIn());
+    } catch (err) {
+      console.warn("[auth] re-sign-in after sign-out failed", err);
+    }
   }, []);
 
   useEffect(() => {
@@ -956,8 +994,22 @@ export default function App() {
       )}
 
       {aboutOpen && (
-        <AboutPanel theme={settings.theme} onSetTheme={setTheme} onClose={() => setAboutOpen(false)} />
+        <AboutPanel
+          theme={settings.theme}
+          onSetTheme={setTheme}
+          user={user}
+          onSignInGoogle={handleSignInGoogle}
+          onSignInApple={handleSignInApple}
+          onSignOut={handleSignOut}
+          onOpenAdmin={() => {
+            setAboutOpen(false);
+            setAdminOpen(true);
+          }}
+          onClose={() => setAboutOpen(false)}
+        />
       )}
+
+      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
 
       {placeDetails && (
         <BusinessDetailPanel place={placeDetails} onGetDirections={getDirectionsToPlace} onClose={closeBusinessPanel} />

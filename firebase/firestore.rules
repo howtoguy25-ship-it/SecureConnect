@@ -11,6 +11,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == createdBy;
     }
 
+    // Keep in sync with web/src/config/admin.ts. Firestore rules can't import that file,
+    // so this list is duplicated here -- it's the one that's actually enforced.
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email in ['howtoguy25@gmail.com'];
+    }
+
     match /alerts/{alertId} {
       allow read: if isSignedIn();
 
@@ -52,7 +58,12 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read, write: if isSignedIn() && request.auth.uid == uid;
+      // Anyone can read/write their own profile doc; only the admin can list/read everyone
+      // else's (for the sign-in history panel) -- name/email/provider/timestamps only,
+      // never a password, since Firebase Auth never exposes that to client or server code.
+      allow get: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isSignedIn() && request.auth.uid == uid;
     }
   }
 }

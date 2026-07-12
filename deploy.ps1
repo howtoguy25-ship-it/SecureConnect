@@ -31,9 +31,9 @@ Write-Host "==> Building the web app" -ForegroundColor Cyan
 npm run build
 if ($LASTEXITCODE -ne 0) { Fail "npm run build failed -- the site was NOT redeployed." }
 
-Write-Host "==> Deploying to Firebase Hosting" -ForegroundColor Cyan
+Write-Host "==> Deploying to Firebase Hosting + Firestore rules" -ForegroundColor Cyan
 Set-Location $PSScriptRoot
-npx firebase-tools deploy --project fleettrack-9f894 --only hosting
+npx firebase-tools deploy --project fleettrack-9f894 --only hosting,firestore:rules
 if ($LASTEXITCODE -ne 0) { Fail "firebase deploy failed (see the error above)." }
 
 Write-Host ""

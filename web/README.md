@@ -23,6 +23,25 @@ turn-by-turn voice guidance, and the EV Radar *siren* (audio) detection (needs n
 audio + TFLite; a browser tab also can't reliably listen in the background once you
 switch away from it).
 
+## Sign-in
+
+Every visitor still gets instant anonymous access (no forced login) -- signing in with
+Google or Apple links to that same session, so existing reports/ownership carry over. Both
+need to be turned on in the Firebase console before they'll work in production, this can't
+be done from code:
+
+- **Google**: Firebase console → Authentication → Sign-in method → enable "Google".
+  One click; Firebase provides its own OAuth client, no separate Google Cloud setup needed.
+- **Apple**: needs a paid Apple Developer Program account ($99/yr), a Services ID with
+  "Sign in with Apple" configured, and that Services ID + key entered under Authentication →
+  Sign-in method → "Apple" in the Firebase console. There's no code-only path around this —
+  it's Apple's real requirement for any app offering Sign in with Apple.
+
+The admin sign-in-history panel (About → "Admin: sign-in history") only shows for the email
+in `web/src/config/admin.ts` — the real enforcement is in `firebase/firestore.rules`
+(an admin-email check on the `users` collection), so redeploy Firestore rules
+(`.\deploy.ps1` does this automatically) after changing that email.
+
 ## Setup
 
 ```

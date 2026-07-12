@@ -1,4 +1,6 @@
+import type { User } from "firebase/auth";
 import { BUSINESS_INFO } from "@/config/business";
+import { ADMIN_EMAILS } from "@/config/admin";
 import type { WebSettings } from "@/hooks/useSettings";
 import "./AboutPanel.css";
 
@@ -13,10 +15,27 @@ const THEME_OPTIONS: { value: WebSettings["theme"]; label: string }[] = [
 interface Props {
   theme: WebSettings["theme"];
   onSetTheme: (theme: WebSettings["theme"]) => void;
+  user: User | null;
+  onSignInGoogle: () => void;
+  onSignInApple: () => void;
+  onSignOut: () => void;
+  onOpenAdmin: () => void;
   onClose: () => void;
 }
 
-export function AboutPanel({ theme, onSetTheme, onClose }: Props) {
+export function AboutPanel({
+  theme,
+  onSetTheme,
+  user,
+  onSignInGoogle,
+  onSignInApple,
+  onSignOut,
+  onOpenAdmin,
+  onClose,
+}: Props) {
+  const isRealAccount = !!user && !user.isAnonymous;
+  const isAdmin = !!user?.email && ADMIN_EMAILS.includes(user.email);
+
   return (
     <div className="about-panel">
       <img src="/logo.png" alt="TrackLive" className="about-logo" />
@@ -36,6 +55,35 @@ export function AboutPanel({ theme, onSetTheme, onClose }: Props) {
           </button>
         ))}
       </div>
+
+      <div className="account-section">
+        {isRealAccount ? (
+          <>
+            <div className="account-signed-in">
+              Signed in as <strong>{user.displayName ?? user.email}</strong>
+            </div>
+            <button className="about-close" onClick={onSignOut}>
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="account-prompt">Sign in to keep your reports linked to your account</div>
+            <button className="account-signin-button account-signin-google" onClick={onSignInGoogle}>
+              Continue with Google
+            </button>
+            <button className="account-signin-button account-signin-apple" onClick={onSignInApple}>
+              Continue with Apple
+            </button>
+          </>
+        )}
+      </div>
+
+      {isAdmin && (
+        <button className="about-close" onClick={onOpenAdmin}>
+          Admin: sign-in history
+        </button>
+      )}
 
       <button className="about-close" onClick={onClose}>
         Close
