@@ -7,6 +7,7 @@ interface UserRow {
   id: string;
   displayName: string | null;
   email: string | null;
+  phoneNumber: string | null;
   provider: string | null;
   firstSignInAt: string;
   lastSignInAt: string;
@@ -40,13 +41,14 @@ export function AdminPanel({ onClose }: Props) {
                 id: d.id,
                 displayName: data.displayName ?? null,
                 email: data.email ?? null,
+                phoneNumber: data.phoneNumber ?? null,
                 provider: data.provider ?? null,
                 firstSignInAt: formatTimestamp(data.firstSignInAt),
                 lastSignInAt: formatTimestamp(data.lastSignInAt),
               };
             })
             // Only rows with a real sign-in identity are meaningful here.
-            .filter((row) => row.email)
+            .filter((row) => row.email || row.phoneNumber)
         );
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load sign-in history."));
@@ -62,8 +64,8 @@ export function AdminPanel({ onClose }: Props) {
           </button>
         </div>
         <div className="admin-panel-subtitle">
-          Names and emails only — Firebase never exposes passwords to this app or any server
-          code, so there's nothing to show even if we wanted to.
+          Names, emails, and phone numbers only — Firebase never exposes passwords to this
+          app or any server code, so there's nothing to show even if we wanted to.
         </div>
 
         {error && <div className="admin-panel-error">{error}</div>}
@@ -77,7 +79,7 @@ export function AdminPanel({ onClose }: Props) {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Email</th>
+                <th>Email / Phone</th>
                 <th>Provider</th>
                 <th>First sign-in</th>
                 <th>Last sign-in</th>
@@ -87,7 +89,7 @@ export function AdminPanel({ onClose }: Props) {
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td>{row.displayName ?? "—"}</td>
-                  <td>{row.email}</td>
+                  <td>{row.email ?? row.phoneNumber ?? "—"}</td>
                   <td>{row.provider?.replace(".com", "")}</td>
                   <td>{row.firstSignInAt}</td>
                   <td>{row.lastSignInAt}</td>

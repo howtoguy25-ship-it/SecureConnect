@@ -12,9 +12,11 @@ service cloud.firestore {
     }
 
     // Keep in sync with web/src/config/admin.ts. Firestore rules can't import that file,
-    // so this list is duplicated here -- it's the one that's actually enforced.
+    // so these lists are duplicated here -- they're what's actually enforced.
     function isAdmin() {
-      return isSignedIn() && request.auth.token.email in ['howtoguy25@gmail.com'];
+      return isSignedIn()
+        && (request.auth.token.email in ['howtoguy25@gmail.com']
+          || request.auth.token.phone_number in ['+61474011265']);
     }
 
     match /alerts/{alertId} {

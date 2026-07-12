@@ -27,6 +27,7 @@ import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
 import { AboutPanel } from "@/components/AboutPanel";
+import { PhoneAuthPanel } from "@/components/PhoneAuthPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
@@ -78,6 +79,7 @@ export default function App() {
   const [detectionOpen, setDetectionOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [phoneAuthOpen, setPhoneAuthOpen] = useState(false);
 
   // Business/POI detail panel (hours, rating, reviews) -- fetched via Places whenever a
   // clickable map icon is tapped outside of any placement/zoom mode.
@@ -190,6 +192,11 @@ export default function App() {
       console.warn("[auth] Apple sign-in failed", err);
       setAuthError(err instanceof Error ? err.message : "Apple sign-in failed.");
     }
+  }, []);
+
+  const handlePhoneSignedIn = useCallback((signedInUser: User) => {
+    setUser(signedInUser);
+    setPhoneAuthOpen(false);
   }, []);
 
   const handleSignOut = useCallback(async () => {
@@ -1000,6 +1007,10 @@ export default function App() {
           user={user}
           onSignInGoogle={handleSignInGoogle}
           onSignInApple={handleSignInApple}
+          onSignInPhone={() => {
+            setAboutOpen(false);
+            setPhoneAuthOpen(true);
+          }}
           onSignOut={handleSignOut}
           onOpenAdmin={() => {
             setAboutOpen(false);
@@ -1007,6 +1018,10 @@ export default function App() {
           }}
           onClose={() => setAboutOpen(false)}
         />
+      )}
+
+      {phoneAuthOpen && (
+        <PhoneAuthPanel onSignedIn={handlePhoneSignedIn} onCancel={() => setPhoneAuthOpen(false)} />
       )}
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}

@@ -1,6 +1,6 @@
 import type { User } from "firebase/auth";
 import { BUSINESS_INFO } from "@/config/business";
-import { ADMIN_EMAILS } from "@/config/admin";
+import { ADMIN_EMAILS, ADMIN_PHONE_NUMBERS } from "@/config/admin";
 import type { WebSettings } from "@/hooks/useSettings";
 import "./AboutPanel.css";
 
@@ -18,6 +18,7 @@ interface Props {
   user: User | null;
   onSignInGoogle: () => void;
   onSignInApple: () => void;
+  onSignInPhone: () => void;
   onSignOut: () => void;
   onOpenAdmin: () => void;
   onClose: () => void;
@@ -29,12 +30,15 @@ export function AboutPanel({
   user,
   onSignInGoogle,
   onSignInApple,
+  onSignInPhone,
   onSignOut,
   onOpenAdmin,
   onClose,
 }: Props) {
   const isRealAccount = !!user && !user.isAnonymous;
-  const isAdmin = !!user?.email && ADMIN_EMAILS.includes(user.email);
+  const isAdmin =
+    (!!user?.email && ADMIN_EMAILS.includes(user.email)) ||
+    (!!user?.phoneNumber && ADMIN_PHONE_NUMBERS.includes(user.phoneNumber));
 
   return (
     <div className="about-panel">
@@ -60,7 +64,7 @@ export function AboutPanel({
         {isRealAccount ? (
           <>
             <div className="account-signed-in">
-              Signed in as <strong>{user.displayName ?? user.email}</strong>
+              Signed in as <strong>{user.displayName ?? user.phoneNumber ?? user.email}</strong>
             </div>
             <button className="about-close" onClick={onSignOut}>
               Sign out
@@ -74,6 +78,9 @@ export function AboutPanel({
             </button>
             <button className="account-signin-button account-signin-apple" onClick={onSignInApple}>
               Continue with Apple
+            </button>
+            <button className="account-signin-button" onClick={onSignInPhone}>
+              Continue with phone
             </button>
           </>
         )}
