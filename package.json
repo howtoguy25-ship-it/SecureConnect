@@ -23,6 +23,7 @@
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-cpu": "^4.22.0",
+    "babel-preset-expo": "~57.0.0",
     "expo": "57.0.4",
     "expo-asset": "~57.0.3",
     "expo-audio": "~57.0.0",
