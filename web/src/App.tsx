@@ -26,6 +26,7 @@ import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
 import { AboutPanel } from "@/components/AboutPanel";
+import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
@@ -74,6 +75,11 @@ export default function App() {
   const [reportOpen, setReportOpen] = useState(false);
   const [detectionOpen, setDetectionOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  // Business/POI detail panel (hours, rating, reviews) -- fetched via Places whenever a
+  // clickable map icon is tapped outside of any placement/zoom mode.
+  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
+  const [placeDetails, setPlaceDetails] = useState<google.maps.places.PlaceResult | null>(null);
 
   const [destination, setDestination] = useState<google.maps.LatLngLiteral | null>(null);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
@@ -404,6 +410,47 @@ export default function App() {
     }
   }, [maxZoomHere, street3DMode]);
 
+  useEffect(() => {
+    if (!selectedPlaceId || !mapRef.current) return;
+    const service = new google.maps.places.PlacesService(mapRef.current);
+    service.getDetails(
+      {
+        placeId: selectedPlaceId,
+        fields: [
+          "name",
+          "formatted_address",
+          "formatted_phone_number",
+          "website",
+          "rating",
+          "user_ratings_total",
+          "opening_hours",
+          "reviews",
+          "geometry",
+        ],
+      },
+      (result, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && result) {
+          setPlaceDetails(result);
+        } else {
+          setPlaceDetails(null);
+          setSelectedPlaceId(null);
+        }
+      }
+    );
+  }, [selectedPlaceId]);
+
+  const closeBusinessPanel = useCallback(() => {
+    setSelectedPlaceId(null);
+    setPlaceDetails(null);
+  }, []);
+
+  const getDirectionsToPlace = useCallback(() => {
+    const loc = placeDetails?.geometry?.location;
+    if (!loc) return;
+    setDestination({ lat: loc.lat(), lng: loc.lng() });
+    closeBusinessPanel();
+  }, [placeDetails, closeBusinessPanel]);
+
   const enterStreet3D = useCallback(() => {
     setShow3DPrompt(false);
     setZoomOutArmed(false);
@@ -446,6 +493,21 @@ export default function App() {
     const loc = place?.geometry?.location;
     if (loc) setDestination({ lat: loc.lat(), lng: loc.lng() });
   }, []);
+
+  // Biases (doesn't restrict) destination search toward wherever the user actually is, so
+  // typing "Lak..." near Lakemba, NSW ranks Lakemba first instead of a same-named place
+  // elsewhere in the world -- a real Autocomplete `bounds` soft bias, not a hard filter, so
+  // a deliberately-typed far-away destination is still reachable.
+  const biasAutocompleteToLocation = useCallback((loc: google.maps.LatLngLiteral) => {
+    if (!autocompleteRef.current) return;
+    const circle = new google.maps.Circle({ center: loc, radius: 50000 });
+    const bounds = circle.getBounds();
+    if (bounds) autocompleteRef.current.setBounds(bounds);
+  }, []);
+
+  useEffect(() => {
+    if (location) biasAutocompleteToLocation(location);
+  }, [location?.lat, location?.lng, biasAutocompleteToLocation]);
 
   const startPlacement = useCallback(
     (type: AlertType) => {
@@ -623,7 +685,10 @@ export default function App() {
           // Double-click is repurposed below to open the "view in 3D?" prompt instead of
           // Google's default double-click-to-zoom-in.
           disableDoubleClickZoom: true,
-          clickableIcons: false,
+          // Enables tapping businesses/POIs for the details panel (hours/rating/reviews) --
+          // see the onClick handler below, which still lets placement/zoom modes take
+          // priority over a POI tap.
+          clickableIcons: true,
           // A vector-rendered Map ID is required for tilt/heading (the "3D follow" driving
           // view) to actually render — without one, Google Maps silently ignores tilt on
           // regular roadmap tiles. Create one at console.cloud.google.com/google/maps-apis/studio/maps
@@ -636,6 +701,7 @@ export default function App() {
           styles: isDarkTheme && !import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ? DARK_MAP_STYLE : undefined,
         }}
         onClick={(e) => {
+          const placeEvent = e as google.maps.MapMouseEvent & { placeId?: string };
           if (pendingType && e.latLng) {
             setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
           } else if (addingStop && e.latLng) {
@@ -646,6 +712,9 @@ export default function App() {
             const currentZoom = map?.getZoom() ?? 15;
             map?.setZoom(Math.max(3, currentZoom - 4));
             setZoomOutArmed(false);
+          } else if (placeEvent.placeId) {
+            placeEvent.stop();
+            setSelectedPlaceId(placeEvent.placeId);
           }
         }}
       >
@@ -723,7 +792,10 @@ export default function App() {
       {!pendingType && !navigating && (
         <div className="top-bar">
           <Autocomplete
-            onLoad={(ac) => (autocompleteRef.current = ac)}
+            onLoad={(ac) => {
+              autocompleteRef.current = ac;
+              if (location) biasAutocompleteToLocation(location);
+            }}
             onPlaceChanged={onPlaceChanged}
           >
             <input className="search-input" placeholder="Search destination" />
@@ -885,6 +957,10 @@ export default function App() {
 
       {aboutOpen && (
         <AboutPanel theme={settings.theme} onSetTheme={setTheme} onClose={() => setAboutOpen(false)} />
+      )}
+
+      {placeDetails && (
+        <BusinessDetailPanel place={placeDetails} onGetDirections={getDirectionsToPlace} onClose={closeBusinessPanel} />
       )}
 
       {selectedAlert && (
