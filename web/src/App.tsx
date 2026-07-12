@@ -40,6 +40,7 @@ import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/type
 import { bearingDegrees, distanceKm } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
 import { DARK_MAP_STYLE } from "@/utils/mapStyles";
+import { fetchOsmTrafficData, type OsmPoint } from "@/services/osmTrafficData";
 import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
 import "./App.css";
 
@@ -50,16 +51,21 @@ const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 // without hammering the Directions API on every GPS tick.
 const REROUTE_THRESHOLD_KM = 0.05;
 
-function markerIcon(color: string): google.maps.Symbol {
+function markerIcon(color: string, scale = 12): google.maps.Symbol {
   return {
     path: google.maps.SymbolPath.CIRCLE,
     fillColor: color,
     fillOpacity: 1,
     strokeColor: "#ffffff",
     strokeWeight: 2,
-    scale: 12,
+    scale,
   };
 }
+
+// Only fetch OpenStreetMap traffic-signal/speed-camera data once zoomed in to roughly
+// street level -- both to keep the Overpass query area (and thus load) reasonable, and
+// because individual light/camera markers aren't meaningful to show zoomed way out.
+const OSM_LAYER_MIN_ZOOM = 15;
 
 export default function App() {
   const { isLoaded } = useJsApiLoader({
@@ -129,6 +135,13 @@ export default function App() {
   // wherever feels comfortable. Reset via the recenter button.
   const [manualHeadingOffset, setManualHeadingOffset] = useState(0);
   const [manualTiltOverride, setManualTiltOverride] = useState<number | null>(null);
+
+  // Real traffic-signal/speed-camera locations from OpenStreetMap, refreshed as the
+  // visible map area changes (see onMapIdle below).
+  const [osmTrafficLights, setOsmTrafficLights] = useState<OsmPoint[]>([]);
+  const [osmSpeedCameras, setOsmSpeedCameras] = useState<OsmPoint[]>([]);
+  const osmFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastOsmBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
 
   // "View in 3D?" prompt — triggers either by double-clicking the map or by reaching max
   // zoom. Declining arms a one-shot "next single click zooms out" mode instead of making
@@ -481,6 +494,46 @@ export default function App() {
     }
   }, [maxZoomHere, street3DMode]);
 
+  // Fetches real OSM traffic-signal/speed-camera data for the visible area once settled
+  // (debounced) at street-level zoom, skipping the request entirely when the current
+  // viewport is already covered by the last fetch so panning around a small area doesn't
+  // keep re-querying Overpass's shared public endpoint.
+  const onMapIdle = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const zoom = map.getZoom();
+    if (zoom === undefined || zoom < OSM_LAYER_MIN_ZOOM) return;
+    const bounds = map.getBounds();
+    if (!bounds) return;
+
+    const last = lastOsmBoundsRef.current;
+    if (last && last.contains(bounds.getNorthEast()) && last.contains(bounds.getSouthWest())) {
+      return;
+    }
+
+    if (osmFetchTimeoutRef.current) clearTimeout(osmFetchTimeoutRef.current);
+    osmFetchTimeoutRef.current = setTimeout(() => {
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+      // Pad the fetched area so small subsequent pans don't immediately re-trigger.
+      const latPad = (ne.lat() - sw.lat()) * 0.5;
+      const lngPad = (ne.lng() - sw.lng()) * 0.5;
+      const paddedBounds = new google.maps.LatLngBounds(
+        { lat: sw.lat() - latPad, lng: sw.lng() - lngPad },
+        { lat: ne.lat() + latPad, lng: ne.lng() + lngPad }
+      );
+      lastOsmBoundsRef.current = paddedBounds;
+      fetchOsmTrafficData(paddedBounds)
+        .then(({ trafficLights, speedCameras }) => {
+          // Capped defensively -- a very dense city area could otherwise return enough
+          // markers to noticeably slow down rendering.
+          setOsmTrafficLights(trafficLights.slice(0, 400));
+          setOsmSpeedCameras(speedCameras.slice(0, 200));
+        })
+        .catch((err) => console.warn("[osm] traffic data fetch failed", err));
+    }, 1200);
+  }, []);
+
   useEffect(() => {
     if (!selectedPlaceId || !mapRef.current) return;
     const service = new google.maps.places.PlacesService(mapRef.current);
@@ -773,6 +826,7 @@ export default function App() {
         tilt={(navigating && navViewMode === "follow") || street3DMode ? 67.5 : 0}
         mapContainerClassName="map-container"
         onZoomChanged={onZoomChanged}
+        onIdle={onMapIdle}
         onDblClick={onMapDblClick}
         options={{
           disableDefaultUI: true,
@@ -834,6 +888,26 @@ export default function App() {
             icon={markerIcon(ALERT_COLORS[alert.type])}
             label={{ text: ALERT_EMOJI[alert.type], fontSize: "14px" }}
             onClick={() => setSelectedAlert(alert)}
+          />
+        ))}
+
+        {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
+            (community-mapped, not an official feed). Speed cameras render larger per
+            request so they stand out more than the smaller traffic-signal dots. */}
+        {osmTrafficLights.map((point) => (
+          <Marker
+            key={`tl-${point.id}`}
+            position={{ lat: point.lat, lng: point.lng }}
+            icon={markerIcon("#0D9488", 5)}
+            title="Traffic signal (OpenStreetMap data)"
+          />
+        ))}
+        {osmSpeedCameras.map((point) => (
+          <Marker
+            key={`sc-${point.id}`}
+            position={{ lat: point.lat, lng: point.lng }}
+            icon={markerIcon("#7C3AED", 9)}
+            title="Speed camera (OpenStreetMap data)"
           />
         ))}
 
