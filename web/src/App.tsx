@@ -662,7 +662,7 @@ export default function App() {
   if (!isLoaded) {
     return (
       <div className="loading-screen">
-        <img src="/logo.png" alt="TrackLive" className="loading-logo" />
+        <img src="/logo.png" alt="TrackLine" className="loading-logo" />
         Loading map…
       </div>
     );
@@ -822,7 +822,7 @@ export default function App() {
       </GoogleMap>
 
       {!pendingType && !navigating && (
-        <button className="about-button" onClick={() => setAboutOpen(true)} aria-label="About TrackLive">
+        <button className="about-button" onClick={() => setAboutOpen(true)} aria-label="About TrackLine">
           <img src="/logo.png" alt="" />
         </button>
       )}

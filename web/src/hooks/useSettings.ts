@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS: WebSettings = {
   hideDetectionTrace: false,
   theme: "system",
 };
-const STORAGE_KEY = "tracklive.settings";
+const STORAGE_KEY = "trackline.settings";
 
 export function useSettings() {
   const [settings, setSettings] = useState<WebSettings>(() => {

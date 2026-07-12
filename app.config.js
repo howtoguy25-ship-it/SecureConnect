@@ -3,8 +3,8 @@ require("dotenv/config");
 /** @type {import('@expo/config-types').ExpoConfig} */
 module.exports = {
   expo: {
-    name: "TrackLive",
-    slug: "tracklive",
+    name: "TrackLine",
+    slug: "trackline",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -17,17 +17,17 @@ module.exports = {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.tracklive.navigate",
+      bundleIdentifier: "com.trackline.navigate",
       config: {
         googleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          "TrackLive uses your location to show your position on the map and provide turn-by-turn navigation.",
+          "TrackLine uses your location to show your position on the map and provide turn-by-turn navigation.",
         NSLocationAlwaysAndWhenInUseUsageDescription:
-          "TrackLive can track your location in the background to keep navigation and nearby-alert notifications accurate.",
+          "TrackLine can track your location in the background to keep navigation and nearby-alert notifications accurate.",
         NSMicrophoneUsageDescription:
-          "TrackLive listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
+          "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
         UIBackgroundModes: ["audio", "location", "fetch"],
       },
     },
@@ -36,7 +36,7 @@ module.exports = {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#0B1220",
       },
-      package: "com.tracklive.navigate",
+      package: "com.trackline.navigate",
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -55,14 +55,14 @@ module.exports = {
         "expo-location",
         {
           locationAlwaysAndWhenInUsePermission:
-            "TrackLive uses your location for live navigation and to show/report nearby alerts.",
+            "TrackLine uses your location for live navigation and to show/report nearby alerts.",
         },
       ],
       [
         "expo-av",
         {
           microphonePermission:
-            "TrackLive listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
+            "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
         },
       ],
     ],

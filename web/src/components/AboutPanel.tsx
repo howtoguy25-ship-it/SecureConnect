@@ -38,8 +38,8 @@ export function AboutPanel({
 
   return (
     <div className="about-panel">
-      <img src="/logo.png" alt="TrackLive" className="about-logo" />
-      <div className="about-name">TrackLive</div>
+      <img src="/logo.png" alt="TrackLine" className="about-logo" />
+      <div className="about-name">TrackLine</div>
       <div className="about-version">Version {APP_VERSION}</div>
       {BUSINESS_INFO.businessName && <div className="about-meta">{BUSINESS_INFO.businessName}</div>}
       {BUSINESS_INFO.abn && <div className="about-meta">ABN {BUSINESS_INFO.abn}</div>}

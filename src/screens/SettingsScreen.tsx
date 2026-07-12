@@ -94,7 +94,7 @@ export function SettingsScreen() {
 
       <View style={styles.about}>
         <Image source={require("../../assets/icon.png")} style={styles.aboutLogo} />
-        <Text style={styles.aboutName}>{Constants.expoConfig?.name ?? "TrackLive"}</Text>
+        <Text style={styles.aboutName}>{Constants.expoConfig?.name ?? "TrackLine"}</Text>
         <Text style={styles.aboutVersion}>Version {Constants.expoConfig?.version ?? "1.0.0"}</Text>
         {BUSINESS_INFO.businessName ? (
           <Text style={styles.aboutMeta}>{BUSINESS_INFO.businessName}</Text>
