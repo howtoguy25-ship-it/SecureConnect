@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
 import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { detectVehiclesInPhoto, warmUpModel } from "@/services/vehicleDetection";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
+import { colors, radius, spacing, pressedOpacity } from "@/theme/tokens";
 
 const CAPTURE_INTERVAL_MS = 1200;
 
@@ -12,6 +14,7 @@ interface Props {
 }
 
 export function VehicleDetectionScreen({ onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>("back");
   const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
@@ -134,7 +137,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
           );
         })}
 
-      <View style={styles.banner}>
+      <View style={[styles.banner, { top: insets.top + spacing.md }]}>
         {status === "loading-model" && (
           <>
             <ActivityIndicator color="#fff" />
@@ -156,12 +159,27 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         )}
       </View>
 
-      <Pressable style={styles.switchButton} onPress={toggleFacing} aria-label="Switch camera">
-        <Ionicons name="camera-reverse" size={22} color="#111827" />
+      <Pressable
+        style={({ pressed }) => [
+          styles.switchButton,
+          { bottom: insets.bottom + spacing.xl },
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={toggleFacing}
+        accessibilityLabel="Switch camera"
+      >
+        <Ionicons name="camera-reverse" size={22} color={colors.text} />
         <Text style={styles.switchButtonText}>Switch camera</Text>
       </Pressable>
 
-      <Pressable style={styles.closeButton} onPress={onClose}>
+      <Pressable
+        style={({ pressed }) => [
+          styles.closeButton,
+          { bottom: insets.bottom + spacing.xl },
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={onClose}
+      >
         <Text style={styles.closeButtonText}>Close</Text>
       </Pressable>
     </View>
@@ -225,15 +243,14 @@ const styles = StyleSheet.create({
   },
   banner: {
     position: "absolute",
-    top: 56,
-    left: 16,
-    right: 16,
+    left: spacing.lg,
+    right: spacing.lg,
     backgroundColor: "rgba(17, 24, 39, 0.85)",
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: radius.md,
+    padding: spacing.md,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: spacing.sm + 2,
   },
   bannerText: {
     color: "#fff",
@@ -242,25 +259,23 @@ const styles = StyleSheet.create({
   },
   switchButton: {
     position: "absolute",
-    bottom: 32,
-    right: 20,
+    right: spacing.xl,
     backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: 24,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.sm - 2,
   },
   switchButtonText: {
-    color: "#111827",
+    color: colors.text,
     fontWeight: "700",
     fontSize: 13,
   },
   closeButton: {
     position: "absolute",
-    bottom: 32,
-    left: 20,
+    left: spacing.xl,
     backgroundColor: "rgba(255,255,255,0.92)",
     borderRadius: 24,
     paddingVertical: 12,

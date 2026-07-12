@@ -5,6 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 import { useLocation } from "@/context/LocationContext";
 import { useAuth } from "@/context/AuthContext";
@@ -37,6 +39,7 @@ export function MapScreen() {
   const { user } = useAuth();
   const { settings, voiceEnabled } = useSettings();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const insets = useSafeAreaInsets();
 
   const mapRef = useRef<MapView>(null);
   const reportSheetRef = useRef<BottomSheet>(null);
@@ -199,12 +202,6 @@ export function MapScreen() {
         ))}
       </MapView>
 
-      <AlertBanner
-        visible={bannerVisible}
-        message={bannerMessage}
-        onDismiss={() => setBannerVisible(false)}
-      />
-
       {!route && (
         <DestinationSearchBar biasLocation={currentLatLng ?? undefined} onDestinationSelected={onDestinationSelected} />
       )}
@@ -218,19 +215,35 @@ export function MapScreen() {
         />
       )}
 
-      <View style={styles.topRightControls}>
+      <View style={[styles.topRightControls, { top: insets.top + spacing.md }]}>
         <MuteButton />
-        <Pressable style={styles.settingsButton} onPress={() => navigation.navigate("Settings")}>
-          <Ionicons name="settings-outline" size={20} color="#0B1220" />
+        <Pressable
+          style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
+          onPress={() => navigation.navigate("Settings")}
+          accessibilityLabel="Settings"
+        >
+          <Ionicons name="settings-outline" size={20} color={colors.text} />
         </Pressable>
       </View>
 
-      <Pressable style={styles.fab} onPress={() => reportSheetRef.current?.expand()}>
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab,
+          { bottom: insets.bottom + 24 },
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={() => reportSheetRef.current?.expand()}
+        accessibilityLabel="Report an alert"
+      >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </Pressable>
 
       <Pressable
-        style={styles.fabSecondary}
+        style={({ pressed }) => [
+          styles.fabSecondary,
+          { bottom: insets.bottom + 24 + 70 },
+          pressed && { opacity: pressedOpacity },
+        ]}
         onPress={() => setDetectionOpen(true)}
         accessibilityLabel="Live vehicle detection"
       >
@@ -250,61 +263,54 @@ export function MapScreen() {
         onHide={onHideAlert}
         onConfirmStillHere={onConfirmStillHere}
       />
+
+      {/* Rendered last so it always paints on top of the search bar/nav card below it,
+          instead of being silently covered by them when both occupy the same top area. */}
+      <AlertBanner
+        visible={bannerVisible}
+        message={bannerMessage}
+        onDismiss={() => setBannerVisible(false)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: colors.surfaceMuted },
   topRightControls: {
     position: "absolute",
-    top: 56,
-    right: 12,
-    gap: 10,
+    right: spacing.md,
+    gap: spacing.sm,
   },
   settingsButton: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    ...shadow.low,
   },
   fab: {
     position: "absolute",
-    bottom: 32,
-    right: 20,
+    right: spacing.xl,
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: "#2563EB",
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    ...shadow.medium,
   },
   fabSecondary: {
     position: "absolute",
-    bottom: 102,
-    right: 20,
+    right: spacing.xl,
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#111827",
+    backgroundColor: colors.dark,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    ...shadow.medium,
   },
 });

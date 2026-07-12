@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertDoc } from "@/types/alert";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 interface Props {
   alert: AlertDoc | null;
@@ -28,7 +29,14 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
   const isOwner = !!alert && !!currentUid && alert.createdBy === currentUid;
 
   return (
-    <BottomSheet ref={ref} index={-1} snapPoints={snapPoints} enablePanDownToClose>
+    <BottomSheet
+      ref={ref}
+      index={-1}
+      snapPoints={snapPoints}
+      enablePanDownToClose
+      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBackground}
+    >
       <BottomSheetView style={styles.container}>
         {alert && (
           <>
@@ -44,17 +52,26 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
               </View>
             </View>
 
-            <Pressable style={styles.confirmButton} onPress={() => onConfirmStillHere(alert)}>
-              <MaterialCommunityIcons name="check-circle-outline" size={18} color="#2563EB" />
+            <Pressable
+              style={({ pressed }) => [styles.confirmButton, pressed && { opacity: pressedOpacity }]}
+              onPress={() => onConfirmStillHere(alert)}
+            >
+              <MaterialCommunityIcons name="check-circle-outline" size={18} color={colors.accent} />
               <Text style={styles.confirmText}>Still here</Text>
             </Pressable>
 
             {isOwner ? (
-              <Pressable style={styles.deleteButton} onPress={() => onDelete(alert)}>
+              <Pressable
+                style={({ pressed }) => [styles.deleteButton, pressed && { opacity: pressedOpacity }]}
+                onPress={() => onDelete(alert)}
+              >
                 <Text style={styles.deleteText}>Delete</Text>
               </Pressable>
             ) : (
-              <Pressable style={styles.hideButton} onPress={() => onHide(alert)}>
+              <Pressable
+                style={({ pressed }) => [styles.hideButton, pressed && { opacity: pressedOpacity }]}
+                onPress={() => onHide(alert)}
+              >
                 <Text style={styles.hideText}>Hide</Text>
               </Pressable>
             )}
@@ -66,53 +83,63 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
 });
 
 const styles = StyleSheet.create({
+  sheetBackground: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.high,
+  },
+  handleIndicator: {
+    backgroundColor: colors.border,
+    width: 40,
+  },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    gap: 14,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    gap: spacing.md + 2,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: spacing.md,
   },
   iconWrap: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },
   title: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
   },
   subtitle: {
     fontSize: 13,
-    color: "#6B7280",
+    color: colors.textMuted,
     marginTop: 2,
   },
   confirmButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: spacing.sm,
     borderWidth: 1,
-    borderColor: "#2563EB",
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
   },
   confirmText: {
-    color: "#2563EB",
+    color: colors.accent,
     fontWeight: "600",
     fontSize: 14,
   },
   deleteButton: {
-    backgroundColor: "#DC2626",
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: colors.danger,
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg - 2,
     alignItems: "center",
   },
   deleteText: {
@@ -122,8 +149,8 @@ const styles = StyleSheet.create({
   },
   hideButton: {
     backgroundColor: "#F3F4F6",
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg - 2,
     alignItems: "center",
   },
   hideText: {

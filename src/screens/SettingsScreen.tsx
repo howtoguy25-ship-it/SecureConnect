@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { syncAlertRadiusToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
 import { BUSINESS_INFO } from "@/config/business";
+import { colors, radius, shadow, spacing } from "@/theme/tokens";
 
 function sensitivityLabel(value: number): string {
   if (value <= 0.4) return "Low";
@@ -59,14 +60,18 @@ export function SettingsScreen() {
             step={1}
             value={settings.alertRadiusKm}
             onSlidingComplete={onRadiusChange}
-            minimumTrackTintColor="#2563EB"
+            minimumTrackTintColor={colors.accent}
           />
         </Row>
       </Section>
 
       <Section title="EV Radar (siren detection)">
         <Row label="Auto-share detections">
-          <Switch value={settings.autoShareDetections} onValueChange={onAutoShareToggle} />
+          <Switch
+            value={settings.autoShareDetections}
+            onValueChange={onAutoShareToggle}
+            trackColor={{ true: colors.accent, false: colors.border }}
+          />
         </Row>
         <Text style={styles.helperText}>
           When on, a confirmed siren detection automatically posts an "Emergency Vehicle" alert
@@ -81,14 +86,18 @@ export function SettingsScreen() {
             step={0.05}
             value={settings.sirenSensitivity}
             onSlidingComplete={onSensitivityChange}
-            minimumTrackTintColor="#2563EB"
+            minimumTrackTintColor={colors.accent}
           />
         </Row>
       </Section>
 
       <Section title="Voice guidance">
         <Row label="Voice guidance on by default">
-          <Switch value={settings.defaultVoiceEnabled} onValueChange={onDefaultVoiceToggle} />
+          <Switch
+            value={settings.defaultVoiceEnabled}
+            onValueChange={onDefaultVoiceToggle}
+            trackColor={{ true: colors.accent, false: colors.border }}
+          />
         </Row>
       </Section>
 
@@ -124,56 +133,58 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F9FAFB" },
-  content: { padding: 20, gap: 24 },
+  container: { flex: 1, backgroundColor: colors.surfaceMuted },
+  content: { padding: spacing.xl, gap: spacing.xxl },
   section: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    padding: 16,
-    gap: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    gap: spacing.md + 2,
+    ...shadow.low,
   },
   sectionTitle: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#6B7280",
+    color: colors.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   row: {
-    gap: 8,
+    gap: spacing.sm,
   },
   rowLabel: {
     fontSize: 15,
     fontWeight: "500",
-    color: "#111827",
+    color: colors.text,
   },
   helperText: {
     fontSize: 12,
-    color: "#6B7280",
+    color: colors.textMuted,
     lineHeight: 17,
   },
   about: {
     alignItems: "center",
-    gap: 4,
-    paddingVertical: 12,
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
   },
   aboutLogo: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    marginBottom: 6,
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+    ...shadow.low,
   },
   aboutName: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#111827",
+    color: colors.text,
   },
   aboutVersion: {
     fontSize: 12,
-    color: "#9CA3AF",
+    color: colors.textFaint,
   },
   aboutMeta: {
     fontSize: 12,
-    color: "#9CA3AF",
+    color: colors.textFaint,
   },
 });

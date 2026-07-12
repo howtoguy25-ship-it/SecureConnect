@@ -1,7 +1,9 @@
 import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteStep } from "@/services/directions";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 const MANEUVER_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   "turn-left": "arrow-back",
@@ -30,11 +32,12 @@ interface Props {
 }
 
 export function NavigationInstructionCard({ step, etaText, distanceRemainingText, onExit }: Props) {
+  const insets = useSafeAreaInsets();
   if (!step) return null;
   const icon = (step.maneuver && MANEUVER_ICONS[step.maneuver]) || "arrow-up";
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { top: insets.top + spacing.md }]}>
       <View style={styles.iconWrap}>
         <Ionicons name={icon} size={28} color="#FFFFFF" />
       </View>
@@ -46,8 +49,13 @@ export function NavigationInstructionCard({ step, etaText, distanceRemainingText
           {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} · {distanceRemainingText} left
         </Text>
       </View>
-      <Pressable onPress={onExit} hitSlop={12} style={styles.exitButton}>
-        <Ionicons name="close" size={20} color="#111827" />
+      <Pressable
+        onPress={onExit}
+        hitSlop={12}
+        style={({ pressed }) => [styles.exitButton, pressed && { opacity: pressedOpacity }]}
+        accessibilityLabel="Exit navigation"
+      >
+        <Ionicons name="close" size={20} color={colors.text} />
       </Pressable>
     </View>
   );
@@ -56,26 +64,21 @@ export function NavigationInstructionCard({ step, etaText, distanceRemainingText
 const styles = StyleSheet.create({
   card: {
     position: "absolute",
-    top: 56,
-    left: 12,
-    right: 12,
-    backgroundColor: "#111827",
-    borderRadius: 16,
-    padding: 14,
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.dark,
+    borderRadius: radius.xl,
+    padding: spacing.lg - 2,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    gap: spacing.md,
+    ...shadow.medium,
   },
   iconWrap: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#2563EB",
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -85,14 +88,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   meta: {
-    color: "#9CA3AF",
+    color: colors.textFaint,
     fontSize: 12,
     marginTop: 4,
   },
   exitButton: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: radius.pill,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",

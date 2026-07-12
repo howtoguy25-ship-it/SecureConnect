@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useRef } from "react";
 import { View, TextInput, FlatList, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { searchPlaces, getPlaceDetails, type PlacePrediction, type PlaceDetails } from "@/services/places";
 import type { LatLng } from "@/utils/polyline";
+import { colors, radius, shadow, spacing } from "@/theme/tokens";
 
 interface Props {
   biasLocation?: LatLng;
@@ -14,6 +16,7 @@ export function DestinationSearchBar({ biasLocation, onDestinationSelected }: Pr
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const insets = useSafeAreaInsets();
 
   const onChangeText = useCallback(
     (text: string) => {
@@ -47,17 +50,17 @@ export function DestinationSearchBar({ biasLocation, onDestinationSelected }: Pr
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { top: insets.top + spacing.md }]}>
       <View style={styles.inputRow}>
-        <Ionicons name="search" size={18} color="#6B7280" />
+        <Ionicons name="search" size={18} color={colors.textMuted} />
         <TextInput
           value={query}
           onChangeText={onChangeText}
           placeholder="Search destination"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textFaint}
           style={styles.input}
         />
-        {loading && <ActivityIndicator size="small" />}
+        {loading && <ActivityIndicator size="small" color={colors.accent} />}
       </View>
       {predictions.length > 0 && (
         <FlatList
@@ -66,8 +69,11 @@ export function DestinationSearchBar({ biasLocation, onDestinationSelected }: Pr
           style={styles.list}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
-            <Pressable style={styles.row} onPress={() => onSelectPrediction(item)}>
-              <Ionicons name="location-outline" size={16} color="#6B7280" />
+            <Pressable
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={() => onSelectPrediction(item)}
+            >
+              <Ionicons name="location-outline" size={16} color={colors.textMuted} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.primaryText}>{item.primaryText}</Text>
                 {!!item.secondaryText && <Text style={styles.secondaryText}>{item.secondaryText}</Text>}
@@ -83,57 +89,51 @@ export function DestinationSearchBar({ biasLocation, onDestinationSelected }: Pr
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    top: 56,
-    left: 12,
-    right: 12,
+    left: spacing.md,
+    right: spacing.md,
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 46,
-    gap: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    height: 48,
+    gap: spacing.sm,
+    ...shadow.low,
   },
   input: {
     flex: 1,
     fontSize: 15,
-    color: "#111827",
+    color: colors.text,
   },
   list: {
-    marginTop: 6,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     maxHeight: 260,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    ...shadow.low,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: colors.border,
+  },
+  rowPressed: {
+    backgroundColor: colors.surfaceMuted,
   },
   primaryText: {
     fontSize: 15,
-    color: "#111827",
+    color: colors.text,
     fontWeight: "500",
   },
   secondaryText: {
     fontSize: 12,
-    color: "#6B7280",
+    color: colors.textMuted,
     marginTop: 2,
   },
 });

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, Pressable } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 interface Props {
   visible: boolean;
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export function AlertBanner({ visible, message, onDismiss }: Props) {
+  const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-120)).current;
 
   useEffect(() => {
@@ -25,10 +28,13 @@ export function AlertBanner({ visible, message, onDismiss }: Props) {
   }, [visible]);
 
   return (
-    <Animated.View style={[styles.banner, { transform: [{ translateY }] }]}>
+    <Animated.View
+      style={[styles.banner, { top: insets.top + spacing.md, transform: [{ translateY }] }]}
+      pointerEvents={visible ? "auto" : "none"}
+    >
       <MaterialCommunityIcons name="ambulance" size={22} color="#FFFFFF" />
       <Text style={styles.text}>{message}</Text>
-      <Pressable onPress={onDismiss} hitSlop={12}>
+      <Pressable onPress={onDismiss} hitSlop={12} style={({ pressed }) => pressed && { opacity: pressedOpacity }}>
         <MaterialCommunityIcons name="close" size={20} color="#FFFFFF" />
       </Pressable>
     </Animated.View>
@@ -38,22 +44,16 @@ export function AlertBanner({ visible, message, onDismiss }: Props) {
 const styles = StyleSheet.create({
   banner: {
     position: "absolute",
-    top: 0,
-    left: 12,
-    right: 12,
-    marginTop: 56,
-    backgroundColor: "#DC2626",
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.danger,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    shadowColor: "#000",
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    gap: spacing.sm + 2,
+    ...shadow.high,
   },
   text: {
     color: "#FFFFFF",

@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertType } from "@/types/alert";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 const ALERT_TYPES: AlertType[] = [
   "police",
@@ -31,7 +32,14 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
   }, [selected, onShare]);
 
   return (
-    <BottomSheet ref={ref} index={-1} snapPoints={snapPoints} enablePanDownToClose>
+    <BottomSheet
+      ref={ref}
+      index={-1}
+      snapPoints={snapPoints}
+      enablePanDownToClose
+      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBackground}
+    >
       <BottomSheetView style={styles.container}>
         <Text style={styles.title}>Report what you see</Text>
         <View style={styles.grid}>
@@ -41,10 +49,11 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
               <Pressable
                 key={type}
                 onPress={() => setSelected(type)}
-                style={[
+                style={({ pressed }) => [
                   styles.typeButton,
-                  { borderColor: isSelected ? ALERT_COLORS[type] : "#E5E7EB" },
+                  { borderColor: isSelected ? ALERT_COLORS[type] : colors.border },
                   isSelected && { backgroundColor: `${ALERT_COLORS[type]}1A` },
+                  pressed && { opacity: pressedOpacity },
                 ]}
               >
                 <MaterialCommunityIcons
@@ -60,7 +69,11 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
         <Pressable
           disabled={!selected}
           onPress={handleConfirm}
-          style={[styles.confirmButton, !selected && styles.confirmButtonDisabled]}
+          style={({ pressed }) => [
+            styles.confirmButton,
+            !selected && styles.confirmButtonDisabled,
+            selected && pressed && { opacity: pressedOpacity },
+          ]}
         >
           <Text style={styles.confirmText}>Share with nearby drivers</Text>
         </Pressable>
@@ -70,30 +83,40 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
 });
 
 const styles = StyleSheet.create({
+  sheetBackground: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.high,
+  },
+  handleIndicator: {
+    backgroundColor: colors.border,
+    width: 40,
+  },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
   },
   title: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#111827",
-    marginBottom: 16,
+    color: colors.text,
+    marginBottom: spacing.lg,
   },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: spacing.md,
   },
   typeButton: {
     width: "30%",
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: spacing.xs + 2,
   },
   typeLabel: {
     fontSize: 12,
@@ -102,10 +125,10 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   confirmButton: {
-    marginTop: 20,
-    backgroundColor: "#2563EB",
-    borderRadius: 12,
-    paddingVertical: 14,
+    marginTop: spacing.xl,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg - 2,
     alignItems: "center",
   },
   confirmButtonDisabled: {
