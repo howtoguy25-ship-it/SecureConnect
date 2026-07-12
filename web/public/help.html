@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="stylesheet" href="/legal.css" />
+    <title>Help — TrackLine</title>
+    <script>
+      try {
+        var s = JSON.parse(localStorage.getItem("trackline.settings") || "{}");
+        if (s.theme === "dark" || s.theme === "light") document.documentElement.setAttribute("data-theme", s.theme);
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="back" href="/">← Back to TrackLine</a>
+      <div class="brand">
+        <img src="/logo.png" alt="TrackLine" />
+        <span>TrackLine</span>
+      </div>
+      <h1>Help</h1>
+      <div class="updated">A quick guide to what's in the app</div>
+
+      <h2>Getting around</h2>
+      <div class="card">
+        <p>Tap the search bar to look for a destination — results are biased toward places near you. Pick one to draw a route, or tap directly on the map to drop a pin.</p>
+        <p>Once you've got a route, pick from up to three options (Best / Fast / Comfort) before starting turn-by-turn navigation.</p>
+      </div>
+
+      <h2>Navigation views</h2>
+      <div class="card">
+        <p><strong>3D Follow</strong> — a tilted, heading-locked driving view. Use the on-screen joystick to rotate/tilt the camera to where's comfortable for you.</p>
+        <p><strong>Street 3D</strong> — zoom all the way in on a street and you'll be offered a 3D street-level view; the same joystick lets you look around.</p>
+        <p>Zoomed all the way in already? Tap the map once to zoom back out.</p>
+      </div>
+
+      <h2>Alerts</h2>
+      <div class="card">
+        <p>Tap the report button to flag Police, an Emergency Vehicle, a Hazard, a Crash, a Speed Camera, or a Traffic Light at your location or a pin you place.</p>
+        <p>Tap any alert marker to confirm it's still there, or to hide/delete it — you can delete your own reports outright; hiding just removes it from your own view.</p>
+        <p>In Settings, adjust how far around you alerts show (radius), switch to seeing every alert region-wide, or lock the visible zone to a fixed spot instead of always following you.</p>
+      </div>
+
+      <h2>Traffic lights &amp; speed cameras</h2>
+      <div class="card">
+        <p>Real traffic-light and speed-camera locations from OpenStreetMap show on the map once you're zoomed in far enough. This is community-mapped data, not an official government feed, so treat it the same as other crowd-sourced alerts — usually right, occasionally out of date.</p>
+      </div>
+
+      <h2>AI Vehicle Detection</h2>
+      <div class="card">
+        <p>Turns on your camera to spot ambulances, fire trucks, and police cars using a custom-trained model, shown with a confidence percentage. It also separately flags any vehicle with an actively flashing red/blue light as a possible unmarked/undercover vehicle — this only catches lights that are genuinely on, and everything runs on your device; nothing is recorded or uploaded.</p>
+        <p>Speed shown next to a detected vehicle is a rough estimate, not a radar-accurate reading.</p>
+      </div>
+
+      <h2>EV Radar (mobile app)</h2>
+      <div class="card">
+        <p>Listens for emergency-vehicle sirens using your microphone, entirely on-device. Turn on "auto-share" in Settings if you want a confirmed detection to automatically post your location as an alert — it's off by default.</p>
+      </div>
+
+      <h2>Day, night &amp; dark mode</h2>
+      <div class="card">
+        <p>Switch between light and dark map/app theme from the About panel. Around real sunset at your location, TrackLine will also offer to switch to night mode — you can accept or stay in day mode, and it won't ask again until the next sunset.</p>
+      </div>
+
+      <h2>Signing in</h2>
+      <div class="card">
+        <p>You never have to sign in to use the map, navigation, or alerts. Signing in with Google, Apple, or your phone number just lets you keep your reported alerts tied to one identity across sessions/devices.</p>
+      </div>
+
+      <div class="nav-links">
+        <a href="/support.html">Support</a>
+        <a href="/privacy.html">Privacy Policy</a>
+        <a href="/">Open TrackLine</a>
+      </div>
+    </div>
+  </body>
+</html>

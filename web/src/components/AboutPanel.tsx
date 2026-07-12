@@ -92,6 +92,18 @@ export function AboutPanel({
         </button>
       )}
 
+      <div className="about-legal-links">
+        <a href="/help.html" target="_blank" rel="noopener">
+          Help
+        </a>
+        <a href="/support.html" target="_blank" rel="noopener">
+          Support
+        </a>
+        <a href="/privacy.html" target="_blank" rel="noopener">
+          Privacy
+        </a>
+      </div>
+
       <button className="about-close" onClick={onClose}>
         Close
       </button>
