@@ -47,6 +47,11 @@ import "./App.css";
 
 const LIBRARIES: "places"[] = ["places"];
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
+// Touch devices get one-finger-drag look-around during 3D Follow instead of the on-screen
+// joystick (see the touch-listener effect below) -- desktop/mouse users keep the joystick
+// since there's no drag-to-rotate gesture to replace it with there.
+const IS_TOUCH_DEVICE =
+  typeof window !== "undefined" && (navigator.maxTouchPoints > 0 || "ontouchstart" in window);
 // Re-fetch directions from the live position while navigating once you've drifted this
 // far from where the route was last computed — keeps ETA/remaining-distance accurate
 // without hammering the Directions API on every GPS tick.
@@ -655,6 +660,61 @@ export default function App() {
     setManualTiltOverride((prev) => Math.max(0, Math.min(67.5, (prev ?? 67.5) + deltaDeg)));
   }, []);
 
+  // One-finger look-around during 3D Follow, replacing the on-screen joystick on touch
+  // devices: a single-finger drag adjusts heading/tilt (feeding the same manual offsets the
+  // joystick buttons do) instead of panning the map, since panning the center during
+  // auto-follow would just get overwritten by the per-tick recenter effect anyway. Two-finger
+  // pinch is untouched -- this only ever looks at single-touch drags -- so zoom keeps working
+  // exactly as normal. Native map dragging is turned off for this mode via the `draggable`
+  // map option below, freeing up one-finger drag for this instead of fighting Maps' own pan.
+  useEffect(() => {
+    if (!navigating || navViewMode !== "follow") return;
+    const map = mapRef.current;
+    if (!map) return;
+    const div = map.getDiv();
+
+    let lastX: number | null = null;
+    let lastY: number | null = null;
+
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length !== 1) {
+        lastX = null;
+        lastY = null;
+        return;
+      }
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    }
+    function onTouchMove(e: TouchEvent) {
+      if (e.touches.length !== 1 || lastX === null || lastY === null) return;
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - lastX;
+      const dy = y - lastY;
+      lastX = x;
+      lastY = y;
+      rotateFollow(dx * 0.3);
+      tiltFollow(-dy * 0.3);
+    }
+    function onTouchEnd(e: TouchEvent) {
+      if (e.touches.length === 0) {
+        lastX = null;
+        lastY = null;
+      }
+    }
+
+    div.addEventListener("touchstart", onTouchStart, { passive: true });
+    div.addEventListener("touchmove", onTouchMove, { passive: true });
+    div.addEventListener("touchend", onTouchEnd, { passive: true });
+    div.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      div.removeEventListener("touchstart", onTouchStart);
+      div.removeEventListener("touchmove", onTouchMove);
+      div.removeEventListener("touchend", onTouchEnd);
+      div.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [navigating, navViewMode, rotateFollow, tiltFollow]);
+
   const onPlaceChanged = useCallback(() => {
     const place = autocompleteRef.current?.getPlace();
     const loc = place?.geometry?.location;
@@ -868,6 +928,11 @@ export default function App() {
         options={{
           disableDefaultUI: true,
           zoomControl: true,
+          // Native one-finger drag-to-pan is turned off only during 3D Follow -- that's
+          // when the touch-listener effect above takes over one-finger drag for look-around
+          // instead (panning the center during auto-follow would just get overwritten by
+          // the per-tick recenter anyway). Pinch-to-zoom is untouched either way.
+          draggable: !(navigating && navViewMode === "follow"),
           // Moved off the default bottom-right so it doesn't stack on top of the FAB
           // column (report/detection/recenter/hide-trace), which lives in that corner.
           zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
@@ -1144,7 +1209,7 @@ export default function App() {
         </>
       )}
 
-      {navigating && navViewMode === "follow" && (
+      {navigating && navViewMode === "follow" && !IS_TOUCH_DEVICE && (
         <Street3DJoystick onRotate={rotateFollow} onTilt={tiltFollow} />
       )}
 

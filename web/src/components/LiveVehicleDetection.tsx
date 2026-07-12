@@ -54,6 +54,21 @@ interface Props {
   navContext?: DetectionNavContext | null;
 }
 
+// Quadratic bezier point + tangent, used to build a tapering ribbon instead of a single
+// stroked line -- this is what actually reads as a flat strip lying on the ground receding
+// into the distance (wide near the viewer, narrowing toward a vanishing point) rather than a
+// line floating in space. Still a schematic GPS-bearing indicator, not true SLAM/ARKit ground
+// tracking (this view has no depth/plane data to project onto) -- see the DetectionNavContext
+// comment above -- but shaped to actually look like a road-level guide instead of an arrow.
+function bezierPoint(p0: number, p1: number, p2: number, t: number): number {
+  const mt = 1 - t;
+  return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
+}
+
+function bezierTangent(p0: number, p1: number, p2: number, t: number): number {
+  return 2 * (1 - t) * (p1 - p0) + 2 * t * (p2 - p1);
+}
+
 function drawGuideRibbon(
   ctx: CanvasRenderingContext2D,
   canvasWidth: number,
@@ -70,30 +85,80 @@ function drawGuideRibbon(
   const controlX = canvasWidth / 2 + t * canvasWidth * 0.15;
   const controlY = canvasHeight * 0.75;
 
-  ctx.save();
-  ctx.strokeStyle = "#2563EB";
-  ctx.lineWidth = 14;
-  ctx.lineCap = "round";
-  ctx.globalAlpha = 0.8;
-  ctx.setLineDash([26, 20]);
-  // Marching-ants flow toward the destination end of the curve, animated by wall-clock time.
-  ctx.lineDashOffset = -((nowMs / 28) % 46);
-  ctx.beginPath();
-  ctx.moveTo(startX, startY);
-  ctx.quadraticCurveTo(controlX, controlY, endX, endY);
-  ctx.stroke();
+  const SEGMENTS = 24;
+  const BASE_WIDTH = canvasWidth * 0.09;
+  const TIP_WIDTH = canvasWidth * 0.012;
+  const points: { x: number; y: number; nx: number; ny: number; width: number }[] = [];
 
-  // Arrowhead at the destination end, angled along the curve's local direction.
-  const arrowAngle = Math.atan2(endY - controlY, endX - controlX);
-  ctx.setLineDash([]);
-  ctx.globalAlpha = 0.95;
-  ctx.fillStyle = "#2563EB";
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const p = i / SEGMENTS;
+    const x = bezierPoint(startX, controlX, endX, p);
+    const y = bezierPoint(startY, controlY, endY, p);
+    const dx = bezierTangent(startX, controlX, endX, p);
+    const dy = bezierTangent(startY, controlY, endY, p);
+    const len = Math.hypot(dx, dy) || 1;
+    // Perpendicular unit normal to the direction of travel along the curve.
+    const nx = -dy / len;
+    const ny = dx / len;
+    // Ease-out taper reads more like true perspective foreshortening than a linear narrow.
+    const width = BASE_WIDTH + (TIP_WIDTH - BASE_WIDTH) * Math.sqrt(p);
+    points.push({ x, y, nx, ny, width });
+  }
+
+  ctx.save();
+
+  // The flat strip itself: a filled, tapering polygon (left edge out, right edge back),
+  // not a stroked line -- this is what actually sells "lying on the ground" over "arrow".
+  const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+  gradient.addColorStop(0, "rgba(37, 99, 235, 0.85)");
+  gradient.addColorStop(1, "rgba(96, 165, 250, 0.35)");
+  ctx.fillStyle = gradient;
   ctx.beginPath();
-  ctx.moveTo(endX + Math.cos(arrowAngle) * 16, endY + Math.sin(arrowAngle) * 16);
-  ctx.lineTo(endX + Math.cos(arrowAngle + 2.5) * 14, endY + Math.sin(arrowAngle + 2.5) * 14);
-  ctx.lineTo(endX + Math.cos(arrowAngle - 2.5) * 14, endY + Math.sin(arrowAngle - 2.5) * 14);
+  points.forEach((pt, i) => {
+    const lx = pt.x + pt.nx * (pt.width / 2);
+    const ly = pt.y + pt.ny * (pt.width / 2);
+    if (i === 0) ctx.moveTo(lx, ly);
+    else ctx.lineTo(lx, ly);
+  });
+  for (let i = points.length - 1; i >= 0; i--) {
+    const pt = points[i];
+    const rx = pt.x - pt.nx * (pt.width / 2);
+    const ry = pt.y - pt.ny * (pt.width / 2);
+    ctx.lineTo(rx, ry);
+  }
   ctx.closePath();
   ctx.fill();
+
+  // Center-line lane ticks flowing toward the destination, animated by wall-clock time --
+  // reinforces the "flat road surface" read instead of a floating tube.
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.lineWidth = Math.max(2, canvasWidth * 0.006);
+  ctx.lineCap = "round";
+  ctx.setLineDash([canvasWidth * 0.02, canvasWidth * 0.035]);
+  ctx.lineDashOffset = -((nowMs / 26) % (canvasWidth * 0.055));
+  ctx.beginPath();
+  points.forEach((pt, i) => {
+    if (i === 0) ctx.moveTo(pt.x, pt.y);
+    else ctx.lineTo(pt.x, pt.y);
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // A real destination marker (pin), not just an arrowhead -- the strip visibly connects to
+  // a point, matching a turn/waypoint marker instead of trailing off into empty space.
+  const pulse = 1 + 0.12 * Math.sin(nowMs / 260);
+  ctx.fillStyle = "#1D4ED8";
+  ctx.beginPath();
+  ctx.arc(endX, endY, 13 * pulse, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(endX, endY, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.restore();
 }
 
