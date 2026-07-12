@@ -86,7 +86,11 @@ module.exports = {
       firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
       firebaseAppId: process.env.FIREBASE_APP_ID,
       eas: {
-        projectId: process.env.EAS_PROJECT_ID,
+        // Not a secret -- EAS project IDs are meant to live directly in config, which is
+        // also the only way `eas build`/`eas submit` can reliably find it, since this file
+        // being a dynamic app.config.js (not static app.json) means the EAS CLI can't write
+        // to it automatically the way `eas init` normally would.
+        projectId: "dd1665d0-24fa-41ce-99d8-d94adf93788d",
       },
     },
   },
