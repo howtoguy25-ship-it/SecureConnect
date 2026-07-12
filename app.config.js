@@ -3,8 +3,8 @@ require("dotenv/config");
 /** @type {import('@expo/config-types').ExpoConfig} */
 module.exports = {
   expo: {
-    name: "FleetTrack",
-    slug: "fleettrack",
+    name: "TrackLive",
+    slug: "tracklive",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -17,17 +17,17 @@ module.exports = {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.fleettrack.navigate",
+      bundleIdentifier: "com.tracklive.navigate",
       config: {
         googleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          "FleetTrack uses your location to show your position on the map and provide turn-by-turn navigation.",
+          "TrackLive uses your location to show your position on the map and provide turn-by-turn navigation.",
         NSLocationAlwaysAndWhenInUseUsageDescription:
-          "FleetTrack can track your location in the background to keep navigation and nearby-alert notifications accurate.",
+          "TrackLive can track your location in the background to keep navigation and nearby-alert notifications accurate.",
         NSMicrophoneUsageDescription:
-          "FleetTrack listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
+          "TrackLive listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
         UIBackgroundModes: ["audio", "location", "fetch"],
       },
     },
@@ -36,7 +36,7 @@ module.exports = {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#0B1220",
       },
-      package: "com.fleettrack.navigate",
+      package: "com.tracklive.navigate",
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -55,14 +55,14 @@ module.exports = {
         "expo-location",
         {
           locationAlwaysAndWhenInUsePermission:
-            "FleetTrack uses your location for live navigation and to show/report nearby alerts.",
+            "TrackLive uses your location for live navigation and to show/report nearby alerts.",
         },
       ],
       [
         "expo-av",
         {
           microphonePermission:
-            "FleetTrack listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
+            "TrackLive listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
         },
       ],
     ],

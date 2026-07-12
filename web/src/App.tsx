@@ -25,6 +25,7 @@ import { NavigationCard, type NavViewMode } from "@/components/NavigationCard";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
+import { AboutPanel } from "@/components/AboutPanel";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
@@ -67,6 +68,7 @@ export default function App() {
   const [selectedAlert, setSelectedAlert] = useState<AlertDoc | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [detectionOpen, setDetectionOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const [destination, setDestination] = useState<google.maps.LatLngLiteral | null>(null);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
@@ -453,7 +455,12 @@ export default function App() {
   const center = useMemo(() => location ?? DEFAULT_CENTER, [location]);
 
   if (!isLoaded) {
-    return <div className="loading-screen">Loading map…</div>;
+    return (
+      <div className="loading-screen">
+        <img src="/logo.png" alt="TrackLive" className="loading-logo" />
+        Loading map…
+      </div>
+    );
   }
 
   const statusMessage = authError ?? locationError ?? null;
@@ -538,6 +545,12 @@ export default function App() {
           <DirectionsRenderer directions={directions} options={{ suppressMarkers: true }} />
         )}
       </GoogleMap>
+
+      {!pendingType && !navigating && (
+        <button className="about-button" onClick={() => setAboutOpen(true)} aria-label="About TrackLive">
+          <img src="/logo.png" alt="" />
+        </button>
+      )}
 
       {!pendingType && !navigating && (
         <div className="top-bar">
@@ -681,6 +694,8 @@ export default function App() {
           <LiveVehicleDetection onClose={() => setDetectionOpen(false)} />
         </Suspense>
       )}
+
+      {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
 
       {selectedAlert && (
         <AlertDetailPanel

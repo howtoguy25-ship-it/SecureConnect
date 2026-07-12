@@ -14,10 +14,18 @@
   width: 100vw;
   height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 14px;
   font-family: system-ui, sans-serif;
   color: #6b7280;
+}
+
+.loading-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
 }
 
 .top-bar {
@@ -116,6 +124,27 @@
 .fab-tertiary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.about-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+  border: none;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 0;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.about-button img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .status-banner {

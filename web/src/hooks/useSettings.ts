@@ -11,7 +11,7 @@ export interface WebSettings {
 }
 
 const DEFAULT_SETTINGS: WebSettings = { alertRadiusKm: 5, regionWide: false, fixedZone: false };
-const STORAGE_KEY = "fleettrack.settings";
+const STORAGE_KEY = "tracklive.settings";
 
 export function useSettings() {
   const [settings, setSettings] = useState<WebSettings>(() => {

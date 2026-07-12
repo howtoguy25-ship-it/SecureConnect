@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Speech from "expo-speech";
 
-const VOICE_ENABLED_KEY = "@fleettrack/voiceEnabled";
+const VOICE_ENABLED_KEY = "@tracklive/voiceEnabled";
 
 /**
  * voiceEnabled is stored separately from the rest of AppSettings because it can change

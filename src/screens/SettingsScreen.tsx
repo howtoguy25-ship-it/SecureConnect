@@ -1,10 +1,12 @@
 import React, { useCallback } from "react";
-import { View, Text, StyleSheet, Switch, ScrollView } from "react-native";
+import { View, Text, Image, StyleSheet, Switch, ScrollView } from "react-native";
 import Slider from "@react-native-community/slider";
+import Constants from "expo-constants";
 import { useSettings } from "@/context/SettingsContext";
 import { useAuth } from "@/context/AuthContext";
 import { syncAlertRadiusToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
+import { BUSINESS_INFO } from "@/config/business";
 
 function sensitivityLabel(value: number): string {
   if (value <= 0.4) return "Low";
@@ -89,6 +91,16 @@ export function SettingsScreen() {
           <Switch value={settings.defaultVoiceEnabled} onValueChange={onDefaultVoiceToggle} />
         </Row>
       </Section>
+
+      <View style={styles.about}>
+        <Image source={require("../../assets/icon.png")} style={styles.aboutLogo} />
+        <Text style={styles.aboutName}>{Constants.expoConfig?.name ?? "TrackLive"}</Text>
+        <Text style={styles.aboutVersion}>Version {Constants.expoConfig?.version ?? "1.0.0"}</Text>
+        {BUSINESS_INFO.businessName ? (
+          <Text style={styles.aboutMeta}>{BUSINESS_INFO.businessName}</Text>
+        ) : null}
+        {BUSINESS_INFO.abn ? <Text style={styles.aboutMeta}>ABN {BUSINESS_INFO.abn}</Text> : null}
+      </View>
     </ScrollView>
   );
 }
@@ -139,5 +151,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6B7280",
     lineHeight: 17,
+  },
+  about: {
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 12,
+  },
+  aboutLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  aboutName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  aboutVersion: {
+    fontSize: 12,
+    color: "#9CA3AF",
+  },
+  aboutMeta: {
+    fontSize: 12,
+    color: "#9CA3AF",
   },
 });

@@ -77,7 +77,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
     return (
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionText}>
-          FleetTrack needs camera access to detect vehicles in view.
+          TrackLive needs camera access to detect vehicles in view.
         </Text>
         <Pressable style={styles.permissionButton} onPress={requestPermission}>
           <Text style={styles.permissionButtonText}>Grant camera access</Text>
