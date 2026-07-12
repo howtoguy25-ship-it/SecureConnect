@@ -1,4 +1,4 @@
-export type AlertType = "police" | "emergency_vehicle" | "hazard" | "camera" | "crash";
+export type AlertType = "police" | "emergency_vehicle" | "hazard" | "camera" | "crash" | "traffic_light";
 
 export interface AlertDoc {
   id: string;
@@ -13,20 +13,25 @@ export interface AlertDoc {
   hiddenBy: string[];
 }
 
+// Speed cameras and traffic lights are community-reported like everything else here —
+// there's no licensed real-time government feed for either wired in, so treat these the
+// same as any other crowd-sourced alert (can be stale/wrong), not an authoritative source.
 export const ALERT_TTL_MS: Record<AlertType, number> = {
   police: 45 * 60 * 1000,
   emergency_vehicle: 45 * 60 * 1000,
   hazard: 2 * 60 * 60 * 1000,
   crash: 2 * 60 * 60 * 1000,
   camera: 24 * 60 * 60 * 1000,
+  traffic_light: 2 * 60 * 60 * 1000,
 };
 
 export const ALERT_LABELS: Record<AlertType, string> = {
   police: "Police",
   emergency_vehicle: "Emergency Vehicle",
   hazard: "Hazard",
-  camera: "Camera",
+  camera: "Speed Camera",
   crash: "Crash",
+  traffic_light: "Traffic Light",
 };
 
 export const ALERT_COLORS: Record<AlertType, string> = {
@@ -35,6 +40,7 @@ export const ALERT_COLORS: Record<AlertType, string> = {
   hazard: "#F59E0B",
   camera: "#7C3AED",
   crash: "#EA580C",
+  traffic_light: "#0D9488",
 };
 
 export const ALERT_EMOJI: Record<AlertType, string> = {
@@ -43,4 +49,5 @@ export const ALERT_EMOJI: Record<AlertType, string> = {
   hazard: "⚠️",
   camera: "📷",
   crash: "💥",
+  traffic_light: "🚦",
 };

@@ -1,13 +1,6 @@
+import { stripHtml, formatDistance } from "@/utils/navFormat";
+import { NavActionsRow } from "@/components/NavActionsRow";
 import "./NavigationCard.css";
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters / 10) * 10} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
-}
 
 export type NavViewMode = "follow" | "street" | "overview";
 
@@ -20,6 +13,11 @@ interface Props {
   onSetNavViewMode: (mode: NavViewMode) => void;
   onClearRoute: () => void;
   onExit: () => void;
+  hasStop: boolean;
+  onAddStop: () => void;
+  onShareEta: () => void;
+  onReportAlert: () => void;
+  onOpenDetection: () => void;
 }
 
 export function NavigationCard({
@@ -31,6 +29,11 @@ export function NavigationCard({
   onSetNavViewMode,
   onClearRoute,
   onExit,
+  hasStop,
+  onAddStop,
+  onShareEta,
+  onReportAlert,
+  onOpenDetection,
 }: Props) {
   const instruction = step ? stripHtml(step.instructions) : "Recalculating…";
   const headline =
@@ -47,6 +50,15 @@ export function NavigationCard({
       <div className="nav-card-meta">
         ETA {etaText} · {distanceRemainingText} remaining
       </div>
+
+      <NavActionsRow
+        hasStop={hasStop}
+        onAddStop={onAddStop}
+        onShareEta={onShareEta}
+        onReportAlert={onReportAlert}
+        onOpenDetection={onOpenDetection}
+      />
+
       <div className="nav-card-view-toggle">
         <button
           className={navViewMode === "follow" ? "nav-view-active" : ""}

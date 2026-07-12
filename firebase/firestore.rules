@@ -18,7 +18,7 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.confirmCount == 0
         && request.resource.data.hiddenBy == []
-        && request.resource.data.type in ['police', 'emergency_vehicle', 'hazard', 'camera', 'crash']
+        && request.resource.data.type in ['police', 'emergency_vehicle', 'hazard', 'camera', 'crash', 'traffic_light']
         && request.resource.data.expiresAt is timestamp
         && request.resource.data.lat is number
         && request.resource.data.lng is number

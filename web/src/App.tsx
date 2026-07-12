@@ -26,6 +26,7 @@ import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
 import { AboutPanel } from "@/components/AboutPanel";
+import { Street3DJoystick } from "@/components/Street3DJoystick";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
@@ -33,6 +34,8 @@ const LiveVehicleDetection = lazy(() =>
 );
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
 import { bearingDegrees, distanceKm } from "@/utils/geo";
+import { stripHtml, formatDistance, formatArrivalClock } from "@/utils/navFormat";
+import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
 import "./App.css";
 
 const LIBRARIES: "places"[] = ["places"];
@@ -60,7 +63,7 @@ export default function App() {
   });
 
   const { location, error: locationError } = useGeolocation();
-  const { settings, setAlertRadiusKm, setRegionWide, setFixedZone } = useSettings();
+  const { settings, setAlertRadiusKm, setRegionWide, setFixedZone, setHideDetectionTrace } = useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -87,6 +90,10 @@ export default function App() {
   const [pendingType, setPendingType] = useState<AlertType | null>(null);
   const [pendingLocation, setPendingLocation] = useState<google.maps.LatLngLiteral | null>(null);
 
+  // Single-waypoint "Add Stop": tap the map once to insert a stop into the current route.
+  const [addingStop, setAddingStop] = useState(false);
+  const [stopLocation, setStopLocation] = useState<google.maps.LatLngLiteral | null>(null);
+
   // Live turn-by-turn navigation
   const [navigating, setNavigating] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -99,10 +106,14 @@ export default function App() {
   const [streetViewUnavailable, setStreetViewUnavailable] = useState(false);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
 
-  // Max-zoom "view in 3D?" prompt
+  // "View in 3D?" prompt — triggers either by double-clicking the map or by reaching max
+  // zoom. Declining arms a one-shot "next single click zooms out" mode instead of making
+  // every click zoom out (which would fight with pin/stop placement); double-clicking
+  // again always re-asks regardless of that armed state.
   const [maxZoomHere, setMaxZoomHere] = useState<number | null>(null);
   const [show3DPrompt, setShow3DPrompt] = useState(false);
   const [street3DMode, setStreet3DMode] = useState(false);
+  const [zoomOutArmed, setZoomOutArmed] = useState(false);
   const promptedAtMaxZoomRef = useRef(false);
 
   // Fixed alert zone
@@ -189,12 +200,15 @@ export default function App() {
     }
     const directionsService = new google.maps.DirectionsService();
 
+    const waypoints = stopLocation ? [{ location: stopLocation, stopover: true }] : undefined;
+
     if (navigating) {
       const profile = ROUTE_PROFILES[selectedRouteKey];
       directionsService.route(
         {
           origin,
           destination,
+          waypoints,
           travelMode: google.maps.TravelMode.DRIVING,
           avoidHighways: profile.avoidHighways,
           avoidTolls: profile.avoidTolls,
@@ -221,6 +235,7 @@ export default function App() {
               {
                 origin,
                 destination,
+                waypoints,
                 travelMode: google.maps.TravelMode.DRIVING,
                 avoidHighways: profile.avoidHighways,
                 avoidTolls: profile.avoidTolls,
@@ -246,7 +261,16 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [routeOrigin?.lat, routeOrigin?.lng, location?.lat, location?.lng, destination, navigating]);
+  }, [
+    routeOrigin?.lat,
+    routeOrigin?.lng,
+    location?.lat,
+    location?.lng,
+    destination,
+    navigating,
+    stopLocation?.lat,
+    stopLocation?.lng,
+  ]);
 
   // Switching which route card is selected (before navigation starts) just swaps in the
   // already-fetched route — no need to hit the Directions API again.
@@ -356,18 +380,39 @@ export default function App() {
 
   const enterStreet3D = useCallback(() => {
     setShow3DPrompt(false);
+    setZoomOutArmed(false);
     setStreet3DMode(true);
     mapRef.current?.setTilt(67.5);
   }, []);
 
   const declineStreet3D = useCallback(() => {
     setShow3DPrompt(false);
+    setZoomOutArmed(true);
   }, []);
 
   const exitStreet3D = useCallback(() => {
     setStreet3DMode(false);
     mapRef.current?.setTilt(0);
     mapRef.current?.setHeading(0);
+  }, []);
+
+  const onMapDblClick = useCallback(() => {
+    setZoomOutArmed(false);
+    setShow3DPrompt(true);
+  }, []);
+
+  const rotateStreet3D = useCallback((deltaDeg: number) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const current = map.getHeading() ?? 0;
+    map.setHeading((current + deltaDeg + 360) % 360);
+  }, []);
+
+  const tiltStreet3D = useCallback((deltaDeg: number) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const current = map.getTilt() ?? 0;
+    map.setTilt(Math.max(0, Math.min(67.5, current + deltaDeg)));
   }, []);
 
   const onPlaceChanged = useCallback(() => {
@@ -443,8 +488,42 @@ export default function App() {
     setRouteOptions({ best: null, fast: null, comfort: null });
     setSelectedRouteKey("best");
     setRouteOrigin(null);
+    setStopLocation(null);
+    setAddingStop(false);
     if (navigating) endNavigation();
   }, [navigating, endNavigation]);
+
+  const onAddStopClick = useCallback(() => {
+    setDetectionOpen(false);
+    if (stopLocation) {
+      setStopLocation(null);
+    } else {
+      setAddingStop(true);
+    }
+  }, [stopLocation]);
+
+  const onReportClick = useCallback(() => {
+    setDetectionOpen(false);
+    setReportOpen(true);
+  }, []);
+
+  // One-time snapshot share (Web Share API, or copy to clipboard as a fallback) -- not a
+  // live-updating tracking link, since that would need a backend to serve a page that keeps
+  // refreshing your position, which isn't wired up here.
+  const shareEta = useCallback(() => {
+    const leg = directions?.routes[0]?.legs[0];
+    if (!leg || !location) return;
+    const arrivalText = formatArrivalClock(Date.now() + (leg.duration?.value ?? 0) * 1000);
+    const mapsLink = `https://www.google.com/maps?q=${location.lat},${location.lng}`;
+    const text = `I'm on my way — ETA ${leg.duration?.text ?? ""}, arriving around ${arrivalText}. My current location: ${mapsLink}`;
+    if (navigator.share) {
+      navigator.share({ text }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("Copied your ETA and current location to the clipboard — paste it to send.");
+      });
+    }
+  }, [directions, location]);
 
   const recenter = useCallback(() => {
     if (!location) return;
@@ -466,6 +545,36 @@ export default function App() {
   const statusMessage = authError ?? locationError ?? null;
   const navSteps = directions?.routes[0]?.legs[0]?.steps ?? [];
   const navLeg = directions?.routes[0]?.legs[0];
+  const currentStep = navSteps[activeStepIndex] ?? null;
+
+  const remainingMeters = navSteps
+    .slice(activeStepIndex)
+    .reduce((sum, s) => sum + (s.distance?.value ?? 0), 0);
+  const distanceRemainingText =
+    remainingMeters < 1000 ? `${remainingMeters} m` : `${(remainingMeters / 1000).toFixed(1)} km`;
+
+  const bearingToManeuverDeg =
+    currentStep && location
+      ? bearingDegrees(location.lat, location.lng, currentStep.end_location.lat(), currentStep.end_location.lng())
+      : null;
+
+  const detectionNavContext: DetectionNavContext | null =
+    navigating && navLeg
+      ? {
+          instructionText: currentStep ? stripHtml(currentStep.instructions) : "Recalculating…",
+          distanceToManeuverM,
+          etaText: navLeg.duration?.text ?? "",
+          arrivalClockText: formatArrivalClock(Date.now() + (navLeg.duration?.value ?? 0) * 1000),
+          distanceRemainingText,
+          bearingToManeuverDeg,
+          travelHeadingDeg: heading,
+          hideTrace: settings.hideDetectionTrace,
+          hasStop: !!stopLocation,
+          onAddStop: onAddStopClick,
+          onShareEta: shareEta,
+          onReportAlert: onReportClick,
+        }
+      : null;
 
   return (
     <div className="app-root">
@@ -481,9 +590,13 @@ export default function App() {
         tilt={(navigating && navViewMode === "follow") || street3DMode ? 67.5 : 0}
         mapContainerClassName="map-container"
         onZoomChanged={onZoomChanged}
+        onDblClick={onMapDblClick}
         options={{
           disableDefaultUI: true,
-          zoomControl: !navigating,
+          zoomControl: true,
+          // Double-click is repurposed below to open the "view in 3D?" prompt instead of
+          // Google's default double-click-to-zoom-in.
+          disableDoubleClickZoom: true,
           clickableIcons: false,
           // A vector-rendered Map ID is required for tilt/heading (the "3D follow" driving
           // view) to actually render — without one, Google Maps silently ignores tilt on
@@ -495,6 +608,14 @@ export default function App() {
         onClick={(e) => {
           if (pendingType && e.latLng) {
             setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+          } else if (addingStop && e.latLng) {
+            setStopLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+            setAddingStop(false);
+          } else if (zoomOutArmed) {
+            const map = mapRef.current;
+            const currentZoom = map?.getZoom() ?? 15;
+            map?.setZoom(Math.max(3, currentZoom - 4));
+            setZoomOutArmed(false);
           }
         }}
       >
@@ -538,6 +659,23 @@ export default function App() {
               scale: 14,
             }}
             zIndex={999}
+          />
+        )}
+
+        {stopLocation && (
+          <Marker
+            position={stopLocation}
+            onClick={() => setStopLocation(null)}
+            title="Stop (click to remove)"
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              fillColor: "#F59E0B",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 3,
+              scale: 10,
+            }}
+            zIndex={998}
           />
         )}
 
@@ -615,15 +753,16 @@ export default function App() {
           step={navSteps[activeStepIndex] ?? null}
           distanceToManeuverM={distanceToManeuverM}
           etaText={navLeg.duration?.text ?? ""}
-          distanceRemainingText={navSteps
-            .slice(activeStepIndex)
-            .reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) < 1000
-            ? `${navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0)} m`
-            : `${(navSteps.slice(activeStepIndex).reduce((sum, s) => sum + (s.distance?.value ?? 0), 0) / 1000).toFixed(1)} km`}
+          distanceRemainingText={distanceRemainingText}
           navViewMode={navViewMode}
           onSetNavViewMode={setNavViewMode}
           onClearRoute={clearRoute}
           onExit={endNavigation}
+          hasStop={!!stopLocation}
+          onAddStop={onAddStopClick}
+          onShareEta={shareEta}
+          onReportAlert={onReportClick}
+          onOpenDetection={() => setDetectionOpen(true)}
         />
       )}
 
@@ -633,6 +772,13 @@ export default function App() {
 
       {pendingType && pendingLocation && (
         <PlacementBar type={pendingType} onConfirm={confirmPlacement} onCancel={cancelPlacement} />
+      )}
+
+      {addingStop && (
+        <div className="stop-placement-bar">
+          <span>Tap the map to add a stop</span>
+          <button onClick={() => setAddingStop(false)}>Cancel</button>
+        </div>
       )}
 
       {!pendingType && !navigating && (
@@ -657,21 +803,33 @@ export default function App() {
           >
             ➤
           </button>
+
+          <button
+            className={`fab fab-quaternary${settings.hideDetectionTrace ? " fab-toggle-active" : ""}`}
+            onClick={() => setHideDetectionTrace(!settings.hideDetectionTrace)}
+            aria-label={
+              settings.hideDetectionTrace
+                ? "AI Detection route guide hidden — tap to show it again"
+                : "Hide AI Detection route guide"
+            }
+            title={settings.hideDetectionTrace ? "Route guide hidden in AI Detection" : "Hide AI Detection route guide"}
+          >
+            🧭
+          </button>
         </>
       )}
 
       {street3DMode && (
-        <button className="street3d-exit" onClick={exitStreet3D} aria-label="Exit 3D view">
-          ✕ Exit 3D
-        </button>
+        <>
+          <button className="street3d-exit" onClick={exitStreet3D} aria-label="Exit 3D view">
+            ✕ Exit 3D
+          </button>
+          <Street3DJoystick onRotate={rotateStreet3D} onTilt={tiltStreet3D} />
+        </>
       )}
 
       {show3DPrompt && (
-        <ConfirmPrompt
-          message="You've zoomed all the way in — do you want to view 3D?"
-          onYes={enterStreet3D}
-          onNo={declineStreet3D}
-        />
+        <ConfirmPrompt message="Do you want to view 3D?" onYes={enterStreet3D} onNo={declineStreet3D} />
       )}
 
       {showLeaveZonePrompt && (
@@ -691,7 +849,7 @@ export default function App() {
 
       {detectionOpen && (
         <Suspense fallback={<div className="detection-loading">Loading detection model…</div>}>
-          <LiveVehicleDetection onClose={() => setDetectionOpen(false)} />
+          <LiveVehicleDetection onClose={() => setDetectionOpen(false)} navContext={detectionNavContext} />
         </Suspense>
       )}
 

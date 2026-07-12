@@ -4,7 +4,14 @@ import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertType } from "@/types/alert";
 
-const ALERT_TYPES: AlertType[] = ["police", "emergency_vehicle", "hazard", "camera", "crash"];
+const ALERT_TYPES: AlertType[] = [
+  "police",
+  "emergency_vehicle",
+  "hazard",
+  "camera",
+  "crash",
+  "traffic_light",
+];
 
 interface Props {
   onShare: (type: AlertType) => void;

@@ -8,9 +8,19 @@ export interface WebSettings {
   // When true, the alert-visibility circle stays centered on wherever it was when you
   // turned this on, instead of always re-centering on your live position.
   fixedZone: boolean;
+  // When true, the AI Detection camera view during navigation skips drawing its route
+  // guide line/turn instructions -- for drivers who know the way and just want the
+  // vehicle detection, without the extra overlay. Only affects that camera view; the
+  // actual route on the main map is untouched either way.
+  hideDetectionTrace: boolean;
 }
 
-const DEFAULT_SETTINGS: WebSettings = { alertRadiusKm: 5, regionWide: false, fixedZone: false };
+const DEFAULT_SETTINGS: WebSettings = {
+  alertRadiusKm: 5,
+  regionWide: false,
+  fixedZone: false,
+  hideDetectionTrace: false,
+};
 const STORAGE_KEY = "tracklive.settings";
 
 export function useSettings() {
@@ -32,5 +42,7 @@ export function useSettings() {
     setAlertRadiusKm: (alertRadiusKm: number) => setSettings((s) => ({ ...s, alertRadiusKm })),
     setRegionWide: (regionWide: boolean) => setSettings((s) => ({ ...s, regionWide })),
     setFixedZone: (fixedZone: boolean) => setSettings((s) => ({ ...s, fixedZone })),
+    setHideDetectionTrace: (hideDetectionTrace: boolean) =>
+      setSettings((s) => ({ ...s, hideDetectionTrace })),
   };
 }

@@ -8,6 +8,8 @@ import {
   type ClassificationResult,
   type VehicleClass,
 } from "@/services/vehicleClassifier";
+import { normalizeAngleDeg } from "@/utils/navFormat";
+import { NavActionsRow } from "@/components/NavActionsRow";
 import "./LiveVehicleDetection.css";
 
 // COCO-SSD (the pretrained model this runs) only knows generic COCO classes — it has no
@@ -27,11 +29,74 @@ const CLASS_DISPLAY_NAMES: Record<VehicleClass, string> = {
 
 type FacingMode = "environment" | "user";
 
-interface Props {
-  onClose: () => void;
+// Live nav info passed in only while navigation is active, so this view can show where to
+// go without the driver needing to exit back to the map. The guide line is a schematic
+// compass-bearing indicator (GPS bearing-to-next-turn vs. direction of travel), not true
+// ground-projected AR — it's a real, physically-derived direction, just not photorealistic.
+export interface DetectionNavContext {
+  instructionText: string;
+  distanceToManeuverM: number | null;
+  etaText: string;
+  arrivalClockText: string;
+  distanceRemainingText: string;
+  bearingToManeuverDeg: number | null;
+  travelHeadingDeg: number;
+  hideTrace: boolean;
+  hasStop: boolean;
+  onAddStop: () => void;
+  onShareEta: () => void;
+  onReportAlert: () => void;
 }
 
-export function LiveVehicleDetection({ onClose }: Props) {
+interface Props {
+  onClose: () => void;
+  navContext?: DetectionNavContext | null;
+}
+
+function drawGuideRibbon(
+  ctx: CanvasRenderingContext2D,
+  canvasWidth: number,
+  canvasHeight: number,
+  relativeAngleDeg: number,
+  nowMs: number
+) {
+  const startX = canvasWidth / 2;
+  const startY = canvasHeight;
+  const clamped = Math.max(-90, Math.min(90, relativeAngleDeg));
+  const t = clamped / 90; // -1..1
+  const endX = canvasWidth / 2 + t * canvasWidth * 0.38;
+  const endY = canvasHeight * 0.4;
+  const controlX = canvasWidth / 2 + t * canvasWidth * 0.15;
+  const controlY = canvasHeight * 0.75;
+
+  ctx.save();
+  ctx.strokeStyle = "#2563EB";
+  ctx.lineWidth = 14;
+  ctx.lineCap = "round";
+  ctx.globalAlpha = 0.8;
+  ctx.setLineDash([26, 20]);
+  // Marching-ants flow toward the destination end of the curve, animated by wall-clock time.
+  ctx.lineDashOffset = -((nowMs / 28) % 46);
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.quadraticCurveTo(controlX, controlY, endX, endY);
+  ctx.stroke();
+
+  // Arrowhead at the destination end, angled along the curve's local direction.
+  const arrowAngle = Math.atan2(endY - controlY, endX - controlX);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.95;
+  ctx.fillStyle = "#2563EB";
+  ctx.beginPath();
+  ctx.moveTo(endX + Math.cos(arrowAngle) * 16, endY + Math.sin(arrowAngle) * 16);
+  ctx.lineTo(endX + Math.cos(arrowAngle + 2.5) * 14, endY + Math.sin(arrowAngle + 2.5) * 14);
+  ctx.lineTo(endX + Math.cos(arrowAngle - 2.5) * 14, endY + Math.sin(arrowAngle - 2.5) * 14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+export function LiveVehicleDetection({ onClose, navContext }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -43,6 +108,9 @@ export function LiveVehicleDetection({ onClose }: Props) {
   // classifier on every single frame.
   const classificationsRef = useRef(new Map<number, ClassificationResult>());
   const classifyingRef = useRef(new Set<number>());
+  // Read inside the detect loop's closure without re-subscribing the effect on every nav tick.
+  const navContextRef = useRef(navContext);
+  navContextRef.current = navContext;
 
   const [status, setStatus] = useState<"loading-model" | "requesting-camera" | "running" | "error">(
     "loading-model"
@@ -122,6 +190,13 @@ export function LiveVehicleDetection({ onClose }: Props) {
         const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const nav = navContextRef.current;
+        if (nav && !nav.hideTrace && nav.bearingToManeuverDeg !== null) {
+          const relativeAngle = normalizeAngleDeg(nav.bearingToManeuverDeg - nav.travelHeadingDeg);
+          drawGuideRibbon(ctx, canvas.width, canvas.height, relativeAngle, performance.now());
+        }
+
         for (const box of tracked) {
           const [x, y, w, h] = box.bbox;
 
@@ -192,20 +267,66 @@ export function LiveVehicleDetection({ onClose }: Props) {
       <div className="detection-banner">
         {status === "loading-model" && "Loading detection model…"}
         {status === "requesting-camera" && "Requesting camera access…"}
+        {status === "running" && navContext && (
+          <>
+            <strong>
+              {navContext.distanceToManeuverM !== null
+                ? `In ${navContext.distanceToManeuverM < 1000 ? `${Math.round(navContext.distanceToManeuverM / 10) * 10} m` : `${(navContext.distanceToManeuverM / 1000).toFixed(1)} km`}, `
+                : ""}
+              {navContext.instructionText}
+            </strong>
+            {navContext.hideTrace && " — route guide line hidden"}
+          </>
+        )}
         {status === "running" &&
+          !navContext &&
           `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
         {status === "error" && (errorMessage ?? "Something went wrong starting the camera.")}
       </div>
 
-      {canSwitchCamera && (
-        <button className="detection-switch" onClick={switchCamera} aria-label="Switch camera">
-          🔄 Switch camera
-        </button>
+      {navContext && status === "running" ? (
+        <div className="detection-bottom-panel">
+          <div className="detection-nav-stats-row">
+            <div>
+              <div className="detection-nav-stat-value">{navContext.arrivalClockText}</div>
+              <div className="detection-nav-stat-label">arrival</div>
+            </div>
+            <div>
+              <div className="detection-nav-stat-value">{navContext.etaText}</div>
+              <div className="detection-nav-stat-label">ETA</div>
+            </div>
+            <div>
+              <div className="detection-nav-stat-value">{navContext.distanceRemainingText}</div>
+              <div className="detection-nav-stat-label">remaining</div>
+            </div>
+          </div>
+          <NavActionsRow
+            hasStop={navContext.hasStop}
+            onAddStop={navContext.onAddStop}
+            onShareEta={navContext.onShareEta}
+            onReportAlert={navContext.onReportAlert}
+          />
+          <div className="detection-bottom-panel-buttons">
+            {canSwitchCamera && (
+              <button onClick={switchCamera} aria-label="Switch camera">
+                🔄 Switch
+              </button>
+            )}
+            <button onClick={onClose}>Close</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {canSwitchCamera && (
+            <button className="detection-switch" onClick={switchCamera} aria-label="Switch camera">
+              🔄 Switch camera
+            </button>
+          )}
+          <button className="detection-close" onClick={onClose}>
+            Close
+          </button>
+        </>
       )}
-
-      <button className="detection-close" onClick={onClose}>
-        Close
-      </button>
     </div>
   );
 }

@@ -126,6 +126,18 @@
   cursor: not-allowed;
 }
 
+.fab-quaternary {
+  bottom: 232px;
+  background: #fff;
+  color: #111827;
+  font-size: 20px;
+}
+
+.fab-quaternary.fab-toggle-active {
+  background: #111827;
+  color: #fff;
+}
+
 .about-button {
   position: absolute;
   top: 16px;
@@ -159,6 +171,36 @@
   font-size: 13px;
   text-align: center;
   z-index: 20;
+}
+
+.stop-placement-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 16px;
+  right: 16px;
+  max-width: 420px;
+  margin: 0 auto;
+  background: #111827;
+  color: #fff;
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  z-index: 15;
+}
+
+.stop-placement-bar button {
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .detection-loading {

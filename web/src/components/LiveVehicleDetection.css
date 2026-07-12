@@ -72,3 +72,51 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+.detection-bottom-panel {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-family: system-ui, sans-serif;
+}
+
+.detection-nav-stats-row {
+  display: flex;
+  justify-content: space-around;
+  text-align: center;
+}
+
+.detection-nav-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.detection-nav-stat-label {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.detection-bottom-panel-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.detection-bottom-panel-buttons button {
+  flex: 1;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}

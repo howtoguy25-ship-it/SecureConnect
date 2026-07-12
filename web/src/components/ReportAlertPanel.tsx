@@ -2,7 +2,14 @@ import { useState } from "react";
 import { ALERT_COLORS, ALERT_EMOJI, ALERT_LABELS, type AlertType } from "@/types/alert";
 import "./ReportAlertPanel.css";
 
-const ALERT_TYPES: AlertType[] = ["police", "emergency_vehicle", "hazard", "camera", "crash"];
+const ALERT_TYPES: AlertType[] = [
+  "police",
+  "emergency_vehicle",
+  "hazard",
+  "camera",
+  "crash",
+  "traffic_light",
+];
 
 interface Props {
   onPlaceOnMap: (type: AlertType) => void;
