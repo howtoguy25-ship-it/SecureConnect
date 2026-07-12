@@ -28,6 +28,8 @@ module.exports = {
           "TrackLine can track your location in the background to keep navigation and nearby-alert notifications accurate.",
         NSMicrophoneUsageDescription:
           "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
+        NSCameraUsageDescription:
+          "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
         UIBackgroundModes: ["audio", "location", "fetch"],
       },
     },
@@ -42,6 +44,7 @@ module.exports = {
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "RECORD_AUDIO",
+        "CAMERA",
         "FOREGROUND_SERVICE",
       ],
       config: {
@@ -63,6 +66,13 @@ module.exports = {
         {
           microphonePermission:
             "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
+        },
+      ],
+      [
+        "expo-camera",
+        {
+          cameraPermission:
+            "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
         },
       ],
     ],
