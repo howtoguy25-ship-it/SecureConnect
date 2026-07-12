@@ -46,12 +46,19 @@ Opens on `http://localhost:5173`.
 
 ## Deploy
 
-This repo's root `firebase.json` already has a `hosting` block pointing at `web/dist`.
-From the repo root (not this `web/` folder):
+From the repo root, run the deploy script — it pulls the latest code, builds, and deploys,
+and stops with a clear error at whichever step fails instead of silently deploying stale
+code:
+```powershell
+.\deploy.ps1
+```
+
+Or by hand, from the repo root (not this `web/` folder) — this repo's root `firebase.json`
+already has a `hosting` block pointing at `web/dist`:
 ```
 cd web && npm run build && cd ..
 npx firebase-tools deploy --project fleettrack-9f894 --only hosting
 ```
-That publishes to a `https://fleettrack-9f894.web.app` URL (and/or a custom domain if one
+Either way publishes to `https://fleettrack-9f894.web.app` (and/or a custom domain if one
 is configured in the Firebase console) — a real link anyone can open and use, no app
 install required.
