@@ -175,6 +175,42 @@ button:focus-visible {
   gap: 3px;
 }
 
+/* Title bar + chevron that collapses the whole panel down to just this row -- lets someone
+   who's already set their radius/camera preference get that map space back instead of it
+   permanently sitting over the map every time they open the app. */
+.radius-control-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 0 6px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--surface-text);
+  cursor: pointer;
+}
+
+.radius-control-collapsed .radius-control-toggle {
+  margin-bottom: 0;
+  color: var(--surface-text-muted);
+  font-weight: 500;
+}
+
+.radius-control-chevron {
+  flex-shrink: 0;
+  color: inherit;
+  transition: transform 0.15s ease;
+}
+
+.radius-control-chevron-up {
+  transform: rotate(180deg);
+}
+
 .radius-control input[type="range"] {
   width: 100%;
   margin: 2px 0 0;

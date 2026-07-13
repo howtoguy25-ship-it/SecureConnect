@@ -6,8 +6,9 @@ import {
   Autocomplete,
   DirectionsRenderer,
   Circle,
-  MarkerClusterer,
+  GoogleMarkerClusterer,
 } from "@react-google-maps/api";
+import { SuperClusterAlgorithm, type Renderer } from "@googlemaps/markerclusterer";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
 import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
@@ -161,6 +162,15 @@ function trafficLightIcon(scale: number): google.maps.Icon {
 // not just visual clutter. This is the standard fix for exactly that (Google's own
 // MarkerClusterer), not a workaround -- clusters split back apart into individual markers
 // automatically once you zoom in close enough to tell them apart anyway.
+//
+// Uses @googlemaps/markerclusterer directly (the actively-maintained library, imported here as
+// GoogleMarkerClusterer) rather than @react-google-maps/api's own bundled `MarkerClusterer`
+// component -- that one wraps a years-unmaintained legacy clustering algorithm that depends on
+// the map's pixel projection being ready at the exact moment each marker is added, and in
+// production that reliably produced zero clustering at all (every marker landing in its own
+// solo "cluster", which just renders as the plain unclustered icon) instead of an intermittent
+// glitch. The modern library clusters directly off lat/lng via a KD-tree (no projection-timing
+// dependency) and is what Google's own docs now point to.
 function clusterBubbleSvg(color: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
     <circle cx="22" cy="22" r="19" fill="${color}" fill-opacity="0.85" stroke="#ffffff" stroke-width="2.5"/>
@@ -168,24 +178,45 @@ function clusterBubbleSvg(color: string): string {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-const TRAFFIC_LIGHT_CLUSTER_STYLE = [
-  {
-    url: clusterBubbleSvg("#0D9488"),
-    height: 44,
-    width: 44,
-    textColor: "#ffffff",
-    textSize: 13,
-  },
-];
-const SPEED_CAMERA_CLUSTER_STYLE = [
-  {
-    url: clusterBubbleSvg("#7C3AED"),
-    height: 44,
-    width: 44,
-    textColor: "#ffffff",
-    textSize: 13,
-  },
-];
+let trafficLightClusterIconCache: google.maps.Icon | null = null;
+let speedCameraClusterIconCache: google.maps.Icon | null = null;
+
+function makeClusterRenderer(color: string, iconCacheGet: () => google.maps.Icon | null, iconCacheSet: (icon: google.maps.Icon) => void): Renderer {
+  return {
+    render: ({ count, position }) => {
+      let icon = iconCacheGet();
+      if (!icon) {
+        icon = {
+          url: clusterBubbleSvg(color),
+          scaledSize: new google.maps.Size(44, 44),
+          anchor: new google.maps.Point(22, 22),
+        };
+        iconCacheSet(icon);
+      }
+      return new google.maps.Marker({
+        position,
+        icon,
+        label: { text: String(count), color: "#ffffff", fontSize: "13px", fontWeight: "700" },
+        zIndex: 900 + count,
+      });
+    },
+  };
+}
+
+const trafficLightClusterRenderer = makeClusterRenderer(
+  "#0D9488",
+  () => trafficLightClusterIconCache,
+  (icon) => (trafficLightClusterIconCache = icon)
+);
+const speedCameraClusterRenderer = makeClusterRenderer(
+  "#7C3AED",
+  () => speedCameraClusterIconCache,
+  (icon) => (speedCameraClusterIconCache = icon)
+);
+
+// 60px pixel-equivalent grouping radius (SuperClusterAlgorithm's `radius` is in the same
+// screen-pixel units the old gridSize was), same clustering distance for both layers.
+const osmClusterAlgorithm = () => new SuperClusterAlgorithm({ radius: 60, maxZoom: 16 });
 
 // A real, classic map-pin glyph for the destination -- distinct from every other marker on
 // the map (alerts, current location, OSM layer) so it's unambiguous which point you're
@@ -296,6 +327,12 @@ export default function App() {
   // ever (persisted in localStorage, not just this session), then never again.
   const [trailTip, setTrailTip] = useState<string | null>(null);
   const trailTipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The alert radius/region-wide/camera-visibility panel sits permanently over the map --
+  // collapsible down to just its title bar so it's not always eating map space for someone who
+  // set it once and doesn't need to touch it again this session. Starts expanded (matches the
+  // panel's previous always-open behavior) rather than defaulting collapsed and hiding a
+  // control people are used to seeing.
+  const [radiusControlExpanded, setRadiusControlExpanded] = useState(true);
   const onToggleHideTrace = useCallback(() => {
     const next = !settings.hideDetectionTrace;
     setHideDetectionTrace(next);
@@ -853,11 +890,16 @@ export default function App() {
       lastOsmBoundsRef.current = paddedBounds;
       fetchOsmTrafficData(paddedBounds)
         .then(({ trafficLights, speedCameras }) => {
-          // Capped defensively -- raised well above the old street-level limits now that a
-          // whole metro area's worth of results can come back in one fetch, but still a hard
-          // ceiling so an extreme case can't hand hundreds of thousands of markers to render.
-          setOsmTrafficLights(trafficLights.slice(0, 1500));
-          setOsmSpeedCameras(speedCameras.slice(0, 600));
+          // Raised now that the OSM layer actually clusters (see GoogleMarkerClusterer above)
+          // -- the old 1500/600 caps predated that fix, back when every marker rendered
+          // individually and a hard ceiling was the only thing standing between a dense metro
+          // area and thousands of live overlays. Clustering means render cost no longer scales
+          // with raw marker count the same way, so this can sit far higher without silently
+          // dropping real signals/cameras that were actually inside the fetched area -- still a
+          // ceiling, not truly unbounded, so one extreme all-at-once fetch can't hand the
+          // browser an unreasonable object count to hold in memory.
+          setOsmTrafficLights(trafficLights.slice(0, 8000));
+          setOsmSpeedCameras(speedCameras.slice(0, 4000));
         })
         .catch((err) => console.warn("[osm] traffic data fetch failed", err));
     }, 1200);
@@ -1327,8 +1369,8 @@ export default function App() {
             below check it, so turning it off actually drops the cost, not just the icons. */}
         {settings.showTrafficCameras && (
           <>
-            <MarkerClusterer
-              options={{ styles: TRAFFIC_LIGHT_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}
+            <GoogleMarkerClusterer
+              options={{ algorithm: osmClusterAlgorithm(), renderer: trafficLightClusterRenderer }}
             >
               {(clusterer) => (
                 <>
@@ -1343,8 +1385,10 @@ export default function App() {
                   ))}
                 </>
               )}
-            </MarkerClusterer>
-            <MarkerClusterer options={{ styles: SPEED_CAMERA_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}>
+            </GoogleMarkerClusterer>
+            <GoogleMarkerClusterer
+              options={{ algorithm: osmClusterAlgorithm(), renderer: speedCameraClusterRenderer }}
+            >
               {(clusterer) => (
                 <>
                   {osmSpeedCameras.map((point) => (
@@ -1358,7 +1402,7 @@ export default function App() {
                   ))}
                 </>
               )}
-            </MarkerClusterer>
+            </GoogleMarkerClusterer>
           </>
         )}
 
@@ -1457,43 +1501,65 @@ export default function App() {
       )}
 
       {!chromeHidden && (
-        <div className={`radius-control${topBannerActive ? " chrome-shifted" : ""}`}>
-          <label>
-            Alert radius: {settings.alertRadiusKm} km
-            <input
-              type="range"
-              min={1}
-              max={15}
-              disabled={settings.regionWide}
-              value={settings.alertRadiusKm}
-              onChange={(e) => setAlertRadiusKm(Number(e.target.value))}
-            />
-          </label>
-          <label className="radius-checkbox">
-            <input
-              type="checkbox"
-              checked={settings.regionWide}
-              onChange={(e) => setRegionWide(e.target.checked)}
-            />
-            Show all alerts region-wide (e.g. all of Australia)
-          </label>
-          <label className="radius-checkbox">
-            <input
-              type="checkbox"
-              disabled={settings.regionWide}
-              checked={settings.fixedZone}
-              onChange={(e) => setFixedZone(e.target.checked)}
-            />
-            Lock alert zone to current spot
-          </label>
-          <label className="radius-checkbox">
-            <input
-              type="checkbox"
-              checked={settings.showTrafficCameras}
-              onChange={(e) => setShowTrafficCameras(e.target.checked)}
-            />
-            Show traffic lights &amp; speed cameras
-          </label>
+        <div className={`radius-control${topBannerActive ? " chrome-shifted" : ""}${radiusControlExpanded ? "" : " radius-control-collapsed"}`}>
+          <button
+            type="button"
+            className="radius-control-toggle"
+            onClick={() => setRadiusControlExpanded((v) => !v)}
+            aria-expanded={radiusControlExpanded}
+            aria-label={radiusControlExpanded ? "Collapse alert settings" : "Expand alert settings"}
+          >
+            <span>Alert &amp; camera settings</span>
+            <svg
+              className={`radius-control-chevron${radiusControlExpanded ? " radius-control-chevron-up" : ""}`}
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+            >
+              <path d="M3 6l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {radiusControlExpanded && (
+            <>
+              <label>
+                Alert radius: {settings.alertRadiusKm} km
+                <input
+                  type="range"
+                  min={1}
+                  max={15}
+                  disabled={settings.regionWide}
+                  value={settings.alertRadiusKm}
+                  onChange={(e) => setAlertRadiusKm(Number(e.target.value))}
+                />
+              </label>
+              <label className="radius-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settings.regionWide}
+                  onChange={(e) => setRegionWide(e.target.checked)}
+                />
+                Show all alerts region-wide (e.g. all of Australia)
+              </label>
+              <label className="radius-checkbox">
+                <input
+                  type="checkbox"
+                  disabled={settings.regionWide}
+                  checked={settings.fixedZone}
+                  onChange={(e) => setFixedZone(e.target.checked)}
+                />
+                Lock alert zone to current spot
+              </label>
+              <label className="radius-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settings.showTrafficCameras}
+                  onChange={(e) => setShowTrafficCameras(e.target.checked)}
+                />
+                Show traffic lights &amp; speed cameras
+              </label>
+            </>
+          )}
         </div>
       )}
 
