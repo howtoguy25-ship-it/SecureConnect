@@ -37,4 +37,4 @@ npx firebase-tools deploy --project fleettrack-9f894 --only hosting,firestore:ru
 if ($LASTEXITCODE -ne 0) { Fail "firebase deploy failed (see the error above)." }
 
 Write-Host ""
-Write-Host "DEPLOY SUCCESSFUL -- https://fleettrack-9f894.web.app is now up to date." -ForegroundColor Green
+Write-Host "DEPLOY SUCCESSFUL -- both https://tracklinemaps.com and https://fleettrack-9f894.web.app are now up to date (same site, same files, two addresses)." -ForegroundColor Green
