@@ -419,6 +419,14 @@ export default function App() {
   // zoom-in restarts the same 10s window rather than stacking timers.
   const trafficLightExplodeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Real satellite imagery toggle -- "hybrid" (not plain "satellite") so road/place names stay
+  // legible over the photo, matching what Google's own Maps app actually shows under its
+  // "Satellite" button despite the underlying API type being called "hybrid". A plain string
+  // state, reactively applied via the map's own mapTypeId prop (see <GoogleMap> below) --
+  // unlike center/heading earlier in this file, this is a primitive value that only changes
+  // reference when it actually changes, so there's no controlled-prop fighting to guard against.
+  const [mapTypeId, setMapTypeId] = useState<"roadmap" | "hybrid">("roadmap");
+
   // "View in 3D?" prompt — triggers automatically on reaching max zoom for this location
   // (native double-click-to-zoom-in is left on, so a double-click here counts too). A plain
   // single click while already at max zoom (see onClick below) just zooms back out again,
@@ -1346,6 +1354,7 @@ export default function App() {
           mapRef.current = map;
         }}
         center={center}
+        mapTypeId={mapTypeId}
         zoom={location ? 15 : 11}
         // Left undefined during 3D Follow -- heading is applied imperatively by the smoothing
         // rAF loop above instead. This is a *controlled* prop: feeding it the raw, unsmoothed
@@ -1725,6 +1734,15 @@ export default function App() {
             title={settings.hideDetectionTrace ? "Route guide hidden in AI Detection" : "Hide AI Detection route guide"}
           >
             🧭
+          </button>
+
+          <button
+            className={`fab fab-quinary${mapTypeId === "hybrid" ? " fab-toggle-active" : ""}`}
+            onClick={() => setMapTypeId((v) => (v === "hybrid" ? "roadmap" : "hybrid"))}
+            aria-label={mapTypeId === "hybrid" ? "Switch to standard map" : "Switch to satellite view"}
+            title={mapTypeId === "hybrid" ? "Standard map" : "Satellite view"}
+          >
+            🛰️
           </button>
         </>
       )}

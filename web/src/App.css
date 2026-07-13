@@ -287,6 +287,18 @@ button:focus-visible {
   color: #fff;
 }
 
+.fab-quinary {
+  bottom: calc(300px + env(safe-area-inset-bottom, 0px));
+  background: var(--fab-surface);
+  color: var(--fab-icon);
+  font-size: 20px;
+}
+
+.fab-quinary.fab-toggle-active {
+  background: #111827;
+  color: #fff;
+}
+
 /* Small explainer bubble anchored to the same height as the compass/hide-trace FAB, sitting
    to its left so it visually points at the button it's explaining. Shown at most a few times
    ever (see onToggleHideTrace in App.tsx), not a persistent label. */
