@@ -8,7 +8,12 @@ import {
   Circle,
   GoogleMarkerClusterer,
 } from "@react-google-maps/api";
-import { SuperClusterAlgorithm, type Renderer, type MarkerClusterer as GoogleMarkerClustererInstance } from "@googlemaps/markerclusterer";
+import {
+  SuperClusterAlgorithm,
+  type Algorithm,
+  type Renderer,
+  type MarkerClusterer as GoogleMarkerClustererInstance,
+} from "@googlemaps/markerclusterer";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
 import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
@@ -179,46 +184,26 @@ function clusterBubbleSvg(color: string): string {
 }
 
 // The count is always printed on the bubble itself at every zoom level -- clicking a cluster
-// no longer zooms the map in (see onClusterClick: emphasizeClusters below), so reading the
-// count was never supposed to require zooming or tapping through to individual markers in the
-// first place. A zoom-IN gesture (not zoom-out, see onZoomChanged) additionally emphasizes
-// every currently-rendered cluster's bubble to a larger size for 10 seconds -- easier to read
-// right after a zoom gesture -- and that emphasis holds for the full 10 seconds even if you
-// zoom back out during that window, then reverts back to the normal small bubble on its own.
-const CLUSTER_NORMAL_SIZE = 44;
-const CLUSTER_EMPHASIZED_SIZE = 62;
-const CLUSTER_EMPHASIS_MS = 10000;
-let clusterEmphasisUntilMs = 0;
-function isClusterEmphasisActive(): boolean {
-  return performance.now() < clusterEmphasisUntilMs;
-}
-
+// no longer zooms the map in (see noZoomOnClusterClick below), so reading the count was never
+// supposed to require zooming or tapping through to individual markers in the first place.
 const clusterIconCache = new Map<string, google.maps.Icon>();
 
 function makeClusterRenderer(color: string): Renderer {
   return {
     render: ({ count, position }) => {
-      const emphasized = isClusterEmphasisActive();
-      const size = emphasized ? CLUSTER_EMPHASIZED_SIZE : CLUSTER_NORMAL_SIZE;
-      const cacheKey = `${color}:${size}`;
-      let icon = clusterIconCache.get(cacheKey);
+      let icon = clusterIconCache.get(color);
       if (!icon) {
         icon = {
           url: clusterBubbleSvg(color),
-          scaledSize: new google.maps.Size(size, size),
-          anchor: new google.maps.Point(size / 2, size / 2),
+          scaledSize: new google.maps.Size(44, 44),
+          anchor: new google.maps.Point(22, 22),
         };
-        clusterIconCache.set(cacheKey, icon);
+        clusterIconCache.set(color, icon);
       }
       return new google.maps.Marker({
         position,
         icon,
-        label: {
-          text: String(count),
-          color: "#ffffff",
-          fontSize: emphasized ? "18px" : "13px",
-          fontWeight: "700",
-        },
+        label: { text: String(count), color: "#ffffff", fontSize: "13px", fontWeight: "700" },
         zIndex: 900 + count,
       });
     },
@@ -231,11 +216,33 @@ function makeClusterRenderer(color: string): Renderer {
 function noZoomOnClusterClick() {}
 
 const trafficLightClusterRenderer = makeClusterRenderer("#0D9488");
-const speedCameraClusterRenderer = makeClusterRenderer("#7C3AED");
 
-// 60px pixel-equivalent grouping radius (SuperClusterAlgorithm's `radius` is in the same
-// screen-pixel units the old gridSize was), same clustering distance for both layers.
-const osmClusterAlgorithm = () => new SuperClusterAlgorithm({ radius: 60, maxZoom: 16 });
+// A zoom-IN gesture (not zoom-out, see onZoomChanged) makes traffic-light clusters "explode"
+// into their real individual lights for 10 seconds -- an intersection realistically has one
+// OSM node per approach/pole, not one, so this shows each of those separately (matching how
+// they actually did before clustering existed) instead of staying folded into one numbered
+// bubble the instant you zoom in even a little. That held-open state survives zooming back out
+// again within the window, however far ("no matter the height"), then reverts back to normal
+// clustering on its own once the 10 seconds elapse.
+const TRAFFIC_LIGHT_EXPLODE_MS = 10000;
+let trafficLightExplodeUntilMs = 0;
+function isTrafficLightExplodeActive(): boolean {
+  return performance.now() < trafficLightExplodeUntilMs;
+}
+
+// Two real SuperCluster instances, not one instance reconfigured on the fly -- maxZoom governs
+// the zoom above which a point stops clustering and shows individually, so maxZoom: 0 means
+// "never cluster" at any real zoom this layer is ever visible at (it only renders from zoom 11
+// up, see OSM_LAYER_MIN_ZOOM below). Which instance actually runs is decided fresh on every
+// calculate() call, so toggling the shared flag above takes effect the next time the clusterer
+// recomputes, without needing to tear down and rebuild the whole clusterer.
+function trafficLightAlgorithm(): Algorithm {
+  const clustered = new SuperClusterAlgorithm({ radius: 60, maxZoom: 16 });
+  const exploded = new SuperClusterAlgorithm({ radius: 60, maxZoom: 0 });
+  return {
+    calculate: (input) => (isTrafficLightExplodeActive() ? exploded : clustered).calculate(input),
+  };
+}
 
 // A real, classic map-pin glyph for the destination -- distinct from every other marker on
 // the map (alerts, current location, OSM layer) so it's unambiguous which point you're
@@ -402,14 +409,15 @@ export default function App() {
   // Captured from the GoogleMarkerClusterer render-prop below so the effects further down can
   // trigger exactly one recluster after a whole new batch of markers mounts, instead of each
   // marker triggering its own -- see the effects and noClustererRedraw usage below for why.
+  // Speed cameras aren't clustered at all anymore (always shown as individual icons), so only
+  // traffic lights need this.
   const trafficClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
-  const speedCameraClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
   // Last seen zoom level, so onZoomChanged can tell a genuine zoom-IN gesture apart from a
-  // zoom-out (only zooming in should trigger the cluster-emphasis window below).
+  // zoom-out (only zooming in should trigger the traffic-light explode window below).
   const lastZoomRef = useRef<number | null>(null);
-  // Cancels/reschedules the "revert cluster bubbles back to normal size" timer -- each new
+  // Cancels/reschedules the "revert traffic lights back to clustered bubbles" timer -- each new
   // zoom-in restarts the same 10s window rather than stacking timers.
-  const clusterEmphasisTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trafficLightExplodeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // "View in 3D?" prompt — triggers automatically on reaching max zoom for this location
   // (native double-click-to-zoom-in is left on, so a double-click here counts too). A plain
@@ -871,19 +879,17 @@ export default function App() {
     const zoom = map.getZoom();
     if (zoom === undefined) return;
 
-    // A genuine zoom-IN gesture (not zoom-out) emphasizes every currently-rendered traffic-
-    // light/speed-camera cluster bubble -- bigger bubble, bigger count text -- for 10 seconds,
-    // holding that size even through a subsequent zoom-out within the window, then reverting
-    // on its own once the window elapses. See isClusterEmphasisActive/makeClusterRenderer above.
+    // A genuine zoom-IN gesture (not zoom-out) explodes traffic-light clusters into their real
+    // individual lights for 10 seconds, holding that open state even through a subsequent
+    // zoom-out within the window, then reverting back to normal clustering on its own once the
+    // window elapses. See isTrafficLightExplodeActive/trafficLightAlgorithm above.
     if (lastZoomRef.current !== null && zoom > lastZoomRef.current) {
-      clusterEmphasisUntilMs = performance.now() + CLUSTER_EMPHASIS_MS;
+      trafficLightExplodeUntilMs = performance.now() + TRAFFIC_LIGHT_EXPLODE_MS;
       trafficClustererRef.current?.render();
-      speedCameraClustererRef.current?.render();
-      if (clusterEmphasisTimeoutRef.current) clearTimeout(clusterEmphasisTimeoutRef.current);
-      clusterEmphasisTimeoutRef.current = setTimeout(() => {
+      if (trafficLightExplodeTimeoutRef.current) clearTimeout(trafficLightExplodeTimeoutRef.current);
+      trafficLightExplodeTimeoutRef.current = setTimeout(() => {
         trafficClustererRef.current?.render();
-        speedCameraClustererRef.current?.render();
-      }, CLUSTER_EMPHASIS_MS);
+      }, TRAFFIC_LIGHT_EXPLODE_MS);
     }
     lastZoomRef.current = zoom;
 
@@ -954,18 +960,17 @@ export default function App() {
     }, 1200);
   }, [settings.showTrafficCameras]);
 
-  // Each <Marker clusterer={clusterer} noClustererRedraw /> below mounts without individually
-  // triggering a recluster (see that prop's JSDoc in @react-google-maps/api) -- without it, a
-  // fresh batch of N markers each call the clusterer's own full recompute over the
-  // whole-growing marker list once per marker added, an O(n^2) cost that's what actually froze
-  // the tab on a real device once the fetch cap above was raised. This fires exactly one real
-  // recluster after the whole batch from a fetch is in, once React has actually mounted them.
+  // The traffic-light <Marker clusterer={clusterer} noClustererRedraw /> below mounts without
+  // individually triggering a recluster (see that prop's JSDoc in @react-google-maps/api) --
+  // without it, a fresh batch of N markers each call the clusterer's own full recompute over
+  // the whole-growing marker list once per marker added, an O(n^2) cost that's what actually
+  // froze the tab on a real device once the fetch cap above was raised. This fires exactly one
+  // real recluster after the whole batch from a fetch is in, once React has actually mounted
+  // them. Speed cameras aren't clustered anymore (see the render below), so they don't need
+  // this -- plain markers just mount/unmount through React's normal reconciliation.
   useEffect(() => {
     trafficClustererRef.current?.render();
   }, [osmTrafficLights]);
-  useEffect(() => {
-    speedCameraClustererRef.current?.render();
-  }, [osmSpeedCameras]);
 
   useEffect(() => {
     if (!selectedPlaceId || !mapRef.current) return;
@@ -1421,19 +1426,23 @@ export default function App() {
         ))}
 
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
-            (community-mapped, not an official feed). Purple camera glyph = speed camera,
-            green traffic-light glyph = signal -- compact at a city-wide view, normal size
-            browsing at street level, bigger zoomed in close or while navigating. Nearby ones
-            cluster into a numbered bubble (see clusterBubbleSvg above) until you're zoomed in
-            past street level, instead of rendering potentially dozens of individual markers
-            on top of each other in a dense area. Whole layer skippable via the "Show traffic
-            lights & speed cameras" checkbox -- both the fetch (onMapIdle) and the render
-            below check it, so turning it off actually drops the cost, not just the icons. */}
+            (community-mapped, not an official feed). Green traffic-light glyph = signal,
+            purple camera glyph = speed camera -- compact at a city-wide view, normal size
+            browsing at street level, bigger zoomed in close or while navigating. Whole layer
+            skippable via the "Show traffic lights & speed cameras" checkbox -- both the fetch
+            (onMapIdle) and the render below check it, so turning it off actually drops the
+            cost, not just the icons. */}
         {settings.showTrafficCameras && (
           <>
+            {/* Traffic lights cluster into a numbered bubble (see clusterBubbleSvg above) --
+                a single real intersection can genuinely have several separate OSM light nodes
+                (one per approach), so folding them into one bubble avoids a dense pile of
+                icons at a city-wide view. Zooming in explodes the relevant bubble(s) back into
+                those real individual lights instead of waiting until fully zoomed to street
+                level -- see trafficLightAlgorithm/isTrafficLightExplodeActive above. */}
             <GoogleMarkerClusterer
               options={{
-                algorithm: osmClusterAlgorithm(),
+                algorithm: trafficLightAlgorithm(),
                 renderer: trafficLightClusterRenderer,
                 onClusterClick: noZoomOnClusterClick,
               }}
@@ -1456,31 +1465,17 @@ export default function App() {
                 );
               }}
             </GoogleMarkerClusterer>
-            <GoogleMarkerClusterer
-              options={{
-                algorithm: osmClusterAlgorithm(),
-                renderer: speedCameraClusterRenderer,
-                onClusterClick: noZoomOnClusterClick,
-              }}
-            >
-              {(clusterer) => {
-                speedCameraClustererRef.current = clusterer;
-                return (
-                  <>
-                    {osmSpeedCameras.map((point) => (
-                      <Marker
-                        key={`sc-${point.id}`}
-                        position={{ lat: point.lat, lng: point.lng }}
-                        icon={speedCameraIcon(osmIconScale)}
-                        title="Speed camera (OpenStreetMap data)"
-                        clusterer={clusterer}
-                        noClustererRedraw
-                      />
-                    ))}
-                  </>
-                );
-              }}
-            </GoogleMarkerClusterer>
+
+            {/* Speed cameras are never clustered/bubbled -- always the real camera icon
+                itself, at every zoom level, per direct request. */}
+            {osmSpeedCameras.map((point) => (
+              <Marker
+                key={`sc-${point.id}`}
+                position={{ lat: point.lat, lng: point.lng }}
+                icon={speedCameraIcon(osmIconScale)}
+                title="Speed camera (OpenStreetMap data)"
+              />
+            ))}
           </>
         )}
 
