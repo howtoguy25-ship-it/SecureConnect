@@ -164,6 +164,13 @@ export default function App() {
   const lastSpeedLimitFetchRef = useRef<google.maps.LatLngLiteral | null>(null);
   const speedLimitFetchInFlightRef = useRef(false);
   const lastLocationSyncRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  // Drives the smoothed 3D Follow camera rotation (see the rAF loop below) -- "target" is
+  // where the GPS/manual-offset math says the camera should point right now, "displayed" is
+  // what's actually been pushed to the map, eased toward the target every frame instead of
+  // snapping straight to it. Keeps turns/GPS jitter from producing a visible whip-pan.
+  const targetHeadingRef = useRef(0);
+  const displayedHeadingRef = useRef(0);
+  const lastAppliedTiltRef = useRef<number | null>(null);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
   // Joystick-driven adjustments to the 3D Follow camera, layered on top of the
   // auto-computed travel heading/default tilt so the driver can nudge the view to
@@ -520,11 +527,49 @@ export default function App() {
         if (currentZoom !== undefined && currentZoom < 16) {
           map.setZoom(18);
         }
-        map.setTilt(manualTiltOverride ?? 67.5);
-        map.setHeading((currentHeading + manualHeadingOffset + 360) % 360);
+        // Only pushed to the map when it actually changed -- calling setTilt every single
+        // GPS tick with the same value still makes the vector renderer redo work it didn't
+        // need to, which is part of what reads as "blurry"/stuttery during a steady drive.
+        const targetTilt = manualTiltOverride ?? 67.5;
+        if (lastAppliedTiltRef.current !== targetTilt) {
+          map.setTilt(targetTilt);
+          lastAppliedTiltRef.current = targetTilt;
+        }
+        // Heading is NOT set directly here -- it only updates the target that the smoothing
+        // loop below eases the camera toward, so turns/GPS jitter ease into place instead of
+        // whip-panning to the new bearing every tick.
+        targetHeadingRef.current = (currentHeading + manualHeadingOffset + 360) % 360;
       }
     }
   }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride]);
+
+  // Smoothly eases the 3D Follow camera's heading toward targetHeadingRef every frame
+  // instead of snapping to it -- exponential ease (each frame closes ~14% of the remaining
+  // angular gap) reads as a natural, weighted turn like a real nav app instead of a jump-cut,
+  // while still catching up to a moving target within well under a second. Only runs while
+  // actually in follow mode so it doesn't burn frames the rest of the time.
+  useEffect(() => {
+    if (!navigating || navViewMode !== "follow") return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    displayedHeadingRef.current = map.getHeading() ?? targetHeadingRef.current;
+    let rafId: number;
+
+    function tick() {
+      const current = displayedHeadingRef.current;
+      const target = targetHeadingRef.current;
+      const delta = ((target - current + 540) % 360) - 180;
+      if (Math.abs(delta) > 0.05) {
+        displayedHeadingRef.current = (current + delta * 0.14 + 360) % 360;
+        map?.setHeading(displayedHeadingRef.current);
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    rafId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(rafId);
+  }, [navigating, navViewMode]);
 
   // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
   // maxspeed tags (see osmTrafficData.ts) -- refetched only after moving ~50m so a live GPS
@@ -994,7 +1039,12 @@ export default function App() {
         }}
         center={center}
         zoom={location ? 15 : 11}
-        heading={navigating && navViewMode === "follow" ? heading : 0}
+        // Left undefined during 3D Follow -- heading is applied imperatively by the smoothing
+        // rAF loop above instead. This is a *controlled* prop: feeding it the raw, unsmoothed
+        // `heading` state here would fire the library's own map.setHeading() on every GPS
+        // tick and fight the smoothing loop for control, snapping the camera right back to
+        // the unsmoothed bearing every time -- exactly the jumpiness the loop exists to fix.
+        heading={navigating && navViewMode === "follow" ? undefined : 0}
         tilt={(navigating && navViewMode === "follow") || street3DMode ? 67.5 : 0}
         mapContainerClassName="map-container"
         onZoomChanged={onZoomChanged}
