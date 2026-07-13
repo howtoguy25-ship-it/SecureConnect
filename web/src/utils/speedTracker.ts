@@ -22,13 +22,44 @@ export interface TrackedBox {
 interface InternalTrack {
   id: number;
   bbox: [number, number, number, number];
+  // Last time this track had an *actual* detection match -- not touched while a track is
+  // being carried forward through its grace period below, so it doubles as both the speed
+  // calculation's elapsed-time base and the "how long has this track been unseen" check.
   lastSeenMs: number;
   distanceM: number;
   speedKmh: number | null;
 }
 
+// How long a track survives a missed detection before its identity is given up on. A
+// partially-visible or edge-of-frame vehicle (exactly the hard case a phone camera sees a
+// lot of) can easily fail to detect for a single frame even though it's still really there --
+// without this grace period, that one missed frame used to immediately drop the track and
+// start a brand new one next frame, which meant a brand new (and possibly different)
+// classification attempt for what's actually the same vehicle. That's what was showing up as
+// the same ordinary car flip-flopping between "Police car" and "Vehicle" a moment apart.
+const TRACK_GRACE_MS = 600;
+// How much a tracked box eases toward each new raw detection instead of snapping straight to
+// it -- COCO-SSD's box coordinates jitter slightly frame to frame even for a vehicle that
+// isn't really moving relative to the frame, which reads as the box not quite "attached" to
+// the vehicle. This keeps the drawn box visually steady without meaningfully lagging behind
+// real movement.
+const BBOX_SMOOTHING = 0.55;
+
 function boxCenter(bbox: [number, number, number, number]): [number, number] {
   return [bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2];
+}
+
+function smoothBbox(
+  prev: [number, number, number, number],
+  next: [number, number, number, number],
+  alpha: number
+): [number, number, number, number] {
+  return [
+    prev[0] + (next[0] - prev[0]) * alpha,
+    prev[1] + (next[1] - prev[1]) * alpha,
+    prev[2] + (next[2] - prev[2]) * alpha,
+    prev[3] + (next[3] - prev[3]) * alpha,
+  ];
 }
 
 function estimateDistanceM(boxWidthPx: number, imageWidthPx: number): number {
@@ -48,6 +79,7 @@ export function createSpeedTracker() {
     const unmatched = new Set(tracks.map((t) => t.id));
     const result: TrackedBox[] = [];
     const nextTracks: InternalTrack[] = [];
+    const matchedIds = new Set<number>();
 
     for (const det of detections) {
       const [cx, cy] = boxCenter(det.bbox);
@@ -70,6 +102,7 @@ export function createSpeedTracker() {
 
       if (best) {
         unmatched.delete(best.id);
+        matchedIds.add(best.id);
         const dtSec = (nowMs - best.lastSeenMs) / 1000;
         if (dtSec > 0.15) {
           const closingMPerSec = (best.distanceM - distanceM) / dtSec;
@@ -79,12 +112,22 @@ export function createSpeedTracker() {
         } else {
           speedKmh = best.speedKmh;
         }
-        nextTracks.push({ id: best.id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh });
-        result.push({ id: best.id, bbox: det.bbox, score: det.score, speedKmh });
+        const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
+        nextTracks.push({ id: best.id, bbox, lastSeenMs: nowMs, distanceM, speedKmh });
+        result.push({ id: best.id, bbox, score: det.score, speedKmh });
       } else {
         const id = nextId++;
         nextTracks.push({ id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh: null });
         result.push({ id, bbox: det.bbox, score: det.score, speedKmh: null });
+      }
+    }
+
+    // Tracks that weren't matched this frame are kept alive (not shown, since there's no
+    // fresh detection to draw a box for) for a short grace period in case the miss was just
+    // one bad frame, instead of immediately discarding their identity.
+    for (const t of tracks) {
+      if (!matchedIds.has(t.id) && nowMs - t.lastSeenMs < TRACK_GRACE_MS) {
+        nextTracks.push(t);
       }
     }
 

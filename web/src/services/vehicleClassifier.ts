@@ -6,7 +6,21 @@ import * as tf from "@tensorflow/tfjs";
 // crop too small, or confidence below threshold).
 const CLASS_NAMES = ["ambulance", "firetruck", "other", "police-car"] as const;
 const MODEL_URL = `${import.meta.env.BASE_URL}models/vehicle-classifier/model.json`;
-const CONFIDENCE_THRESHOLD = 0.6;
+// Trained on ~500 images sourced from a public stock/dashcam dataset, not from real phone
+// footage shot through a windshield -- it validates well (85%) against held-out images from
+// that *same* dataset, but that doesn't measure how it holds up against a live phone camera's
+// different lighting/angle/motion-blur/compression, which is a materially different input
+// distribution a dataset this size can't fully cover. In practice that gap shows up as
+// confidently wrong guesses on ordinary cars, not just borderline uncertainty -- raising this
+// alone doesn't fully fix that (a confidently-wrong model is still confident), so it's paired
+// with the extra-strict police-specific bar below and with-vehicle-classification consistency
+// requirements in LiveVehicleDetection.tsx.
+const CONFIDENCE_THRESHOLD = 0.85;
+// A wrong "Police car" call is the costliest mistake this makes -- the one result that could
+// actually worry or distract a driver -- so it's held to a stricter bar than ambulance/
+// firetruck. Below this, a police-leaning guess is treated as inconclusive and falls back to
+// the generic "Vehicle" label instead of asserting something that specific on shakier evidence.
+const POLICE_CONFIDENCE_THRESHOLD = 0.94;
 const INPUT_SIZE = 224;
 const MIN_CROP_PX = 20;
 
@@ -76,5 +90,6 @@ export async function classifyVehicleCrop(
   });
 
   if (outcome.confidence < CONFIDENCE_THRESHOLD) return null;
+  if (outcome.label === "police-car" && outcome.confidence < POLICE_CONFIDENCE_THRESHOLD) return null;
   return outcome;
 }

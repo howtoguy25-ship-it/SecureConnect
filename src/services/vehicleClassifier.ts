@@ -6,7 +6,12 @@ import { bundledModelIO } from "@/services/modelAssetIO";
 // imperfect best guess, not a certified identification. Same model file and thresholds as
 // the web app's classifier (web/src/services/vehicleClassifier.ts).
 const CLASS_NAMES = ["ambulance", "firetruck", "other", "police-car"] as const;
-const CONFIDENCE_THRESHOLD = 0.6;
+// See web/src/services/vehicleClassifier.ts for why these are this high -- the ~500-image
+// training set (public stock/dashcam photos) validates well against its own held-out images
+// but doesn't cover live phone-camera conditions well enough, which in practice showed up as
+// confidently wrong "Police car" guesses on ordinary cars, not just borderline uncertainty.
+const CONFIDENCE_THRESHOLD = 0.85;
+const POLICE_CONFIDENCE_THRESHOLD = 0.94;
 const INPUT_SIZE = 224;
 const MIN_CROP_PX = 20;
 
@@ -89,5 +94,6 @@ export async function classifyVehicleCrop(
   });
 
   if (outcome.confidence < CONFIDENCE_THRESHOLD) return null;
+  if (outcome.label === "police-car" && outcome.confidence < POLICE_CONFIDENCE_THRESHOLD) return null;
   return outcome;
 }
