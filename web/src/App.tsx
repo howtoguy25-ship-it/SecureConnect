@@ -1051,11 +1051,21 @@ export default function App() {
         onIdle={onMapIdle}
         options={{
           disableDefaultUI: true,
-          zoomControl: true,
+          // Native zoom control is off -- custom-positioned +/- buttons are rendered below
+          // instead. The native control's zoomControlOptions.position is unreliable on
+          // vector (Map ID) maps -- it was landing bottom-right and overlapping the FAB
+          // column no matter what position was requested, so this sidesteps that entirely
+          // by taking full control of where it sits.
+          zoomControl: false,
           draggable: true,
-          // Moved off the default bottom-right so it doesn't stack on top of the FAB
-          // column (report/detection/recenter/hide-trace), which lives in that corner.
-          zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
+          // "greedy" makes a single finger always pan the map, full stop -- the default
+          // ("auto") detects when a map might be embedded in a scrollable page and falls
+          // back to requiring two fingers (showing a "use two fingers to move the map"
+          // hint) so the page itself can still scroll underneath it. This app has no page
+          // scroll to protect -- the map IS the screen -- so that fallback only got in the
+          // way and, worse, let an unclaimed one-finger drag bubble up as a native page
+          // scroll (see the html/body lockdown in App.css).
+          gestureHandling: "greedy",
           // Enables tapping businesses/POIs for the details panel (hours/rating/reviews) --
           // see the onClick handler below, which still lets placement/zoom modes take
           // priority over a POI tap.
@@ -1157,6 +1167,27 @@ export default function App() {
           <DirectionsRenderer directions={directions} options={{ suppressMarkers: true }} />
         )}
       </GoogleMap>
+
+      <div className="zoom-control">
+        <button
+          onClick={() => {
+            const map = mapRef.current;
+            if (map) map.setZoom((map.getZoom() ?? 15) + 1);
+          }}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={() => {
+            const map = mapRef.current;
+            if (map) map.setZoom((map.getZoom() ?? 15) - 1);
+          }}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+      </div>
 
       {!chromeHidden && (
         <button

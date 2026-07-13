@@ -39,6 +39,27 @@
   }
 }
 
+/* Locks the whole page in place so a one-finger touch drag can never scroll/bounce the
+   entire app (search bar, panels, everything) instead of just panning the map underneath it
+   -- iOS Safari can rubber-band-scroll the page on an untrapped touchmove even when nothing
+   on it visibly overflows, this is the standard hard block for that. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
 .app-root {
   position: relative;
   width: 100vw;
@@ -112,28 +133,35 @@
   position: absolute;
   top: 76px;
   left: 16px;
+  max-width: 230px;
   background: var(--surface);
-  padding: 10px 14px;
-  border-radius: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   z-index: 10;
   font-family: system-ui, sans-serif;
-  font-size: 13px;
+  font-size: 11px;
   color: var(--surface-text-muted);
 }
 
 .radius-control label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+}
+
+.radius-control input[type="range"] {
+  width: 100%;
+  margin: 2px 0 0;
 }
 
 .radius-checkbox {
   flex-direction: row !important;
   align-items: center;
-  gap: 6px !important;
-  margin-top: 8px;
-  font-size: 12px;
+  gap: 5px !important;
+  margin-top: 6px;
+  font-size: 10.5px;
+  line-height: 1.3;
 }
 
 .street3d-exit {
@@ -196,6 +224,38 @@
 .fab-quaternary.fab-toggle-active {
   background: #111827;
   color: #fff;
+}
+
+/* Custom zoom +/- control, replacing the native one -- see the comment in App.tsx's map
+   options for why (its position was unreliable on vector maps and kept landing on top of
+   the FAB column). Bottom-left keeps it clear of the FAB stack (right) and the speed-limit
+   sign (mid-left) at the same time. */
+.zoom-control {
+  position: absolute;
+  left: 16px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.zoom-control button {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: var(--fab-surface);
+  color: var(--fab-icon);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoom-control button:first-child {
+  border-bottom: 1px solid var(--surface-border);
 }
 
 .about-button {
