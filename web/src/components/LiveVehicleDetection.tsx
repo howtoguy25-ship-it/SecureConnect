@@ -31,6 +31,12 @@ const VEHICLE_CLASSES = new Set(["car", "truck", "bus", "motorcycle"]);
 // vehicle from a phone/laptop camera.
 const MIN_DETECT_INTERVAL_MS = 120;
 
+// Consecutive detection passes (not wall-clock time, since passes are already throttled
+// above) a vehicle needs to be matched to the same track id before it's shown as "locked
+// on" -- avoids the lock indicator flickering onto a box that only appeared for a frame
+// or two. ~6 passes at the 120ms throttle above is roughly 700ms of stable tracking.
+const LOCK_FRAMES_THRESHOLD = 6;
+
 const CLASS_DISPLAY_NAMES: Record<VehicleClass, string> = {
   ambulance: "Ambulance",
   firetruck: "Fire truck",
@@ -172,6 +178,42 @@ function drawGuideRibbon(
   ctx.restore();
 }
 
+// Four corner brackets drawn just inside a tracked box's own corners, independent of the
+// box's own outline color -- reads as a distinct "locked on" state for whichever vehicles
+// have earned it (see LOCK_FRAMES_THRESHOLD) without touching the vehicle-type box color
+// itself. Purely a function of that one box's own coordinates, so drawing it for several
+// vehicles at once never overlaps or interferes with any other vehicle's box.
+function drawLockBrackets(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const len = Math.min(w, h) * 0.22;
+  ctx.strokeStyle = "#4ADE80";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(x, y + len);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + len, y);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x + w - len, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + len);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x + w, y + h - len);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + w - len, y + h);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x + len, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.lineTo(x, y + h - len);
+  ctx.stroke();
+}
+
 export function LiveVehicleDetection({ onClose, navContext }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -191,6 +233,9 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
   // via null) for the rest of its time in frame.
   const plateTextRef = useRef(new Map<number, string | null>());
   const platesReadingRef = useRef(new Set<number>());
+  // Consecutive-detection-pass counter per track id, backing the "locked on" indicator --
+  // see LOCK_FRAMES_THRESHOLD above.
+  const lockFramesRef = useRef(new Map<number, number>());
   // Read inside the detect loop's closure without re-subscribing the effect on every nav tick.
   const navContextRef = useRef(navContext);
   navContextRef.current = navContext;
@@ -284,7 +329,14 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      model.detect(video).then((predictions) => {
+      // Raised from the library default of 20 -- that cap is shared across every COCO class
+      // detected in frame (not just vehicles), so a busy/"smushed" multi-car scene can starve
+      // out slots that would otherwise be a real vehicle box. minScore is intentionally left
+      // at the library default: COCO-SSD's own NMS step reuses that same number as both the
+      // confidence bar AND the overlap-tolerance between boxes, so raising it to merge tightly
+      // packed cars less aggressively would also filter out real detections -- not a knob that
+      // can be tuned to only help, so it's left alone rather than traded against itself.
+      model.detect(video, 30).then((predictions) => {
         const vehicleDetections = predictions
           .filter((p) => VEHICLE_CLASSES.has(p.class))
           .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score }));
@@ -293,6 +345,21 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         pruneLightbarTracks(liveTrackIds);
         for (const id of plateTextRef.current.keys()) {
           if (!liveTrackIds.has(id)) plateTextRef.current.delete(id);
+        }
+        for (const id of lockFramesRef.current.keys()) {
+          if (!liveTrackIds.has(id)) lockFramesRef.current.delete(id);
+        }
+
+        // Nearest vehicle = largest apparent width = smallest pinhole-model distance estimate
+        // (see speedTracker.ts). Computed once per pass rather than per-box below so every
+        // box's "am I the closest" check is just an id comparison, not a fresh scan.
+        let closestId: number | null = null;
+        let closestDistanceM = Infinity;
+        for (const box of tracked) {
+          if (box.distanceM < closestDistanceM) {
+            closestDistanceM = box.distanceM;
+            closestId = box.id;
+          }
         }
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -305,6 +372,14 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
 
         for (const box of tracked) {
           const [x, y, w, h] = box.bbox;
+
+          // Every vehicle in frame accrues its own lock count independently off its own track
+          // id, so several cars lock on (or lose lock, if one drops out and its id is pruned
+          // above) at the same time without any of them affecting each other.
+          const lockFrames = (lockFramesRef.current.get(box.id) ?? 0) + 1;
+          lockFramesRef.current.set(box.id, lockFrames);
+          const isLocked = lockFrames >= LOCK_FRAMES_THRESHOLD;
+          const isClosest = box.id === closestId && tracked.length > 1;
 
           if (!classificationsRef.current.has(box.id) && !classifyingRef.current.has(box.id)) {
             classifyingRef.current.add(box.id);
@@ -329,6 +404,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           ctx.strokeStyle = boxColor;
           ctx.lineWidth = 3;
           ctx.strokeRect(x, y, w, h);
+          if (isLocked) drawLockBrackets(ctx, x, y, w, h);
 
           const speedText =
             box.speedKmh === null
@@ -338,11 +414,12 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
                 : box.speedKmh < -3
                   ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
                   : " · steady";
+          const prefix = (isClosest ? "🎯 Closest · " : "") + (isLocked ? "🔒 " : "");
           const label = isEmergencyVehicle
-            ? `${CLASS_DISPLAY_NAMES[classification.label]} ${Math.round(classification.confidence * 100)}%${speedText}`
+            ? `${prefix}${CLASS_DISPLAY_NAMES[classification.label]} ${Math.round(classification.confidence * 100)}%${speedText}`
             : isUnmarkedCandidate
-              ? `Unmarked police? (lights active)${speedText}`
-              : `Vehicle ${Math.round(box.score * 100)}%${speedText}`;
+              ? `${prefix}Unmarked police? (lights active)${speedText}`
+              : `${prefix}Vehicle ${Math.round(box.score * 100)}%${speedText}`;
           ctx.font = "16px system-ui, sans-serif";
           const textWidth = ctx.measureText(label).width;
           ctx.fillStyle = boxColor;
@@ -389,10 +466,18 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
             if (plateText) {
               ctx.font = "bold 13px monospace";
               const plateTextWidth = ctx.measureText(plateText).width;
+              const labelW = plateTextWidth + 8;
+              const labelH = 18;
+              // Beside the plate box (to its right), vertically centered on it -- falls back
+              // to the left side instead if there isn't room to the right, so the reading
+              // never gets clipped off the edge of the canvas for a plate near the frame edge.
+              const fitsRight = plate.x + plate.w + 4 + labelW <= canvas.width;
+              const labelX = fitsRight ? plate.x + plate.w + 4 : Math.max(0, plate.x - 4 - labelW);
+              const labelY = Math.max(0, Math.min(canvas.height - labelH, plate.y + plate.h / 2 - labelH / 2));
               ctx.fillStyle = "#22D3EE";
-              ctx.fillRect(plate.x, Math.max(0, plate.y - 18), plateTextWidth + 8, 18);
+              ctx.fillRect(labelX, labelY, labelW, labelH);
               ctx.fillStyle = "#111827";
-              ctx.fillText(plateText, plate.x + 4, Math.max(13, plate.y - 5));
+              ctx.fillText(plateText, labelX + 4, labelY + 13);
             }
           }
         }
@@ -441,7 +526,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         )}
         {status === "running" && !navContext && !infoDismissed && (
           <>
-            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset and held to a stricter confidence bar for "Police car" specifically than the other labels, since that's the one result worth being extra conservative about — still a real but imperfect guess, never a certified identification or a guarantee. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate. A small cyan box also estimates where each vehicle's number plate is, and attempts a real on-device text read of it (shown above the box when successful) — for detection display only, one attempt per vehicle, never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number — especially from a moving vehicle at an angle.`}
+            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset and held to a stricter confidence bar for "Police car" specifically than the other labels, since that's the one result worth being extra conservative about — still a real but imperfect guess, never a certified identification or a guarantee. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate. Each vehicle tracked steadily for under a second gets green corner brackets (🔒) showing it's locked on, independently of every other vehicle in frame, and the nearest one is marked 🎯 Closest. A small cyan box also estimates where each vehicle's number plate is, and attempts a real on-device text read of it (shown beside the box when successful) — for detection display only, one attempt per vehicle, never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number — especially from a moving vehicle at an angle.`}
             <button className="detection-banner-dismiss" onClick={dismissInfo}>
               Got it, don't show this again
             </button>

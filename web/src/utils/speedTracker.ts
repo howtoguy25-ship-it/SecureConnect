@@ -17,6 +17,9 @@ export interface TrackedBox {
   bbox: [number, number, number, number];
   score: number;
   speedKmh: number | null;
+  // Same pinhole-model estimate used for speed above, exposed directly so callers (e.g. a
+  // "closest vehicle" indicator) don't need to re-derive it from bbox width themselves.
+  distanceM: number;
 }
 
 interface InternalTrack {
@@ -114,11 +117,11 @@ export function createSpeedTracker() {
         }
         const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
         nextTracks.push({ id: best.id, bbox, lastSeenMs: nowMs, distanceM, speedKmh });
-        result.push({ id: best.id, bbox, score: det.score, speedKmh });
+        result.push({ id: best.id, bbox, score: det.score, speedKmh, distanceM });
       } else {
         const id = nextId++;
         nextTracks.push({ id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh: null });
-        result.push({ id, bbox: det.bbox, score: det.score, speedKmh: null });
+        result.push({ id, bbox: det.bbox, score: det.score, speedKmh: null, distanceM });
       }
     }
 
