@@ -6,14 +6,7 @@ import {
   Autocomplete,
   DirectionsRenderer,
   Circle,
-  GoogleMarkerClusterer,
 } from "@react-google-maps/api";
-import {
-  SuperClusterAlgorithm,
-  type Algorithm,
-  type Renderer,
-  type MarkerClusterer as GoogleMarkerClustererInstance,
-} from "@googlemaps/markerclusterer";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
 import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
@@ -160,90 +153,6 @@ function trafficLightIcon(scale: number): google.maps.Icon {
   return icon;
 }
 
-// Nearby OSM markers collapse into a single numbered bubble instead of rendering every one
-// individually -- widening the layer's coverage to a whole metro area (see OSM_LAYER_MIN_ZOOM
-// below) means a dense city block can genuinely have 30-plus signals bunched together, and
-// rendering that many live map overlays at once is real, measurable render/interaction cost,
-// not just visual clutter. This is the standard fix for exactly that (Google's own
-// MarkerClusterer), not a workaround -- clusters split back apart into individual markers
-// automatically once you zoom in close enough to tell them apart anyway.
-//
-// Uses @googlemaps/markerclusterer directly (the actively-maintained library, imported here as
-// GoogleMarkerClusterer) rather than @react-google-maps/api's own bundled `MarkerClusterer`
-// component -- that one wraps a years-unmaintained legacy clustering algorithm that depends on
-// the map's pixel projection being ready at the exact moment each marker is added, and in
-// production that reliably produced zero clustering at all (every marker landing in its own
-// solo "cluster", which just renders as the plain unclustered icon) instead of an intermittent
-// glitch. The modern library clusters directly off lat/lng via a KD-tree (no projection-timing
-// dependency) and is what Google's own docs now point to.
-function clusterBubbleSvg(color: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
-    <circle cx="22" cy="22" r="19" fill="${color}" fill-opacity="0.85" stroke="#ffffff" stroke-width="2.5"/>
-  </svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-// The count is always printed on the bubble itself at every zoom level -- clicking a cluster
-// no longer zooms the map in (see noZoomOnClusterClick below), so reading the count was never
-// supposed to require zooming or tapping through to individual markers in the first place.
-const clusterIconCache = new Map<string, google.maps.Icon>();
-
-function makeClusterRenderer(color: string): Renderer {
-  return {
-    render: ({ count, position }) => {
-      let icon = clusterIconCache.get(color);
-      if (!icon) {
-        icon = {
-          url: clusterBubbleSvg(color),
-          scaledSize: new google.maps.Size(44, 44),
-          anchor: new google.maps.Point(22, 22),
-        };
-        clusterIconCache.set(color, icon);
-      }
-      return new google.maps.Marker({
-        position,
-        icon,
-        label: { text: String(count), color: "#ffffff", fontSize: "13px", fontWeight: "700" },
-        zIndex: 900 + count,
-      });
-    },
-  };
-}
-
-// Overrides the library's default click handler, which zooms the map to fit the cluster's
-// bounds -- the count is already printed right on the bubble, so there was never anything a
-// click needed to reveal by zooming in for you.
-function noZoomOnClusterClick() {}
-
-const trafficLightClusterRenderer = makeClusterRenderer("#0D9488");
-
-// A zoom-IN gesture (not zoom-out, see onZoomChanged) makes traffic-light clusters "explode"
-// into their real individual lights for 10 seconds -- an intersection realistically has one
-// OSM node per approach/pole, not one, so this shows each of those separately (matching how
-// they actually did before clustering existed) instead of staying folded into one numbered
-// bubble the instant you zoom in even a little. That held-open state survives zooming back out
-// again within the window, however far ("no matter the height"), then reverts back to normal
-// clustering on its own once the 10 seconds elapse.
-const TRAFFIC_LIGHT_EXPLODE_MS = 10000;
-let trafficLightExplodeUntilMs = 0;
-function isTrafficLightExplodeActive(): boolean {
-  return performance.now() < trafficLightExplodeUntilMs;
-}
-
-// Two real SuperCluster instances, not one instance reconfigured on the fly -- maxZoom governs
-// the zoom above which a point stops clustering and shows individually, so maxZoom: 0 means
-// "never cluster" at any real zoom this layer is ever visible at (it only renders from zoom 11
-// up, see OSM_LAYER_MIN_ZOOM below). Which instance actually runs is decided fresh on every
-// calculate() call, so toggling the shared flag above takes effect the next time the clusterer
-// recomputes, without needing to tear down and rebuild the whole clusterer.
-function trafficLightAlgorithm(): Algorithm {
-  const clustered = new SuperClusterAlgorithm({ radius: 60, maxZoom: 16 });
-  const exploded = new SuperClusterAlgorithm({ radius: 60, maxZoom: 0 });
-  return {
-    calculate: (input) => (isTrafficLightExplodeActive() ? exploded : clustered).calculate(input),
-  };
-}
-
 // A real, classic map-pin glyph for the destination -- distinct from every other marker on
 // the map (alerts, current location, OSM layer) so it's unambiguous which point you're
 // actually driving to, whatever kind of place it is (house, warehouse, carpark, park...).
@@ -287,7 +196,8 @@ export default function App() {
     setFixedZone,
     setHideDetectionTrace,
     setTheme,
-    setShowTrafficCameras,
+    setShowTrafficLights,
+    setShowSpeedCameras,
   } = useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -406,18 +316,6 @@ export default function App() {
   const [osmSpeedCameras, setOsmSpeedCameras] = useState<OsmPoint[]>([]);
   const osmFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOsmBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
-  // Captured from the GoogleMarkerClusterer render-prop below so the effects further down can
-  // trigger exactly one recluster after a whole new batch of markers mounts, instead of each
-  // marker triggering its own -- see the effects and noClustererRedraw usage below for why.
-  // Speed cameras aren't clustered at all anymore (always shown as individual icons), so only
-  // traffic lights need this.
-  const trafficClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
-  // Last seen zoom level, so onZoomChanged can tell a genuine zoom-IN gesture apart from a
-  // zoom-out (only zooming in should trigger the traffic-light explode window below).
-  const lastZoomRef = useRef<number | null>(null);
-  // Cancels/reschedules the "revert traffic lights back to clustered bubbles" timer -- each new
-  // zoom-in restarts the same 10s window rather than stacking timers.
-  const trafficLightExplodeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Real satellite imagery toggle -- "hybrid" (not plain "satellite") so road/place names stay
   // legible over the photo, matching what Google's own Maps app actually shows under its
@@ -887,20 +785,6 @@ export default function App() {
     const zoom = map.getZoom();
     if (zoom === undefined) return;
 
-    // A genuine zoom-IN gesture (not zoom-out) explodes traffic-light clusters into their real
-    // individual lights for 10 seconds, holding that open state even through a subsequent
-    // zoom-out within the window, then reverting back to normal clustering on its own once the
-    // window elapses. See isTrafficLightExplodeActive/trafficLightAlgorithm above.
-    if (lastZoomRef.current !== null && zoom > lastZoomRef.current) {
-      trafficLightExplodeUntilMs = performance.now() + TRAFFIC_LIGHT_EXPLODE_MS;
-      trafficClustererRef.current?.render();
-      if (trafficLightExplodeTimeoutRef.current) clearTimeout(trafficLightExplodeTimeoutRef.current);
-      trafficLightExplodeTimeoutRef.current = setTimeout(() => {
-        trafficClustererRef.current?.render();
-      }, TRAFFIC_LIGHT_EXPLODE_MS);
-    }
-    lastZoomRef.current = zoom;
-
     // Rounded to whole levels -- the OSM marker icon sizing below reads this, and only
     // needs to change a handful of times across a zoom gesture, not on every fractional
     // in-between value a pinch can report.
@@ -924,9 +808,11 @@ export default function App() {
   const onMapIdle = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-    // Skip the fetch entirely (not just hide the results) when the layer's turned off --
-    // no Overpass request, no markers, no clustering cost at all.
-    if (!settings.showTrafficCameras) return;
+    // Skip the fetch entirely (not just hide the results) when both layers are turned off --
+    // no Overpass request, no markers at all. If either is on, the fetch still runs as one
+    // combined request (it's a single query for both node types); each layer only renders
+    // its own markers based on its own toggle below.
+    if (!settings.showTrafficLights && !settings.showSpeedCameras) return;
     const zoom = map.getZoom();
     if (zoom === undefined || zoom < OSM_LAYER_MIN_ZOOM) return;
     const bounds = map.getBounds();
@@ -966,19 +852,7 @@ export default function App() {
         })
         .catch((err) => console.warn("[osm] traffic data fetch failed", err));
     }, 1200);
-  }, [settings.showTrafficCameras]);
-
-  // The traffic-light <Marker clusterer={clusterer} noClustererRedraw /> below mounts without
-  // individually triggering a recluster (see that prop's JSDoc in @react-google-maps/api) --
-  // without it, a fresh batch of N markers each call the clusterer's own full recompute over
-  // the whole-growing marker list once per marker added, an O(n^2) cost that's what actually
-  // froze the tab on a real device once the fetch cap above was raised. This fires exactly one
-  // real recluster after the whole batch from a fetch is in, once React has actually mounted
-  // them. Speed cameras aren't clustered anymore (see the render below), so they don't need
-  // this -- plain markers just mount/unmount through React's normal reconciliation.
-  useEffect(() => {
-    trafficClustererRef.current?.render();
-  }, [osmTrafficLights]);
+  }, [settings.showTrafficLights, settings.showSpeedCameras]);
 
   useEffect(() => {
     if (!selectedPlaceId || !mapRef.current) return;
@@ -1437,63 +1311,37 @@ export default function App() {
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
             (community-mapped, not an official feed). Green traffic-light glyph = signal,
             purple camera glyph = speed camera -- compact at a city-wide view, normal size
-            browsing at street level, bigger zoomed in close or while navigating. Whole layer
-            skippable via the "Show traffic lights & speed cameras" checkbox -- both the fetch
-            (onMapIdle) and the render below check it, so turning it off actually drops the
-            cost, not just the icons. */}
-        {settings.showTrafficCameras && (
-          <>
-            {/* Traffic lights cluster into a numbered bubble (see clusterBubbleSvg above) --
-                a single real intersection can genuinely have several separate OSM light nodes
-                (one per approach), so folding them into one bubble avoids a dense pile of
-                icons at a city-wide view. Zooming in explodes the relevant bubble(s) back into
-                those real individual lights instead of waiting until fully zoomed to street
-                level -- see trafficLightAlgorithm/isTrafficLightExplodeActive above. */}
-            <GoogleMarkerClusterer
-              options={{
-                algorithm: trafficLightAlgorithm(),
-                renderer: trafficLightClusterRenderer,
-                onClusterClick: noZoomOnClusterClick,
-              }}
-            >
-              {(clusterer) => {
-                trafficClustererRef.current = clusterer;
-                return (
-                  <>
-                    {osmTrafficLights.map((point) => (
-                      <Marker
-                        key={`tl-${point.id}`}
-                        position={{ lat: point.lat, lng: point.lng }}
-                        icon={trafficLightIcon(osmIconScale)}
-                        title="Traffic signal (OpenStreetMap data)"
-                        clusterer={clusterer}
-                        noClustererRedraw
-                        // Explicit, high zIndex -- markers always sit above the base map tiles
-                        // regardless of type in normal Google Maps behavior, but this makes
-                        // that non-negotiable rather than assumed, specifically because
-                        // satellite/hybrid imagery is a much busier, more visually competing
-                        // background than the plain roadmap this was originally tuned against.
-                        zIndex={500}
-                      />
-                    ))}
-                  </>
-                );
-              }}
-            </GoogleMarkerClusterer>
+            browsing at street level, bigger zoomed in close or while navigating. Each type has
+            its own independent on/off toggle -- both the fetch (onMapIdle) and the render here
+            check the relevant one, so turning either off actually drops its cost, not just its
+            icons. Neither type is ever clustered -- always the real individual icon itself, at
+            every zoom level, per direct request. */}
+        {settings.showTrafficLights &&
+          osmTrafficLights.map((point) => (
+            <Marker
+              key={`tl-${point.id}`}
+              position={{ lat: point.lat, lng: point.lng }}
+              icon={trafficLightIcon(osmIconScale)}
+              title="Traffic signal (OpenStreetMap data)"
+              // Explicit, high zIndex -- markers always sit above the base map tiles
+              // regardless of type in normal Google Maps behavior, but this makes
+              // that non-negotiable rather than assumed, specifically because
+              // satellite/hybrid imagery is a much busier, more visually competing
+              // background than the plain roadmap this was originally tuned against.
+              zIndex={500}
+            />
+          ))}
 
-            {/* Speed cameras are never clustered/bubbled -- always the real camera icon
-                itself, at every zoom level, per direct request. */}
-            {osmSpeedCameras.map((point) => (
-              <Marker
-                key={`sc-${point.id}`}
-                position={{ lat: point.lat, lng: point.lng }}
-                icon={speedCameraIcon(osmIconScale)}
-                title="Speed camera (OpenStreetMap data)"
-                zIndex={500}
-              />
-            ))}
-          </>
-        )}
+        {settings.showSpeedCameras &&
+          osmSpeedCameras.map((point) => (
+            <Marker
+              key={`sc-${point.id}`}
+              position={{ lat: point.lat, lng: point.lng }}
+              icon={speedCameraIcon(osmIconScale)}
+              title="Speed camera (OpenStreetMap data)"
+              zIndex={500}
+            />
+          ))}
 
         {pendingLocation && (
           <Marker
@@ -1642,10 +1490,18 @@ export default function App() {
               <label className="radius-checkbox">
                 <input
                   type="checkbox"
-                  checked={settings.showTrafficCameras}
-                  onChange={(e) => setShowTrafficCameras(e.target.checked)}
+                  checked={settings.showTrafficLights}
+                  onChange={(e) => setShowTrafficLights(e.target.checked)}
                 />
-                Show traffic lights &amp; speed cameras
+                Show traffic lights
+              </label>
+              <label className="radius-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settings.showSpeedCameras}
+                  onChange={(e) => setShowSpeedCameras(e.target.checked)}
+                />
+                Show speed cameras
               </label>
             </>
           )}
