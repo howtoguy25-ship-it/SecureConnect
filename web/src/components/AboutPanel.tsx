@@ -6,14 +6,12 @@ import type { WebSettings } from "@/hooks/useSettings";
 import "./AboutPanel.css";
 
 const APP_VERSION = "1.0.0";
-// Temporarily hidden -- Apple's Sign in with Apple servers are returning invalid_client
-// despite the Firebase/Apple Developer config now looking correct (key, Team ID, Key ID,
-// Primary App ID, domains, and return URLs all verified). Newly (re)configured Sign in with
-// Apple setups can take anywhere from 30 minutes to a few hours to actually propagate on
-// Apple's end, so hiding the button avoids showing a broken option in the meantime rather
-// than users hitting a dead-end error. Flip back to true once it's confirmed working again --
-// nothing on the Apple/Firebase side needs to change for that, this is purely a UI toggle.
-const APPLE_SIGNIN_ENABLED = false;
+// Re-enabled -- Apple Developer's Services ID (com.trackline.web.signin) Web Authentication
+// Configuration (Primary App ID, domains, return URL) has been re-verified saved correctly
+// via desktop-site mode after the mobile-site "tag" inputs were silently failing to persist.
+// If Apple's invalid_client error resurfaces, that's a sign this genuinely still needs more
+// propagation time on Apple's end rather than another config change.
+const APPLE_SIGNIN_ENABLED = true;
 
 type Tab = "account" | "about";
 
