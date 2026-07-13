@@ -100,7 +100,12 @@ body {
   position: absolute;
   top: 16px;
   left: 16px;
-  right: 16px;
+  /* Leaves room for the about/sign-in button (40px wide + 16px gap) instead of the search
+     bar's own right edge landing exactly on top of it. On any screen narrower than about
+     456px -- i.e. essentially every phone -- max-width alone didn't stop the two from
+     overlapping, and since the search bar renders after the button in the DOM at the same
+     z-index, it painted over it completely, making the button vanish on mobile. */
+  right: 64px;
   max-width: 420px;
   z-index: 10;
   transition: top 0.15s ease;
@@ -273,7 +278,10 @@ body {
   background: var(--fab-surface);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   padding: 0;
-  z-index: 10;
+  /* Above the search bar's z-index (10) as a second line of defense -- the real fix is the
+     top-bar's `right` inset above, but this way the button stays visible even if something
+     else ever ends up sharing this corner. */
+  z-index: 11;
   overflow: hidden;
 }
 

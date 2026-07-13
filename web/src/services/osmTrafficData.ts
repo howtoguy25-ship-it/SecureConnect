@@ -36,7 +36,7 @@ export async function fetchOsmTrafficData(bounds: google.maps.LatLngBounds): Pro
   const bbox = `${sw.lat()},${sw.lng()},${ne.lat()},${ne.lng()}`;
 
   const query = `
-    [out:json][timeout:20];
+    [out:json][timeout:30];
     (
       node["highway"="traffic_signals"](${bbox});
       node["highway"="speed_camera"](${bbox});

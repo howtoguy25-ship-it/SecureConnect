@@ -5,6 +5,7 @@ import {
   Marker,
   Autocomplete,
   DirectionsRenderer,
+  Circle,
 } from "@react-google-maps/api";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
@@ -152,17 +153,34 @@ function trafficLightIcon(scale: number): google.maps.Icon {
   return icon;
 }
 
-// Fetches (and shows) the OSM traffic-light/speed-camera layer starting from a somewhat
-// wider zoom than before (13 vs. the old 15), since it's meant to be available anywhere in
-// Australia you zoom into, not just tight city blocks. Deliberately not dropped further than
-// this -- every zoom level out roughly doubles the query area in each direction, so going
-// much lower risks the exact map lag being fixed elsewhere in this same pass (a bigger
-// Overpass query area means a slower fetch and more markers to render). A literal single
-// all-of-Australia fetch isn't practical at all -- that's tens of thousands of nodes in one
-// request, which would time out against Overpass's public API and stall the browser
-// rendering them, so this stays viewport-based rather than ever trying to load the whole
-// country in one shot.
-const OSM_LAYER_MIN_ZOOM = 13;
+// A real, classic map-pin glyph for the destination -- distinct from every other marker on
+// the map (alerts, current location, OSM layer) so it's unambiguous which point you're
+// actually driving to, whatever kind of place it is (house, warehouse, carpark, park...).
+let destinationIconCache: google.maps.Icon | null = null;
+function destinationIcon(): google.maps.Icon {
+  if (!destinationIconCache) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="46" viewBox="0 0 32 44">
+      <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 28 16 28s16-16 16-28C32 7.2 24.8 0 16 0z" fill="#16A34A" stroke="#ffffff" stroke-width="2"/>
+      <circle cx="16" cy="16" r="6.5" fill="#ffffff"/>
+    </svg>`;
+    destinationIconCache = {
+      url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+      scaledSize: new google.maps.Size(34, 46),
+      anchor: new google.maps.Point(17, 46),
+    };
+  }
+  return destinationIconCache;
+}
+
+// Fetches (and shows) the OSM traffic-light/speed-camera layer from a city-wide zoom level
+// on down -- zoom 11 comfortably fits an entire metro area like greater Sydney in view at
+// once, so panning/zooming around a whole city surfaces its cameras/signals, not just a
+// tight street-level block. Still viewport-based (whatever's currently on screen), not a
+// single unbounded fetch -- a literal all-of-Australia-at-once request would be tens of
+// thousands of nodes in one call and would time out against Overpass's public API, so it
+// stays capped to "however wide the visible map currently is", same debounced/cached
+// fetching as before, just triggered from further out.
+const OSM_LAYER_MIN_ZOOM = 11;
 
 export default function App() {
   const { isLoaded } = useJsApiLoader({
@@ -231,6 +249,15 @@ export default function App() {
   const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
   const lastSpeedLimitFetchRef = useRef<google.maps.LatLngLiteral | null>(null);
   const speedLimitFetchInFlightRef = useRef(false);
+  // Ticks while navigating purely to force a re-render every ~150ms so the destination
+  // highlight's pulse (a real, computed Math.sin wave, read at render time below) animates
+  // smoothly instead of only updating whenever something else happens to re-render the app.
+  const [, setPulseTick] = useState(0);
+  useEffect(() => {
+    if (!navigating) return;
+    const id = setInterval(() => setPulseTick((t) => t + 1), 150);
+    return () => clearInterval(id);
+  }, [navigating]);
   const lastLocationSyncRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
   // Drives the smoothed 3D Follow camera rotation (see the rAF loop below) -- "target" is
   // where the GPS/manual-offset math says the camera should point right now, "displayed" is
@@ -258,6 +285,11 @@ export default function App() {
   // single click while already at max zoom (see onClick below) just zooms back out again,
   // no priming/arming step needed.
   const [maxZoomHere, setMaxZoomHere] = useState<number | null>(null);
+  // Drives the OSM traffic-light/speed-camera icon size below -- compact at a city-wide
+  // view (so hundreds of markers don't clutter it), normal size at street level, bigger
+  // once you're zoomed in close. Only updates on whole zoom levels (see onZoomChanged),
+  // not continuously during a pinch gesture.
+  const [mapZoomLevel, setMapZoomLevel] = useState<number | null>(null);
   const [show3DPrompt, setShow3DPrompt] = useState(false);
   const [street3DMode, setStreet3DMode] = useState(false);
   const promptedAtMaxZoomRef = useRef(false);
@@ -704,10 +736,15 @@ export default function App() {
 
   const onZoomChanged = useCallback(() => {
     const map = mapRef.current;
-    if (!map || maxZoomHere === null) return;
+    if (!map) return;
     const zoom = map.getZoom();
     if (zoom === undefined) return;
+    // Rounded to whole levels -- the OSM marker icon sizing below reads this, and only
+    // needs to change a handful of times across a zoom gesture, not on every fractional
+    // in-between value a pinch can report.
+    setMapZoomLevel(Math.round(zoom));
 
+    if (maxZoomHere === null) return;
     if (zoom >= maxZoomHere) {
       if (!promptedAtMaxZoomRef.current && !street3DMode) {
         promptedAtMaxZoomRef.current = true;
@@ -749,10 +786,11 @@ export default function App() {
       lastOsmBoundsRef.current = paddedBounds;
       fetchOsmTrafficData(paddedBounds)
         .then(({ trafficLights, speedCameras }) => {
-          // Capped defensively -- a very dense city area could otherwise return enough
-          // markers to noticeably slow down rendering.
-          setOsmTrafficLights(trafficLights.slice(0, 400));
-          setOsmSpeedCameras(speedCameras.slice(0, 200));
+          // Capped defensively -- raised well above the old street-level limits now that a
+          // whole metro area's worth of results can come back in one fetch, but still a hard
+          // ceiling so an extreme case can't hand hundreds of thousands of markers to render.
+          setOsmTrafficLights(trafficLights.slice(0, 1500));
+          setOsmSpeedCameras(speedCameras.slice(0, 600));
         })
         .catch((err) => console.warn("[osm] traffic data fetch failed", err));
     }, 1200);
@@ -1109,6 +1147,12 @@ export default function App() {
   // screen -- whichever one is showing, the search bar/about button/radius control shift
   // down out of its way so nothing overlaps.
   const topBannerActive = bannerVisible || show3DPrompt;
+  // Compact at a city-wide view (a whole metro area's worth of markers shouldn't clutter
+  // it), normal size at ordinary street-browsing zoom, bigger once zoomed in close --
+  // navigating always gets at least the "zoomed in" size, since visibility while actually
+  // driving matters more than decluttering.
+  const osmZoomTierScale = mapZoomLevel === null ? 1 : mapZoomLevel >= 17 ? 1.3 : mapZoomLevel >= 14 ? 1 : 0.7;
+  const osmIconScale = navigating ? Math.max(osmZoomTierScale, 1.4) : osmZoomTierScale;
 
   return (
     <div className="app-root">
@@ -1207,14 +1251,13 @@ export default function App() {
 
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
             (community-mapped, not an official feed). Purple camera glyph = speed camera,
-            green traffic-light glyph = signal -- sized up while actively navigating so
-            they're easier to spot at a glance while driving, smaller otherwise since the
-            layer now shows across a wider zoom range than before. */}
+            green traffic-light glyph = signal -- compact at a city-wide view, normal size
+            browsing at street level, bigger zoomed in close or while navigating. */}
         {osmTrafficLights.map((point) => (
           <Marker
             key={`tl-${point.id}`}
             position={{ lat: point.lat, lng: point.lng }}
-            icon={trafficLightIcon(navigating ? 1.5 : 1)}
+            icon={trafficLightIcon(osmIconScale)}
             title="Traffic signal (OpenStreetMap data)"
           />
         ))}
@@ -1222,7 +1265,7 @@ export default function App() {
           <Marker
             key={`sc-${point.id}`}
             position={{ lat: point.lat, lng: point.lng }}
-            icon={speedCameraIcon(navigating ? 1.5 : 1)}
+            icon={speedCameraIcon(osmIconScale)}
             title="Speed camera (OpenStreetMap data)"
           />
         ))}
@@ -1251,6 +1294,28 @@ export default function App() {
 
         {directions && (
           <DirectionsRenderer directions={directions} options={{ suppressMarkers: true }} />
+        )}
+
+        {/* A real pin so you can actually see which building/spot you're headed to -- house,
+            warehouse, carpark, park, whatever it is -- instead of the route just ending with
+            nothing marking it. The green ring is a genuine live-computed pulse (not a static
+            image), and grows visually more prominent as you approach purely because 3D
+            Follow zooms in tighter the whole drive, without needing to know the destination's
+            actual building footprint (not available through this API). */}
+        {destination && <Marker position={destination} icon={destinationIcon()} zIndex={950} />}
+        {navigating && destination && (
+          <Circle
+            center={destination}
+            radius={16 + (0.55 + 0.45 * Math.sin(Date.now() / 450)) * 8}
+            options={{
+              strokeColor: "#16A34A",
+              strokeOpacity: 0.9,
+              strokeWeight: 2,
+              fillColor: "#16A34A",
+              fillOpacity: 0.12 + (0.55 + 0.45 * Math.sin(Date.now() / 450)) * 0.14,
+              clickable: false,
+            }}
+          />
         )}
       </GoogleMap>
 
