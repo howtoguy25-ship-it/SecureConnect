@@ -1468,6 +1468,12 @@ export default function App() {
                         title="Traffic signal (OpenStreetMap data)"
                         clusterer={clusterer}
                         noClustererRedraw
+                        // Explicit, high zIndex -- markers always sit above the base map tiles
+                        // regardless of type in normal Google Maps behavior, but this makes
+                        // that non-negotiable rather than assumed, specifically because
+                        // satellite/hybrid imagery is a much busier, more visually competing
+                        // background than the plain roadmap this was originally tuned against.
+                        zIndex={500}
                       />
                     ))}
                   </>
@@ -1483,6 +1489,7 @@ export default function App() {
                 position={{ lat: point.lat, lng: point.lng }}
                 icon={speedCameraIcon(osmIconScale)}
                 title="Speed camera (OpenStreetMap data)"
+                zIndex={500}
               />
             ))}
           </>
