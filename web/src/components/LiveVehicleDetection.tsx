@@ -35,6 +35,15 @@ const MIN_DETECT_INTERVAL_MS = 120;
 // or two. ~6 passes at the 120ms throttle above is roughly 700ms of stable tracking.
 const LOCK_FRAMES_THRESHOLD = 6;
 
+// A plate read that fails isn't necessarily an unreadable plate -- it might just be a bad
+// frame (motion blur, glare, mid-jitter crop). Retries a confidently-located but not-yet-read
+// plate at this cadence (not every detection pass -- OCR is too expensive and there's only one
+// shared Tesseract worker for every vehicle in frame to share) up to a capped number of tries,
+// so a genuinely legible plate on a vehicle that's around for more than a moment gets several
+// real chances instead of one.
+const PLATE_RETRY_INTERVAL_MS = 900;
+const MAX_PLATE_ATTEMPTS = 8;
+
 type FacingMode = "environment" | "user";
 
 // Live nav info passed in only while navigation is active, so this view can show where to
@@ -217,8 +226,21 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
   // real text recognition is far too slow to run every frame (100ms-1s+ per attempt), so
   // each tracked vehicle only ever gets one read attempt, cached (or cached as "unreadable"
   // via null) for the rest of its time in frame.
-  const plateTextRef = useRef(new Map<number, string | null>());
+  // Only ever holds a CONFIRMED real read (a track id with no entry just hasn't been read
+  // yet, or hasn't succeeded yet) -- unlike a single-attempt cache, a failed read is not
+  // stored here, so a vehicle whose plate is genuinely legible but caught a bad frame (motion
+  // blur, glare, a partial view) gets more chances instead of being permanently given up on
+  // after one unlucky attempt.
+  const plateTextRef = useRef(new Map<number, string>());
   const platesReadingRef = useRef(new Set<number>());
+  // Retry bookkeeping for the above: how many attempts a track has had, and when the last one
+  // was, so retries are spaced out (OCR is expensive, and there's only one shared Tesseract
+  // worker -- see plateOcr.ts -- so hammering it every single frame would just queue up and
+  // starve every vehicle's reads, not speed any of them up) and eventually give up on a
+  // vehicle that's had a fair number of genuine tries and still hasn't produced a confident
+  // read, rather than retrying forever.
+  const plateAttemptsRef = useRef(new Map<number, number>());
+  const plateLastAttemptMsRef = useRef(new Map<number, number>());
   // Consecutive-detection-pass counter per track id, backing the "locked on" indicator --
   // see LOCK_FRAMES_THRESHOLD above.
   const lockFramesRef = useRef(new Map<number, number>());
@@ -334,6 +356,12 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         for (const id of plateTextRef.current.keys()) {
           if (!liveTrackIds.has(id)) plateTextRef.current.delete(id);
         }
+        for (const id of plateAttemptsRef.current.keys()) {
+          if (!liveTrackIds.has(id)) {
+            plateAttemptsRef.current.delete(id);
+            plateLastAttemptMsRef.current.delete(id);
+          }
+        }
         for (const id of lockFramesRef.current.keys()) {
           if (!liveTrackIds.has(id)) lockFramesRef.current.delete(id);
         }
@@ -416,11 +444,27 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           // side-on view (isFrontOrRearFacing) so nothing gets attempted at a bad angle.
           const plate = goodView ? locatePlate(video, box.bbox) : null;
           if (plate) {
-            // One real OCR attempt per tracked vehicle, cached (see plateOcr.ts for why this
-            // can't run every frame) -- undefined means "not attempted yet", null means
-            // "attempted, no confident read", a string means a successful read.
-            if (plateTextRef.current.get(box.id) === undefined && !platesReadingRef.current.has(box.id)) {
+            // Retries a confidently-located plate that hasn't been read yet, spaced out (not
+            // every detection pass) and capped, instead of giving up forever after one unlucky
+            // frame -- see PLATE_RETRY_INTERVAL_MS/MAX_PLATE_ATTEMPTS above for why. Stops the
+            // moment a real read succeeds (plateTextRef gets an entry) or the attempt cap is
+            // reached.
+            const alreadyRead = plateTextRef.current.has(box.id);
+            const attempts = plateAttemptsRef.current.get(box.id) ?? 0;
+            const lastAttemptMs = plateLastAttemptMsRef.current.get(box.id) ?? 0;
+            // The very first attempt fires immediately once a plate is confidently located --
+            // only the SECOND and later retries wait out the interval. (Comparing against
+            // performance.now() directly for attempt 0 would happen to work anyway, since
+            // performance.now() is already well past PLATE_RETRY_INTERVAL_MS by the time the
+            // model/camera have finished loading -- but that's an accident of timing, not
+            // something this should quietly depend on.)
+            const readyToRetry =
+              attempts < MAX_PLATE_ATTEMPTS &&
+              (attempts === 0 || performance.now() - lastAttemptMs >= PLATE_RETRY_INTERVAL_MS);
+            if (!alreadyRead && readyToRetry && !platesReadingRef.current.has(box.id)) {
               platesReadingRef.current.add(box.id);
+              plateAttemptsRef.current.set(box.id, attempts + 1);
+              plateLastAttemptMsRef.current.set(box.id, performance.now());
               const cropCanvas = document.createElement("canvas");
               // Upscale the (tiny) plate crop before OCR -- Tesseract reads small text far
               // more reliably when it isn't asked to work from a handful of source pixels.
@@ -431,7 +475,9 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
               if (cropCtx) {
                 cropCtx.drawImage(video, plate.x, plate.y, plate.w, plate.h, 0, 0, cropCanvas.width, cropCanvas.height);
                 readPlateText(cropCanvas)
-                  .then((text) => plateTextRef.current.set(box.id, text))
+                  .then((text) => {
+                    if (text) plateTextRef.current.set(box.id, text);
+                  })
                   .finally(() => platesReadingRef.current.delete(box.id));
               } else {
                 platesReadingRef.current.delete(box.id);
@@ -512,7 +558,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         )}
         {status === "running" && !navContext && !infoDismissed && (
           <>
-            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — every car/motorcycle is boxed "Vehicle" and every truck/bus "Heavy Vehicle" (amber box, shown with detection confidence %). This app doesn't guess at "police car" or similar — real-world testing showed that kind of fine-grained guess being confidently wrong too often to trust, so it isn't claimed at all. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) regardless of vehicle type — it only catches lights that are actually on, not antennas or other hardware, and is real-time evidence rather than a guess. Speed (a rough estimate, not radar-accurate) and the plate estimate only show for a vehicle seen face-on (front or rear) — side-on, the box just shows type and confidence, since neither the speed model nor a plate is reliable from that angle. A small cyan box only appears once a real on-device text read of a plate actually succeeds (shown beside the box) — never just a location guess with nothing behind it, one attempt per vehicle, never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number. Each vehicle tracked steadily for under a second (and seen face-on) gets green corner brackets (🔒) showing it's locked on, independently of every other vehicle in frame, and the nearest one is marked 🎯 Closest.`}
+            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — every car/motorcycle is boxed "Vehicle" and every truck/bus "Heavy Vehicle" (amber box, shown with detection confidence %). This app doesn't guess at "police car" or similar — real-world testing showed that kind of fine-grained guess being confidently wrong too often to trust, so it isn't claimed at all. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) regardless of vehicle type — it only catches lights that are actually on, not antennas or other hardware, and is real-time evidence rather than a guess. Speed (a rough estimate, not radar-accurate) and the plate estimate only show for a vehicle seen face-on (front or rear) — side-on, the box just shows type and confidence, since neither the speed model nor a plate is reliable from that angle. A small cyan box only appears once a real on-device text read of a plate actually succeeds (shown beside the box) — never just a location guess with nothing behind it. It keeps retrying a legible-looking plate for a little while rather than giving up after one bad frame, then stops once it succeeds or after enough genuine tries — never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number. Each vehicle tracked steadily for under a second (and seen face-on) gets green corner brackets (🔒) showing it's locked on, independently of every other vehicle in frame, and the nearest one is marked 🎯 Closest.`}
             <button className="detection-banner-dismiss" onClick={dismissInfo}>
               Got it, don't show this again
             </button>
