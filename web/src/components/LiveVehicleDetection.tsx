@@ -341,7 +341,10 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           .filter((p) => VEHICLE_CLASSES.has(p.class))
           .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score }));
         const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
-        const liveTrackIds = new Set(tracked.map((b) => b.id));
+        // Includes ids still alive in a grace period even if they produced no box this frame
+        // -- see liveTrackIds() in speedTracker.ts for why pruning off `tracked` itself would
+        // wipe per-vehicle cached state (plate reads, lock-on progress) on a single missed frame.
+        const liveTrackIds = speedTrackerRef.current.liveTrackIds();
         pruneLightbarTracks(liveTrackIds);
         for (const id of plateTextRef.current.keys()) {
           if (!liveTrackIds.has(id)) plateTextRef.current.delete(id);
