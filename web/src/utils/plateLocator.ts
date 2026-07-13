@@ -17,9 +17,33 @@ const SAMPLE_H = 20;
 const MIN_SPAN_FRAC = 0.32;
 const MAX_SPAN_FRAC = 0.62;
 const MIN_CONFIDENCE = 1.35;
+// Real number plates are wide rectangles, not squares -- Australian plates run about 2.7:1
+// (width:height). The horizontal-energy scan above only ever finds the plate's likely width
+// (a column span); this fixes the returned box's height to what a plate of that width would
+// actually look like, instead of using the whole scanned crop band's height, which made the
+// box read as a near-square guess rather than an actual plate shape.
+const PLATE_ASPECT_RATIO = 2.7;
 // Below this vehicle-box width (in source video pixels), a plate wouldn't be resolvable
 // anyway -- skip the analysis entirely rather than spend time on noise.
 const MIN_VEHICLE_WIDTH_PX = 70;
+
+// A vehicle seen face-on (front or rear) has a bounding box that's roughly as wide as it is
+// tall -- you're looking at its width. A vehicle seen from the side has a box much wider than
+// tall -- you're looking at its full length instead, which is exactly the case a plate isn't
+// visible in (it's mounted on the front/rear, not the side) and where the "assumed avg vehicle
+// width" pinhole distance/speed model below in speedTracker.ts doesn't apply either, since the
+// box width there is length, not width. Above this width:height ratio, treat the view as
+// side-on rather than guess at either.
+const SIDE_ON_ASPECT_RATIO = 2.0;
+
+/** True when a vehicle's box shape is consistent with a front/rear ("good") view rather than a
+ *  side profile -- gates plate detection, the speed estimate, and the lock-on indicator, all of
+ *  which assume you're looking at the vehicle's width, not its length. */
+export function isFrontOrRearFacing(vehicleBbox: [number, number, number, number]): boolean {
+  const [, , vw, vh] = vehicleBbox;
+  if (vh <= 0) return false;
+  return vw / vh < SIDE_ON_ASPECT_RATIO;
+}
 
 let sampleCanvas: HTMLCanvasElement | null = null;
 function getSampleCanvas(): HTMLCanvasElement {
@@ -46,6 +70,7 @@ export function locatePlate(
 ): PlateBox | null {
   const [vx, vy, vw, vh] = vehicleBbox;
   if (vw < MIN_VEHICLE_WIDTH_PX) return null;
+  if (!isFrontOrRearFacing(vehicleBbox)) return null;
 
   // The lower-middle band of the vehicle silhouette -- below the windows/grille, above the
   // wheels/ground shadow -- is where a plate sits on the overwhelming majority of vehicles
@@ -108,10 +133,16 @@ export function locatePlate(
 
   if (bestStart < 0 || bestAvg / avgPerCol < MIN_CONFIDENCE) return null;
 
+  const foundW = (bestSpan / SAMPLE_W) * cropW;
+  // Shrink the box down from the whole scanned band's height to a real plate's proportions,
+  // centered in the band the energy spike was found in, rather than stretching the box to the
+  // full searched height.
+  const plateH = Math.min(cropH, foundW / PLATE_ASPECT_RATIO);
+
   return {
     x: cropX + (bestStart / SAMPLE_W) * cropW,
-    y: cropY,
-    w: (bestSpan / SAMPLE_W) * cropW,
-    h: cropH,
+    y: cropY + (cropH - plateH) / 2,
+    w: foundW,
+    h: plateH,
   };
 }

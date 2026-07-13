@@ -3,25 +3,23 @@ import * as tf from "@tensorflow/tfjs";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createSpeedTracker } from "@/utils/speedTracker";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
-import { locatePlate } from "@/utils/plateLocator";
+import { locatePlate, isFrontOrRearFacing } from "@/utils/plateLocator";
 import { warmUpPlateOcr, readPlateText } from "@/services/plateOcr";
-import {
-  warmUpClassifier,
-  classifyVehicleCrop,
-  type ClassificationResult,
-  type VehicleClass,
-} from "@/services/vehicleClassifier";
 import { normalizeAngleDeg, formatDistance } from "@/utils/navFormat";
 import { NavActionsRow } from "@/components/NavActionsRow";
 import "./LiveVehicleDetection.css";
 
-// COCO-SSD (the pretrained model this runs) only knows generic COCO classes — it has no
-// concept of "police car" or "ambulance", just "car" / "truck" / "bus" / "motorcycle". A
-// second, custom-trained classifier (see training/README.md) runs behind it on each box to
-// take a real guess at ambulance/firetruck/police-car -- trained on a modest ~500-image
-// dataset, so it's shown as a confidence score, not a certified ID, and falls back to the
-// generic "Vehicle" label whenever it isn't confident enough.
+// COCO-SSD (the pretrained model this runs) only knows generic COCO classes -- "car" / "truck"
+// / "bus" / "motorcycle" -- and that's exactly what gets shown: "Vehicle" for a car/motorcycle,
+// "Heavy Vehicle" for a truck/bus. This app previously ran a second, custom-trained classifier
+// behind it to guess ambulance/firetruck/police-car specifically, but repeated real-world
+// testing (including on ordinary cars and even stylized/CGI vehicles it had never seen) kept
+// producing confidently-wrong "Police car" results even after tightening its confidence bar
+// twice -- a ~500-image training set just isn't enough to make that fine a call reliably. Fixed
+// honestly by not making that claim at all rather than continuing to tune a guess that kept
+// being wrong: the generic vehicle-type label below is what COCO-SSD is actually good at.
 const VEHICLE_CLASSES = new Set(["car", "truck", "bus", "motorcycle"]);
+const HEAVY_VEHICLE_CLASSES = new Set(["truck", "bus"]);
 
 // Cap detection passes instead of running one every single animation frame -- COCO-SSD
 // inference (plus the per-box classifier and lightbar sampling riding on top of it) is heavy
@@ -36,13 +34,6 @@ const MIN_DETECT_INTERVAL_MS = 120;
 // on" -- avoids the lock indicator flickering onto a box that only appeared for a frame
 // or two. ~6 passes at the 120ms throttle above is roughly 700ms of stable tracking.
 const LOCK_FRAMES_THRESHOLD = 6;
-
-const CLASS_DISPLAY_NAMES: Record<VehicleClass, string> = {
-  ambulance: "Ambulance",
-  firetruck: "Fire truck",
-  "police-car": "Police car",
-  other: "Vehicle",
-};
 
 type FacingMode = "environment" | "user";
 
@@ -222,12 +213,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
   const lastDetectMsRef = useRef(0);
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
   const speedTrackerRef = useRef(createSpeedTracker());
-  // Keyed by the speed tracker's per-vehicle track id: classify each tracked vehicle once
-  // and cache the result (a car doesn't change type mid-track), instead of re-running the
-  // classifier on every single frame.
-  const classificationsRef = useRef(new Map<number, ClassificationResult>());
-  const classifyingRef = useRef(new Set<number>());
-  // Same one-attempt-per-track caching as the classifier above, but for OCR'd plate text --
+  // One-attempt-per-track caching for OCR'd plate text --
   // real text recognition is far too slow to run every frame (100ms-1s+ per attempt), so
   // each tracked vehicle only ever gets one read attempt, cached (or cached as "unreadable"
   // via null) for the rest of its time in frame.
@@ -278,7 +264,6 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           await tf.ready();
           modelRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
           if (cancelled) return;
-          warmUpClassifier();
           warmUpPlateOcr();
         }
 
@@ -339,7 +324,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       model.detect(video, 30).then((predictions) => {
         const vehicleDetections = predictions
           .filter((p) => VEHICLE_CLASSES.has(p.class))
-          .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score }));
+          .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score, vehicleClass: p.class }));
         const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
         // Includes ids still alive in a grace period even if they produced no box this frame
         // -- see liveTrackIds() in speedTracker.ts for why pruning off `tracked` itself would
@@ -381,28 +366,23 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           // above) at the same time without any of them affecting each other.
           const lockFrames = (lockFramesRef.current.get(box.id) ?? 0) + 1;
           lockFramesRef.current.set(box.id, lockFrames);
-          const isLocked = lockFrames >= LOCK_FRAMES_THRESHOLD;
           const isClosest = box.id === closestId && tracked.length > 1;
 
-          if (!classificationsRef.current.has(box.id) && !classifyingRef.current.has(box.id)) {
-            classifyingRef.current.add(box.id);
-            classifyVehicleCrop(video, box.bbox)
-              .then((result) => {
-                if (result) classificationsRef.current.set(box.id, result);
-              })
-              .finally(() => classifyingRef.current.delete(box.id));
-          }
+          // A vehicle seen face-on (front/rear) is a good enough view to trust the plate
+          // estimate, the speed model, and the lock-on indicator -- all three assume you're
+          // looking at the vehicle's actual width, which isn't true side-on (see
+          // isFrontOrRearFacing in plateLocator.ts). A vehicle caught side-on (like two trucks
+          // passing each other across the frame) just gets its plain box and type instead of
+          // guessing at any of those three off an angle the math doesn't support.
+          const goodView = isFrontOrRearFacing(box.bbox);
+          const isLocked = goodView && lockFrames >= LOCK_FRAMES_THRESHOLD;
 
-          const classification = classificationsRef.current.get(box.id);
-          const isEmergencyVehicle = classification && classification.label !== "other";
-          // Runs independently of the trained classifier above -- it's a real-time pixel
-          // heuristic for an actively strobing red/blue light (see lightbarDetector.ts),
-          // not a "this car is unmarked police" model. Only flagged when the vehicle isn't
-          // already confidently classified as a marked emergency vehicle, so a normal
-          // marked police car with its lights on just keeps its usual red "Police car" box.
+          // Real-time pixel heuristic for an actively strobing red/blue light (see
+          // lightbarDetector.ts) -- independent evidence, not a classification guess, so it
+          // isn't gated by vehicle type or viewing angle the way the speed/plate/lock
+          // treatment above is.
           const lightsActive = sampleLightbarActivity(video, box.id, box.bbox, performance.now());
-          const isUnmarkedCandidate = !isEmergencyVehicle && lightsActive;
-          const boxColor = isEmergencyVehicle ? "#DC2626" : isUnmarkedCandidate ? "#7C3AED" : "#F59E0B";
+          const boxColor = lightsActive ? "#7C3AED" : "#F59E0B";
 
           ctx.strokeStyle = boxColor;
           ctx.lineWidth = 3;
@@ -410,39 +390,32 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           if (isLocked) drawLockBrackets(ctx, x, y, w, h);
 
           const speedText =
-            box.speedKmh === null
+            !goodView || box.speedKmh === null
               ? ""
               : box.speedKmh > 3
                 ? ` · ~${Math.round(box.speedKmh)} km/h approaching`
                 : box.speedKmh < -3
                   ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
                   : " · steady";
+          const vehicleTypeLabel = HEAVY_VEHICLE_CLASSES.has(box.vehicleClass) ? "Heavy Vehicle" : "Vehicle";
           const prefix = (isClosest ? "🎯 Closest · " : "") + (isLocked ? "🔒 " : "");
-          const label = isEmergencyVehicle
-            ? `${prefix}${CLASS_DISPLAY_NAMES[classification.label]} ${Math.round(classification.confidence * 100)}%${speedText}`
-            : isUnmarkedCandidate
-              ? `${prefix}Unmarked police? (lights active)${speedText}`
-              : `${prefix}Vehicle ${Math.round(box.score * 100)}%${speedText}`;
+          const label = lightsActive
+            ? `${prefix}Unmarked police? (lights active)${speedText}`
+            : `${prefix}${vehicleTypeLabel} ${Math.round(box.score * 100)}%${speedText}`;
           ctx.font = "16px system-ui, sans-serif";
           const textWidth = ctx.measureText(label).width;
           ctx.fillStyle = boxColor;
           ctx.fillRect(x, Math.max(0, y - 22), textWidth + 10, 22);
-          // The violet "unmarked" box is darker than the amber/red ones, so it needs light
-          // text instead of the usual dark text to stay readable.
-          ctx.fillStyle = isUnmarkedCandidate ? "#ffffff" : "#111827";
+          // The violet "unmarked" box is darker than the amber one, so it needs light text
+          // instead of the usual dark text to stay readable.
+          ctx.fillStyle = lightsActive ? "#ffffff" : "#111827";
           ctx.fillText(label, x + 5, Math.max(16, y - 6));
 
           // Real, live-computed plate-region estimate (see plateLocator.ts) -- NOT plate
-          // reading/OCR, just a small box around where the plate likely is. Recomputed fresh
-          // every frame from the current tracked box, so it only ever appears for a vehicle
-          // that's actually in frame right now and naturally disappears the instant that
-          // vehicle leaves (or the heuristic loses confidence), same as the vehicle box itself.
-          const plate = locatePlate(video, box.bbox);
+          // reading/OCR, just where the plate likely is, and it already returns null for a
+          // side-on view (isFrontOrRearFacing) so nothing gets attempted at a bad angle.
+          const plate = goodView ? locatePlate(video, box.bbox) : null;
           if (plate) {
-            ctx.strokeStyle = "#22D3EE";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(plate.x, plate.y, plate.w, plate.h);
-
             // One real OCR attempt per tracked vehicle, cached (see plateOcr.ts for why this
             // can't run every frame) -- undefined means "not attempted yet", null means
             // "attempted, no confident read", a string means a successful read.
@@ -465,8 +438,18 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
               }
             }
 
+            // The plate box and its reading only ever get drawn once OCR actually confirms
+            // real text -- while an attempt is in progress, or if it never gets a confident
+            // read, nothing is drawn at all. Previously the box appeared the instant the
+            // locator merely found a plate-shaped region, whether or not anything was ever
+            // actually read from it, which looked like a detection when it was really just a
+            // location guess with nothing behind it.
             const plateText = plateTextRef.current.get(box.id);
             if (plateText) {
+              ctx.strokeStyle = "#22D3EE";
+              ctx.lineWidth = 2;
+              ctx.strokeRect(plate.x, plate.y, plate.w, plate.h);
+
               ctx.font = "bold 13px monospace";
               const plateTextWidth = ctx.measureText(plateText).width;
               const labelW = plateTextWidth + 8;
@@ -529,7 +512,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         )}
         {status === "running" && !navContext && !infoDismissed && (
           <>
-            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset and held to a stricter confidence bar for "Police car" specifically than the other labels, since that's the one result worth being extra conservative about — still a real but imperfect guess, never a certified identification or a guarantee. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate. Each vehicle tracked steadily for under a second gets green corner brackets (🔒) showing it's locked on, independently of every other vehicle in frame, and the nearest one is marked 🎯 Closest. A small cyan box also estimates where each vehicle's number plate is, and attempts a real on-device text read of it (shown beside the box when successful) — for detection display only, one attempt per vehicle, never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number — especially from a moving vehicle at an angle.`}
+            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — every car/motorcycle is boxed "Vehicle" and every truck/bus "Heavy Vehicle" (amber box, shown with detection confidence %). This app doesn't guess at "police car" or similar — real-world testing showed that kind of fine-grained guess being confidently wrong too often to trust, so it isn't claimed at all. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) regardless of vehicle type — it only catches lights that are actually on, not antennas or other hardware, and is real-time evidence rather than a guess. Speed (a rough estimate, not radar-accurate) and the plate estimate only show for a vehicle seen face-on (front or rear) — side-on, the box just shows type and confidence, since neither the speed model nor a plate is reliable from that angle. A small cyan box only appears once a real on-device text read of a plate actually succeeds (shown beside the box) — never just a location guess with nothing behind it, one attempt per vehicle, never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number. Each vehicle tracked steadily for under a second (and seen face-on) gets green corner brackets (🔒) showing it's locked on, independently of every other vehicle in frame, and the nearest one is marked 🎯 Closest.`}
             <button className="detection-banner-dismiss" onClick={dismissInfo}>
               Got it, don't show this again
             </button>

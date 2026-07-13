@@ -16,6 +16,10 @@ export interface TrackedBox {
   id: number;
   bbox: [number, number, number, number];
   score: number;
+  // The underlying detector's own class for this box ("car"/"truck"/"bus"/"motorcycle") --
+  // passed straight through, untouched by the tracker itself, so callers can label without
+  // re-deriving it.
+  vehicleClass: string;
   speedKmh: number | null;
   // Same pinhole-model estimate used for speed above, exposed directly so callers (e.g. a
   // "closest vehicle" indicator) don't need to re-derive it from bbox width themselves.
@@ -37,9 +41,8 @@ interface InternalTrack {
 // partially-visible or edge-of-frame vehicle (exactly the hard case a phone camera sees a
 // lot of) can easily fail to detect for a single frame even though it's still really there --
 // without this grace period, that one missed frame used to immediately drop the track and
-// start a brand new one next frame, which meant a brand new (and possibly different)
-// classification attempt for what's actually the same vehicle. That's what was showing up as
-// the same ordinary car flip-flopping between "Police car" and "Vehicle" a moment apart.
+// start a brand new one next frame, resetting every bit of per-vehicle state (lock-on
+// progress, cached plate read) for what's actually the same vehicle.
 const TRACK_GRACE_MS = 600;
 // How much a tracked box eases toward each new raw detection instead of snapping straight to
 // it -- COCO-SSD's box coordinates jitter slightly frame to frame even for a vehicle that
@@ -47,6 +50,10 @@ const TRACK_GRACE_MS = 600;
 // the vehicle. This keeps the drawn box visually steady without meaningfully lagging behind
 // real movement.
 const BBOX_SMOOTHING = 0.55;
+// How much each new speed reading pulls the running average -- weighted well toward history
+// since a real speed change plays out over a second or more, not one 120ms detection tick, so
+// there's no real cost to leaning harder on smoothing here.
+const SPEED_SMOOTHING = 0.25;
 
 function boxCenter(bbox: [number, number, number, number]): [number, number] {
   return [bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2];
@@ -75,7 +82,7 @@ export function createSpeedTracker() {
   let nextId = 1;
 
   function update(
-    detections: { bbox: [number, number, number, number]; score: number }[],
+    detections: { bbox: [number, number, number, number]; score: number; vehicleClass: string }[],
     imageWidthPx: number,
     nowMs: number
   ): TrackedBox[] {
@@ -100,28 +107,41 @@ export function createSpeedTracker() {
         }
       }
 
-      const distanceM = estimateDistanceM(det.bbox[2], imageWidthPx);
       let speedKmh: number | null = null;
 
       if (best) {
         unmatched.delete(best.id);
         matchedIds.add(best.id);
+        // Smooth the box FIRST, then measure distance off the smoothed width -- measuring off
+        // the raw incoming detection's width (as this used to) fed every bit of COCO-SSD's
+        // normal frame-to-frame box jitter straight into the distance-change calculation, which
+        // is exactly what showed up as a parked, genuinely stationary vehicle reporting a real
+        // (fake) closing/receding speed: a few pixels of box-width noise translates to a real
+        // multi-km/h swing once divided by a ~120ms tick.
+        const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
+        const distanceM = estimateDistanceM(bbox[2], imageWidthPx);
         const dtSec = (nowMs - best.lastSeenMs) / 1000;
-        if (dtSec > 0.15) {
+        // Guards only against a near-zero elapsed time (which would spike the division below),
+        // not against the detector's normal ~120ms cadence -- this used to be 0.15s, comfortably
+        // *above* that cadence, which happened to work only because other per-frame work (the
+        // classifier that used to run here) usually pushed real elapsed time past it anyway.
+        // With that removed, passes run closer to the raw ~120ms throttle, and a threshold above
+        // the normal cadence would have silently stopped speed from updating at all most frames.
+        if (dtSec > 0.05) {
           const closingMPerSec = (best.distanceM - distanceM) / dtSec;
           const rawKmh = closingMPerSec * 3.6;
           // Smooth against the previous reading so it doesn't jitter frame to frame.
-          speedKmh = best.speedKmh === null ? rawKmh : best.speedKmh * 0.6 + rawKmh * 0.4;
+          speedKmh = best.speedKmh === null ? rawKmh : best.speedKmh * (1 - SPEED_SMOOTHING) + rawKmh * SPEED_SMOOTHING;
         } else {
           speedKmh = best.speedKmh;
         }
-        const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
         nextTracks.push({ id: best.id, bbox, lastSeenMs: nowMs, distanceM, speedKmh });
-        result.push({ id: best.id, bbox, score: det.score, speedKmh, distanceM });
+        result.push({ id: best.id, bbox, score: det.score, vehicleClass: det.vehicleClass, speedKmh, distanceM });
       } else {
+        const distanceM = estimateDistanceM(det.bbox[2], imageWidthPx);
         const id = nextId++;
         nextTracks.push({ id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh: null });
-        result.push({ id, bbox: det.bbox, score: det.score, speedKmh: null, distanceM });
+        result.push({ id, bbox: det.bbox, score: det.score, vehicleClass: det.vehicleClass, speedKmh: null, distanceM });
       }
     }
 
