@@ -1105,6 +1105,10 @@ export default function App() {
       : null;
 
   const bannerVisible = Boolean(statusMessage) && !bannerDismissed;
+  // Both the error banner and the top-pinned 3D-view prompt live at the very top of the
+  // screen -- whichever one is showing, the search bar/about button/radius control shift
+  // down out of its way so nothing overlaps.
+  const topBannerActive = bannerVisible || show3DPrompt;
 
   return (
     <div className="app-root">
@@ -1179,16 +1183,12 @@ export default function App() {
           } else if (placeEvent.placeId) {
             placeEvent.stop();
             setSelectedPlaceId(placeEvent.placeId);
-          } else {
-            // Plain click on the map itself: if already zoomed all the way in here, treat
-            // it as "zoom back out" (matching Google/Apple Maps' click-to-zoom-out at max
-            // zoom) instead of doing nothing.
-            const map = mapRef.current;
-            const currentZoom = map?.getZoom();
-            if (map && currentZoom !== undefined && maxZoomHere !== null && currentZoom >= maxZoomHere) {
-              map.setZoom(Math.max(3, currentZoom - 4));
-            }
           }
+          // A plain tap on empty map (not a placement, not a POI) used to auto-zoom back out
+          // once you'd reached max zoom -- meant as a "tap to zoom out" shortcut, but it fired
+          // on *any* ordinary tap up there, so exploring around at max zoom kept getting
+          // yanked back out from underneath you. Removed -- zoom in as far as you want, and
+          // use the zoom -/pinch to actually zoom out when you mean to.
         }}
       >
         {location && (
@@ -1277,7 +1277,7 @@ export default function App() {
 
       {!chromeHidden && (
         <button
-          className={`about-button${bannerVisible ? " chrome-shifted" : ""}`}
+          className={`about-button${topBannerActive ? " chrome-shifted" : ""}`}
           onClick={() => setAboutOpen(true)}
           aria-label="About TrackLine"
         >
@@ -1286,7 +1286,7 @@ export default function App() {
       )}
 
       {!chromeHidden && (
-        <div className={`top-bar${bannerVisible ? " chrome-shifted" : ""}`}>
+        <div className={`top-bar${topBannerActive ? " chrome-shifted" : ""}`}>
           <Autocomplete
             onLoad={(ac) => {
               autocompleteRef.current = ac;
@@ -1300,7 +1300,7 @@ export default function App() {
       )}
 
       {!chromeHidden && (
-        <div className={`radius-control${bannerVisible ? " chrome-shifted" : ""}`}>
+        <div className={`radius-control${topBannerActive ? " chrome-shifted" : ""}`}>
           <label>
             Alert radius: {settings.alertRadiusKm} km
             <input
@@ -1438,7 +1438,12 @@ export default function App() {
       )}
 
       {show3DPrompt && (
-        <ConfirmPrompt message="Do you want to view 3D?" onYes={enterStreet3D} onNo={declineStreet3D} />
+        <ConfirmPrompt
+          message="Do you want to view 3D?"
+          onYes={enterStreet3D}
+          onNo={declineStreet3D}
+          variant="top"
+        />
       )}
 
       {showNightPrompt && !aboutOpen && !phoneAuthOpen && !adminOpen && !reportOpen && !detectionOpen && (

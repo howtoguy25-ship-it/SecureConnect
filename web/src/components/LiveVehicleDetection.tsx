@@ -3,6 +3,7 @@ import * as tf from "@tensorflow/tfjs";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createSpeedTracker } from "@/utils/speedTracker";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
+import { locatePlate } from "@/utils/plateLocator";
 import {
   warmUpClassifier,
   classifyVehicleCrop,
@@ -338,6 +339,18 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           // text instead of the usual dark text to stay readable.
           ctx.fillStyle = isUnmarkedCandidate ? "#ffffff" : "#111827";
           ctx.fillText(label, x + 5, Math.max(16, y - 6));
+
+          // Real, live-computed plate-region estimate (see plateLocator.ts) -- NOT plate
+          // reading/OCR, just a small box around where the plate likely is. Recomputed fresh
+          // every frame from the current tracked box, so it only ever appears for a vehicle
+          // that's actually in frame right now and naturally disappears the instant that
+          // vehicle leaves (or the heuristic loses confidence), same as the vehicle box itself.
+          const plate = locatePlate(video, box.bbox);
+          if (plate) {
+            ctx.strokeStyle = "#22D3EE";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(plate.x, plate.y, plate.w, plate.h);
+          }
         }
         rafRef.current = requestAnimationFrame(detectLoop);
       });
@@ -384,7 +397,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         )}
         {status === "running" && !navContext && !infoDismissed && (
           <>
-            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
+            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate. A small cyan box also estimates where each vehicle's number plate is — that's a real live position estimate, not plate-reading/OCR, and it only shows up when confident, never a guessed location.`}
             <button className="detection-banner-dismiss" onClick={dismissInfo}>
               Got it, don't show this again
             </button>
