@@ -8,7 +8,7 @@ import {
 } from "@react-google-maps/api";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
-import { upsertSignedInProfile } from "@/services/userProfile";
+import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
 import {
   subscribeNearbyAlerts,
   subscribeAllAlerts,
@@ -163,6 +163,7 @@ export default function App() {
   const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
   const lastSpeedLimitFetchRef = useRef<google.maps.LatLngLiteral | null>(null);
   const speedLimitFetchInFlightRef = useRef(false);
+  const lastLocationSyncRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
   // Joystick-driven adjustments to the 3D Follow camera, layered on top of the
   // auto-computed travel heading/default tilt so the driver can nudge the view to
@@ -271,6 +272,24 @@ export default function App() {
       upsertSignedInProfile(user).catch((err) => console.warn("[auth] profile sync failed", err));
     }
   }, [user]);
+
+  // Last-known location for the admin panel (see userProfile.ts) -- refreshed at most every
+  // 5 minutes or every 0.5km moved, whichever comes first, so a real signed-in account's
+  // location stays reasonably current for support/moderation purposes without writing to
+  // Firestore on every single GPS tick. No-op for guests (updateLastKnownLocation itself
+  // checks isAnonymous too, matching the sign-in-history sync above).
+  useEffect(() => {
+    if (!user || user.isAnonymous || !location) return;
+    const last = lastLocationSyncRef.current;
+    const now = Date.now();
+    if (last && now - last.at < 5 * 60 * 1000 && distanceKm(last.lat, last.lng, location.lat, location.lng) < 0.5) {
+      return;
+    }
+    lastLocationSyncRef.current = { lat: location.lat, lng: location.lng, at: now };
+    updateLastKnownLocation(user, location.lat, location.lng).catch((err) =>
+      console.warn("[profile] location sync failed", err)
+    );
+  }, [user, location?.lat, location?.lng]);
 
   const handleSignInGoogle = useCallback(async () => {
     try {

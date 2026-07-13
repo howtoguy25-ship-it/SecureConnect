@@ -76,3 +76,14 @@
   padding: 8px;
   border-bottom: 1px solid var(--surface-border);
 }
+
+.admin-panel-table a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.admin-panel-location-time {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--surface-text-muted);
+}

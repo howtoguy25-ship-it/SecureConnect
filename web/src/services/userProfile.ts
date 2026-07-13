@@ -33,3 +33,18 @@ export async function upsertSignedInProfile(user: User): Promise<void> {
     { merge: true }
   );
 }
+
+// Last-known location for the admin panel, kept separate from upsertSignedInProfile since it
+// updates on a much more frequent cadence (periodically while signed in and moving) than the
+// sign-in metadata above. Disclosed in the Privacy Policy alongside the sign-in history --
+// same "admin-only, never a password, name/email/phone stay as the account provider gave
+// them" posture, just extended to also cover this. No-op for anonymous "Guest" sessions,
+// same as upsertSignedInProfile, since there's no real account to attach a location to.
+export async function updateLastKnownLocation(user: User, lat: number, lng: number): Promise<void> {
+  if (user.isAnonymous) return;
+  await setDoc(
+    doc(db, "users", user.uid),
+    { lastLat: lat, lastLng: lng, lastLocationAt: serverTimestamp() },
+    { merge: true }
+  );
+}

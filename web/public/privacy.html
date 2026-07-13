@@ -47,7 +47,10 @@
         <li>
           <strong>Our Firebase database</strong> — only when you choose to report an alert (the
           alert's coordinates), or as part of a nearby-alert lookup. We don't log a continuous history
-          of everywhere you drive.
+          of everywhere you drive. If you're signed in with a real account (not a guest), we also
+          keep a single "last-known location" value, periodically overwritten as you move — not a
+          trail or history of past locations — visible only to the app's administrator (see "Who can
+          see your data" below).
         </li>
       </ul>
       <p>
@@ -95,8 +98,11 @@
       <p>
         Community alerts (type, location, expiry) are visible to other signed-in users of the app —
         that's the point of a shared alert map. Your account's sign-in history (name, email or phone,
-        method, first/last sign-in time) is visible only to the app's administrator — never your
-        password, and never to other regular users.
+        method, first/last sign-in time) and last-known location are visible only to the app's
+        administrator — never your password, and never to other regular users. Last-known location
+        is only recorded for accounts signed in with a real identity (Google, Apple, or phone) —
+        never for anonymous/guest sessions — and is refreshed periodically while you use the app,
+        not continuously tracked in the background.
       </p>
 
       <h2>Data stored only on your device</h2>

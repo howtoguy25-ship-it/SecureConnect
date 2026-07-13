@@ -11,6 +11,9 @@ interface UserRow {
   provider: string | null;
   firstSignInAt: string;
   lastSignInAt: string;
+  lastLat: number | null;
+  lastLng: number | null;
+  lastLocationAt: string;
 }
 
 function formatTimestamp(value: unknown): string {
@@ -45,6 +48,9 @@ export function AdminPanel({ onClose }: Props) {
                 provider: data.provider ?? null,
                 firstSignInAt: formatTimestamp(data.firstSignInAt),
                 lastSignInAt: formatTimestamp(data.lastSignInAt),
+                lastLat: typeof data.lastLat === "number" ? data.lastLat : null,
+                lastLng: typeof data.lastLng === "number" ? data.lastLng : null,
+                lastLocationAt: formatTimestamp(data.lastLocationAt),
               };
             })
             // Only rows with a real sign-in identity are meaningful here.
@@ -64,8 +70,10 @@ export function AdminPanel({ onClose }: Props) {
           </button>
         </div>
         <div className="admin-panel-subtitle">
-          Names, emails, and phone numbers only — Firebase never exposes passwords to this
-          app or any server code, so there's nothing to show even if we wanted to.
+          Names, emails, phone numbers, and last-known location only — Firebase never exposes
+          passwords to this app or any server code, so there's nothing to show even if we
+          wanted to. Location is disclosed in the Privacy Policy and only ever synced for
+          real signed-in accounts, never guests.
         </div>
 
         {error && <div className="admin-panel-error">{error}</div>}
@@ -83,6 +91,7 @@ export function AdminPanel({ onClose }: Props) {
                 <th>Provider</th>
                 <th>First sign-in</th>
                 <th>Last sign-in</th>
+                <th>Last known location</th>
               </tr>
             </thead>
             <tbody>
@@ -93,6 +102,22 @@ export function AdminPanel({ onClose }: Props) {
                   <td>{row.provider?.replace(".com", "")}</td>
                   <td>{row.firstSignInAt}</td>
                   <td>{row.lastSignInAt}</td>
+                  <td>
+                    {row.lastLat !== null && row.lastLng !== null ? (
+                      <>
+                        <a
+                          href={`https://www.google.com/maps?q=${row.lastLat},${row.lastLng}`}
+                          target="_blank"
+                          rel="noopener"
+                        >
+                          {row.lastLat.toFixed(4)}, {row.lastLng.toFixed(4)}
+                        </a>
+                        <div className="admin-panel-location-time">{row.lastLocationAt}</div>
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
