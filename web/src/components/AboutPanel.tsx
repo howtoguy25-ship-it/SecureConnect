@@ -6,6 +6,14 @@ import type { WebSettings } from "@/hooks/useSettings";
 import "./AboutPanel.css";
 
 const APP_VERSION = "1.0.0";
+// Temporarily hidden -- Apple's Sign in with Apple servers are returning invalid_client
+// despite the Firebase/Apple Developer config now looking correct (key, Team ID, Key ID,
+// Primary App ID, domains, and return URLs all verified). Newly (re)configured Sign in with
+// Apple setups can take anywhere from 30 minutes to a few hours to actually propagate on
+// Apple's end, so hiding the button avoids showing a broken option in the meantime rather
+// than users hitting a dead-end error. Flip back to true once it's confirmed working again --
+// nothing on the Apple/Firebase side needs to change for that, this is purely a UI toggle.
+const APPLE_SIGNIN_ENABLED = false;
 
 type Tab = "account" | "about";
 
@@ -74,9 +82,11 @@ export function AboutPanel({
               <button className="account-signin-button account-signin-google" onClick={onSignInGoogle}>
                 Continue with Google
               </button>
-              <button className="account-signin-button account-signin-apple" onClick={onSignInApple}>
-                Continue with Apple
-              </button>
+              {APPLE_SIGNIN_ENABLED && (
+                <button className="account-signin-button account-signin-apple" onClick={onSignInApple}>
+                  Continue with Apple
+                </button>
+              )}
               <button className="account-signin-button" onClick={onSignInPhone}>
                 Continue with phone
               </button>
