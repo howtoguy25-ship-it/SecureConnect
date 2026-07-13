@@ -60,6 +60,22 @@ body {
   height: 100%;
 }
 
+/* Buttons never had their default tap-highlight/focus styling suppressed anywhere in the
+   app -- mobile Safari/Chrome draw their own gray/blue overlay and/or outline on a tapped
+   button, which lingers as a "stuck" extra tint on top of a button's own color (most obvious
+   on the dark FAB buttons, where a bluish highlight reads as "won't go back to normal").
+   :focus-visible keeps a real outline for actual keyboard navigation while a tap/click never
+   gets the leftover highlight. */
+button {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .app-root {
   position: relative;
   /* 100% of html/body (fixed + inset:0 above, so it tracks the real visible viewport) --

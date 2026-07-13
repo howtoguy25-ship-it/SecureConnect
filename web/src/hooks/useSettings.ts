@@ -19,6 +19,10 @@ export interface WebSettings {
   // ignores inline tile styling on Map ID-based vector maps, so a custom Map ID would need
   // its own dark variant configured in Cloud Console to fully match.
   theme: "system" | "light" | "dark";
+  // When false, the OSM traffic-light/speed-camera layer is skipped entirely -- no
+  // Overpass fetch, no markers rendered -- for anyone who'd rather not have it on screen
+  // or wants to cut its cost on a slower device/connection. On by default.
+  showTrafficCameras: boolean;
 }
 
 const DEFAULT_SETTINGS: WebSettings = {
@@ -27,6 +31,7 @@ const DEFAULT_SETTINGS: WebSettings = {
   fixedZone: false,
   hideDetectionTrace: false,
   theme: "system",
+  showTrafficCameras: true,
 };
 const STORAGE_KEY = "trackline.settings";
 
@@ -52,5 +57,7 @@ export function useSettings() {
     setHideDetectionTrace: (hideDetectionTrace: boolean) =>
       setSettings((s) => ({ ...s, hideDetectionTrace })),
     setTheme: (theme: WebSettings["theme"]) => setSettings((s) => ({ ...s, theme })),
+    setShowTrafficCameras: (showTrafficCameras: boolean) =>
+      setSettings((s) => ({ ...s, showTrafficCameras })),
   };
 }

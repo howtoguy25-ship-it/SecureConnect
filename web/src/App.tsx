@@ -223,8 +223,15 @@ export default function App() {
   });
 
   const { location, error: locationError } = useGeolocation();
-  const { settings, setAlertRadiusKm, setRegionWide, setFixedZone, setHideDetectionTrace, setTheme } =
-    useSettings();
+  const {
+    settings,
+    setAlertRadiusKm,
+    setRegionWide,
+    setFixedZone,
+    setHideDetectionTrace,
+    setTheme,
+    setShowTrafficCameras,
+  } = useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -819,6 +826,9 @@ export default function App() {
   const onMapIdle = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
+    // Skip the fetch entirely (not just hide the results) when the layer's turned off --
+    // no Overpass request, no markers, no clustering cost at all.
+    if (!settings.showTrafficCameras) return;
     const zoom = map.getZoom();
     if (zoom === undefined || zoom < OSM_LAYER_MIN_ZOOM) return;
     const bounds = map.getBounds();
@@ -851,7 +861,7 @@ export default function App() {
         })
         .catch((err) => console.warn("[osm] traffic data fetch failed", err));
     }, 1200);
-  }, []);
+  }, [settings.showTrafficCameras]);
 
   useEffect(() => {
     if (!selectedPlaceId || !mapRef.current) return;
@@ -1312,39 +1322,45 @@ export default function App() {
             browsing at street level, bigger zoomed in close or while navigating. Nearby ones
             cluster into a numbered bubble (see clusterBubbleSvg above) until you're zoomed in
             past street level, instead of rendering potentially dozens of individual markers
-            on top of each other in a dense area. */}
-        <MarkerClusterer
-          options={{ styles: TRAFFIC_LIGHT_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}
-        >
-          {(clusterer) => (
-            <>
-              {osmTrafficLights.map((point) => (
-                <Marker
-                  key={`tl-${point.id}`}
-                  position={{ lat: point.lat, lng: point.lng }}
-                  icon={trafficLightIcon(osmIconScale)}
-                  title="Traffic signal (OpenStreetMap data)"
-                  clusterer={clusterer}
-                />
-              ))}
-            </>
-          )}
-        </MarkerClusterer>
-        <MarkerClusterer options={{ styles: SPEED_CAMERA_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}>
-          {(clusterer) => (
-            <>
-              {osmSpeedCameras.map((point) => (
-                <Marker
-                  key={`sc-${point.id}`}
-                  position={{ lat: point.lat, lng: point.lng }}
-                  icon={speedCameraIcon(osmIconScale)}
-                  title="Speed camera (OpenStreetMap data)"
-                  clusterer={clusterer}
-                />
-              ))}
-            </>
-          )}
-        </MarkerClusterer>
+            on top of each other in a dense area. Whole layer skippable via the "Show traffic
+            lights & speed cameras" checkbox -- both the fetch (onMapIdle) and the render
+            below check it, so turning it off actually drops the cost, not just the icons. */}
+        {settings.showTrafficCameras && (
+          <>
+            <MarkerClusterer
+              options={{ styles: TRAFFIC_LIGHT_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}
+            >
+              {(clusterer) => (
+                <>
+                  {osmTrafficLights.map((point) => (
+                    <Marker
+                      key={`tl-${point.id}`}
+                      position={{ lat: point.lat, lng: point.lng }}
+                      icon={trafficLightIcon(osmIconScale)}
+                      title="Traffic signal (OpenStreetMap data)"
+                      clusterer={clusterer}
+                    />
+                  ))}
+                </>
+              )}
+            </MarkerClusterer>
+            <MarkerClusterer options={{ styles: SPEED_CAMERA_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}>
+              {(clusterer) => (
+                <>
+                  {osmSpeedCameras.map((point) => (
+                    <Marker
+                      key={`sc-${point.id}`}
+                      position={{ lat: point.lat, lng: point.lng }}
+                      icon={speedCameraIcon(osmIconScale)}
+                      title="Speed camera (OpenStreetMap data)"
+                      clusterer={clusterer}
+                    />
+                  ))}
+                </>
+              )}
+            </MarkerClusterer>
+          </>
+        )}
 
         {pendingLocation && (
           <Marker
@@ -1469,6 +1485,14 @@ export default function App() {
               onChange={(e) => setFixedZone(e.target.checked)}
             />
             Lock alert zone to current spot
+          </label>
+          <label className="radius-checkbox">
+            <input
+              type="checkbox"
+              checked={settings.showTrafficCameras}
+              onChange={(e) => setShowTrafficCameras(e.target.checked)}
+            />
+            Show traffic lights &amp; speed cameras
           </label>
         </div>
       )}
