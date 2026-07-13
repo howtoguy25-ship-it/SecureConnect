@@ -235,6 +235,44 @@ body {
   color: #fff;
 }
 
+/* Small explainer bubble anchored to the same height as the compass/hide-trace FAB, sitting
+   to its left so it visually points at the button it's explaining. Shown at most a few times
+   ever (see onToggleHideTrace in App.tsx), not a persistent label. */
+.trail-tip {
+  position: absolute;
+  right: 84px;
+  bottom: calc(232px + env(safe-area-inset-bottom, 0px));
+  max-width: 190px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px 12px;
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  z-index: 11;
+  pointer-events: none;
+  animation: trail-tip-fade 3.5s ease forwards;
+}
+
+@keyframes trail-tip-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Custom zoom +/- control, replacing the native one -- see the comment in App.tsx's map
    options for why (its position was unreliable on vector maps and kept landing on top of
    the FAB column). Bottom-left keeps it clear of the FAB stack (right) and the speed-limit

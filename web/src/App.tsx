@@ -283,6 +283,29 @@ export default function App() {
   const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
   const lastSpeedLimitFetchRef = useRef<google.maps.LatLngLiteral | null>(null);
   const speedLimitFetchInFlightRef = useRef(false);
+  // A small explainer bubble the first few times the "hide AI Detection route guide" button
+  // is tapped -- it only visibly does anything once you're actually inside AI Detection, so
+  // on the plain map screen it can look like it does nothing at all. Shown at most 3 times
+  // ever (persisted in localStorage, not just this session), then never again.
+  const [trailTip, setTrailTip] = useState<string | null>(null);
+  const trailTipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onToggleHideTrace = useCallback(() => {
+    const next = !settings.hideDetectionTrace;
+    setHideDetectionTrace(next);
+
+    const key = "trackline.hideTraceTipShownCount";
+    const shown = Number(localStorage.getItem(key) ?? "0");
+    if (shown < 3) {
+      localStorage.setItem(key, String(shown + 1));
+      setTrailTip(
+        next
+          ? "Route guide line will be hidden next time you open AI Detection"
+          : "Route guide line will show again next time you open AI Detection"
+      );
+      if (trailTipTimeoutRef.current) clearTimeout(trailTipTimeoutRef.current);
+      trailTipTimeoutRef.current = setTimeout(() => setTrailTip(null), 3500);
+    }
+  }, [settings.hideDetectionTrace, setHideDetectionTrace]);
   // Ticks while navigating purely to force a re-render every ~150ms so the destination
   // highlight's pulse (a real, computed Math.sin wave, read at render time below) animates
   // smoothly instead of only updating whenever something else happens to re-render the app.
@@ -1527,9 +1550,10 @@ export default function App() {
             ➤
           </button>
 
+          {trailTip && <div className="trail-tip">{trailTip}</div>}
           <button
             className={`fab fab-quaternary${settings.hideDetectionTrace ? " fab-toggle-active" : ""}`}
-            onClick={() => setHideDetectionTrace(!settings.hideDetectionTrace)}
+            onClick={onToggleHideTrace}
             aria-label={
               settings.hideDetectionTrace
                 ? "AI Detection route guide hidden — tap to show it again"
