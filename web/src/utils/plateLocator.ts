@@ -24,8 +24,16 @@ const MIN_CONFIDENCE = 1.35;
 // box read as a near-square guess rather than an actual plate shape.
 const PLATE_ASPECT_RATIO = 2.7;
 // Below this vehicle-box width (in source video pixels), a plate wouldn't be resolvable
-// anyway -- skip the analysis entirely rather than spend time on noise.
-const MIN_VEHICLE_WIDTH_PX = 70;
+// anyway -- skip the analysis entirely rather than spend time on noise. Tied to a real,
+// measured floor (not a guess): a synthetic-plate OCR test found Tesseract reading correctly
+// at 96% confidence on a 55px-wide native plate crop, but dropping to 0% (nothing read at all)
+// once the native crop fell under ~40px -- upscaling afterward can't put back detail that was
+// never captured. The found plate width is at most ~0.47 of the crop band's width (bestSpan's
+// MAX_SPAN_FRAC=0.62 of a 0.76-of-vehicle-width crop band, see below), and realistically often
+// less than that best case -- so this requires enough vehicle width that even a middling span
+// still clears a real safety margin above that measured floor, instead of attempting (and
+// silently failing) on a vehicle too small to ever produce a readable crop.
+const MIN_VEHICLE_WIDTH_PX = 180;
 
 // A vehicle seen face-on (front or rear) has a bounding box that's roughly as wide as it is
 // tall -- you're looking at its width. A vehicle seen from the side has a box much wider than

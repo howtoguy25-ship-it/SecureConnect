@@ -331,8 +331,16 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
 
         setStatus("requesting-camera");
         streamRef.current?.getTracks().forEach((t) => t.stop());
+        // Without an explicit resolution request, browsers are free to default to something
+        // modest (640x480 on plenty of devices) -- fine for the vehicle boxes themselves, but
+        // measured (via a real Tesseract OCR test against synthetic plate crops at varying
+        // sizes) to be the actual reason a clearly-visible plate wasn't reading: OCR read a
+        // 260x90-native plate crop correctly at 96% confidence, but dropped to 0% once the
+        // native crop fell under roughly 40-55px wide -- and upscaling a too-small crop
+        // afterward (see plateOcr.ts) can't recover detail that was never captured. `ideal`
+        // (not `min`/`exact`) still falls back gracefully on cameras that can't do this.
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode },
+          video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
         });
         if (cancelled) {
