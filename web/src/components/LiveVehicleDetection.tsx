@@ -214,6 +214,46 @@ function drawLockBrackets(ctx: CanvasRenderingContext2D, x: number, y: number, w
   ctx.stroke();
 }
 
+// COCO-SSD's own overlap suppression only merges two boxes of the same class when they overlap
+// by IOU (intersection over the UNION of both boxes), and a real failure mode this app kept
+// hitting is a second, much larger phantom box that almost entirely contains a tight, correct
+// one for the same physical vehicle -- their IOU stays well under the usual threshold (the
+// union is dominated by the big box's extra area) even though a person looking at it instantly
+// sees "that's the same car, twice." This catches that specific case by containment instead:
+// if a much bigger box almost entirely covers a smaller one, the smaller, tighter box is far
+// more likely to be the genuine detection (a real detection hugs its object; an anomalously
+// oversized one swallowing a normal-sized box is the classic spurious-detection shape), so the
+// bigger one is dropped regardless of which one scored higher. This is a real heuristic, not a
+// guarantee -- a legitimately huge vehicle with an unrelated spurious box detected deep inside
+// it would be misjudged the same way, but that hasn't been the failure mode actually observed.
+const DUPLICATE_CONTAINMENT_THRESHOLD = 0.85;
+const DUPLICATE_SIZE_RATIO_THRESHOLD = 1.6;
+
+function boxArea(b: [number, number, number, number]): number {
+  return b[2] * b[3];
+}
+
+function intersectionArea(a: [number, number, number, number], b: [number, number, number, number]): number {
+  const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+  return ix * iy;
+}
+
+function dedupeOversizedDuplicates<T extends { bbox: [number, number, number, number] }>(detections: T[]): T[] {
+  const drop = new Set<number>();
+  for (let i = 0; i < detections.length; i++) {
+    const areaI = boxArea(detections[i].bbox);
+    for (let j = 0; j < detections.length; j++) {
+      if (i === j || drop.has(i)) continue;
+      const areaJ = boxArea(detections[j].bbox);
+      if (areaI <= areaJ * DUPLICATE_SIZE_RATIO_THRESHOLD) continue;
+      const containment = intersectionArea(detections[i].bbox, detections[j].bbox) / areaJ;
+      if (containment >= DUPLICATE_CONTAINMENT_THRESHOLD) drop.add(i);
+    }
+  }
+  return detections.filter((_, idx) => !drop.has(idx));
+}
+
 export function LiveVehicleDetection({ onClose, navContext }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -344,9 +384,14 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       // packed cars less aggressively would also filter out real detections -- not a knob that
       // can be tuned to only help, so it's left alone rather than traded against itself.
       model.detect(video, 30).then((predictions) => {
-        const vehicleDetections = predictions
+        const rawVehicleDetections = predictions
           .filter((p) => VEHICLE_CLASSES.has(p.class))
           .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score, vehicleClass: p.class }));
+        // Collapses a spurious oversized duplicate box down to just the tight, correct one for
+        // the same vehicle BEFORE tracking ever sees it -- de-duping after the fact would mean
+        // the phantom box had already spun up its own track id, its own lock-on progress, and
+        // its own (likely-doomed, since its crop is wrong) plate attempts.
+        const vehicleDetections = dedupeOversizedDuplicates(rawVehicleDetections);
         const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
         // Includes ids still alive in a grace period even if they produced no box this frame
         // -- see liveTrackIds() in speedTracker.ts for why pruning off `tracked` itself would
@@ -417,6 +462,10 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           ctx.strokeRect(x, y, w, h);
           if (isLocked) drawLockBrackets(ctx, x, y, w, h);
 
+          // "Steady" once a vehicle is locked on doesn't say anything a viewer doesn't already
+          // know -- the lock brackets themselves already mean "this has been tracked
+          // consistently" -- so it's dropped once locked to keep the label to what's actually
+          // new information (real approaching/receding speed still shows either way).
           const speedText =
             !goodView || box.speedKmh === null
               ? ""
@@ -424,7 +473,9 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
                 ? ` · ~${Math.round(box.speedKmh)} km/h approaching`
                 : box.speedKmh < -3
                   ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
-                  : " · steady";
+                  : isLocked
+                    ? ""
+                    : " · steady";
           const vehicleTypeLabel = HEAVY_VEHICLE_CLASSES.has(box.vehicleClass) ? "Heavy Vehicle" : "Vehicle";
           const prefix = (isClosest ? "🎯 Closest · " : "") + (isLocked ? "🔒 " : "");
           const label = lightsActive
