@@ -8,7 +8,7 @@ import {
   Circle,
   GoogleMarkerClusterer,
 } from "@react-google-maps/api";
-import { SuperClusterAlgorithm, type Renderer } from "@googlemaps/markerclusterer";
+import { SuperClusterAlgorithm, type Renderer, type MarkerClusterer as GoogleMarkerClustererInstance } from "@googlemaps/markerclusterer";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
 import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
@@ -380,6 +380,11 @@ export default function App() {
   const [osmSpeedCameras, setOsmSpeedCameras] = useState<OsmPoint[]>([]);
   const osmFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOsmBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
+  // Captured from the GoogleMarkerClusterer render-prop below so the effects further down can
+  // trigger exactly one recluster after a whole new batch of markers mounts, instead of each
+  // marker triggering its own -- see the effects and noClustererRedraw usage below for why.
+  const trafficClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
+  const speedCameraClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
 
   // "View in 3D?" prompt — triggers automatically on reaching max zoom for this location
   // (native double-click-to-zoom-in is left on, so a double-click here counts too). A plain
@@ -890,20 +895,35 @@ export default function App() {
       lastOsmBoundsRef.current = paddedBounds;
       fetchOsmTrafficData(paddedBounds)
         .then(({ trafficLights, speedCameras }) => {
-          // Raised now that the OSM layer actually clusters (see GoogleMarkerClusterer above)
-          // -- the old 1500/600 caps predated that fix, back when every marker rendered
-          // individually and a hard ceiling was the only thing standing between a dense metro
-          // area and thousands of live overlays. Clustering means render cost no longer scales
-          // with raw marker count the same way, so this can sit far higher without silently
-          // dropping real signals/cameras that were actually inside the fetched area -- still a
-          // ceiling, not truly unbounded, so one extreme all-at-once fetch can't hand the
-          // browser an unreasonable object count to hold in memory.
-          setOsmTrafficLights(trafficLights.slice(0, 8000));
-          setOsmSpeedCameras(speedCameras.slice(0, 4000));
+          // NOTE: an earlier version of this raised these caps to 8000/4000, reasoning that
+          // clustering made render cost stop scaling with marker count -- true for the visual
+          // result, but not for *mounting* that many markers in the first place (each one is a
+          // real google.maps.Marker construction), and a separate bug (see noClustererRedraw
+          // below) made every single one of those trigger a full recluster over the
+          // whole-growing list, an O(n^2) cost that could genuinely hang the tab for several
+          // seconds on modest hardware at 12,000 markers. That recluster bug is fixed now, but
+          // the sheer mount cost of a very large batch is still real, so this stays well below
+          // the old 8000/4000 as a safety margin -- still comfortably above the original
+          // 1500/600 for real coverage.
+          setOsmTrafficLights(trafficLights.slice(0, 4000));
+          setOsmSpeedCameras(speedCameras.slice(0, 2000));
         })
         .catch((err) => console.warn("[osm] traffic data fetch failed", err));
     }, 1200);
   }, [settings.showTrafficCameras]);
+
+  // Each <Marker clusterer={clusterer} noClustererRedraw /> below mounts without individually
+  // triggering a recluster (see that prop's JSDoc in @react-google-maps/api) -- without it, a
+  // fresh batch of N markers each call the clusterer's own full recompute over the
+  // whole-growing marker list once per marker added, an O(n^2) cost that's what actually froze
+  // the tab on a real device once the fetch cap above was raised. This fires exactly one real
+  // recluster after the whole batch from a fetch is in, once React has actually mounted them.
+  useEffect(() => {
+    trafficClustererRef.current?.render();
+  }, [osmTrafficLights]);
+  useEffect(() => {
+    speedCameraClustererRef.current?.render();
+  }, [osmSpeedCameras]);
 
   useEffect(() => {
     if (!selectedPlaceId || !mapRef.current) return;
@@ -1372,36 +1392,44 @@ export default function App() {
             <GoogleMarkerClusterer
               options={{ algorithm: osmClusterAlgorithm(), renderer: trafficLightClusterRenderer }}
             >
-              {(clusterer) => (
-                <>
-                  {osmTrafficLights.map((point) => (
-                    <Marker
-                      key={`tl-${point.id}`}
-                      position={{ lat: point.lat, lng: point.lng }}
-                      icon={trafficLightIcon(osmIconScale)}
-                      title="Traffic signal (OpenStreetMap data)"
-                      clusterer={clusterer}
-                    />
-                  ))}
-                </>
-              )}
+              {(clusterer) => {
+                trafficClustererRef.current = clusterer;
+                return (
+                  <>
+                    {osmTrafficLights.map((point) => (
+                      <Marker
+                        key={`tl-${point.id}`}
+                        position={{ lat: point.lat, lng: point.lng }}
+                        icon={trafficLightIcon(osmIconScale)}
+                        title="Traffic signal (OpenStreetMap data)"
+                        clusterer={clusterer}
+                        noClustererRedraw
+                      />
+                    ))}
+                  </>
+                );
+              }}
             </GoogleMarkerClusterer>
             <GoogleMarkerClusterer
               options={{ algorithm: osmClusterAlgorithm(), renderer: speedCameraClusterRenderer }}
             >
-              {(clusterer) => (
-                <>
-                  {osmSpeedCameras.map((point) => (
-                    <Marker
-                      key={`sc-${point.id}`}
-                      position={{ lat: point.lat, lng: point.lng }}
-                      icon={speedCameraIcon(osmIconScale)}
-                      title="Speed camera (OpenStreetMap data)"
-                      clusterer={clusterer}
-                    />
-                  ))}
-                </>
-              )}
+              {(clusterer) => {
+                speedCameraClustererRef.current = clusterer;
+                return (
+                  <>
+                    {osmSpeedCameras.map((point) => (
+                      <Marker
+                        key={`sc-${point.id}`}
+                        position={{ lat: point.lat, lng: point.lng }}
+                        icon={speedCameraIcon(osmIconScale)}
+                        title="Speed camera (OpenStreetMap data)"
+                        clusterer={clusterer}
+                        noClustererRedraw
+                      />
+                    ))}
+                  </>
+                );
+              }}
             </GoogleMarkerClusterer>
           </>
         )}
