@@ -4,6 +4,7 @@ import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createSpeedTracker } from "@/utils/speedTracker";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import { locatePlate } from "@/utils/plateLocator";
+import { warmUpPlateOcr, readPlateText } from "@/services/plateOcr";
 import {
   warmUpClassifier,
   classifyVehicleCrop,
@@ -184,6 +185,12 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
   // classifier on every single frame.
   const classificationsRef = useRef(new Map<number, ClassificationResult>());
   const classifyingRef = useRef(new Set<number>());
+  // Same one-attempt-per-track caching as the classifier above, but for OCR'd plate text --
+  // real text recognition is far too slow to run every frame (100ms-1s+ per attempt), so
+  // each tracked vehicle only ever gets one read attempt, cached (or cached as "unreadable"
+  // via null) for the rest of its time in frame.
+  const plateTextRef = useRef(new Map<number, string | null>());
+  const platesReadingRef = useRef(new Set<number>());
   // Read inside the detect loop's closure without re-subscribing the effect on every nav tick.
   const navContextRef = useRef(navContext);
   navContextRef.current = navContext;
@@ -227,6 +234,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           modelRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
           if (cancelled) return;
           warmUpClassifier();
+          warmUpPlateOcr();
         }
 
         setStatus("requesting-camera");
@@ -281,7 +289,11 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           .filter((p) => VEHICLE_CLASSES.has(p.class))
           .map((p) => ({ bbox: p.bbox as [number, number, number, number], score: p.score }));
         const tracked = speedTrackerRef.current.update(vehicleDetections, canvas.width, performance.now());
-        pruneLightbarTracks(new Set(tracked.map((b) => b.id)));
+        const liveTrackIds = new Set(tracked.map((b) => b.id));
+        pruneLightbarTracks(liveTrackIds);
+        for (const id of plateTextRef.current.keys()) {
+          if (!liveTrackIds.has(id)) plateTextRef.current.delete(id);
+        }
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -350,6 +362,38 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
             ctx.strokeStyle = "#22D3EE";
             ctx.lineWidth = 2;
             ctx.strokeRect(plate.x, plate.y, plate.w, plate.h);
+
+            // One real OCR attempt per tracked vehicle, cached (see plateOcr.ts for why this
+            // can't run every frame) -- undefined means "not attempted yet", null means
+            // "attempted, no confident read", a string means a successful read.
+            if (plateTextRef.current.get(box.id) === undefined && !platesReadingRef.current.has(box.id)) {
+              platesReadingRef.current.add(box.id);
+              const cropCanvas = document.createElement("canvas");
+              // Upscale the (tiny) plate crop before OCR -- Tesseract reads small text far
+              // more reliably when it isn't asked to work from a handful of source pixels.
+              const scale = Math.max(1, 120 / plate.w);
+              cropCanvas.width = Math.round(plate.w * scale);
+              cropCanvas.height = Math.round(plate.h * scale);
+              const cropCtx = cropCanvas.getContext("2d");
+              if (cropCtx) {
+                cropCtx.drawImage(video, plate.x, plate.y, plate.w, plate.h, 0, 0, cropCanvas.width, cropCanvas.height);
+                readPlateText(cropCanvas)
+                  .then((text) => plateTextRef.current.set(box.id, text))
+                  .finally(() => platesReadingRef.current.delete(box.id));
+              } else {
+                platesReadingRef.current.delete(box.id);
+              }
+            }
+
+            const plateText = plateTextRef.current.get(box.id);
+            if (plateText) {
+              ctx.font = "bold 13px monospace";
+              const plateTextWidth = ctx.measureText(plateText).width;
+              ctx.fillStyle = "#22D3EE";
+              ctx.fillRect(plate.x, Math.max(0, plate.y - 18), plateTextWidth + 8, 18);
+              ctx.fillStyle = "#111827";
+              ctx.fillText(plateText, plate.x + 4, Math.max(13, plate.y - 5));
+            }
           }
         }
         rafRef.current = requestAnimationFrame(detectLoop);
@@ -397,7 +441,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         )}
         {status === "running" && !navContext && !infoDismissed && (
           <>
-            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate. A small cyan box also estimates where each vehicle's number plate is — that's a real live position estimate, not plate-reading/OCR, and it only shows up when confident, never a guessed location.`}
+            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate. A small cyan box also estimates where each vehicle's number plate is, and attempts a real on-device text read of it (shown above the box when successful) — for detection display only, one attempt per vehicle, never stored or sent anywhere. It's a genuine but general-purpose OCR engine, not one built for plates specifically, so treat any reading as a rough attempt, not a confirmed plate number — especially from a moving vehicle at an angle.`}
             <button className="detection-banner-dismiss" onClick={dismissInfo}>
               Got it, don't show this again
             </button>
