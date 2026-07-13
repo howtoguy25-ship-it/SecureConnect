@@ -6,6 +6,7 @@ import {
   Autocomplete,
   DirectionsRenderer,
   Circle,
+  MarkerClusterer,
 } from "@react-google-maps/api";
 import type { User } from "firebase/auth";
 import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
@@ -152,6 +153,39 @@ function trafficLightIcon(scale: number): google.maps.Icon {
   }
   return icon;
 }
+
+// Nearby OSM markers collapse into a single numbered bubble instead of rendering every one
+// individually -- widening the layer's coverage to a whole metro area (see OSM_LAYER_MIN_ZOOM
+// below) means a dense city block can genuinely have 30-plus signals bunched together, and
+// rendering that many live map overlays at once is real, measurable render/interaction cost,
+// not just visual clutter. This is the standard fix for exactly that (Google's own
+// MarkerClusterer), not a workaround -- clusters split back apart into individual markers
+// automatically once you zoom in close enough to tell them apart anyway.
+function clusterBubbleSvg(color: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+    <circle cx="22" cy="22" r="19" fill="${color}" fill-opacity="0.85" stroke="#ffffff" stroke-width="2.5"/>
+  </svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const TRAFFIC_LIGHT_CLUSTER_STYLE = [
+  {
+    url: clusterBubbleSvg("#0D9488"),
+    height: 44,
+    width: 44,
+    textColor: "#ffffff",
+    textSize: 13,
+  },
+];
+const SPEED_CAMERA_CLUSTER_STYLE = [
+  {
+    url: clusterBubbleSvg("#7C3AED"),
+    height: 44,
+    width: 44,
+    textColor: "#ffffff",
+    textSize: 13,
+  },
+];
 
 // A real, classic map-pin glyph for the destination -- distinct from every other marker on
 // the map (alerts, current location, OSM layer) so it's unambiguous which point you're
@@ -1252,23 +1286,42 @@ export default function App() {
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
             (community-mapped, not an official feed). Purple camera glyph = speed camera,
             green traffic-light glyph = signal -- compact at a city-wide view, normal size
-            browsing at street level, bigger zoomed in close or while navigating. */}
-        {osmTrafficLights.map((point) => (
-          <Marker
-            key={`tl-${point.id}`}
-            position={{ lat: point.lat, lng: point.lng }}
-            icon={trafficLightIcon(osmIconScale)}
-            title="Traffic signal (OpenStreetMap data)"
-          />
-        ))}
-        {osmSpeedCameras.map((point) => (
-          <Marker
-            key={`sc-${point.id}`}
-            position={{ lat: point.lat, lng: point.lng }}
-            icon={speedCameraIcon(osmIconScale)}
-            title="Speed camera (OpenStreetMap data)"
-          />
-        ))}
+            browsing at street level, bigger zoomed in close or while navigating. Nearby ones
+            cluster into a numbered bubble (see clusterBubbleSvg above) until you're zoomed in
+            past street level, instead of rendering potentially dozens of individual markers
+            on top of each other in a dense area. */}
+        <MarkerClusterer
+          options={{ styles: TRAFFIC_LIGHT_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}
+        >
+          {(clusterer) => (
+            <>
+              {osmTrafficLights.map((point) => (
+                <Marker
+                  key={`tl-${point.id}`}
+                  position={{ lat: point.lat, lng: point.lng }}
+                  icon={trafficLightIcon(osmIconScale)}
+                  title="Traffic signal (OpenStreetMap data)"
+                  clusterer={clusterer}
+                />
+              ))}
+            </>
+          )}
+        </MarkerClusterer>
+        <MarkerClusterer options={{ styles: SPEED_CAMERA_CLUSTER_STYLE, maxZoom: 16, gridSize: 50 }}>
+          {(clusterer) => (
+            <>
+              {osmSpeedCameras.map((point) => (
+                <Marker
+                  key={`sc-${point.id}`}
+                  position={{ lat: point.lat, lng: point.lng }}
+                  icon={speedCameraIcon(osmIconScale)}
+                  title="Speed camera (OpenStreetMap data)"
+                  clusterer={clusterer}
+                />
+              ))}
+            </>
+          )}
+        </MarkerClusterer>
 
         {pendingLocation && (
           <Marker
