@@ -32,6 +32,7 @@ import { PhoneAuthPanel } from "@/components/PhoneAuthPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
+import { Map3DView } from "@/components/Map3DView";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
@@ -1212,6 +1213,28 @@ export default function App() {
   const osmZoomTierScale = mapZoomLevel === null ? 1 : mapZoomLevel >= 17 ? 1.3 : mapZoomLevel >= 14 ? 1 : 0.7;
   const osmIconScale = navigating ? Math.max(osmZoomTierScale, 1.4) : osmZoomTierScale;
 
+  // Real photorealistic 3D tiles replace the flat (and, tilted, visibly squashed) satellite
+  // imagery specifically when satellite's selected AND the camera's actually tilted into a
+  // 3D view -- either live-navigation follow mode or the manual "Explore in 3D" prompt. The
+  // plain roadmap tilt path is untouched; it already renders tilt cleanly via the vector Map
+  // ID, this was only ever a satellite-imagery problem. Stage 1 (see Map3DView.tsx): core
+  // rendering + live position + route only, no traffic-light/camera/alert overlays yet.
+  const navFollow3D = navigating && navViewMode === "follow";
+  const use3DSatellite = mapTypeId === "hybrid" && (navFollow3D || street3DMode);
+  const map3dTilt = manualTiltOverride ?? 67.5;
+  const map3dRoutePath =
+    directions?.routes[0]?.overview_path?.map((p) => ({ lat: p.lat(), lng: p.lng() })) ?? null;
+  const map3dInitialRange =
+    mapZoomLevel === null
+      ? 400
+      : mapZoomLevel >= 18
+        ? 200
+        : mapZoomLevel >= 16
+          ? 350
+          : mapZoomLevel >= 14
+            ? 700
+            : 1200;
+
   return (
     <div className="app-root">
       {bannerVisible && (
@@ -1391,6 +1414,16 @@ export default function App() {
           />
         )}
       </GoogleMap>
+
+      <Map3DView
+        active={use3DSatellite}
+        location={location}
+        targetHeadingRef={targetHeadingRef}
+        tilt={map3dTilt}
+        follow={navFollow3D}
+        routePath={map3dRoutePath}
+        initialRange={map3dInitialRange}
+      />
 
       <div className="zoom-control">
         <button

@@ -93,6 +93,20 @@ button:focus-visible {
   height: 100%;
 }
 
+/* Sits directly above the flat 2D map (default stacking) but below every UI chrome layer
+   (search bar, nav card, FAB buttons, panels -- all z-index 10+) -- see Map3DView.tsx. */
+.map3d-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.map3d-overlay gmp-map-3d {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .loading-screen {
   width: 100%;
   height: 100%;
