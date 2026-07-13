@@ -81,15 +81,28 @@ function markerIcon(color: string, scale = 12, strokeWeight = 2): google.maps.Sy
   return icon;
 }
 
-// Static (never changes), so build it once instead of a fresh object literal on every render.
-const CURRENT_LOCATION_ICON: google.maps.Symbol = {
-  path: google.maps.SymbolPath.CIRCLE,
-  fillColor: "#2563EB",
-  fillOpacity: 1,
-  strokeColor: "#ffffff",
-  strokeWeight: 3,
-  scale: 8,
-};
+// Static (never changes), so build it once instead of a fresh object literal on every render
+// -- but lazily, on first call, NOT as a plain top-level const. The Google Maps script that
+// defines the `google` global loads asynchronously (see useJsApiLoader below); a top-level
+// `const x = { path: google.maps.SymbolPath.CIRCLE, ... }` runs the instant this module is
+// first evaluated by the browser, before that script has necessarily finished loading --
+// `google` is undefined at that point, which threw and crashed the entire app to a blank
+// white screen on every page load. Deferring the object-literal construction into a function
+// (only ever called from inside JSX that's already gated on isLoaded) fixes that.
+let currentLocationIconCache: google.maps.Symbol | null = null;
+function currentLocationIcon(): google.maps.Symbol {
+  if (!currentLocationIconCache) {
+    currentLocationIconCache = {
+      path: google.maps.SymbolPath.CIRCLE,
+      fillColor: "#2563EB",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 3,
+      scale: 8,
+    };
+  }
+  return currentLocationIconCache;
+}
 
 // Only fetch OpenStreetMap traffic-signal/speed-camera data once zoomed in to roughly
 // street level -- both to keep the Overpass query area (and thus load) reasonable, and
@@ -1108,7 +1121,7 @@ export default function App() {
         }}
       >
         {location && (
-          <Marker position={location} icon={CURRENT_LOCATION_ICON} />
+          <Marker position={location} icon={currentLocationIcon()} />
         )}
 
         {alerts.map((alert) => (
