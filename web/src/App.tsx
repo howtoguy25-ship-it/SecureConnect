@@ -178,41 +178,60 @@ function clusterBubbleSvg(color: string): string {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-let trafficLightClusterIconCache: google.maps.Icon | null = null;
-let speedCameraClusterIconCache: google.maps.Icon | null = null;
+// The count is always printed on the bubble itself at every zoom level -- clicking a cluster
+// no longer zooms the map in (see onClusterClick: emphasizeClusters below), so reading the
+// count was never supposed to require zooming or tapping through to individual markers in the
+// first place. A zoom-IN gesture (not zoom-out, see onZoomChanged) additionally emphasizes
+// every currently-rendered cluster's bubble to a larger size for 10 seconds -- easier to read
+// right after a zoom gesture -- and that emphasis holds for the full 10 seconds even if you
+// zoom back out during that window, then reverts back to the normal small bubble on its own.
+const CLUSTER_NORMAL_SIZE = 44;
+const CLUSTER_EMPHASIZED_SIZE = 62;
+const CLUSTER_EMPHASIS_MS = 10000;
+let clusterEmphasisUntilMs = 0;
+function isClusterEmphasisActive(): boolean {
+  return performance.now() < clusterEmphasisUntilMs;
+}
 
-function makeClusterRenderer(color: string, iconCacheGet: () => google.maps.Icon | null, iconCacheSet: (icon: google.maps.Icon) => void): Renderer {
+const clusterIconCache = new Map<string, google.maps.Icon>();
+
+function makeClusterRenderer(color: string): Renderer {
   return {
     render: ({ count, position }) => {
-      let icon = iconCacheGet();
+      const emphasized = isClusterEmphasisActive();
+      const size = emphasized ? CLUSTER_EMPHASIZED_SIZE : CLUSTER_NORMAL_SIZE;
+      const cacheKey = `${color}:${size}`;
+      let icon = clusterIconCache.get(cacheKey);
       if (!icon) {
         icon = {
           url: clusterBubbleSvg(color),
-          scaledSize: new google.maps.Size(44, 44),
-          anchor: new google.maps.Point(22, 22),
+          scaledSize: new google.maps.Size(size, size),
+          anchor: new google.maps.Point(size / 2, size / 2),
         };
-        iconCacheSet(icon);
+        clusterIconCache.set(cacheKey, icon);
       }
       return new google.maps.Marker({
         position,
         icon,
-        label: { text: String(count), color: "#ffffff", fontSize: "13px", fontWeight: "700" },
+        label: {
+          text: String(count),
+          color: "#ffffff",
+          fontSize: emphasized ? "18px" : "13px",
+          fontWeight: "700",
+        },
         zIndex: 900 + count,
       });
     },
   };
 }
 
-const trafficLightClusterRenderer = makeClusterRenderer(
-  "#0D9488",
-  () => trafficLightClusterIconCache,
-  (icon) => (trafficLightClusterIconCache = icon)
-);
-const speedCameraClusterRenderer = makeClusterRenderer(
-  "#7C3AED",
-  () => speedCameraClusterIconCache,
-  (icon) => (speedCameraClusterIconCache = icon)
-);
+// Overrides the library's default click handler, which zooms the map to fit the cluster's
+// bounds -- the count is already printed right on the bubble, so there was never anything a
+// click needed to reveal by zooming in for you.
+function noZoomOnClusterClick() {}
+
+const trafficLightClusterRenderer = makeClusterRenderer("#0D9488");
+const speedCameraClusterRenderer = makeClusterRenderer("#7C3AED");
 
 // 60px pixel-equivalent grouping radius (SuperClusterAlgorithm's `radius` is in the same
 // screen-pixel units the old gridSize was), same clustering distance for both layers.
@@ -385,6 +404,12 @@ export default function App() {
   // marker triggering its own -- see the effects and noClustererRedraw usage below for why.
   const trafficClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
   const speedCameraClustererRef = useRef<GoogleMarkerClustererInstance | null>(null);
+  // Last seen zoom level, so onZoomChanged can tell a genuine zoom-IN gesture apart from a
+  // zoom-out (only zooming in should trigger the cluster-emphasis window below).
+  const lastZoomRef = useRef<number | null>(null);
+  // Cancels/reschedules the "revert cluster bubbles back to normal size" timer -- each new
+  // zoom-in restarts the same 10s window rather than stacking timers.
+  const clusterEmphasisTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // "View in 3D?" prompt — triggers automatically on reaching max zoom for this location
   // (native double-click-to-zoom-in is left on, so a double-click here counts too). A plain
@@ -845,6 +870,23 @@ export default function App() {
     if (!map) return;
     const zoom = map.getZoom();
     if (zoom === undefined) return;
+
+    // A genuine zoom-IN gesture (not zoom-out) emphasizes every currently-rendered traffic-
+    // light/speed-camera cluster bubble -- bigger bubble, bigger count text -- for 10 seconds,
+    // holding that size even through a subsequent zoom-out within the window, then reverting
+    // on its own once the window elapses. See isClusterEmphasisActive/makeClusterRenderer above.
+    if (lastZoomRef.current !== null && zoom > lastZoomRef.current) {
+      clusterEmphasisUntilMs = performance.now() + CLUSTER_EMPHASIS_MS;
+      trafficClustererRef.current?.render();
+      speedCameraClustererRef.current?.render();
+      if (clusterEmphasisTimeoutRef.current) clearTimeout(clusterEmphasisTimeoutRef.current);
+      clusterEmphasisTimeoutRef.current = setTimeout(() => {
+        trafficClustererRef.current?.render();
+        speedCameraClustererRef.current?.render();
+      }, CLUSTER_EMPHASIS_MS);
+    }
+    lastZoomRef.current = zoom;
+
     // Rounded to whole levels -- the OSM marker icon sizing below reads this, and only
     // needs to change a handful of times across a zoom gesture, not on every fractional
     // in-between value a pinch can report.
@@ -1390,7 +1432,11 @@ export default function App() {
         {settings.showTrafficCameras && (
           <>
             <GoogleMarkerClusterer
-              options={{ algorithm: osmClusterAlgorithm(), renderer: trafficLightClusterRenderer }}
+              options={{
+                algorithm: osmClusterAlgorithm(),
+                renderer: trafficLightClusterRenderer,
+                onClusterClick: noZoomOnClusterClick,
+              }}
             >
               {(clusterer) => {
                 trafficClustererRef.current = clusterer;
@@ -1411,7 +1457,11 @@ export default function App() {
               }}
             </GoogleMarkerClusterer>
             <GoogleMarkerClusterer
-              options={{ algorithm: osmClusterAlgorithm(), renderer: speedCameraClusterRenderer }}
+              options={{
+                algorithm: osmClusterAlgorithm(),
+                renderer: speedCameraClusterRenderer,
+                onClusterClick: noZoomOnClusterClick,
+              }}
             >
               {(clusterer) => {
                 speedCameraClustererRef.current = clusterer;
