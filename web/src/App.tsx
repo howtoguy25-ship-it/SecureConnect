@@ -104,10 +104,65 @@ function currentLocationIcon(): google.maps.Symbol {
   return currentLocationIconCache;
 }
 
-// Only fetch OpenStreetMap traffic-signal/speed-camera data once zoomed in to roughly
-// street level -- both to keep the Overpass query area (and thus load) reasonable, and
-// because individual light/camera markers aren't meaningful to show zoomed way out.
-const OSM_LAYER_MIN_ZOOM = 15;
+// Real, recognizable glyphs instead of plain colored dots -- a purple camera body for speed
+// cameras, a green traffic-light housing (three lenses) for signals -- cached by exact pixel
+// size (same lazy-build-once pattern as the functions above, for the same reason: `google`
+// isn't defined yet at module-load time, only once the Maps script has actually loaded).
+const speedCameraIconCache = new Map<number, google.maps.Icon>();
+function speedCameraIcon(scale: number): google.maps.Icon {
+  const w = Math.round(22 * scale);
+  const h = Math.round(16 * scale);
+  let icon = speedCameraIconCache.get(w);
+  if (!icon) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 33 24">
+      <rect x="1" y="5" width="24" height="15" rx="3" fill="#7C3AED" stroke="#ffffff" stroke-width="2"/>
+      <rect x="24" y="9" width="7" height="8" rx="1.5" fill="#7C3AED" stroke="#ffffff" stroke-width="1.5"/>
+      <circle cx="13" cy="12.5" r="5.4" fill="#ffffff"/>
+      <circle cx="13" cy="12.5" r="2.8" fill="#7C3AED"/>
+    </svg>`;
+    icon = {
+      url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+      scaledSize: new google.maps.Size(w, h),
+      anchor: new google.maps.Point(w / 2, h / 2),
+    };
+    speedCameraIconCache.set(w, icon);
+  }
+  return icon;
+}
+
+const trafficLightIconCache = new Map<number, google.maps.Icon>();
+function trafficLightIcon(scale: number): google.maps.Icon {
+  const w = Math.round(15 * scale);
+  const h = Math.round(24 * scale);
+  let icon = trafficLightIconCache.get(w);
+  if (!icon) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 24 38">
+      <rect x="3" y="1" width="18" height="36" rx="7" fill="#0D9488" stroke="#ffffff" stroke-width="2"/>
+      <circle cx="12" cy="10.5" r="4" fill="#ffffff" opacity="0.95"/>
+      <circle cx="12" cy="19" r="4" fill="#ffffff" opacity="0.55"/>
+      <circle cx="12" cy="27.5" r="4" fill="#ffffff" opacity="0.55"/>
+    </svg>`;
+    icon = {
+      url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+      scaledSize: new google.maps.Size(w, h),
+      anchor: new google.maps.Point(w / 2, h / 2),
+    };
+    trafficLightIconCache.set(w, icon);
+  }
+  return icon;
+}
+
+// Fetches (and shows) the OSM traffic-light/speed-camera layer starting from a somewhat
+// wider zoom than before (13 vs. the old 15), since it's meant to be available anywhere in
+// Australia you zoom into, not just tight city blocks. Deliberately not dropped further than
+// this -- every zoom level out roughly doubles the query area in each direction, so going
+// much lower risks the exact map lag being fixed elsewhere in this same pass (a bigger
+// Overpass query area means a slower fetch and more markers to render). A literal single
+// all-of-Australia fetch isn't practical at all -- that's tens of thousands of nodes in one
+// request, which would time out against Overpass's public API and stall the browser
+// rendering them, so this stays viewport-based rather than ever trying to load the whole
+// country in one shot.
+const OSM_LAYER_MIN_ZOOM = 13;
 
 export default function App() {
   const { isLoaded } = useJsApiLoader({
@@ -982,7 +1037,23 @@ export default function App() {
     }
   }, [location, navigating]);
 
-  const center = useMemo(() => location ?? DEFAULT_CENTER, [location]);
+  // Seeds the map's center exactly once, the first time a real GPS fix arrives -- NOT
+  // reactively tied to `location` on every tick. <GoogleMap>'s `center` prop is controlled:
+  // the wrapper library calls map.setCenter() any time this value's object reference changes,
+  // which used to happen on every single GPS update (useGeolocation hands back a fresh
+  // {lat,lng} object each time). That meant freely panning/dragging around the map got
+  // periodically yanked back to your live position mid-drag -- the "little delay"/jank
+  // reported when moving the map. Ongoing recentering is already handled imperatively
+  // elsewhere (the recenter button, and the 3D Follow effect's own map.panTo() calls), so
+  // this only ever needs to fire once.
+  const [center, setCenter] = useState<google.maps.LatLngLiteral>(DEFAULT_CENTER);
+  const centerSeededRef = useRef(false);
+  useEffect(() => {
+    if (location && !centerSeededRef.current) {
+      centerSeededRef.current = true;
+      setCenter(location);
+    }
+  }, [location]);
 
   if (!isLoaded) {
     return (
@@ -1135,13 +1206,15 @@ export default function App() {
         ))}
 
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
-            (community-mapped, not an official feed). Speed cameras render larger per
-            request so they stand out more than the smaller traffic-signal dots. */}
+            (community-mapped, not an official feed). Purple camera glyph = speed camera,
+            green traffic-light glyph = signal -- sized up while actively navigating so
+            they're easier to spot at a glance while driving, smaller otherwise since the
+            layer now shows across a wider zoom range than before. */}
         {osmTrafficLights.map((point) => (
           <Marker
             key={`tl-${point.id}`}
             position={{ lat: point.lat, lng: point.lng }}
-            icon={markerIcon("#0D9488", 5)}
+            icon={trafficLightIcon(navigating ? 1.5 : 1)}
             title="Traffic signal (OpenStreetMap data)"
           />
         ))}
@@ -1149,7 +1222,7 @@ export default function App() {
           <Marker
             key={`sc-${point.id}`}
             position={{ lat: point.lat, lng: point.lng }}
-            icon={markerIcon("#7C3AED", 9)}
+            icon={speedCameraIcon(navigating ? 1.5 : 1)}
             title="Speed camera (OpenStreetMap data)"
           />
         ))}

@@ -18,7 +18,7 @@
   text-align: center;
   /* Keeps the panel fully on-screen (and scrollable) on short viewports instead of its
      bottom-anchored content pushing account/legal sections above the top of the screen. */
-  max-height: calc(100vh - 48px);
+  max-height: calc(100% - 48px);
   overflow-y: auto;
 }
 

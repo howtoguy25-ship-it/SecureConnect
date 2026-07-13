@@ -195,6 +195,16 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
   // is the fallback on laptops/desktops that don't have a rear-facing one at all.
   const [facingMode, setFacingMode] = useState<FacingMode>("environment");
   const [canSwitchCamera, setCanSwitchCamera] = useState(false);
+  // The long how-this-works explainer only needs to be read once -- remembered permanently
+  // (like the night-mode prompt in App.tsx) instead of blocking the camera view with the same
+  // paragraph every single time AI Detection is opened.
+  const [infoDismissed, setInfoDismissed] = useState(
+    () => localStorage.getItem("trackline.aiDetectionInfoDismissed") === "1"
+  );
+  const dismissInfo = () => {
+    setInfoDismissed(true);
+    localStorage.setItem("trackline.aiDetectionInfoDismissed", "1");
+  };
 
   useEffect(() => {
     navigator.mediaDevices
@@ -372,9 +382,14 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
             {navContext.hideTrace && " — route guide line hidden"}
           </>
         )}
-        {status === "running" &&
-          !navContext &&
-          `Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
+        {status === "running" && !navContext && !infoDismissed && (
+          <>
+            {`Detecting vehicles (${facingMode === "environment" ? "back" : "front"} camera) — a custom-trained model guesses ambulance/fire truck/police car (red box, shown with its confidence %) when confident enough, generic "Vehicle" (amber box) otherwise. A separate light-flash detector flags any vehicle with an actively strobing red/blue light as "Unmarked police?" (violet box) even if it doesn't look like a marked car — it only catches lights that are actually on, not antennas or other hardware. It's trained on a modest ~500-image dataset — a real but imperfect guess, not certified identification. Speed is a rough estimate (assumes average car width, no calibration) — not radar-accurate.`}
+            <button className="detection-banner-dismiss" onClick={dismissInfo}>
+              Got it, don't show this again
+            </button>
+          </>
+        )}
         {status === "error" && (errorMessage ?? "Something went wrong starting the camera.")}
       </div>
 

@@ -37,6 +37,8 @@
   top: 16px;
   left: 16px;
   right: 16px;
+  max-height: calc(100% - 120px);
+  overflow-y: auto;
   background: rgba(17, 24, 39, 0.85);
   color: #fff;
   padding: 10px 14px;
@@ -44,6 +46,19 @@
   font-family: system-ui, sans-serif;
   font-size: 13px;
   text-align: center;
+}
+
+.detection-banner-dismiss {
+  display: block;
+  margin: 10px auto 2px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .detection-close {
