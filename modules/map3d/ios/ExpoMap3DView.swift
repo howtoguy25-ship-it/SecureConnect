@@ -61,16 +61,13 @@ public class ExpoMap3DView: ExpoView {
 
   // --- Prop setters, called from Map3DModule's View{} Prop blocks ---
 
+  // Mutates the existing Camera value's properties in place (rather than reconstructing a
+  // whole new Camera(...) with every field spelled out) specifically to avoid repeating the
+  // same "guess the declared parameter order" risk that broke the one real construction call
+  // in Map3DState.swift -- Swift enforces call-site argument order against the actual
+  // declared initializer, and this SDK's real order isn't fully confirmed from docs alone.
   func setCenter(latitude: Double, longitude: Double) {
-    state.camera = Camera(
-      center: LatLngAltitude(latitude: latitude, longitude: longitude, altitude: 0),
-      fieldOfView: state.camera.fieldOfView,
-      altitudeMode: state.camera.altitudeMode,
-      heading: state.camera.heading,
-      tilt: state.camera.tilt,
-      roll: state.camera.roll,
-      range: state.camera.range
-    )
+    state.camera.center = LatLngAltitude(latitude: latitude, longitude: longitude, altitude: 0)
   }
 
   func setMapMode(_ mode: String) {
@@ -91,30 +88,11 @@ public class ExpoMap3DView: ExpoView {
   // --- Imperative joystick functions, called from Map3DModule's Function blocks ---
 
   func rotateCamera(deltaDeg: Double) {
-    let current = state.camera
-    let rawHeading = (current.heading + deltaDeg).truncatingRemainder(dividingBy: 360)
-    let normalizedHeading = (rawHeading + 360).truncatingRemainder(dividingBy: 360)
-    state.camera = Camera(
-      center: current.center,
-      fieldOfView: current.fieldOfView,
-      altitudeMode: current.altitudeMode,
-      heading: normalizedHeading,
-      tilt: current.tilt,
-      roll: current.roll,
-      range: current.range
-    )
+    let rawHeading = (state.camera.heading + deltaDeg).truncatingRemainder(dividingBy: 360)
+    state.camera.heading = (rawHeading + 360).truncatingRemainder(dividingBy: 360)
   }
 
   func tiltCamera(deltaDeg: Double) {
-    let current = state.camera
-    state.camera = Camera(
-      center: current.center,
-      fieldOfView: current.fieldOfView,
-      altitudeMode: current.altitudeMode,
-      heading: current.heading,
-      tilt: min(max(current.tilt + deltaDeg, 0), 67.5),
-      roll: current.roll,
-      range: current.range
-    )
+    state.camera.tilt = min(max(state.camera.tilt + deltaDeg, 0), 67.5)
   }
 }
