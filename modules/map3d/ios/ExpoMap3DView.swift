@@ -42,7 +42,13 @@ public class ExpoMap3DView: ExpoView {
 
   public override func didMoveToWindow() {
     super.didMoveToWindow()
-    if window != nil, let parentController = reactViewController() {
+    // Real Xcode error: "cannot find 'reactViewController' in scope" -- that method (used by
+    // ExpoModulesCore's own SwiftUIHostingView.swift, which this was mirroring) turned out
+    // not to be visible from this module's build target. Switched to
+    // appContext.utilities?.currentViewController(), a cross-module Expo utility confirmed
+    // working the same way in expo-camera's own iOS code
+    // (node_modules/expo-camera/ios/CameraViewModule.swift).
+    if window != nil, let parentController = appContext?.utilities?.currentViewController() {
       parentController.addChild(hostingController)
       addSubview(hostingController.view)
       hostingController.didMove(toParent: parentController)
