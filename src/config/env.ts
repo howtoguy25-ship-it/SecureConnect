@@ -1,4 +1,6 @@
 import Constants from "expo-constants";
+import { Platform } from "react-native";
+import { TestIds } from "react-native-google-mobile-ads";
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string | undefined>;
 
@@ -22,5 +24,17 @@ export const env = {
     storageBucket: required("firebaseStorageBucket", extra.firebaseStorageBucket),
     messagingSenderId: required("firebaseMessagingSenderId", extra.firebaseMessagingSenderId),
     appId: required("firebaseAppId", extra.firebaseAppId),
+  },
+  // Falls back to Google's own real (non-fake) test ad unit IDs -- these serve actual test
+  // ads from Google's network, they just never generate revenue -- so ads work out of the
+  // box before real AdMob ad units are configured. See .env.example for how to set the real
+  // production unit IDs once an AdMob account/app is set up.
+  ads: {
+    bannerUnitId:
+      (Platform.OS === "android" ? extra.admobBannerAndroidUnitId : extra.admobBannerIosUnitId) ||
+      TestIds.BANNER,
+    appOpenUnitId:
+      (Platform.OS === "android" ? extra.admobAppOpenAndroidUnitId : extra.admobAppOpenIosUnitId) ||
+      TestIds.APP_OPEN,
   },
 };

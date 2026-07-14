@@ -84,6 +84,19 @@ module.exports = {
           iosApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
         },
       ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          // Google's own public test App IDs as the fallback -- real Google Mobile Ads
+          // account App IDs (format ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY, from
+          // admob.google.com -> Apps -> App settings) override via env vars once set up.
+          // Ads work out of the box with real (Google-served) test ads either way.
+          androidAppId: process.env.ADMOB_ANDROID_APP_ID || "ca-app-pub-3940256099942544~3347511713",
+          iosAppId: process.env.ADMOB_IOS_APP_ID || "ca-app-pub-3940256099942544~1458002511",
+          userTrackingUsageDescription:
+            "TrackLine shows ads to help keep the app free. Allowing tracking lets those ads be more relevant -- you can decline and the app works the same either way.",
+        },
+      ],
     ],
     extra: {
       googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY,
@@ -94,6 +107,10 @@ module.exports = {
       firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET,
       firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
       firebaseAppId: process.env.FIREBASE_APP_ID,
+      admobBannerAndroidUnitId: process.env.ADMOB_ANDROID_BANNER_UNIT_ID,
+      admobBannerIosUnitId: process.env.ADMOB_IOS_BANNER_UNIT_ID,
+      admobAppOpenAndroidUnitId: process.env.ADMOB_ANDROID_APP_OPEN_UNIT_ID,
+      admobAppOpenIosUnitId: process.env.ADMOB_IOS_APP_OPEN_UNIT_ID,
       eas: {
         // Not a secret -- EAS project IDs are meant to live directly in config, which is
         // also the only way `eas build`/`eas submit` can reliably find it, since this file

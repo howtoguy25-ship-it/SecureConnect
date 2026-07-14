@@ -17,6 +17,7 @@ import { DestinationSearchBar } from "@/components/DestinationSearchBar";
 import { NavigationInstructionCard } from "@/components/NavigationInstructionCard";
 import { AlertMarker } from "@/components/AlertMarker";
 import { AlertBanner } from "@/components/AlertBanner";
+import { BannerAdBar } from "@/components/BannerAdBar";
 import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
 import { getDirections, type Route } from "@/services/directions";
@@ -186,6 +187,10 @@ export function MapScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Everything map-related lives in its own flex:1 area so the banner ad below gets a
+          real reserved row of its own instead of floating over the map -- it can never
+          overlap the route, turn instructions, or FAB buttons this way. */}
+      <View style={styles.mapArea}>
       {/* Google provider needs a custom dev client on iOS (unavailable in Expo Go); Android gets it for free. */}
       <MapView
         ref={mapRef}
@@ -279,6 +284,11 @@ export function MapScreen() {
           <Ionicons name="globe-outline" size={22} color="#FFFFFF" />
         </Pressable>
       )}
+      </View>
+
+      {/* Never shown while navigating -- a driving app shouldn't have anything competing for
+          attention with the road/turn instructions, safety concern first and foremost. */}
+      {!route && <BannerAdBar />}
 
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
         <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
@@ -307,6 +317,7 @@ export function MapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceMuted },
+  mapArea: { flex: 1 },
   topRightControls: {
     position: "absolute",
     right: spacing.md,

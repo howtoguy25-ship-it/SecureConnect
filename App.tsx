@@ -6,6 +6,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { LocationProvider } from "@/context/LocationContext";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { RootNavigator } from "@/navigation/RootNavigator";
+import { AppOpenAdManager } from "@/components/AppOpenAdManager";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <SettingsProvider>
             <LocationProvider>
               <StatusBar style="dark" />
+              <AppOpenAdManager />
               <RootNavigator />
             </LocationProvider>
           </SettingsProvider>
