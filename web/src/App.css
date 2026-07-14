@@ -352,6 +352,30 @@ button:focus-visible {
   color: #fff;
 }
 
+/* Only shown while navigating (the normal FAB stack is hidden then) -- lets alert pins be
+   hidden just for this trip when they get dense enough to clutter the driving view, without
+   touching the always-on region-wide alert visibility setting. */
+.nav-alerts-toggle {
+  position: absolute;
+  bottom: calc(164px + env(safe-area-inset-bottom, 0px));
+  right: 20px;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  border: none;
+  background: var(--fab-surface);
+  color: var(--fab-icon);
+  font-size: 20px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  z-index: 10;
+}
+
+.nav-alerts-toggle-active {
+  background: #111827;
+  color: #fff;
+}
+
 /* Small explainer bubble anchored to the same height as the compass/hide-trace FAB, sitting
    to its left so it visually points at the button it's explaining. Shown at most a few times
    ever (see onToggleHideTrace in App.tsx), not a persistent label. */

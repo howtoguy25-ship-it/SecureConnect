@@ -13,6 +13,7 @@ interface Props {
   onSetNavViewMode: (mode: NavViewMode) => void;
   onClearRoute: () => void;
   onExit: () => void;
+  onCollapse: () => void;
   hasStop: boolean;
   onAddStop: () => void;
   onShareEta: () => void;
@@ -29,6 +30,7 @@ export function NavigationCard({
   onSetNavViewMode,
   onClearRoute,
   onExit,
+  onCollapse,
   hasStop,
   onAddStop,
   onShareEta,
@@ -43,6 +45,14 @@ export function NavigationCard({
 
   return (
     <div className="nav-card">
+      <button
+        className="nav-card-collapse"
+        onClick={onCollapse}
+        aria-label="Hide turn-by-turn card"
+        title="Hide (shows a small direction pill instead)"
+      >
+        ⌄
+      </button>
       <button className="nav-card-clear" onClick={onClearRoute} aria-label="Remove route">
         ✕
       </button>

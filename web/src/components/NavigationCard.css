@@ -28,10 +28,26 @@
   cursor: pointer;
 }
 
+.nav-card-collapse {
+  position: absolute;
+  top: 12px;
+  right: 50px;
+  width: 30px;
+  height: 30px;
+  border-radius: 15px;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .nav-card-instruction {
   font-size: 17px;
   font-weight: 700;
-  padding-right: 34px;
+  padding-right: 72px;
 }
 
 .nav-card-meta {

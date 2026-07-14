@@ -24,6 +24,7 @@ import { ReportAlertPanel } from "@/components/ReportAlertPanel";
 import { AlertDetailPanel } from "@/components/AlertDetailPanel";
 import { PlacementBar } from "@/components/PlacementBar";
 import { NavigationCard, type NavViewMode } from "@/components/NavigationCard";
+import { NavMiniBox } from "@/components/NavMiniBox";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
@@ -303,6 +304,16 @@ export default function App() {
   // wherever feels comfortable. Reset via the recenter button.
   const [manualHeadingOffset, setManualHeadingOffset] = useState(0);
   const [manualTiltOverride, setManualTiltOverride] = useState<number | null>(null);
+
+  // Lets the driver collapse the full turn-by-turn card down to a small direction pill --
+  // the full card (ETA, action row, view toggle, end-nav button) covers a meaningful chunk
+  // of the screen, especially with the real 3D satellite view underneath it. Reset whenever
+  // navigation starts/ends so it never carries over collapsed into a fresh trip.
+  const [navCardCollapsed, setNavCardCollapsed] = useState(false);
+  // Alert pins can get dense enough in a busy area to clutter the driving view -- lets the
+  // driver hide them just for the duration of this navigation without touching the
+  // always-on region-wide alert visibility setting.
+  const [hideAlertsWhileNavigating, setHideAlertsWhileNavigating] = useState(false);
 
   // Real traffic-signal/speed-camera locations from OpenStreetMap, refreshed as the
   // visible map area changes (see onMapIdle below).
@@ -630,9 +641,20 @@ export default function App() {
 
     const last = lastLocationRef.current;
     let currentHeading = heading;
-    if (last) {
+    // Real GPS-chip course-over-ground (from the Geolocation API, backed by the device's own
+    // Doppler/course estimate) is far steadier than a bearing computed from two consecutive
+    // fixes -- deriving our own bearing from two close, noisy lat/lng points is numerically
+    // unstable (a few meters of ordinary GPS jitter can swing the computed angle wildly),
+    // which is exactly what was reading as the 3D Follow camera "wiggling and spinning" and
+    // then "resetting" mid-drive. Only fall back to the two-fix bearing when the platform
+    // doesn't provide one (some desktop browsers never populate it), and require a bigger,
+    // more deliberate movement before trusting that fallback.
+    if (location.heading !== null && !Number.isNaN(location.heading) && (location.speed ?? 0) > 0.5) {
+      currentHeading = location.heading;
+      setHeading(currentHeading);
+    } else if (last) {
       const movedKm = distanceKm(last.lat, last.lng, location.lat, location.lng);
-      if (movedKm > 0.003) {
+      if (movedKm > 0.008) {
         currentHeading = bearingDegrees(last.lat, last.lng, location.lat, location.lng);
         setHeading(currentHeading);
       }
@@ -654,41 +676,54 @@ export default function App() {
       setRouteOrigin(location);
     }
 
-    // Reasserted every tick (not just on mode change) so the 3D camera can't get stuck
-    // flattened out -- Google's renderer silently drops tilt below a certain zoom level,
-    // and a wide zoom-out (deliberate or accidental) would otherwise never self-correct
-    // while stationary, since nothing else would re-trigger it.
     if (navViewMode === "follow") {
-      const map = mapRef.current;
-      if (map) {
-        map.panTo(location);
-        const currentZoom = map.getZoom();
-        if (currentZoom !== undefined && currentZoom < 16) {
-          map.setZoom(18);
+      // Real photorealistic 3D tiles (Map3DView) render as a separate overlay on top of this
+      // classic map when active -- the classic map sits hidden underneath it the whole time.
+      // It used to still get a full panTo/setZoom/setTilt every single GPS tick regardless,
+      // which is real, wasted rendering/reflow work competing with the visible WebGL 3D view
+      // for the same frame budget -- part of what read as "lag" during 3D Follow. Only touch
+      // the classic map's own camera when it's actually the one on screen.
+      const showing3D = mapTypeId === "hybrid" && navViewMode === "follow";
+      if (!showing3D) {
+        // Reasserted every tick (not just on mode change) so the 2D camera can't get stuck
+        // flattened out -- Google's renderer silently drops tilt below a certain zoom level,
+        // and a wide zoom-out (deliberate or accidental) would otherwise never self-correct
+        // while stationary, since nothing else would re-trigger it.
+        const map = mapRef.current;
+        if (map) {
+          map.panTo(location);
+          const currentZoom = map.getZoom();
+          if (currentZoom !== undefined && currentZoom < 16) {
+            map.setZoom(18);
+          }
+          // Only pushed to the map when it actually changed -- calling setTilt every single
+          // GPS tick with the same value still makes the vector renderer redo work it didn't
+          // need to, which is part of what reads as "blurry"/stuttery during a steady drive.
+          const targetTilt = manualTiltOverride ?? 67.5;
+          if (lastAppliedTiltRef.current !== targetTilt) {
+            map.setTilt(targetTilt);
+            lastAppliedTiltRef.current = targetTilt;
+          }
         }
-        // Only pushed to the map when it actually changed -- calling setTilt every single
-        // GPS tick with the same value still makes the vector renderer redo work it didn't
-        // need to, which is part of what reads as "blurry"/stuttery during a steady drive.
-        const targetTilt = manualTiltOverride ?? 67.5;
-        if (lastAppliedTiltRef.current !== targetTilt) {
-          map.setTilt(targetTilt);
-          lastAppliedTiltRef.current = targetTilt;
-        }
-        // Heading is NOT set directly here -- it only updates the target that the smoothing
-        // loop below eases the camera toward, so turns/GPS jitter ease into place instead of
-        // whip-panning to the new bearing every tick.
-        targetHeadingRef.current = (currentHeading + manualHeadingOffset + 360) % 360;
       }
+      // Always kept current regardless of which view is visible -- both the classic map's
+      // own heading-easing loop and Map3DView's independent one (see Map3DView.tsx) ease
+      // toward this same ref, so turns/GPS jitter ease into place instead of whip-panning to
+      // the new bearing every tick, on whichever view is actually on screen.
+      targetHeadingRef.current = (currentHeading + manualHeadingOffset + 360) % 360;
     }
-  }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride]);
+  }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride, mapTypeId]);
 
   // Smoothly eases the 3D Follow camera's heading toward targetHeadingRef every frame
   // instead of snapping to it -- exponential ease (each frame closes ~14% of the remaining
   // angular gap) reads as a natural, weighted turn like a real nav app instead of a jump-cut,
   // while still catching up to a moving target within well under a second. Only runs while
-  // actually in follow mode so it doesn't burn frames the rest of the time.
+  // actually in follow mode so it doesn't burn frames the rest of the time. Also skipped
+  // whenever the real 3D tiles are what's actually on screen -- Map3DView runs this exact
+  // same easing loop itself (see Map3DView.tsx), so running a second one here would just be
+  // wasted rAF work on a hidden map, competing with the visible WebGL view for frame time.
   useEffect(() => {
-    if (!navigating || navViewMode !== "follow") return;
+    if (!navigating || navViewMode !== "follow" || mapTypeId === "hybrid") return;
     const map = mapRef.current;
     if (!map) return;
 
@@ -708,7 +743,7 @@ export default function App() {
     rafId = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(rafId);
-  }, [navigating, navViewMode]);
+  }, [navigating, navViewMode, mapTypeId]);
 
   // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
   // maxspeed tags (see osmTrafficData.ts) -- refetched only after moving ~50m so a live GPS
@@ -1073,6 +1108,7 @@ export default function App() {
     setActiveStepIndex(0);
     setRouteOrigin(location);
     lastLocationRef.current = location;
+    setNavCardCollapsed(false);
   }, [location]);
 
   const endNavigation = useCallback(() => {
@@ -1082,6 +1118,7 @@ export default function App() {
     mapRef.current?.setTilt(0);
     mapRef.current?.setHeading(0);
     mapRef.current?.setZoom(15);
+    setNavCardCollapsed(false);
   }, []);
 
   const clearRoute = useCallback(() => {
@@ -1321,15 +1358,16 @@ export default function App() {
           <Marker position={location} icon={currentLocationIcon()} />
         )}
 
-        {alerts.map((alert) => (
-          <Marker
-            key={alert.id}
-            position={{ lat: alert.lat, lng: alert.lng }}
-            icon={markerIcon(ALERT_COLORS[alert.type])}
-            label={{ text: ALERT_EMOJI[alert.type], fontSize: "14px" }}
-            onClick={() => setSelectedAlert(alert)}
-          />
-        ))}
+        {!(navigating && hideAlertsWhileNavigating) &&
+          alerts.map((alert) => (
+            <Marker
+              key={alert.id}
+              position={{ lat: alert.lat, lng: alert.lng }}
+              icon={markerIcon(ALERT_COLORS[alert.type])}
+              label={{ text: ALERT_EMOJI[alert.type], fontSize: "14px" }}
+              onClick={() => setSelectedAlert(alert)}
+            />
+          ))}
 
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
             (community-mapped, not an official feed). Green traffic-light glyph = signal,
@@ -1550,7 +1588,7 @@ export default function App() {
 
       {navigating && speedLimitKmh !== null && <SpeedLimitSign kmh={speedLimitKmh} />}
 
-      {navigating && navLeg && (
+      {navigating && navLeg && !navCardCollapsed && (
         <NavigationCard
           step={navSteps[activeStepIndex] ?? null}
           distanceToManeuverM={distanceToManeuverM}
@@ -1560,11 +1598,21 @@ export default function App() {
           onSetNavViewMode={setNavViewMode}
           onClearRoute={clearRoute}
           onExit={endNavigation}
+          onCollapse={() => setNavCardCollapsed(true)}
           hasStop={!!stopLocation}
           onAddStop={onAddStopClick}
           onShareEta={shareEta}
           onReportAlert={onReportClick}
           onOpenDetection={() => setDetectionOpen(true)}
+        />
+      )}
+
+      {navigating && navLeg && navCardCollapsed && (
+        <NavMiniBox
+          step={navSteps[activeStepIndex] ?? null}
+          distanceToManeuverM={distanceToManeuverM}
+          etaText={navLeg.duration?.text ?? ""}
+          onExpand={() => setNavCardCollapsed(false)}
         />
       )}
 
@@ -1642,6 +1690,17 @@ export default function App() {
 
       {navigating && navViewMode === "follow" && !IS_TOUCH_DEVICE && (
         <Street3DJoystick onRotate={rotateFollow} onTilt={tiltFollow} />
+      )}
+
+      {navigating && (
+        <button
+          className={`nav-alerts-toggle${hideAlertsWhileNavigating ? " nav-alerts-toggle-active" : ""}`}
+          onClick={() => setHideAlertsWhileNavigating((v) => !v)}
+          aria-label={hideAlertsWhileNavigating ? "Show alert pins" : "Hide alert pins"}
+          title={hideAlertsWhileNavigating ? "Alert pins hidden — tap to show" : "Hide alert pins"}
+        >
+          {hideAlertsWhileNavigating ? "🚫" : "🚩"}
+        </button>
       )}
 
       {show3DPrompt && (
