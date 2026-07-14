@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 // Real photorealistic 3D satellite tiles via Google's newer, separate Maps JS API surface
 // (google.maps.maps3d.Map3DElement, a Custom Element -- not part of the classic
@@ -15,6 +15,14 @@ import { useEffect, useRef } from "react";
 // Currently in Preview (free, no SLA) per Google's own docs as of mid-2026 -- expect this to
 // need revisiting once it reaches General Availability and usage-based pricing kicks in.
 
+export interface Map3DViewHandle {
+  // Mirrors the 2D "Explore in 3D" joystick's direct-map-call semantics exactly (see
+  // rotateStreet3D/tiltStreet3D in App.tsx) -- reads the element's current heading/tilt and
+  // nudges it, rather than going through React state.
+  rotate: (deltaDeg: number) => void;
+  tilt: (deltaDeg: number) => void;
+}
+
 interface Props {
   // Mounted/unmounted (not just hidden) on this flag so re-activating later always starts
   // from a clean Map3DElement instead of reusing potentially-stale internal state.
@@ -22,7 +30,9 @@ interface Props {
   location: google.maps.LatLngLiteral | null;
   // The same ref the 2D follow-mode camera loop eases its own heading toward (see the rAF
   // loop in App.tsx) -- reused as-is rather than recomputed, so both views always agree on
-  // where the camera should be pointing.
+  // where the camera should be pointing. Only actually applied while `follow` is on (see the
+  // rAF effect below) -- during free-look "Explore in 3D" this ref sits stale/frozen, so
+  // easing toward it unconditionally would fight the joystick/native drag every frame.
   targetHeadingRef: React.MutableRefObject<number>;
   tilt: number;
   // Whether to keep recentering the camera on `location` as it updates (mirrors the 2D
@@ -34,17 +44,50 @@ interface Props {
 }
 
 const HEADING_EASE = 0.14;
+// Real photorealistic tiles stream in progressively -- starting the camera already close-in
+// and steeply tilted (the actual target view) requests the most expensive, highest-detail
+// tiles immediately, which can show as dark/undertextured placeholder geometry for a beat
+// while they load. Constructing at a wider, flatter overview first and then easing down to
+// the real target via flyCameraTo spreads that load out and gives the tiles a moment to
+// stream in before the close/tilted view needs them.
+const FLY_IN_DURATION_MS = 1200;
 
-export function Map3DView({ active, location, targetHeadingRef, tilt, follow, routePath, initialRange }: Props) {
+export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
+  { active, location, targetHeadingRef, tilt, follow, routePath, initialRange },
+  ref
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapElRef = useRef<google.maps.maps3d.Map3DElement | null>(null);
   const markerElRef = useRef<google.maps.maps3d.Marker3DElement | null>(null);
   const polylineElRef = useRef<google.maps.maps3d.Polyline3DElement | null>(null);
+  const [isSteady, setIsSteady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      rotate: (deltaDeg: number) => {
+        const map = mapElRef.current;
+        if (!map) return;
+        const current = map.heading ?? 0;
+        map.heading = (current + deltaDeg + 360) % 360;
+      },
+      tilt: (deltaDeg: number) => {
+        const map = mapElRef.current;
+        if (!map) return;
+        const current = map.tilt ?? 0;
+        map.tilt = Math.max(0, Math.min(67.5, current + deltaDeg));
+      },
+    }),
+    []
+  );
 
   // Mount once when this view first becomes active.
   useEffect(() => {
     if (!active || mapElRef.current || !containerRef.current) return;
     let cancelled = false;
+    setIsSteady(false);
+    setLoadError(false);
 
     google.maps
       .importLibrary("maps3d")
@@ -56,11 +99,13 @@ export function Map3DView({ active, location, targetHeadingRef, tilt, follow, ro
         const map = new Map3DElement({
           center: { lat: startCenter.lat, lng: startCenter.lng, altitude: 0 },
           heading: targetHeadingRef.current,
-          tilt,
-          range: initialRange,
+          tilt: 0,
+          range: Math.max(initialRange * 3, 1500),
           mode: MapMode.HYBRID,
           gestureHandling: "GREEDY",
         });
+        map.addEventListener("gmp-steadychange", (e) => setIsSteady(e.isSteady));
+        map.addEventListener("gmp-error", () => setLoadError(true));
         containerRef.current.appendChild(map);
         mapElRef.current = map;
 
@@ -80,8 +125,16 @@ export function Map3DView({ active, location, targetHeadingRef, tilt, follow, ro
         });
         map.appendChild(polyline);
         polylineElRef.current = polyline;
+
+        map.flyCameraTo({
+          endCamera: { center: startCenter, heading: targetHeadingRef.current, tilt, range: initialRange },
+          durationMillis: FLY_IN_DURATION_MS,
+        });
       })
-      .catch((err) => console.warn("[map3d] failed to load photorealistic 3D tiles", err));
+      .catch((err) => {
+        console.warn("[map3d] failed to load photorealistic 3D tiles", err);
+        setLoadError(true);
+      });
 
     return () => {
       cancelled = true;
@@ -117,10 +170,13 @@ export function Map3DView({ active, location, targetHeadingRef, tilt, follow, ro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, location?.lat, location?.lng, follow]);
 
+  // Only reasserted while following -- during free-look "Explore in 3D" this would otherwise
+  // fight the joystick/native two-finger tilt gesture every time the target prop's identity
+  // changed, exactly like the 2D map's own tilt handling avoids doing outside follow mode.
   useEffect(() => {
-    if (!active || !mapElRef.current) return;
+    if (!active || !follow || !mapElRef.current) return;
     mapElRef.current.tilt = tilt;
-  }, [active, tilt]);
+  }, [active, follow, tilt]);
 
   useEffect(() => {
     if (!active || !polylineElRef.current) return;
@@ -129,9 +185,12 @@ export function Map3DView({ active, location, targetHeadingRef, tilt, follow, ro
 
   // Eases the camera heading toward targetHeadingRef every frame, mirroring the 2D
   // follow-mode camera loop's math exactly (same easing factor) so both views turn with
-  // the same weighted, non-jump-cut feel.
+  // the same weighted, non-jump-cut feel. Gated on `follow` exactly like the 2D loop is
+  // gated on navViewMode === "follow" -- outside follow mode targetHeadingRef sits frozen/
+  // stale (nothing updates it), so easing toward it unconditionally would silently fight
+  // every manual joystick/gesture rotation during free-look "Explore in 3D".
   useEffect(() => {
-    if (!active) return;
+    if (!active || !follow) return;
     let rafId: number;
     let displayed = targetHeadingRef.current;
 
@@ -150,7 +209,14 @@ export function Map3DView({ active, location, targetHeadingRef, tilt, follow, ro
     }
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [active, targetHeadingRef]);
+  }, [active, follow, targetHeadingRef]);
 
-  return <div ref={containerRef} className="map3d-overlay" style={{ display: active ? "block" : "none" }} />;
-}
+  return (
+    <div ref={containerRef} className="map3d-overlay" style={{ display: active ? "block" : "none" }}>
+      {active && loadError && (
+        <div className="map3d-status map3d-status-error">3D satellite imagery failed to load</div>
+      )}
+      {active && !loadError && !isSteady && <div className="map3d-status">Loading 3D imagery…</div>}
+    </div>
+  );
+});

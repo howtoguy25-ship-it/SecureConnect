@@ -32,7 +32,7 @@ import { PhoneAuthPanel } from "@/components/PhoneAuthPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
-import { Map3DView } from "@/components/Map3DView";
+import { Map3DView, type Map3DViewHandle } from "@/components/Map3DView";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
@@ -233,6 +233,7 @@ export default function App() {
   const [routeOrigin, setRouteOrigin] = useState<google.maps.LatLngLiteral | null>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const map3dHandleRef = useRef<Map3DViewHandle | null>(null);
 
   // Manual alert placement: pick a type, then tap/drag on the map to choose where the
   // report actually goes, instead of always using your current GPS fix.
@@ -912,19 +913,31 @@ export default function App() {
     mapRef.current?.setHeading(0);
   }, []);
 
+  // When satellite's real 3D tiles are the ones actually on screen (see use3DSatellite
+  // below), the joystick has to reach that element instead -- it renders in a separate
+  // overlay on top of the classic 2D map, so calling mapRef's own setHeading/setTilt here
+  // would silently spin the hidden 2D map underneath while the visible 3D view never moves.
   const rotateStreet3D = useCallback((deltaDeg: number) => {
+    if (mapTypeId === "hybrid") {
+      map3dHandleRef.current?.rotate(deltaDeg);
+      return;
+    }
     const map = mapRef.current;
     if (!map) return;
     const current = map.getHeading() ?? 0;
     map.setHeading((current + deltaDeg + 360) % 360);
-  }, []);
+  }, [mapTypeId]);
 
   const tiltStreet3D = useCallback((deltaDeg: number) => {
+    if (mapTypeId === "hybrid") {
+      map3dHandleRef.current?.tilt(deltaDeg);
+      return;
+    }
     const map = mapRef.current;
     if (!map) return;
     const current = map.getTilt() ?? 0;
     map.setTilt(Math.max(0, Math.min(67.5, current + deltaDeg)));
-  }, []);
+  }, [mapTypeId]);
 
   // 3D Follow's joystick: unlike Street 3D's, these persist as state (not just direct map
   // calls) since the per-tick tracking effect reasserts the camera every location update
@@ -1416,6 +1429,7 @@ export default function App() {
       </GoogleMap>
 
       <Map3DView
+        ref={map3dHandleRef}
         active={use3DSatellite}
         location={location}
         targetHeadingRef={targetHeadingRef}

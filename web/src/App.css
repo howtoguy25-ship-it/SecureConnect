@@ -107,6 +107,24 @@ button:focus-visible {
   display: block;
 }
 
+.map3d-status {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  background: rgba(17, 24, 39, 0.82);
+  color: #fff;
+  font: 500 13px system-ui, sans-serif;
+  padding: 7px 14px;
+  border-radius: 20px;
+  pointer-events: none;
+}
+
+.map3d-status-error {
+  background: rgba(185, 28, 28, 0.9);
+}
+
 .loading-screen {
   width: 100%;
   height: 100%;
