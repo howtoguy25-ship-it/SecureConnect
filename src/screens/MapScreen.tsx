@@ -105,18 +105,32 @@ export function MapScreen() {
     }
   }, [currentLatLng, route, voiceEnabled, activeStepIndex]);
 
-  // EV Radar (Phase 6): start/stop siren detection with the map screen lifecycle.
+  // EV Radar (Phase 6): start/stop siren detection with the map screen lifecycle -- mount-once
+  // (deps: []), NOT re-keyed on location. It used to also depend on currentLatLng/user/
+  // autoShareDetections, which meant the entire on-device audio ML pipeline (mic permission,
+  // model load, audio session, recorder) got torn down and rebuilt from scratch on every GPS
+  // update -- several times a minute while driving. Reads to those values only ever happen
+  // inside the onDetection callback, which is why refs (updated every render, not causing a
+  // re-run) are enough here -- there's no need for the effect itself to see fresh values.
+  const currentLatLngRef = useRef(currentLatLng);
+  currentLatLngRef.current = currentLatLng;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const autoShareDetectionsRef = useRef(settings.autoShareDetections);
+  autoShareDetectionsRef.current = settings.autoShareDetections;
+
   useEffect(() => {
-    sirenDetection.setSensitivity(settings.sirenSensitivity);
     sirenDetection.start();
 
     const unsubscribe = sirenDetection.onDetection(async ({ label }) => {
       setBannerMessage("Emergency vehicle detected nearby");
       setBannerVisible(true);
 
-      if (settings.autoShareDetections && currentLatLng && user) {
+      const latLng = currentLatLngRef.current;
+      const currentUser = userRef.current;
+      if (autoShareDetectionsRef.current && latLng && currentUser) {
         try {
-          await reportAlert("emergency_vehicle", currentLatLng, user.uid);
+          await reportAlert("emergency_vehicle", latLng, currentUser.uid);
         } catch (err) {
           console.warn("[siren] auto-share detection failed", err);
         }
@@ -127,8 +141,13 @@ export function MapScreen() {
       unsubscribe();
       sirenDetection.stop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.sirenSensitivity, settings.autoShareDetections, currentLatLng?.latitude, user?.uid]);
+  }, []);
+
+  // Sensitivity is the one siren setting that genuinely should apply immediately without a
+  // full restart -- kept as its own small effect, separate from the mount-once one above.
+  useEffect(() => {
+    sirenDetection.setSensitivity(settings.sirenSensitivity);
+  }, [settings.sirenSensitivity]);
 
   const onDestinationSelected = useCallback(
     async (place: PlaceDetails) => {

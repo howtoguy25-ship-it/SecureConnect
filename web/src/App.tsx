@@ -33,6 +33,7 @@ import { AdminPanel } from "@/components/AdminPanel";
 import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
 import { Map3DView, type Map3DViewHandle } from "@/components/Map3DView";
+import { DestinationPulseCircle } from "@/components/DestinationPulseCircle";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
@@ -288,15 +289,6 @@ export default function App() {
       trailTipTimeoutRef.current = setTimeout(() => setTrailTip(null), 3500);
     }
   }, [settings.hideDetectionTrace, setHideDetectionTrace]);
-  // Ticks while navigating purely to force a re-render every ~150ms so the destination
-  // highlight's pulse (a real, computed Math.sin wave, read at render time below) animates
-  // smoothly instead of only updating whenever something else happens to re-render the app.
-  const [, setPulseTick] = useState(0);
-  useEffect(() => {
-    if (!navigating) return;
-    const id = setInterval(() => setPulseTick((t) => t + 1), 150);
-    return () => clearInterval(id);
-  }, [navigating]);
   const lastLocationSyncRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
   // Drives the smoothed 3D Follow camera rotation (see the rAF loop below) -- "target" is
   // where the GPS/manual-offset math says the camera should point right now, "displayed" is
@@ -1256,6 +1248,46 @@ export default function App() {
             ? 700
             : 1200;
 
+  // Memoized so the map's `options` prop keeps a stable identity across renders that don't
+  // actually change any of these values -- @react-google-maps/api re-applies map options
+  // whenever this object's reference changes, which is wasted work on every render otherwise.
+  const mapOptions = useMemo<google.maps.MapOptions>(
+    () => ({
+      disableDefaultUI: true,
+      zoomControl: false,
+      draggable: true,
+      gestureHandling: "greedy",
+      clickableIcons: true,
+      mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
+      styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
+        ? undefined
+        : isDarkTheme
+          ? DARK_MAP_STYLE
+          : LIGHT_MAP_STYLE,
+    }),
+    [isDarkTheme]
+  );
+
+  const onMapLoad = useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+  }, []);
+
+  const onMapClick = useCallback(
+    (e: google.maps.MapMouseEvent) => {
+      const placeEvent = e as google.maps.MapMouseEvent & { placeId?: string };
+      if (pendingType && e.latLng) {
+        setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+      } else if (addingStop && e.latLng) {
+        setStopLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+        setAddingStop(false);
+      } else if (placeEvent.placeId) {
+        placeEvent.stop();
+        setSelectedPlaceId(placeEvent.placeId);
+      }
+    },
+    [pendingType, addingStop]
+  );
+
   return (
     <div className="app-root">
       {bannerVisible && (
@@ -1268,9 +1300,7 @@ export default function App() {
       )}
 
       <GoogleMap
-        onLoad={(map) => {
-          mapRef.current = map;
-        }}
+        onLoad={onMapLoad}
         center={center}
         mapTypeId={mapTypeId}
         zoom={location ? 15 : 11}
@@ -1284,59 +1314,8 @@ export default function App() {
         mapContainerClassName="map-container"
         onZoomChanged={onZoomChanged}
         onIdle={onMapIdle}
-        options={{
-          disableDefaultUI: true,
-          // Native zoom control is off -- custom-positioned +/- buttons are rendered below
-          // instead. The native control's zoomControlOptions.position is unreliable on
-          // vector (Map ID) maps -- it was landing bottom-right and overlapping the FAB
-          // column no matter what position was requested, so this sidesteps that entirely
-          // by taking full control of where it sits.
-          zoomControl: false,
-          draggable: true,
-          // "greedy" makes a single finger always pan the map, full stop -- the default
-          // ("auto") detects when a map might be embedded in a scrollable page and falls
-          // back to requiring two fingers (showing a "use two fingers to move the map"
-          // hint) so the page itself can still scroll underneath it. This app has no page
-          // scroll to protect -- the map IS the screen -- so that fallback only got in the
-          // way and, worse, let an unclaimed one-finger drag bubble up as a native page
-          // scroll (see the html/body lockdown in App.css).
-          gestureHandling: "greedy",
-          // Enables tapping businesses/POIs for the details panel (hours/rating/reviews) --
-          // see the onClick handler below, which still lets placement/zoom modes take
-          // priority over a POI tap.
-          clickableIcons: true,
-          // A vector-rendered Map ID is required for tilt/heading (the "3D follow" driving
-          // view) to actually render — without one, Google Maps silently ignores tilt on
-          // regular roadmap tiles. Create one at console.cloud.google.com/google/maps-apis/studio/maps
-          // (render type: Vector) and set VITE_GOOGLE_MAPS_MAP_ID; falls back to a flat
-          // map if unset.
-          mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
-          // Inline styles are ignored on Map ID-based vector maps (Google requires a
-          // separately-configured dark/light Map ID for that case instead) -- only apply
-          // these here when there's no Map ID to conflict with.
-          styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
-            ? undefined
-            : isDarkTheme
-              ? DARK_MAP_STYLE
-              : LIGHT_MAP_STYLE,
-        }}
-        onClick={(e) => {
-          const placeEvent = e as google.maps.MapMouseEvent & { placeId?: string };
-          if (pendingType && e.latLng) {
-            setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-          } else if (addingStop && e.latLng) {
-            setStopLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-            setAddingStop(false);
-          } else if (placeEvent.placeId) {
-            placeEvent.stop();
-            setSelectedPlaceId(placeEvent.placeId);
-          }
-          // A plain tap on empty map (not a placement, not a POI) used to auto-zoom back out
-          // once you'd reached max zoom -- meant as a "tap to zoom out" shortcut, but it fired
-          // on *any* ordinary tap up there, so exploring around at max zoom kept getting
-          // yanked back out from underneath you. Removed -- zoom in as far as you want, and
-          // use the zoom -/pinch to actually zoom out when you mean to.
-        }}
+        options={mapOptions}
+        onClick={onMapClick}
       >
         {location && (
           <Marker position={location} icon={currentLocationIcon()} />
@@ -1420,20 +1399,7 @@ export default function App() {
             Follow zooms in tighter the whole drive, without needing to know the destination's
             actual building footprint (not available through this API). */}
         {destination && <Marker position={destination} icon={destinationIcon()} zIndex={950} />}
-        {navigating && destination && (
-          <Circle
-            center={destination}
-            radius={16 + (0.55 + 0.45 * Math.sin(Date.now() / 450)) * 8}
-            options={{
-              strokeColor: "#16A34A",
-              strokeOpacity: 0.9,
-              strokeWeight: 2,
-              fillColor: "#16A34A",
-              fillOpacity: 0.12 + (0.55 + 0.45 * Math.sin(Date.now() / 450)) * 0.14,
-              clickable: false,
-            }}
-          />
-        )}
+        {navigating && destination && <DestinationPulseCircle center={destination} />}
       </GoogleMap>
 
       <Map3DView

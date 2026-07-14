@@ -9,7 +9,11 @@ interface Props {
   onPress: (alert: AlertDoc) => void;
 }
 
-export function AlertMarker({ alert, onPress }: Props) {
+// Memoized so MapScreen re-renders (e.g. every GPS tick, which changes currentLatLng but not
+// the alerts list itself) don't cascade into reconciling every marker on screen -- onPress is
+// already a stable useCallback([]) from MapScreen (onMarkerPress), so only a real change to
+// this specific alert actually re-renders it.
+export const AlertMarker = React.memo(function AlertMarker({ alert, onPress }: Props) {
   return (
     <Marker
       coordinate={{ latitude: alert.lat, longitude: alert.lng }}
@@ -21,7 +25,7 @@ export function AlertMarker({ alert, onPress }: Props) {
       </View>
     </Marker>
   );
-}
+});
 
 const styles = StyleSheet.create({
   pin: {
