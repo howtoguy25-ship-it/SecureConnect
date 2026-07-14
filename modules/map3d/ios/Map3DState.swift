@@ -14,18 +14,19 @@ final class Map3DState: ObservableObject {
 
   init() {
     // Every field explicit here (matching Google's documented sample) rather than relying on
-    // unconfirmed default values for fieldOfView/altitudeMode -- this is a pre-GA SDK with
-    // sparse docs. Parameter order corrected per a real Xcode compile error ("argument
-    // 'heading' must precede argument 'fieldOfView'") from an actual build -- Swift enforces
-    // call-site argument order to match the declared initializer exactly, unlike Kotlin.
+    // unconfirmed default values for fieldOfView/altitudeMode -- this is a pre-GA SDK shipped
+    // as a precompiled binary (no public Swift source to check), so this order is inferred
+    // from two real Xcode compile errors so far: "argument 'heading' must precede argument
+    // 'fieldOfView'" and "argument 'tilt' must precede argument 'fieldOfView'". Both center,
+    // heading, tilt, roll, range before fieldOfView/altitudeMode.
     camera = Camera(
       center: LatLngAltitude(latitude: 0, longitude: 0, altitude: 0),
       heading: 0,
-      fieldOfView: .degrees(50),
-      altitudeMode: .relativeToGround,
       tilt: 0,
       roll: 0,
-      range: 1500
+      range: 1500,
+      fieldOfView: .degrees(50),
+      altitudeMode: .relativeToGround
     )
   }
 }
