@@ -82,9 +82,12 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
     []
   );
 
-  // Mount once when this view first becomes active.
+  // Mount once when this view first becomes active. Waits for a real location rather than
+  // ever falling back to a hardcoded {lat:0, lng:0} -- starting the camera at "Null Island"
+  // for even a moment reads as a completely arbitrary, disorienting view snapping in before
+  // correcting itself, not the driver's actual position.
   useEffect(() => {
-    if (!active || mapElRef.current || !containerRef.current) return;
+    if (!active || !location || mapElRef.current || !containerRef.current) return;
     let cancelled = false;
     setIsSteady(false);
     setLoadError(false);
@@ -95,7 +98,7 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
         if (cancelled || !containerRef.current) return;
         const { Map3DElement, Marker3DElement, Polyline3DElement, MapMode, AltitudeMode } = lib;
 
-        const startCenter = location ?? { lat: 0, lng: 0 };
+        const startCenter = location;
         const map = new Map3DElement({
           center: { lat: startCenter.lat, lng: startCenter.lng, altitude: 0 },
           heading: targetHeadingRef.current,
@@ -104,7 +107,15 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
           mode: MapMode.HYBRID,
           gestureHandling: "GREEDY",
         });
-        map.addEventListener("gmp-steadychange", (e) => setIsSteady(e.isSteady));
+        map.addEventListener("gmp-steadychange", (e) => {
+          setIsSteady(e.isSteady);
+          // A prior gmp-error doesn't necessarily mean the view is stuck broken -- a single
+          // failed tile request can fire it even though the map goes on to render correctly
+          // (real imagery, not a blank/broken view). Once the map reports steady again, treat
+          // that as proof it actually recovered rather than leaving a stale "failed to load"
+          // badge sitting over imagery that's now genuinely fine.
+          if (e.isSteady) setLoadError(false);
+        });
         map.addEventListener("gmp-error", () => setLoadError(true));
         containerRef.current.appendChild(map);
         mapElRef.current = map;
@@ -139,8 +150,11 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
     return () => {
       cancelled = true;
     };
+    // Boolean(location), not location itself -- this should only re-run the one time location
+    // goes from absent to present while already active (e.g. GPS was still acquiring when 3D
+    // was turned on), not on every subsequent lat/lng tick once it's mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
+  }, [active, Boolean(location)]);
 
   // Tear down on deactivation so a later reactivation gets a fresh element rather than
   // reusing one that may have been left in an unknown state.
@@ -214,7 +228,16 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
   return (
     <div ref={containerRef} className="map3d-overlay" style={{ display: active ? "block" : "none" }}>
       {active && loadError && (
-        <div className="map3d-status map3d-status-error">3D satellite imagery failed to load</div>
+        <div className="map3d-status map3d-status-error">
+          3D satellite imagery failed to load
+          <button
+            className="map3d-status-dismiss"
+            onClick={() => setLoadError(false)}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
       )}
       {active && !loadError && !isSteady && <div className="map3d-status">Loading 3D imagery…</div>}
     </div>

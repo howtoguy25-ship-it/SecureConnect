@@ -1237,8 +1237,16 @@ export default function App() {
   const map3dTilt = manualTiltOverride ?? 67.5;
   const map3dRoutePath =
     directions?.routes[0]?.overview_path?.map((p) => ({ lat: p.lat(), lng: p.lng() })) ?? null;
-  const map3dInitialRange =
-    mapZoomLevel === null
+  // Nav-follow gets one fixed, deliberately-tuned chase-cam distance every time -- not
+  // whatever the flat 2D map's zoom happened to be showing the moment satellite got turned
+  // on, which is how this was producing an inconsistent, seemingly arbitrary framing instead
+  // of a proper "behind and above the driver, facing the road ahead" view. "Explore in 3D"
+  // still starts from roughly the zoom level the user was already looking at, since that
+  // mode is explicitly about picking up where their own manual browsing left off.
+  const NAV_FOLLOW_3D_RANGE_M = 380;
+  const map3dInitialRange = navFollow3D
+    ? NAV_FOLLOW_3D_RANGE_M
+    : mapZoomLevel === null
       ? 400
       : mapZoomLevel >= 18
         ? 200
