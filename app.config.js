@@ -31,6 +31,11 @@ module.exports = {
         NSCameraUsageDescription:
           "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
         UIBackgroundModes: ["audio", "location", "fetch"],
+        // App only uses standard HTTPS/TLS (Firebase, Google Maps, AdMob) -- no custom
+        // encryption -- so it qualifies as exempt. Declaring this here answers Apple's
+        // export-compliance question automatically on every build/submit instead of
+        // App Store Connect prompting for it by hand each time.
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
