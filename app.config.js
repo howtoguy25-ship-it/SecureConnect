@@ -84,6 +84,7 @@ module.exports = {
           iosApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
         },
       ],
+      "./modules/map3d/plugin/withGoogleMaps3DSignatureFix.js",
       [
         "react-native-google-mobile-ads",
         {
