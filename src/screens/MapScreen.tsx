@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, StyleSheet, Pressable, Platform, Modal } from "react-native";
 import MapView, { PROVIDER_GOOGLE, Polyline } from "react-native-maps";
+import { Map3DView, isMap3DSupported } from "map3d";
 import { Ionicons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
@@ -55,6 +56,11 @@ export function MapScreen() {
   const [bannerVisible, setBannerVisible] = useState(false);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
+  // Real photorealistic 3D satellite (Android only for now, see modules/map3d) -- Stage 1:
+  // core rendering + live position + the active route only, mirroring the web build's own
+  // staged rollout. Renders as an overlay on top of the existing MapView, matching how the
+  // web version layers its own Map3DElement over the classic 2D map.
+  const [show3D, setShow3D] = useState(false);
 
   const currentLatLng = useMemo(
     () =>
@@ -202,6 +208,15 @@ export function MapScreen() {
         ))}
       </MapView>
 
+      {show3D && isMap3DSupported && currentLatLng && (
+        <Map3DView
+          style={StyleSheet.absoluteFill}
+          center={currentLatLng}
+          markerPosition={currentLatLng}
+          routeCoordinates={route?.polyline}
+        />
+      )}
+
       {!route && (
         <DestinationSearchBar biasLocation={currentLatLng ?? undefined} onDestinationSelected={onDestinationSelected} />
       )}
@@ -249,6 +264,21 @@ export function MapScreen() {
       >
         <Ionicons name="videocam" size={24} color="#FFFFFF" />
       </Pressable>
+
+      {isMap3DSupported && (
+        <Pressable
+          style={({ pressed }) => [
+            styles.fabSecondary,
+            { bottom: insets.bottom + 24 + 140 },
+            show3D && styles.fabActive,
+            pressed && { opacity: pressedOpacity },
+          ]}
+          onPress={() => setShow3D((v) => !v)}
+          accessibilityLabel={show3D ? "Switch to standard map" : "Switch to 3D satellite view"}
+        >
+          <Ionicons name="globe-outline" size={22} color="#FFFFFF" />
+        </Pressable>
+      )}
 
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
         <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
@@ -312,5 +342,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.medium,
+  },
+  fabActive: {
+    backgroundColor: colors.accent,
   },
 });

@@ -77,6 +77,12 @@ module.exports = {
             "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
         },
       ],
+      [
+        "./modules/map3d/plugin/withMap3D.js",
+        {
+          androidApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
+        },
+      ],
     ],
     extra: {
       googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY,

@@ -38,6 +38,7 @@
     "expo-task-manager": "~57.0.2",
     "firebase": "^12.16.0",
     "jpeg-js": "^0.4.4",
+    "map3d": "file:./modules/map3d",
     "react": "19.2.3",
     "react-native": "0.86.0",
     "react-native-gesture-handler": "~2.32.0",

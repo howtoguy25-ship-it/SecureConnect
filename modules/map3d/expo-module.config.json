@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.map3d.Map3DModule"]
+  }
+}

@@ -1,0 +1,27 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.map3d'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.map3d"
+  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 23)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  // Real photorealistic 3D tiles SDK -- still pre-1.0 (0.2.0) as of when this was written,
+  // so expect breaking API changes on future bumps. See
+  // https://developers.google.com/maps/documentation/maps-3d/android-sdk/setup
+  implementation "com.google.android.gms:play-services-maps3d:0.2.0"
+}
+
+def safeExtGet(prop, fallback) {
+  rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
