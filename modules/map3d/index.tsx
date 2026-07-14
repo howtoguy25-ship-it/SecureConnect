@@ -2,12 +2,11 @@ import { requireNativeViewManager } from "expo-modules-core";
 import { forwardRef, useImperativeHandle, useRef, type ComponentType, type Ref } from "react";
 import { Platform, type ViewStyle } from "react-native";
 
-// Android-only for now -- Google's Maps 3D SDK for iOS is still Experimental/pre-GA and
-// uses Swift Package Manager, which doesn't fit Expo's CocoaPods-based iOS build pipeline
-// cleanly. Attempting that integration now risked breaking iOS builds entirely for very low
-// reward given the SDK's own immature status -- see modules/map3d/README.md. Callers should
-// check this before rendering Map3DView and fall back to the existing flat map on iOS.
-export const isMap3DSupported = Platform.OS === "android";
+// Both platforms have real native implementations now (see ../android and ../ios). iOS uses
+// Google's Maps 3D SDK for iOS, which is still Experimental/pre-GA -- see
+// modules/map3d/README.md for the known risks/caveats specific to that platform before
+// shipping this to production there.
+export const isMap3DSupported = Platform.OS === "android" || Platform.OS === "ios";
 
 export interface Map3DViewHandle {
   rotate: (deltaDeg: number) => void;

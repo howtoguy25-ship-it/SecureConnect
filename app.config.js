@@ -81,6 +81,7 @@ module.exports = {
         "./modules/map3d/plugin/withMap3D.js",
         {
           androidApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
+          iosApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
         },
       ],
     ],

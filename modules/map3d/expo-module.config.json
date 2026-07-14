@@ -1,6 +1,10 @@
 {
-  "platforms": ["android"],
+  "platforms": ["android", "apple"],
   "android": {
     "modules": ["expo.modules.map3d.Map3DModule"]
+  },
+  "apple": {
+    "modules": ["Map3DModule"],
+    "podspecPath": ["ios/Map3D.podspec"]
   }
 }
