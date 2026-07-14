@@ -25,11 +25,18 @@ public class Map3DModule: Module {
         view.setRouteCoordinates(points ?? [])
       }
 
-      Function("rotateCamera") { (view: ExpoMap3DView, deltaDeg: Double) in
+      // AsyncFunction, not Function -- real Xcode error: "no exact matches in call to static
+      // method 'buildExpression'" at this exact line. Checked expo-camera's own iOS module
+      // (node_modules/expo-camera/ios/CameraViewModule.swift): every single Function call
+      // inside its View { } block is AsyncFunction, never plain Function -- this SDK's
+      // View-scoped result builder apparently doesn't have a buildExpression overload for
+      // plain Function at all, only for AsyncFunction. (Android's Kotlin View{} block does
+      // support plain Function -- this is an iOS-only fix.)
+      AsyncFunction("rotateCamera") { (view: ExpoMap3DView, deltaDeg: Double) in
         view.rotateCamera(deltaDeg: deltaDeg)
       }
 
-      Function("tiltCamera") { (view: ExpoMap3DView, deltaDeg: Double) in
+      AsyncFunction("tiltCamera") { (view: ExpoMap3DView, deltaDeg: Double) in
         view.tiltCamera(deltaDeg: deltaDeg)
       }
     }
