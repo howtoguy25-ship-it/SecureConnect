@@ -53,6 +53,7 @@ module.exports = {
     plugins: [
       "expo-font",
       "expo-asset",
+      "expo-tracking-transparency",
       // expo-splash-screen's own plugin, not the legacy top-level `splash` config field --
       // that legacy field left Android's actual splashscreen_background color resource
       // hardcoded to white regardless of what backgroundColor was set to (confirmed by
