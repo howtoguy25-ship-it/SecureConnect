@@ -61,6 +61,7 @@ module.exports = {
     plugins: [
       "expo-font",
       "expo-asset",
+      "expo-status-bar",
       [
         "expo-location",
         {
