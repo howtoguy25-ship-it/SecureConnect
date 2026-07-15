@@ -59,6 +59,18 @@ service cloud.firestore {
         && request.resource.data.hiddenBy == resource.data.hiddenBy;
     }
 
+    match /crashReports/{reportId} {
+      // Write-only from the client -- the app reports its own fatal JS errors here (see
+      // src/services/crashReporter.ts) so real crash details are visible somewhere besides
+      // Apple's native-only .ips reports, which never capture the actual JS error message.
+      // No client read/update/delete -- reports are only ever inspected via the Firebase
+      // console, and nobody should be able to tamper with someone else's crash report.
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt is timestamp;
+      allow read, update, delete: if false;
+    }
+
     match /users/{uid} {
       // Anyone can read/write their own profile doc; only the admin can list/read everyone
       // else's (for the sign-in history panel) -- name/email/provider/timestamps only,

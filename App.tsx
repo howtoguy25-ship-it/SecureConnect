@@ -7,6 +7,14 @@ import { LocationProvider } from "@/context/LocationContext";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { RootNavigator } from "@/navigation/RootNavigator";
 import { AppOpenAdManager } from "@/components/AppOpenAdManager";
+import { installCrashReporter } from "@/services/crashReporter";
+
+// Installed at module scope so it's active as early as this file is ever imported/evaluated
+// -- before any provider or component below even mounts. See crashReporter.ts for why this
+// exists: Apple's own .ips crash reports only ever show the generic RN bridge frames for a
+// fatal JS error (RCTExceptionsManager reportFatal:), never the actual message/stack, which
+// is exactly the wall this app hit investigating real TestFlight crashes this session.
+installCrashReporter();
 
 export default function App() {
   return (
