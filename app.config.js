@@ -11,7 +11,10 @@ module.exports = {
     userInterfaceStyle: "automatic",
     assetBundlePatterns: ["**/*"],
     ios: {
-      supportsTablet: true,
+      // Phone-only -- TrackLine is a live driving/navigation app, not something meant to run
+      // on an iPad mounted somewhere, and this avoids App Store Connect requiring a whole
+      // separate set of iPad screenshots for a form factor the app isn't really designed for.
+      supportsTablet: false,
       bundleIdentifier: "com.trackline.navigate",
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
