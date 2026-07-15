@@ -18,9 +18,6 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.trackline.navigate",
-      config: {
-        googleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
-      },
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
           "TrackLine uses your location to show your position on the map and provide turn-by-turn navigation.",
@@ -62,6 +59,20 @@ module.exports = {
       "expo-font",
       "expo-asset",
       "expo-status-bar",
+      // Deliberately using react-native-maps' own config plugin here instead of the old
+      // `ios.config.googleMapsApiKey` field -- that field triggers a legacy, unmaintained
+      // plugin bundled in @expo/config-plugins (node_modules/@expo/config-plugins/build/
+      // ios/Maps.js) that injects `pod 'react-native-google-maps', ...` into the Podfile, a
+      // pod name that hasn't existed since old react-native-maps versions -- current
+      // react-native-maps (1.x) ships its own plugin that correctly adds
+      // `pod 'react-native-maps/Google', ...` (a real subspec) instead. Real error this was
+      // causing: "[!] No podspec found for `react-native-google-maps`" failing `pod install`.
+      [
+        "react-native-maps",
+        {
+          iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
+        },
+      ],
       [
         "expo-location",
         {
