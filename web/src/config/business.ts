@@ -9,6 +9,6 @@
 // decide sole trader vs. company, which affects tax/liability -- worth a quick read on
 // https://business.gov.au/planning/business-structures-and-types before registering).
 export const BUSINESS_INFO = {
-  businessName: "",
-  abn: "",
+  businessName: "TrackLine Maps",
+  abn: "32 866 987 843",
 };
