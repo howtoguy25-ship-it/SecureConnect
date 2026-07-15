@@ -62,6 +62,15 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
   const polylineElRef = useRef<google.maps.maps3d.Polyline3DElement | null>(null);
   const [isSteady, setIsSteady] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // True for the duration of the mount-time flyCameraTo entrance animation (see below).
+  // The recenter/tilt/heading effects further down all set camera properties directly and
+  // fire on every GPS tick -- in a live-tracking scenario a tick almost always lands well
+  // before the 1.2s fly-in finishes, and setting .center/.tilt/.heading directly while
+  // flyCameraTo is still actively animating those same properties corrupts/cancels the
+  // animation, leaving the camera permanently stuck in whatever odd intermediate framing it
+  // was mid-transition through -- a flat, wrong-angle view that never resolves into the real
+  // tilted chase view. Guarding those effects until the fly-in actually finishes fixes it.
+  const flyingInRef = useRef(false);
 
   useImperativeHandle(
     ref,
@@ -137,10 +146,14 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
         map.appendChild(polyline);
         polylineElRef.current = polyline;
 
+        flyingInRef.current = true;
         map.flyCameraTo({
           endCamera: { center: startCenter, heading: targetHeadingRef.current, tilt, range: initialRange },
           durationMillis: FLY_IN_DURATION_MS,
         });
+        window.setTimeout(() => {
+          flyingInRef.current = false;
+        }, FLY_IN_DURATION_MS);
       })
       .catch((err) => {
         console.warn("[map3d] failed to load photorealistic 3D tiles", err);
@@ -178,7 +191,7 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
   useEffect(() => {
     if (!active || !location || !markerElRef.current) return;
     markerElRef.current.position = location;
-    if (follow && mapElRef.current) {
+    if (follow && mapElRef.current && !flyingInRef.current) {
       mapElRef.current.center = { lat: location.lat, lng: location.lng, altitude: 0 };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -188,7 +201,7 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
   // fight the joystick/native two-finger tilt gesture every time the target prop's identity
   // changed, exactly like the 2D map's own tilt handling avoids doing outside follow mode.
   useEffect(() => {
-    if (!active || !follow || !mapElRef.current) return;
+    if (!active || !follow || !mapElRef.current || flyingInRef.current) return;
     mapElRef.current.tilt = tilt;
   }, [active, follow, tilt]);
 
@@ -210,7 +223,7 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
 
     function tick() {
       const map = mapElRef.current;
-      if (map) {
+      if (map && !flyingInRef.current) {
         const current = displayed;
         const target = targetHeadingRef.current;
         const delta = ((target - current + 540) % 360) - 180;
@@ -218,6 +231,10 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
           displayed = (current + delta * HEADING_EASE + 360) % 360;
           map.heading = displayed;
         }
+      } else if (map) {
+        // Keep the easing loop's own idea of "current heading" in sync with reality while
+        // the fly-in owns the camera, so it doesn't snap once it hands control back.
+        displayed = map.heading ?? displayed;
       }
       rafId = requestAnimationFrame(tick);
     }
