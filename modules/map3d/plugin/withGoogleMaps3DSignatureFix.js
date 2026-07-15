@@ -44,13 +44,32 @@ const SIGNATURE_FIX_SNIPPET = `
         unless user_target.shell_script_build_phases.any? { |p| p.name == embed_phase_name }
           phase = user_target.new_shell_script_build_phase(embed_phase_name)
           phase.shell_script = <<-'SCRIPT'
-    SRC="$CONFIGURATION_BUILD_DIR/GoogleMaps3D.framework"
+    set -e
     DEST_DIR="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
     DEST="$DEST_DIR/GoogleMaps3D.framework"
-    if [ ! -d "$SRC" ]; then
-      echo "warning: [Map3D] $SRC not found -- GoogleMaps3D.framework will not be embedded, real-device builds will crash on launch"
-      exit 0
+
+    # The exact directory a Swift Package Manager product lands in when pulled into a
+    # CocoaPods build via spm_dependency isn't guaranteed to be $CONFIGURATION_BUILD_DIR --
+    # search every plausible root instead of hardcoding one guessed path, since guessing wrong
+    # here means this whole fix silently does nothing and the app keeps crashing on launch
+    # with no build-time signal that anything's wrong.
+    SRC=""
+    for ROOT in "$CONFIGURATION_BUILD_DIR" "$BUILT_PRODUCTS_DIR" "$BUILD_DIR" "$OBJROOT" "$SYMROOT"; do
+      if [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
+        FOUND=$(find "$ROOT" -maxdepth 6 -iname "GoogleMaps3D.framework" -type d 2>/dev/null | head -n 1)
+        if [ -n "$FOUND" ]; then
+          SRC="$FOUND"
+          break
+        fi
+      fi
+    done
+
+    if [ -z "$SRC" ]; then
+      echo "error: [Map3D] GoogleMaps3D.framework not found anywhere under CONFIGURATION_BUILD_DIR/BUILT_PRODUCTS_DIR/BUILD_DIR/OBJROOT/SYMROOT -- it will not be embedded and the app WILL crash on launch on a real device. Searched roots: CONFIGURATION_BUILD_DIR=$CONFIGURATION_BUILD_DIR BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR BUILD_DIR=$BUILD_DIR"
+      exit 1
     fi
+
+    echo "note: [Map3D] embedding GoogleMaps3D.framework from $SRC"
     mkdir -p "$DEST_DIR"
     rm -rf "$DEST"
     cp -R "$SRC" "$DEST"
