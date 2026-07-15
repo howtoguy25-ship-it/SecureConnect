@@ -9,11 +9,6 @@ module.exports = {
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
-    splash: {
-      image: "./assets/splash.png",
-      resizeMode: "contain",
-      backgroundColor: "#0B1220",
-    },
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
@@ -58,6 +53,23 @@ module.exports = {
     plugins: [
       "expo-font",
       "expo-asset",
+      // expo-splash-screen's own plugin, not the legacy top-level `splash` config field --
+      // that legacy field left Android's actual splashscreen_background color resource
+      // hardcoded to white regardless of what backgroundColor was set to (confirmed by
+      // inspecting the generated android/app/src/main/res/values/colors.xml), so the logo
+      // always showed on a white box instead of this color. This plugin properly treats the
+      // image as a centered icon over a real background color on both platforms, so the
+      // transparent-cutout logo (assets/logo-transparent.png, background removed from the
+      // original opaque icon.png) sits cleanly on the color with no box/seam around it.
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/logo-transparent.png",
+          resizeMode: "contain",
+          backgroundColor: "#0B1220",
+          imageWidth: 200,
+        },
+      ],
       "expo-status-bar",
       // Deliberately using react-native-maps' own config plugin here instead of the old
       // `ios.config.googleMapsApiKey` field -- that field triggers a legacy, unmaintained
