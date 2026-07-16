@@ -8,3 +8,4 @@ ios/
 android/
 .env
 .env.local
+firebase/functions/lib/

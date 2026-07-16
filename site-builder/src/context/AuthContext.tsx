@@ -14,6 +14,7 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { auth } from '@/services/firebase';
+import { ensureAccount } from '@/services/aiBuilder';
 
 function requireAuth() {
   if (!auth) {
@@ -51,6 +52,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
       setInitializing(false);
+      if (nextUser) {
+        // Fire-and-forget: guarantees the credits doc exists so the balance UI has
+        // something to show immediately, even for accounts older than this function.
+        ensureAccount().catch(() => {});
+      }
     });
     return unsubscribe;
   }, []);

@@ -30,7 +30,7 @@ export default function NewProjectScreen({ navigation }: Props) {
             <Pressable
               key={pageType}
               style={styles.card}
-              onPress={() => navigation.navigate('ThemeGallery', { pageType })}
+              onPress={() => navigation.navigate('BuildMethod', { pageType })}
             >
               <View style={styles.iconWrap}>
                 <Ionicons name={info.icon as any} size={28} color="#111827" />

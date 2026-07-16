@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,13 +6,23 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
 import { env } from '@/config/env';
+import { userAccountStore } from '@/storage/userAccountStore';
+import { UserAccount } from '@/types';
+import { getPlan } from '@/data/pricing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Account'>;
 
 export default function AccountScreen({ navigation }: Props) {
   const { user, signOut } = useAuth();
+  const [account, setAccount] = useState<UserAccount | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    return userAccountStore.subscribe(user.uid, setAccount);
+  }, [user]);
 
   const identity = user?.email || user?.phoneNumber || 'Signed in';
+  const planName = account ? (getPlan(account.plan)?.name ?? 'Free') : null;
 
   const confirmSignOut = () => {
     Alert.alert('Sign out?', undefined, [
@@ -36,6 +46,16 @@ export default function AccountScreen({ navigation }: Props) {
           <Ionicons name="person" size={28} color="#FFFFFF" />
         </View>
         <Text style={styles.identity}>{identity}</Text>
+      </View>
+
+      <View style={styles.creditsCard}>
+        <View>
+          <Text style={styles.creditsValue}>{account?.credits ?? '—'}</Text>
+          <Text style={styles.creditsLabel}>credits · {planName ?? 'Free'} plan</Text>
+        </View>
+        <Pressable style={styles.buyMoreButton} onPress={() => navigation.navigate('Subscription')}>
+          <Text style={styles.buyMoreText}>Buy More</Text>
+        </Pressable>
       </View>
 
       <View style={styles.section}>
@@ -74,6 +94,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   identity: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
+  creditsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF2FF',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 14,
+    padding: 16,
+  },
+  creditsValue: { fontSize: 26, fontWeight: '800', color: '#4338CA' },
+  creditsLabel: { fontSize: 12, color: '#6366F1', marginTop: 2, fontWeight: '600' },
+  buyMoreButton: { backgroundColor: '#4338CA', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  buyMoreText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
   section: { backgroundColor: '#FFFFFF', marginHorizontal: 16, borderRadius: 14, overflow: 'hidden' },
   row: {
     flexDirection: 'row',

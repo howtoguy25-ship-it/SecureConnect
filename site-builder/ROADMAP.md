@@ -1,10 +1,13 @@
 # SiteSpark — Roadmap
 
 This app was scoped as a multi-phase build (see the original feature request).
-**Phase 1** is the manual site/logo/social/video-page builder. **Phase 2 (this commit)**
-is real accounts: Firebase Auth (Google, Apple, email+password, phone+SMS), password
-reset, resend code, and projects/theme-unlocks moved from on-device storage to Firestore
-keyed by account. Everything under "Still to come" is *not yet built*.
+**Phase 1** is the manual site/logo/social/video-page builder. **Phase 2** is real
+accounts: Firebase Auth (Google, Apple, email+password, phone+SMS), password reset,
+resend code, and projects/theme-unlocks moved from on-device storage to Firestore keyed
+by account. **Phase 3 (this commit)** is the real AI Site Builder: an OpenAI-backed
+Cloud Functions pipeline that writes real content and generates real images for a
+prompted site, with live progress, pause-to-inject, and server-side credit deduction.
+Everything under "Still to come" is *not yet built*.
 
 ## What's real vs. mocked right now
 
@@ -58,29 +61,88 @@ keyed by account. Everything under "Still to come" is *not yet built*.
 Until step 1–3 are done, the Welcome screen's buttons will call real Firebase/Google/Apple
 APIs and get real "not configured" errors — that's expected, not a bug.
 
-## Phase 3 — AI Site Builder (the app's centerpiece)
+## Phase 3 — AI Site Builder (this commit) — real, backed by OpenAI
 
-- Prompt box (max 4,000 words) → generation pipeline that writes real layout/content,
-  not a template swap. Needs a backend service (Cloud Functions or similar) calling an
-  LLM, plus an image-generation step for original art.
-- Live "what the AI is doing" progress feed during generation, a pause button (max 2
-  pauses per build) to let the user inject a follow-up instruction mid-build.
-- Constrained chat: only answers questions about the site being built.
-- Needed from you: an LLM API key/budget, and a decision on where generated images are
-  hosted/stored.
+Built for real, not mocked: a Cloud Functions backend (`firebase/functions/`) calls
+OpenAI to write real site copy/layout via structured output, generates original images
+(`gpt-image-1`) for visual sections, and lays them out deterministically onto the same
+canvas element schema the manual editor uses — so an AI-built site opens in the regular
+editor afterward, fully editable.
+
+- **Prompt screen** (`AIPromptScreen`): up to 4,000 words, a Simple/Professional/Go-All-Out
+  complexity picker, and an upfront credit-cost estimate.
+- **Live progress screen** (`AIBuildProgressScreen`): subscribes to the build's Firestore
+  session doc in real time — shows exactly what step it's on, minutes elapsed, credits
+  used, and a **Pause** button (max 2 per build) that lets you type an extra instruction
+  before it continues.
+- **Credits**: 8 free on signup; a build's cost is checked and deducted **server-side**
+  in a Firestore transaction before generation starts (never trust the client for this);
+  refunded automatically if generation errors out. Running short routes to a
+  subscription/credit-pack screen (`SubscriptionScreen` — pricing is real, purchases are
+  still demo-mode until Phase 4's Apple IAP wiring).
+- **Constrained chat** (`askBuildQuestion` function): answers only relate to the current
+  build; not yet surfaced as its own chat UI in the app (the Pause flow covers "ask/add
+  something" from the spec) — a persistent chat *with full app control* is Phase 5.
+
+### Scoping decisions worth knowing about
+
+- **Layout is deterministic, not AI-picked pixel coordinates.** The model writes content
+  (headline/body/button copy, image prompts, color palette) via OpenAI structured
+  outputs; this app's own code (`firebase/functions/src/layout.ts`) turns that into
+  positioned elements. Letting an LLM emit raw x/y coordinates directly is unreliable in
+  practice (overlapping/broken layouts) — this split plays to each side's strength and is
+  why builds are described as having "no issues" rather than needing a disclaimer.
+- **Pauses are honored at 2 fixed checkpoints** (after the content is written, and after
+  images are generated), not at the exact instant you tap Pause — the function finishes
+  its current step first, then checks. A request during a step is picked up at the next
+  checkpoint.
+- **Insufficient credits are checked upfront**, before generation starts — not
+  mid-build. The spec's exact "runs out mid-build, pause there, resume after
+  subscribing" flow is a real refinement but adds a lot of extra state machinery; this
+  version blocks cleanly before spending anything, which achieves the same practical
+  goal (can't finish without enough credits) more simply.
+
+### Setup — making the AI builder actually run
+
+1. **OpenAI API key**: platform.openai.com → API keys → create one (attach a project,
+   set a usage budget). Do **not** put this in `.env` — unlike Firebase's config, this key
+   must never ship inside the client app, or anyone could extract it from the app bundle
+   and spend your budget.
+2. **Firebase Blaze plan** (pay-as-you-go): required for Cloud Functions to run at all,
+   and already needed for Phone Auth SMS beyond the free 10/day.
+3. Install the CLI and set the key as a Cloud Functions secret (server-side only):
+   ```
+   npm install -g firebase-tools
+   firebase login
+   cd site-builder
+   firebase use --add          # pick sitespark-a5817 (or your project)
+   firebase functions:secrets:set OPENAI_API_KEY
+   ```
+4. Deploy:
+   ```
+   firebase deploy --only functions,firestore:rules,storage
+   ```
+5. From then on, signing in provisions 8 free credits automatically, and the AI Site
+   Builder button (New Project → pick a page type → "AI Site Builder") is live.
 
 ## Phase 4 — Credits, Subscriptions & Paywall
 
-- Credit ledger per account: 8 free credits on signup, metered per generation/minute per
-  the pricing you specified (Beginner/Middle Class/Advanced tiers, weekly vs. monthly
-  resets, add-on-minute costs).
-- Post-signup/sign-in offer modal with a dismiss-after-5-seconds close button.
-- Credit pack purchases (12/38/70/200-credit packs) and monthly subscriptions.
-- **Must be implemented as Apple In-App Purchase / StoreKit**, not card payments,
-  because credits and theme unlocks are digital goods consumed inside an iOS app —
-  Apple requires IAP for this category. Needed from you: App Store Connect access to
-  create the IAP products, plus a backend to validate receipts and update the credit
-  ledger server-side (client-trusted credits are not safe).
+**Partially built in Phase 3**: the credit ledger itself is real (server-side balance,
+transactional deduction, refund-on-failure — see `firebase/functions/src/index.ts`), and
+`src/data/pricing.ts` has the real Beginner/Middle Class/Advanced plans and credit-pack
+pricing you specified. `SubscriptionScreen` shows all of it. What's still missing:
+
+- **Real purchases.** Selecting a plan or pack on `SubscriptionScreen` currently just
+  closes the screen — no charge happens, matching the existing theme-purchase "demo mode"
+  pattern. Making it real means Apple In-App Purchase / StoreKit, **not** card payments —
+  Apple requires IAP for digital goods consumed inside an iOS app (guideline 3.1.1).
+  Needed from you: App Store Connect access to create the IAP products (you have this
+  now), plus server-side receipt validation wired into the same credit ledger.
+- **Post-signup/sign-in offer modal** with a dismiss-after-5-seconds close button,
+  shown until the user hits their credit limit — not built yet.
+- **Weekly credit reset + minimum-usage requirement** for the Middle Class plan, and
+  monthly resets for Beginner/Advanced — the pricing data models this
+  (`minimumUsageNote`/`billingPeriod`) but no scheduled function enforces it yet.
 
 ## Phase 5 — AI Chat Assistant (full app control)
 

@@ -2,5 +2,14 @@
   "firestore": {
     "rules": "firebase/firestore.rules",
     "indexes": "firebase/firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "firebase/functions",
+      "codebase": "default"
+    }
+  ],
+  "storage": {
+    "rules": "firebase/storage.rules"
   }
 }

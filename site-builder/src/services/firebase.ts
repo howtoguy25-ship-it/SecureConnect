@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { initializeAuth, getAuth, Auth, Persistence } from 'firebase/auth';
 import { initializeFirestore, Firestore } from 'firebase/firestore';
+import { getFunctions, Functions } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { env } from '@/config/env';
 
@@ -35,6 +36,7 @@ const firebaseConfig = {
 let _firebaseApp: FirebaseApp | null = null;
 let _auth: Auth | null = null;
 let _db: Firestore | null = null;
+let _functions: Functions | null = null;
 
 if (env.isFirebaseConfigured) {
   _firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
@@ -57,8 +59,11 @@ if (env.isFirebaseConfigured) {
   _db = initializeFirestore(_firebaseApp, {
     experimentalAutoDetectLongPolling: true,
   });
+
+  _functions = getFunctions(_firebaseApp);
 }
 
 export const firebaseApp = _firebaseApp;
 export const auth = _auth;
 export const db = _db;
+export const functions = _functions;

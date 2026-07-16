@@ -1,19 +1,21 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
-social/video-sized pages by hand: pick a theme, drag/resize elements, add text, images,
-slideshows, and an announcement bar — now behind real Firebase accounts.
+social/video-sized pages — by hand, or generated for you by a real AI builder — behind
+real Firebase accounts.
 
-This is **Phase 1 (manual editor) + Phase 2 (accounts/auth)** of a much larger product (AI
-site builder, subscriptions, domains — see `ROADMAP.md` for what's built vs. what's next
-and what real accounts each later phase needs).
+This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder)**
+of a larger product (subscriptions/IAP, video editor, domains — see `ROADMAP.md` for
+what's built vs. what's next and what real accounts each later phase needs).
 
 ## Stack
 
 - Expo SDK 57, React Native 0.86, TypeScript (strict)
 - React Navigation (native-stack), gated by auth state
 - Firebase Auth (Google, Apple, email+password, phone+SMS) and Firestore (projects,
-  unlocked themes) — see `src/services/firebase.ts`
+  unlocked themes, credits, AI build sessions) — see `src/services/firebase.ts`
+- Firebase Cloud Functions (`firebase/functions/`) calling OpenAI for real site
+  copy/layout + image generation, with server-side credit deduction
 - `expo-image-picker` for photo library access
 - `react-native-svg` for shape rendering, `@expo/vector-icons` for the icon library
 
@@ -38,6 +40,9 @@ src/
   storage/
     projectsStore.ts               Firestore CRUD for projects (users/{uid}/projects)
     unlockedThemesStore.ts         Firestore-backed unlocked-theme tracking
+    userAccountStore.ts            Credit balance + plan (read-only client side)
+    generationSessionStore.ts      Live AI-build progress subscription
+  data/pricing.ts                  Plans, credit packs, build-cost estimator (client copy)
   components/
     canvas/                        Canvas, DraggableElement (drag+resize), ElementRenderer,
                                     AnnouncementBarView
@@ -45,15 +50,25 @@ src/
     elements/                      ElementsPanel (library grid), AnnouncementPanel
   screens/
     auth/                          Welcome, EmailAuth, ForgotPassword, PhoneAuth, PhoneVerify
-    AccountScreen.tsx               Signed-in identity + sign out
+    AccountScreen.tsx               Signed-in identity, credit balance + sign out
     ProjectsScreen.tsx              Dashboard + "+" create button
     NewProjectScreen.tsx            Page-type picker (Web/Video/Social/Logo)
+    BuildMethodScreen.tsx           Manual vs. AI Site Builder choice
     ThemeGalleryScreen.tsx          Theme picker with priced-tier unlock modal
+    AIPromptScreen.tsx              4,000-word prompt + complexity + cost estimate
+    AIBuildProgressScreen.tsx       Live status/credits/pause (max 2) while the AI builds
+    SubscriptionScreen.tsx          Real plans/credit-pack pricing (demo purchase for now)
     EditorScreen.tsx                Main canvas editor
   navigation/
     RootNavigator.tsx               Switches Auth stack vs. App stack on auth state
     AuthNavigator.tsx
-firebase/firestore.rules          Restricts every doc to its owning uid
+firebase/
+  firestore.rules                  Restricts every doc to its owning uid; credits/sessions
+                                    are server-write-only
+  storage.rules                    Locked down entirely (Admin SDK + signed URLs only)
+  functions/                       Cloud Functions: startGeneration, requestPause,
+                                    resumeGeneration, askBuildQuestion, ensureAccount,
+                                    onUserCreated (OpenAI-backed, see its own README below)
 ```
 
 ## Setup
@@ -71,6 +86,10 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 
 - Real Firebase Auth: Google, Apple, email+password (with reset), phone+SMS (with resend,
   30s cooldown) — once you've filled in `.env` per ROADMAP.md.
+- Real AI Site Builder: describe a site in up to 4,000 words, pick a detail level, and a
+  Cloud Functions backend calls OpenAI to write real copy and generate real images,
+  laying them onto an editable canvas — with live progress, pause-to-add-something (max
+  2), and server-side credit deduction (8 free on signup).
 - Projects and unlocked themes are stored in Firestore per-account, so signing in
   restores your builds.
 - Create a project for Web Page, Video Page, Social (9:16) Page, or Logo Page.
@@ -85,9 +104,11 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 
 ## Known gaps (see ROADMAP.md for the full breakdown)
 
-- Theme purchases and future credit/subscription purchases need real Apple In-App
-  Purchase wiring, which needs your App Store Connect setup.
+- Theme purchases, credit packs, and subscriptions all show real pricing but no real
+  charge yet — need Apple In-App Purchase wiring (App Store Connect setup).
 - Video Page's cut/split/audio-overlay tools aren't built yet — the New Project screen
   says so rather than pretending they work.
-- The AI site builder, credits/subscriptions, AI chat assistant, and domain
-  purchase/transfer are not part of this phase.
+- AI-build credit costs are checked and deducted upfront, not mid-build — see
+  ROADMAP.md Phase 3 "Scoping decisions" for why.
+- A persistent AI chat assistant with full app control, and real domain purchase/transfer,
+  are not part of this phase.

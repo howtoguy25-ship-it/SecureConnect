@@ -1,28 +1,11 @@
+// Mirrors the app's src/types/index.ts element/project shapes. Cloud Functions run in a
+// separate Node/TypeScript project from the Expo app (different build toolchain, can't
+// share a `@/` path alias across them), so these are duplicated rather than imported --
+// keep in sync by hand if either side's schema changes.
+
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ThemeTier = 'blank' | 'free' | 'luxury' | 'luxury-crazy';
-
-export interface Theme {
-  id: string;
-  name: string;
-  tier: ThemeTier;
-  price: number; // 0 for blank/free
-  description: string;
-  swatch: [string, string]; // gradient preview colors
-  background: string;
-  accent: string;
-  textColor: string;
-  fontFamily?: string;
-  seedElements: CanvasElement[];
-}
-
-export type ElementType =
-  | 'text'
-  | 'image'
-  | 'shape'
-  | 'button'
-  | 'icon'
-  | 'slideshow';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow';
 
 interface BaseElement {
   id: string;
@@ -86,24 +69,17 @@ export type CanvasElement =
   | IconElement
   | SlideshowElement;
 
-export interface AnnouncementBarConfig {
-  id: string;
-  text: string;
-  backgroundColor: string;
-  textColor: string;
+export interface CanvasSize {
+  width: number;
+  height: number;
+  label: string;
 }
 
 export interface AnnouncementSettings {
   enabled: boolean;
   autoSlide: boolean;
   intervalMs: number;
-  bars: AnnouncementBarConfig[]; // max 2
-}
-
-export interface CanvasSize {
-  width: number;
-  height: number;
-  label: string;
+  bars: { id: string; text: string; backgroundColor: string; textColor: string }[];
 }
 
 export interface Project {
@@ -118,8 +94,6 @@ export interface Project {
   createdAt: number;
   updatedAt: number;
 }
-
-// -- AI Site Builder (Phase 3) --
 
 export type GenerationStatus =
   | 'starting'
@@ -141,6 +115,7 @@ export interface GenerationSession {
   creditsUsed: number;
   pausesUsed: number;
   pauseRequested: boolean;
+  resumeRequested: boolean;
   injectedMessage: string | null;
   resultProjectId: string | null;
   errorMessage: string | null;
@@ -148,10 +123,12 @@ export interface GenerationSession {
   updatedAt: number;
 }
 
+export type PlanId = 'free' | 'beginner' | 'middle' | 'advanced';
+
 export interface UserAccount {
   uid: string;
   credits: number;
-  plan: 'free' | 'beginner' | 'middle' | 'advanced';
+  plan: PlanId;
   planRenewsAt: number | null;
   createdAt: number;
 }
