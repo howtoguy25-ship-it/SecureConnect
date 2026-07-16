@@ -1,4 +1,4 @@
-# SiteForge — Roadmap
+# SiteSpark — Roadmap
 
 This app was scoped as a multi-phase build (see the original feature request).
 **Phase 1** is the manual site/logo/social/video-page builder. **Phase 2 (this commit)**
@@ -32,7 +32,7 @@ keyed by account. Everything under "Still to come" is *not yet built*.
 ## Setup — making auth actually work
 
 1. **Firebase project**: console.firebase.google.com → create a project → add an iOS app
-   with bundle ID `com.siteforge.app` → Project Settings → General → copy the Web app
+   with bundle ID `com.sitespark.app` → Project Settings → General → copy the Web app
    config into `.env` (`EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`,
    `EXPO_PUBLIC_FIREBASE_PROJECT_ID`, `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET`,
    `EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `EXPO_PUBLIC_FIREBASE_APP_ID`). These use the
@@ -45,10 +45,10 @@ keyed by account. Everything under "Still to come" is *not yet built*.
      into Firebase's Apple provider config.
 3. **Google Sign-In client IDs**: Google Cloud Console (same project Firebase created) →
    APIs & Services → Credentials → create an **iOS** OAuth client (bundle id
-   `com.siteforge.app`) and a **Web** OAuth client. Put both into `.env` as
+   `com.sitespark.app`) and a **Web** OAuth client. Put both into `.env` as
    `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` / `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`.
 4. **Apple Sign-In**: needs an Apple Developer account with the "Sign in with Apple"
-   capability enabled for `com.siteforge.app` (already declared in `app.config.js` via
+   capability enabled for `com.sitespark.app` (already declared in `app.config.js` via
    `ios.usesAppleSignIn`) — no extra client ID needed for the native flow.
 5. **Deploy Firestore rules**: `firebase deploy --only firestore:rules,firestore:indexes`
    (rules restrict every doc to `users/{uid}/**` matching the signed-in account — see

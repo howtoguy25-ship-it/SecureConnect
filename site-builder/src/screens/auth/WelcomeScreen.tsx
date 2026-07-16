@@ -73,7 +73,7 @@ export default function WelcomeScreen({ navigation }: Props) {
         <View style={styles.logo}>
           <Ionicons name="sparkles" size={32} color="#FFFFFF" />
         </View>
-        <Text style={styles.title}>SiteForge</Text>
+        <Text style={styles.title}>SiteSpark</Text>
         <Text style={styles.subtitle}>Build real sites, logos, and social pages — right from your phone.</Text>
       </View>
 

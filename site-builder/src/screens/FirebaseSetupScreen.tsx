@@ -21,7 +21,7 @@ export default function FirebaseSetupScreen() {
 
         <View style={styles.steps}>
           <Step n={1} text="Create a Firebase project at console.firebase.google.com" />
-          <Step n={2} text="Add an iOS app with bundle ID com.siteforge.app, copy its config" />
+          <Step n={2} text="Add an iOS app with bundle ID com.sitespark.app, copy its config" />
           <Step n={3} text="Copy .env.example to .env and paste the config in" />
           <Step n={4} text="Enable Email/Password, Phone, Google, and Apple sign-in providers" />
           <Step n={5} text="Restart the app" />

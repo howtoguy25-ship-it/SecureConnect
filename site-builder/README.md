@@ -1,4 +1,4 @@
-# SiteForge — iOS Site/Video/Social/Logo Builder (Phase 1 + 2)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages by hand: pick a theme, drag/resize elements, add text, images,

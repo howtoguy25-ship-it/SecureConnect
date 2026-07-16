@@ -2,9 +2,9 @@ require('dotenv/config');
 
 module.exports = ({ config }) => ({
   ...config,
-  name: 'SiteForge',
-  slug: 'siteforge',
-  scheme: 'siteforge',
+  name: 'SiteSpark',
+  slug: 'sitespark',
+  scheme: 'sitespark',
   version: '0.1.0',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
@@ -12,11 +12,11 @@ module.exports = ({ config }) => ({
   assetBundlePatterns: ['**/*'],
   ios: {
     supportsTablet: false,
-    bundleIdentifier: 'com.siteforge.app',
+    bundleIdentifier: 'com.sitespark.app',
     usesAppleSignIn: true,
   },
   android: {
-    package: 'com.siteforge.app',
+    package: 'com.sitespark.app',
   },
   web: {
     bundler: 'metro',
@@ -25,7 +25,7 @@ module.exports = ({ config }) => ({
     [
       'expo-image-picker',
       {
-        photosPermission: 'SiteForge needs access to your photos so you can add images to your site.',
+        photosPermission: 'SiteSpark needs access to your photos so you can add images to your site.',
       },
     ],
     'expo-apple-authentication',
