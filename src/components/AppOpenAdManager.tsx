@@ -17,7 +17,9 @@ export function AppOpenAdManager() {
   const hasShownRef = useRef(false);
 
   useEffect(() => {
-    ensureAdsInitialized().then(load);
+    ensureAdsInitialized()
+      .then(load)
+      .catch((err) => console.warn("[ads] app open ad load failed", err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

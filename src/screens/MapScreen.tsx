@@ -18,6 +18,7 @@ import { NavigationInstructionCard } from "@/components/NavigationInstructionCar
 import { AlertMarker } from "@/components/AlertMarker";
 import { AlertBanner } from "@/components/AlertBanner";
 import { BannerAdBar } from "@/components/BannerAdBar";
+import { AdsErrorBoundary } from "@/components/AdsErrorBoundary";
 import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
 import { getDirections, type Route } from "@/services/directions";
@@ -307,7 +308,11 @@ export function MapScreen() {
 
       {/* Never shown while navigating -- a driving app shouldn't have anything competing for
           attention with the road/turn instructions, safety concern first and foremost. */}
-      {!route && <BannerAdBar />}
+      {!route && (
+        <AdsErrorBoundary>
+          <BannerAdBar />
+        </AdsErrorBoundary>
+      )}
 
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
         <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />

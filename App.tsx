@@ -7,6 +7,7 @@ import { LocationProvider } from "@/context/LocationContext";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { RootNavigator } from "@/navigation/RootNavigator";
 import { AppOpenAdManager } from "@/components/AppOpenAdManager";
+import { AdsErrorBoundary } from "@/components/AdsErrorBoundary";
 import { installCrashReporter } from "@/services/crashReporter";
 
 // Installed at module scope so it's active as early as this file is ever imported/evaluated
@@ -24,7 +25,9 @@ export default function App() {
           <SettingsProvider>
             <LocationProvider>
               <StatusBar style="dark" />
-              <AppOpenAdManager />
+              <AdsErrorBoundary>
+                <AppOpenAdManager />
+              </AdsErrorBoundary>
               <RootNavigator />
             </LocationProvider>
           </SettingsProvider>
