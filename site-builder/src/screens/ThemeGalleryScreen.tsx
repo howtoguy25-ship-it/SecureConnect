@@ -1,0 +1,251 @@
+import React, { useCallback, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  Alert,
+  Modal,
+  TextInput,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '@/navigation/types';
+import { THEMES } from '@/data/themes';
+import { Theme, ThemeTier } from '@/types';
+import { unlockedThemesStore } from '@/storage/unlockedThemesStore';
+import { projectsStore } from '@/storage/projectsStore';
+import { createProject } from '@/utils/createProject';
+import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'ThemeGallery'>;
+
+const TIER_LABEL: Record<ThemeTier, string> = {
+  blank: 'Blank',
+  free: 'Free',
+  luxury: 'Luxury',
+  'luxury-crazy': 'Luxury Crazy',
+};
+
+export default function ThemeGalleryScreen({ navigation, route }: Props) {
+  const { pageType } = route.params;
+  const [unlocked, setUnlocked] = useState<string[]>([]);
+  const [purchaseTheme, setPurchaseTheme] = useState<Theme | null>(null);
+  const [nameModal, setNameModal] = useState<Theme | null>(null);
+  const [nameValue, setNameValue] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      unlockedThemesStore.list().then(setUnlocked);
+    }, [])
+  );
+
+  const isLocked = (theme: Theme) => theme.price > 0 && !unlocked.includes(theme.id);
+
+  const openTheme = (theme: Theme) => {
+    if (isLocked(theme)) {
+      setPurchaseTheme(theme);
+      return;
+    }
+    setNameValue(`My ${PAGE_TYPE_INFO[pageType].title}`);
+    setNameModal(theme);
+  };
+
+  const confirmPurchase = async () => {
+    if (!purchaseTheme) return;
+    await unlockedThemesStore.unlock(purchaseTheme.id);
+    setUnlocked((prev) => [...prev, purchaseTheme.id]);
+    const theme = purchaseTheme;
+    setPurchaseTheme(null);
+    setNameValue(`My ${PAGE_TYPE_INFO[pageType].title}`);
+    setNameModal(theme);
+  };
+
+  const createAndOpen = async () => {
+    if (!nameModal) return;
+    const project = createProject(nameValue.trim() || nameModal.name, pageType, nameModal.id);
+    await projectsStore.save(project);
+    setNameModal(null);
+    navigation.reset({
+      index: 1,
+      routes: [{ name: 'Projects' }, { name: 'Editor', params: { projectId: project.id } }],
+    });
+  };
+
+  const renderGroup = (tier: ThemeTier) => {
+    const items = THEMES.filter((t) => t.tier === tier);
+    if (items.length === 0) return null;
+    return (
+      <View style={styles.group} key={tier}>
+        <Text style={styles.groupTitle}>
+          {TIER_LABEL[tier]}
+          {tier === 'luxury' && '  ·  $189'}
+          {tier === 'luxury-crazy' && '  ·  $399'}
+        </Text>
+        <View style={styles.grid}>
+          {items.map((theme) => (
+            <Pressable key={theme.id} style={styles.themeCard} onPress={() => openTheme(theme)}>
+              <LinearGradient colors={theme.swatch} style={styles.swatch}>
+                {isLocked(theme) && (
+                  <View style={styles.lockOverlay}>
+                    <Ionicons name="lock-closed" size={18} color="#FFFFFF" />
+                  </View>
+                )}
+              </LinearGradient>
+              <Text style={styles.themeName}>{theme.name}</Text>
+              <Text style={styles.themeDesc} numberOfLines={2}>
+                {theme.description}
+              </Text>
+              {theme.price > 0 && <Text style={styles.themePrice}>${theme.price}</Text>}
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+          <Ionicons name="chevron-back" size={26} color="#0F172A" />
+        </Pressable>
+        <Text style={styles.title}>Choose a Theme</Text>
+        <View style={{ width: 26 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        {renderGroup('blank')}
+        {renderGroup('free')}
+        {renderGroup('luxury')}
+        {renderGroup('luxury-crazy')}
+      </ScrollView>
+
+      <Modal visible={!!purchaseTheme} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Unlock "{purchaseTheme?.name}"</Text>
+            <Text style={styles.modalBody}>
+              This is a one-time purchase of ${purchaseTheme?.price} for this theme.{'\n\n'}
+              Demo mode: no real payment is processed yet — real purchases will use Apple's
+              In-App Purchase once App Store Connect products are configured (see Roadmap).
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancel} onPress={() => setPurchaseTheme(null)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirm} onPress={confirmPurchase}>
+                <Text style={styles.modalConfirmText}>Buy ${purchaseTheme?.price}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!nameModal} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Name your project</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={nameValue}
+              onChangeText={setNameValue}
+              autoFocus
+              placeholder="Project name"
+            />
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancel} onPress={() => setNameModal(null)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirm} onPress={createAndOpen}>
+                <Text style={styles.modalConfirmText}>Create</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  title: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  group: { paddingHorizontal: 16, marginTop: 18 },
+  groupTitle: { fontSize: 15, fontWeight: '700', color: '#334155', marginBottom: 10 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  themeCard: {
+    width: '47%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  swatch: {
+    height: 90,
+    borderRadius: 10,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    padding: 6,
+  },
+  lockOverlay: {
+    backgroundColor: '#00000066',
+    borderRadius: 12,
+    padding: 4,
+  },
+  themeName: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginTop: 8 },
+  themeDesc: { fontSize: 11, color: '#64748B', marginTop: 2, height: 28 },
+  themePrice: { fontSize: 13, fontWeight: '700', color: '#B45309', marginTop: 4 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: '#00000088',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20 },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
+  modalBody: { fontSize: 13, color: '#475569', marginTop: 10, lineHeight: 19 },
+  nameInput: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  modalCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+  modalCancelText: { color: '#334155', fontWeight: '600' },
+  modalConfirm: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: '#111827',
+  },
+  modalConfirmText: { color: '#FFFFFF', fontWeight: '600' },
+});
