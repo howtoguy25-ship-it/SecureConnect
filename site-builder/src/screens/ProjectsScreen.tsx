@@ -7,6 +7,7 @@ import {
   Pressable,
   Alert,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,18 +17,23 @@ import { RootStackParamList } from '@/navigation/types';
 import { Project } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
+import { useAuth } from '@/context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Projects'>;
 
 export default function ProjectsScreen({ navigation }: Props) {
+  const { user } = useAuth();
+  const uid = user!.uid;
   const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
   const load = useCallback(async () => {
-    const list = await projectsStore.list();
+    const list = await projectsStore.list(uid);
     setProjects(list);
-  }, []);
+    setLoading(false);
+  }, [uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,7 +48,7 @@ export default function ProjectsScreen({ navigation }: Props) {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await projectsStore.remove(project.id);
+          await projectsStore.remove(uid, project.id);
           load();
         },
       },
@@ -56,7 +62,7 @@ export default function ProjectsScreen({ navigation }: Props) {
 
   const commitRename = async () => {
     if (renamingId && renameValue.trim()) {
-      await projectsStore.rename(renamingId, renameValue.trim());
+      await projectsStore.rename(uid, renamingId, renameValue.trim());
     }
     setRenamingId(null);
     load();
@@ -65,6 +71,9 @@ export default function ProjectsScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
+        <Pressable onPress={() => navigation.navigate('Account')} hitSlop={8} style={styles.accountButton}>
+          <Ionicons name="person-circle-outline" size={28} color="#334155" />
+        </Pressable>
         <Text style={styles.title}>My Projects</Text>
         <Pressable
           style={styles.createButton}
@@ -75,7 +84,11 @@ export default function ProjectsScreen({ navigation }: Props) {
         </Pressable>
       </View>
 
-      {projects.length === 0 ? (
+      {loading ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator />
+        </View>
+      ) : projects.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="albums-outline" size={48} color="#94A3B8" />
           <Text style={styles.emptyTitle}>No projects yet</Text>
@@ -142,7 +155,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
-  title: { fontSize: 28, fontWeight: '700', color: '#0F172A' },
+  title: { fontSize: 22, fontWeight: '700', color: '#0F172A' },
+  accountButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   createButton: {
     width: 44,
     height: 44,

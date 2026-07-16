@@ -1,56 +1,43 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  updateDoc,
+  query,
+  orderBy,
+} from 'firebase/firestore';
+import { db } from '@/services/firebase';
 import { Project } from '@/types';
+import { requireDb } from '@/services/requireDb';
 
-const PROJECTS_KEY = 'siteforge:projects';
-
-async function readAll(): Promise<Project[]> {
-  const raw = await AsyncStorage.getItem(PROJECTS_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as Project[];
-  } catch {
-    return [];
-  }
-}
-
-async function writeAll(projects: Project[]): Promise<void> {
-  await AsyncStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+function projectsCollection(uid: string) {
+  return collection(requireDb(db), 'users', uid, 'projects');
 }
 
 export const projectsStore = {
-  async list(): Promise<Project[]> {
-    const projects = await readAll();
-    return projects.sort((a, b) => b.updatedAt - a.updatedAt);
+  async list(uid: string): Promise<Project[]> {
+    const snapshot = await getDocs(query(projectsCollection(uid), orderBy('updatedAt', 'desc')));
+    return snapshot.docs.map((d) => d.data() as Project);
   },
 
-  async get(id: string): Promise<Project | null> {
-    const projects = await readAll();
-    return projects.find((p) => p.id === id) ?? null;
+  async get(uid: string, id: string): Promise<Project | null> {
+    const snapshot = await getDoc(doc(projectsCollection(uid), id));
+    return snapshot.exists() ? (snapshot.data() as Project) : null;
   },
 
-  async save(project: Project): Promise<void> {
-    const projects = await readAll();
-    const idx = projects.findIndex((p) => p.id === project.id);
-    const updated = { ...project, updatedAt: Date.now() };
-    if (idx >= 0) {
-      projects[idx] = updated;
-    } else {
-      projects.push(updated);
-    }
-    await writeAll(projects);
+  async save(uid: string, project: Project): Promise<void> {
+    const updated: Project = { ...project, updatedAt: Date.now() };
+    await setDoc(doc(projectsCollection(uid), project.id), updated);
   },
 
-  async remove(id: string): Promise<void> {
-    const projects = await readAll();
-    await writeAll(projects.filter((p) => p.id !== id));
+  async remove(uid: string, id: string): Promise<void> {
+    await deleteDoc(doc(projectsCollection(uid), id));
   },
 
-  async rename(id: string, name: string): Promise<void> {
-    const projects = await readAll();
-    const idx = projects.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      projects[idx] = { ...projects[idx], name, updatedAt: Date.now() };
-      await writeAll(projects);
-    }
+  async rename(uid: string, id: string, name: string): Promise<void> {
+    await updateDoc(doc(projectsCollection(uid), id), { name, updatedAt: Date.now() });
   },
 };

@@ -5,4 +5,5 @@ export type RootStackParamList = {
   NewProject: undefined;
   ThemeGallery: { pageType: PageType };
   Editor: { projectId: string };
+  Account: undefined;
 };

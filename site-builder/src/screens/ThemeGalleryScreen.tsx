@@ -21,6 +21,7 @@ import { unlockedThemesStore } from '@/storage/unlockedThemesStore';
 import { projectsStore } from '@/storage/projectsStore';
 import { createProject } from '@/utils/createProject';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
+import { useAuth } from '@/context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeGallery'>;
 
@@ -33,6 +34,8 @@ const TIER_LABEL: Record<ThemeTier, string> = {
 
 export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const { pageType } = route.params;
+  const { user } = useAuth();
+  const uid = user!.uid;
   const [unlocked, setUnlocked] = useState<string[]>([]);
   const [purchaseTheme, setPurchaseTheme] = useState<Theme | null>(null);
   const [nameModal, setNameModal] = useState<Theme | null>(null);
@@ -40,8 +43,8 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      unlockedThemesStore.list().then(setUnlocked);
-    }, [])
+      unlockedThemesStore.list(uid).then(setUnlocked);
+    }, [uid])
   );
 
   const isLocked = (theme: Theme) => theme.price > 0 && !unlocked.includes(theme.id);
@@ -57,7 +60,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
 
   const confirmPurchase = async () => {
     if (!purchaseTheme) return;
-    await unlockedThemesStore.unlock(purchaseTheme.id);
+    await unlockedThemesStore.unlock(uid, purchaseTheme.id);
     setUnlocked((prev) => [...prev, purchaseTheme.id]);
     const theme = purchaseTheme;
     setPurchaseTheme(null);
@@ -68,7 +71,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const createAndOpen = async () => {
     if (!nameModal) return;
     const project = createProject(nameValue.trim() || nameModal.name, pageType, nameModal.id);
-    await projectsStore.save(project);
+    await projectsStore.save(uid, project);
     setNameModal(null);
     navigation.reset({
       index: 1,

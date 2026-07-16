@@ -1,32 +1,62 @@
 # SiteForge — Roadmap
 
-This app was scoped as a multi-phase build (see the original feature request). **Phase 1
-(this commit)** is the manual site/logo/social/video-page builder: projects dashboard,
-theme gallery with priced tiers, and a working drag/resize canvas editor with an elements
-library, text/image/slideshow blocks, and a page-level announcement bar. Everything below
-is *not yet built* and is ordered roughly by dependency.
+This app was scoped as a multi-phase build (see the original feature request).
+**Phase 1** is the manual site/logo/social/video-page builder. **Phase 2 (this commit)**
+is real accounts: Firebase Auth (Google, Apple, email+password, phone+SMS), password
+reset, resend code, and projects/theme-unlocks moved from on-device storage to Firestore
+keyed by account. Everything under "Still to come" is *not yet built*.
 
 ## What's real vs. mocked right now
 
-- Projects, elements, and unlocked-theme state persist locally via `AsyncStorage` — no
-  backend or account system yet, so data lives on-device only.
+- Auth is wired to real Firebase Auth APIs (not mocked) — but it can't actually run until
+  you create a Firebase project and drop its config into `.env` (see **Setup** below). No
+  fake/demo sign-in path exists; without real config, every auth screen will show a real
+  Firebase error rather than silently succeeding.
+- Projects and unlocked-theme state now live in Firestore under `users/{uid}/...` —
+  signing in on a new device restores your builds and purchases.
 - Theme purchases ($189 / $399 tiers) show a real price and unlock flow, but no money
   moves — the modal explicitly says "Demo mode". Wiring this to real payment requires
-  Apple In-App Purchase (see below); Stripe/web checkout cannot be used for unlocking
+  Apple In-App Purchase (see Phase 4); Stripe/web checkout cannot be used for unlocking
   digital content inside an iOS app per App Store rules.
 - Video Page and the 9:16 Social Page use the right canvas aspect ratio and share the
   same element editor, but the video-specific tools (cut, split, audio track overlay,
   picking a camera-roll clip as a sound source) are not built — the New Project screen
   labels this honestly rather than faking a working video editor.
+- Phone auth's reCAPTCHA step is a custom WebView component (`src/services/recaptcha/`)
+  instead of the community `expo-firebase-recaptcha` package — that package is
+  unmaintained and pulls in a nested `expo-firebase-core` dependency with several known
+  vulnerable transitive packages (confirmed via `npm audit`). This does the same thing
+  (solve Google's invisible reCAPTCHA inside a WebView, hand the token to Firebase's real
+  `signInWithPhoneNumber`) without that baggage.
 
-## Phase 2 — Accounts & Auth (needs a Firebase project + Apple Developer account)
+## Setup — making auth actually work
 
-- Firebase Auth: Google Sign-In, Sign in with Apple, email+password, phone+SMS OTP.
-- Real password reset (email) and resend-code (phone) flows via Firebase Auth.
-- Move `projectsStore`/`unlockedThemesStore` from `AsyncStorage` to Firestore keyed by
-  `uid`, so builds follow the signed-in account across devices.
-- Needed from you: a Firebase project (Blaze plan for SMS), an Apple Developer account
-  (for Sign in with Apple + later IAP), and OAuth client IDs for Google sign-in.
+1. **Firebase project**: console.firebase.google.com → create a project → add an iOS app
+   with bundle ID `com.siteforge.app` → Project Settings → General → copy the Web app
+   config into `.env` (`EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`,
+   `EXPO_PUBLIC_FIREBASE_PROJECT_ID`, `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET`,
+   `EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `EXPO_PUBLIC_FIREBASE_APP_ID`). These use the
+   `EXPO_PUBLIC_` prefix so Expo inlines them into the client bundle at build time — that's
+   correct for Firebase's client config, which is meant to be public.
+2. **Enable providers**: Firebase Console → Authentication → Sign-in method → enable
+   Email/Password, Phone, Google, and Apple.
+   - Phone auth requires the Blaze (pay-as-you-go) plan for SMS delivery.
+   - Apple requires a Services ID + private key from your Apple Developer account, entered
+     into Firebase's Apple provider config.
+3. **Google Sign-In client IDs**: Google Cloud Console (same project Firebase created) →
+   APIs & Services → Credentials → create an **iOS** OAuth client (bundle id
+   `com.siteforge.app`) and a **Web** OAuth client. Put both into `.env` as
+   `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` / `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`.
+4. **Apple Sign-In**: needs an Apple Developer account with the "Sign in with Apple"
+   capability enabled for `com.siteforge.app` (already declared in `app.config.js` via
+   `ios.usesAppleSignIn`) — no extra client ID needed for the native flow.
+5. **Deploy Firestore rules**: `firebase deploy --only firestore:rules,firestore:indexes`
+   (rules restrict every doc to `users/{uid}/**` matching the signed-in account — see
+   `firebase/firestore.rules`).
+6. Copy `.env.example` to `.env`, fill in the values above, then `npx expo start`.
+
+Until step 1–3 are done, the Welcome screen's buttons will call real Firebase/Google/Apple
+APIs and get real "not configured" errors — that's expected, not a bug.
 
 ## Phase 3 — AI Site Builder (the app's centerpiece)
 

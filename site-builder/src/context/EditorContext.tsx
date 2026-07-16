@@ -25,9 +25,11 @@ interface EditorContextValue {
 const EditorContext = createContext<EditorContextValue | null>(null);
 
 export function EditorProvider({
+  uid,
   projectId,
   children,
 }: {
+  uid: string;
   projectId: string;
   children: React.ReactNode;
 }) {
@@ -36,15 +38,18 @@ export function EditorProvider({
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    projectsStore.get(projectId).then((p) => setProject(p));
-  }, [projectId]);
+    projectsStore.get(uid, projectId).then((p) => setProject(p));
+  }, [uid, projectId]);
 
-  const scheduleSave = useCallback((next: Project) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      projectsStore.save(next);
-    }, 400);
-  }, []);
+  const scheduleSave = useCallback(
+    (next: Project) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        projectsStore.save(uid, next);
+      }, 400);
+    },
+    [uid]
+  );
 
   const updateProject = useCallback(
     (patch: Partial<Project>) => {

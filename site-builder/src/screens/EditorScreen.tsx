@@ -12,6 +12,7 @@ import ElementInspector from '@/components/inspector/ElementInspector';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement } from '@/types';
+import { useAuth } from '@/context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
@@ -191,8 +192,9 @@ function TabButton({
 }
 
 export default function EditorScreen(props: Props) {
+  const { user } = useAuth();
   return (
-    <EditorProvider projectId={props.route.params.projectId}>
+    <EditorProvider uid={user!.uid} projectId={props.route.params.projectId}>
       <EditorInner {...props} />
     </EditorProvider>
   );

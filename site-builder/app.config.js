@@ -1,3 +1,5 @@
+require('dotenv/config');
+
 module.exports = ({ config }) => ({
   ...config,
   name: 'SiteForge',
@@ -11,6 +13,7 @@ module.exports = ({ config }) => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: 'com.siteforge.app',
+    usesAppleSignIn: true,
   },
   android: {
     package: 'com.siteforge.app',
@@ -25,9 +28,11 @@ module.exports = ({ config }) => ({
         photosPermission: 'SiteForge needs access to your photos so you can add images to your site.',
       },
     ],
+    'expo-apple-authentication',
+    'expo-web-browser',
   ],
   extra: {
-    supportPhone: '+61 408 680 813',
-    supportEmail: 'adisssal7@hotmail.com',
+    supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',
+    supportEmail: process.env.SUPPORT_EMAIL || 'adisssal7@hotmail.com',
   },
 });
