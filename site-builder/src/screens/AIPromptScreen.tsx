@@ -24,10 +24,10 @@ function wordCount(text: string): number {
 }
 
 export default function AIPromptScreen({ navigation, route }: Props) {
-  const { pageType } = route.params;
+  const { pageType, initialPrompt } = route.params;
   const { user } = useAuth();
   const uid = user!.uid;
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(initialPrompt ?? '');
   const [complexity, setComplexity] = useState<BuildComplexity>('standard');
   const [account, setAccount] = useState<UserAccount | null>(null);
 

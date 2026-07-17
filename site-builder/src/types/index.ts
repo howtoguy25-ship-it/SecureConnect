@@ -155,3 +155,26 @@ export interface UserAccount {
   planRenewsAt: number | null;
   createdAt: number;
 }
+
+// -- Persistent AI chat assistant (Phase 5) --
+
+export interface AssistantMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+}
+
+export type AssistantActionType =
+  | 'navigate'
+  | 'startBuildFlow'
+  | 'startAIBuild'
+  | 'openSubscription'
+  | 'openAccount';
+
+export interface AssistantAction {
+  type: AssistantActionType;
+  screen: 'Projects' | 'NewProject' | 'Subscription' | 'Account' | null;
+  pageType: PageType | null;
+  prompt: string | null;
+}

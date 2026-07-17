@@ -144,12 +144,32 @@ pricing you specified. `SubscriptionScreen` shows all of it. What's still missin
   monthly resets for Beginner/Advanced — the pricing data models this
   (`minimumUsageNote`/`billingPeriod`) but no scheduled function enforces it yet.
 
-## Phase 5 — AI Chat Assistant (full app control)
+## Phase 5 — AI Chat Assistant (full app control) — done
 
-- An assistant that can act on the user's behalf across the app (find a setting, jump to
-  a screen, explain a feature) when they're stuck. Needs the same backend/LLM piece as
-  Phase 3, plus an action layer that can safely drive navigation/state rather than just
-  answer in a chat bubble.
+A persistent chat assistant ("Spark"), reachable via a floating button on every
+signed-in screen (`src/components/assistant/AssistantLauncher.tsx`). Real OpenAI-backed
+conversation, with structured-output actions the client executes to actually drive the
+app rather than just describe what to do:
+
+- **Real conversation** — `firebase/functions/src/assistant.ts`'s `chatWithAssistant` calls
+  OpenAI with the user's current screen/credits/plan/project count as context, using the
+  same `OPENAI_API_KEY` secret and per-plan model tier as the site builder (Phase 3).
+- **Real app control** — the model's structured response can include up to 3 actions:
+  `navigate` (Projects/NewProject/Subscription/Account), `startBuildFlow` (opens the
+  AI-vs-manual picker for a page type), `startAIBuild` (opens the AI prompt screen
+  pre-filled with a prompt it wrote from the conversation), `openSubscription`,
+  `openAccount`. Actions only ever *open a screen* for the user to confirm — the
+  assistant itself never spends credits or starts a paid build on its own.
+- **Persistent history** — messages are stored per-account in
+  `users/{uid}/assistantMessages` (client-owned, like projects — see `firestore.rules`),
+  so the conversation survives app restarts.
+- Navigation from outside the screen tree uses a `navigationRef`
+  (`src/navigation/navigationRef.ts`), the standard React Navigation pattern for
+  navigating from a component that isn't itself a screen.
+
+Not covered yet: the assistant can't edit canvas elements directly (add/move/style a
+specific element via chat) — that's a larger scope than "app control" navigation and
+isn't part of this phase.
 
 ## Phase 6 — Video Page Editor
 

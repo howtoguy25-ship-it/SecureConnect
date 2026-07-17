@@ -1,12 +1,13 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 5)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
-real Firebase accounts.
+real Firebase accounts, with a persistent AI chat assistant that can drive the app for you.
 
-This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder)**
-of a larger product (subscriptions/IAP, video editor, domains — see `ROADMAP.md` for
-what's built vs. what's next and what real accounts each later phase needs).
+This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder) +
+Phase 5 (AI chat assistant)** of a larger product (subscriptions/IAP, video editor,
+domains — see `ROADMAP.md` for what's built vs. what's next and what real accounts each
+later phase needs).
 
 ## Stack
 
@@ -42,12 +43,15 @@ src/
     unlockedThemesStore.ts         Firestore-backed unlocked-theme tracking
     userAccountStore.ts            Credit balance + plan (read-only client side)
     generationSessionStore.ts      Live AI-build progress subscription
+    assistantMessagesStore.ts      Persistent chat-assistant message history
   data/pricing.ts                  Plans, credit packs, build-cost estimator (client copy)
   components/
     canvas/                        Canvas, DraggableElement (drag+resize), ElementRenderer,
                                     AnnouncementBarView
     inspector/                     Per-element style controls (color, size, text, image)
     elements/                      ElementsPanel (library grid), AnnouncementPanel
+    assistant/                     AssistantLauncher (floating button, every signed-in
+                                    screen), AssistantChatScreen (chat UI + action execution)
   screens/
     auth/                          Welcome, EmailAuth, ForgotPassword, PhoneAuth, PhoneVerify
     AccountScreen.tsx               Signed-in identity, credit balance + sign out
@@ -68,7 +72,8 @@ firebase/
   storage.rules                    Locked down entirely (Admin SDK + signed URLs only)
   functions/                       Cloud Functions: startGeneration, requestPause,
                                     resumeGeneration, askBuildQuestion, ensureAccount,
-                                    onUserCreated (OpenAI-backed, see its own README below)
+                                    onUserCreated, assistantChat (OpenAI-backed, see its
+                                    own README below)
 ```
 
 ## Setup
@@ -90,6 +95,11 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   Cloud Functions backend calls OpenAI to write real copy and generate real images,
   laying them onto an editable canvas — with live progress, pause-to-add-something (max
   2), and server-side credit deduction (8 free on signup).
+- Real persistent AI chat assistant ("Spark"): a floating button on every signed-in
+  screen opens a chat that answers questions and can drive the app for you — jump to
+  your projects, open the build picker for a page type, or open the AI prompt screen
+  pre-filled with a site description it wrote from your message. Conversation history
+  is saved per-account so it's still there next time you open the app.
 - Projects and unlocked themes are stored in Firestore per-account, so signing in
   restores your builds.
 - Create a project for Web Page, Video Page, Social (9:16) Page, or Logo Page.

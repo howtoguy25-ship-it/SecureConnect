@@ -9,6 +9,7 @@ import { GenerationSession, Project, UserAccount } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
+import { chatWithAssistant, AssistantChatMessage } from './assistant';
 
 initializeApp();
 const db = getFirestore();
@@ -18,6 +19,8 @@ const MAX_PROMPT_WORDS = 4000;
 const MAX_PAUSES = 2;
 const PAUSE_POLL_INTERVAL_MS = 3000;
 const PAUSE_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_ASSISTANT_MESSAGE_WORDS = 500;
+const MAX_ASSISTANT_HISTORY = 20;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -289,4 +292,42 @@ export const askBuildQuestion = onCall({ secrets: [openaiApiKey] }, async (reque
     `${question}\n\n(Original build prompt: ${session.prompt})`
   );
   return { answer };
+});
+
+// Persistent, app-wide AI chat assistant -- can hold a normal conversation and also drive
+// navigation/build actions for the user (see assistant.ts). Chat history itself lives in
+// Firestore under the client's control (users/{uid}/assistantMessages); this function is
+// stateless per call and only needs the recent turns the client sends up as `history`.
+export const assistantChat = onCall({ secrets: [openaiApiKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { message, history, screen } = request.data as {
+    message: string;
+    history?: AssistantChatMessage[];
+    screen?: string;
+  };
+
+  if (!message?.trim()) throw new HttpsError('invalid-argument', 'Missing message.');
+  if (wordCount(message) > MAX_ASSISTANT_MESSAGE_WORDS) {
+    throw new HttpsError('invalid-argument', `Keep messages under ${MAX_ASSISTANT_MESSAGE_WORDS} words.`);
+  }
+
+  const userRef = db.collection('users').doc(uid);
+  const [userSnap, projectsCount] = await Promise.all([
+    userRef.get(),
+    userRef.collection('projects').count().get(),
+  ]);
+  const account = userSnap.data() as UserAccount | undefined;
+
+  const client = createOpenAIClient(openaiApiKey.value());
+  const model = MODEL_FOR_PLAN[account?.plan ?? 'free'];
+  const trimmedHistory = (history ?? []).slice(-MAX_ASSISTANT_HISTORY);
+
+  return chatWithAssistant(client, model, trimmedHistory, message.trim(), {
+    screen: screen || 'Projects',
+    credits: account?.credits ?? 0,
+    plan: account?.plan ?? 'free',
+    projectCount: projectsCount.data().count,
+  });
 });

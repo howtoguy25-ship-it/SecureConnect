@@ -3,9 +3,11 @@ import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
+import { navigationRef } from '@/navigation/navigationRef';
 import { useAuth } from '@/context/AuthContext';
 import { env } from '@/config/env';
 import AuthNavigator from '@/navigation/AuthNavigator';
+import AssistantLauncher from '@/components/assistant/AssistantLauncher';
 import FirebaseSetupScreen from '@/screens/FirebaseSetupScreen';
 import ProjectsScreen from '@/screens/ProjectsScreen';
 import NewProjectScreen from '@/screens/NewProjectScreen';
@@ -50,5 +52,16 @@ export default function RootNavigator() {
     );
   }
 
-  return <NavigationContainer>{user ? <AppStack /> : <AuthNavigator />}</NavigationContainer>;
+  return (
+    <NavigationContainer ref={navigationRef}>
+      {user ? (
+        <>
+          <AppStack />
+          <AssistantLauncher />
+        </>
+      ) : (
+        <AuthNavigator />
+      )}
+    </NavigationContainer>
+  );
 }

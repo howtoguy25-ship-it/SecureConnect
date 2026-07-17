@@ -32,5 +32,11 @@ service cloud.firestore {
       allow read: if isOwner(uid);
       allow write: if false;
     }
+
+    // Persistent assistant chat history -- just conversation text, not security-sensitive,
+    // so (unlike credits/sessions above) the client owns it directly like projects do.
+    match /users/{uid}/assistantMessages/{messageId} {
+      allow read, write: if isOwner(uid);
+    }
   }
 }
