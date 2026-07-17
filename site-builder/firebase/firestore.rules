@@ -49,5 +49,13 @@ service cloud.firestore {
     match /domainMappings/{hostname} {
       allow read, write: if false;
     }
+
+    // Domain purchase records (contain the real registrant contact + Stripe/Namecheap
+    // status) -- client can read its own for the purchase-progress UI, but only
+    // createDomainCheckout/stripeWebhook (Admin SDK) ever write one.
+    match /users/{uid}/domainPurchases/{purchaseId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
   }
 }

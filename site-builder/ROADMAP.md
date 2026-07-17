@@ -203,13 +203,56 @@ Hosting Admin"), or `connectDomain` will fail with a permission error. This API 
 hasn't been exercised against your live project yet — treat the first real attempt as
 something we debug together from a screenshot, like the rest of this build.
 
-**Buying a brand-new domain from inside the app, and ownership transfer, are still not
-built.** Both require becoming a reseller with a registrar (e.g. Namecheap, Cloudflare
-Registrar, GoDaddy) with a real transactional API and your own payment processing (this
-is a real-world good, not IAP digital content) — I can wire the integration once you
-have that account and key, but can't create the account or hold funds on your behalf.
-Transfer specifically also needs EPP/auth codes from the losing registrar and
-ICANN-mandated wait periods outside any app's control.
+**Buying a brand-new domain from inside the app (done).** `BuyDomainScreen` (from
+Publish → Custom domain → "Buy a new domain") does a real search, real pricing, and a
+real registration:
+
+- `checkDomainAvailability` and `createDomainCheckout` call Namecheap's real XML API
+  (`firebase/functions/src/namecheapApi.ts`) for availability + `users.getPricing`, and
+  create a real Stripe Checkout session (`firebase/functions/src/stripeApi.ts`) —
+  payment happens on Stripe's own hosted page (opened in an in-app browser), **not**
+  native Apple IAP, since a registered domain is a real-world service, not digital app
+  content (this is the same pattern Wix/Squarespace's iOS apps use).
+- `stripeWebhook` (public `onRequest`, signature-verified) only registers the domain via
+  `registerDomain` **after** Stripe confirms payment (`checkout.session.completed`), and
+  is idempotent against Stripe's webhook retries — the domain is never registered
+  without payment clearing, and never registered twice.
+- A `DomainPurchase` record (`users/{uid}/domainPurchases/{id}`, owner-read/server-write
+  only) tracks status (`pending → paid → registering → registered`/`failed`) for the
+  client's live progress UI.
+- Real WHOIS privacy (WhoisGuard) is requested automatically so the registrant's real
+  contact info — required by ICANN, collected in the app's registrant form — isn't
+  publicly exposed.
+- Pricing is Namecheap's real cost plus a flat `DOMAIN_MARKUP_USD` (currently $5,
+  `firebase/functions/src/index.ts`) — a business knob, change it there.
+
+**One-time infrastructure this needed (already done for `sitespark-a5817`):**
+Namecheap's API only accepts calls from a whitelisted IP, so Cloud Functions needed a
+static outbound IP:
+```
+gcloud services enable compute.googleapis.com vpcaccess.googleapis.com
+gcloud compute addresses create sitespark-nat-ip --region=us-central1
+gcloud compute networks vpc-access connectors create sitespark-connector --region=us-central1 --network=default --range=10.8.0.0/28
+gcloud compute routers create sitespark-router --region=us-central1 --network=default
+gcloud compute routers nats create sitespark-nat --router=sitespark-router --region=us-central1 --nat-external-ip-pool=sitespark-nat-ip --nat-all-subnet-ip-ranges
+```
+That IP (`35.223.117.40`) is whitelisted on the Namecheap account and hardcoded as
+`NAMECHEAP_CLIENT_IP` in `namecheapApi.ts` — if the address is ever recreated, update
+both places. The functions that call Namecheap route through `sitespark-connector`
+(`vpcConnector`/`vpcConnectorEgressSettings` in their options).
+
+**Secrets required:** `NAMECHEAP_API_USER`, `NAMECHEAP_API_KEY`, `NAMECHEAP_USERNAME`,
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — all set via
+`firebase functions:secrets:set <NAME> --data-file <path>` (never pasted into a chat or
+typed at an unmasked prompt). The Stripe webhook secret comes from creating the webhook
+endpoint in the Stripe Dashboard (Developers → Webhooks → Add endpoint) pointing at the
+deployed `stripeWebhook` function's URL, listening for `checkout.session.completed`.
+
+**Not built:** auto-configuring DNS after registration — once a domain is bought here,
+use the existing "Connect a domain you already own" flow above to point it at the
+published site (Namecheap's own DNS records aren't wired to Firebase Hosting
+automatically yet). **Ownership transfer** (EPP/auth codes, ICANN wait periods) also
+isn't built — it's a distinct, finicky flow even with a real registrar API in place.
 
 ## Phase 8 — Policies & Support
 

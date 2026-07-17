@@ -5,7 +5,8 @@ import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import * as functionsV1 from 'firebase-functions/v1';
 
-import { GenerationSession, Project, PublishedSite, UserAccount } from './types';
+import Stripe from 'stripe';
+import { GenerationSession, Project, PublishedSite, DomainPurchase, UserAccount } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
@@ -13,10 +14,26 @@ import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import { renderProjectHtml } from './siteHtml';
 import { slugify, uniqueSlug } from './publish';
 import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
+import { checkAvailability, getRegistrationPriceUsd, registerDomain, RegistrantContact } from './namecheapApi';
+import { createStripeClient, createCheckoutSession } from './stripeApi';
 
 initializeApp();
 const db = getFirestore();
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const namecheapApiUser = defineSecret('NAMECHEAP_API_USER');
+const namecheapApiKey = defineSecret('NAMECHEAP_API_KEY');
+const namecheapUserName = defineSecret('NAMECHEAP_USERNAME');
+const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
+const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
+
+// Namecheap only accepts API calls from a whitelisted IP -- these functions must route
+// egress through the static-IP Cloud NAT set up for this project (see ROADMAP.md Phase 7
+// for the exact gcloud commands that created `sitespark-connector`).
+const NAMECHEAP_VPC_OPTS = { vpcConnector: 'sitespark-connector', vpcConnectorEgressSettings: 'ALL_TRAFFIC' } as const;
+const POPULAR_TLDS = ['com', 'net', 'org', 'io', 'co', 'app', 'dev'];
+// Flat markup over Namecheap's own registration cost -- adjust as a business decision,
+// not a technical one.
+const DOMAIN_MARKUP_USD = 5;
 
 const MAX_PROMPT_WORDS = 4000;
 const MAX_PAUSES = 2;
@@ -505,3 +522,141 @@ export const disconnectDomain = onCall(async (request) => {
   await projectRef.update({ customDomain: null, domainStatus: null, updatedAt: Date.now() });
   return { ok: true };
 });
+
+// Real domain search: checks availability across popular TLDs (or the exact domain if the
+// query already includes one) and prices each available result via Namecheap's real
+// pricing API, marked up by DOMAIN_MARKUP_USD.
+export const checkDomainAvailability = onCall(
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { query } = request.data as { query: string };
+    if (!query?.trim()) throw new HttpsError('invalid-argument', 'Missing search query.');
+
+    const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+    const base = query.trim().toLowerCase().replace(/[^a-z0-9.-]/g, '');
+    const candidates = base.includes('.') ? [base] : POPULAR_TLDS.map((tld) => `${base}.${tld}`);
+
+    const availability = await checkAvailability(creds, candidates);
+    const priced = await Promise.all(
+      availability
+        .filter((a) => a.available)
+        .map(async (a) => {
+          const basePrice = a.isPremium ? a.premiumPriceUsd : await getRegistrationPriceUsd(creds, a.domain);
+          return basePrice != null ? { domain: a.domain, priceUsd: Math.round((basePrice + DOMAIN_MARKUP_USD) * 100) / 100 } : null;
+        })
+    );
+
+    return { results: priced.filter((r): r is { domain: string; priceUsd: number } => r != null) };
+  }
+);
+
+// Creates a real Stripe Checkout session for a domain purchase -- payment happens on
+// Stripe's own hosted page (opened in an in-app browser client-side), not native IAP,
+// since a registered domain is a real-world service/good, not digital app content.
+export const createDomainCheckout = onCall(
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName, stripeSecretKey], ...NAMECHEAP_VPC_OPTS },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { domain, years, registrant, projectId } = request.data as {
+      domain: string;
+      years: number;
+      registrant: RegistrantContact;
+      projectId?: string;
+    };
+    if (!domain || !years || !registrant) {
+      throw new HttpsError('invalid-argument', 'Missing domain, years, or registrant contact.');
+    }
+
+    const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+    const availability = await checkAvailability(creds, [domain]);
+    const match = availability[0];
+    if (!match?.available) throw new HttpsError('failed-precondition', 'That domain is no longer available.');
+
+    const basePrice = match.isPremium ? match.premiumPriceUsd : await getRegistrationPriceUsd(creds, domain);
+    if (basePrice == null) throw new HttpsError('failed-precondition', 'Could not price this domain.');
+    const priceUsd = Math.round((basePrice + DOMAIN_MARKUP_USD) * 100) / 100;
+
+    const purchaseRef = db.collection('users').doc(uid).collection('domainPurchases').doc();
+    const purchase: DomainPurchase = {
+      id: purchaseRef.id,
+      uid,
+      projectId: projectId ?? null,
+      domain,
+      years,
+      priceUsd,
+      namecheapChargedUsd: null,
+      stripeSessionId: null,
+      status: 'pending',
+      registrant,
+      errorMessage: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await purchaseRef.set(purchase);
+
+    const stripe = createStripeClient(stripeSecretKey.value());
+    const session = await createCheckoutSession(stripe, {
+      domain,
+      priceUsd,
+      successUrl: 'sitespark://domain-purchase-complete',
+      cancelUrl: 'sitespark://domain-purchase-cancelled',
+      metadata: { uid, purchaseId: purchaseRef.id },
+    });
+
+    await purchaseRef.update({ stripeSessionId: session.id, updatedAt: Date.now() });
+    return { purchaseId: purchaseRef.id, checkoutUrl: session.url };
+  }
+);
+
+// Public Stripe webhook -- verifies the signature, then (idempotently, since Stripe
+// retries webhook deliveries) registers the domain for real via Namecheap once payment
+// is confirmed. Registration only ever happens from here, never from the client, so a
+// domain can't be registered without payment actually clearing first.
+export const stripeWebhook = onRequest(
+  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  async (req, res) => {
+    const stripe = createStripeClient(stripeSecretKey.value());
+    const signature = req.headers['stripe-signature'];
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, signature as string, stripeWebhookSecret.value());
+    } catch (err) {
+      res.status(400).send('Webhook signature verification failed.');
+      return;
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const uid = session.metadata?.uid;
+      const purchaseId = session.metadata?.purchaseId;
+
+      if (uid && purchaseId) {
+        const purchaseRef = db.collection('users').doc(uid).collection('domainPurchases').doc(purchaseId);
+        const purchase = (await purchaseRef.get()).data() as DomainPurchase | undefined;
+
+        if (purchase && purchase.status === 'pending') {
+          await purchaseRef.update({ status: 'registering', updatedAt: Date.now() });
+          try {
+            const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+            const result = await registerDomain(creds, purchase.domain, purchase.years, purchase.registrant);
+            await purchaseRef.update({
+              status: result.registered ? 'registered' : 'failed',
+              namecheapChargedUsd: result.chargedAmountUsd,
+              errorMessage: result.registered ? null : 'Namecheap did not confirm the registration.',
+              updatedAt: Date.now(),
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Domain registration failed.';
+            await purchaseRef.update({ status: 'failed', errorMessage: message, updatedAt: Date.now() });
+          }
+        }
+      }
+    }
+
+    res.status(200).send('ok');
+  }
+);

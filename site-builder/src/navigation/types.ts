@@ -11,5 +11,6 @@ export type RootStackParamList = {
   Subscription: undefined;
   Editor: { projectId: string };
   Publish: { projectId: string };
+  BuyDomain: { projectId: string };
   Account: undefined;
 };

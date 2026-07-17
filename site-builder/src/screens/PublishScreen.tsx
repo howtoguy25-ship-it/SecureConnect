@@ -219,6 +219,9 @@ export default function PublishScreen({ navigation, route }: Props) {
               <Pressable style={styles.primaryButton} onPress={handleConnectDomain} disabled={connecting}>
                 {connecting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Connect</Text>}
               </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={() => navigation.navigate('BuyDomain', { projectId })}>
+                <Text style={styles.secondaryButtonText}>Don't have one? Buy a new domain</Text>
+              </Pressable>
             </>
           ) : (
             <>

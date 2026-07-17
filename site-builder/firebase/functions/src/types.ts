@@ -108,6 +108,39 @@ export interface PublishedSite {
   updatedAt: number;
 }
 
+export type DomainPurchaseStatus = 'pending' | 'paid' | 'registering' | 'registered' | 'failed';
+
+// Real-world registrant contact required by ICANN for every domain registration --
+// WHOIS privacy (WhoisGuard) hides it publicly, but the registrar still needs the real
+// owner's details on file.
+export interface RegistrantContact {
+  firstName: string;
+  lastName: string;
+  address1: string;
+  city: string;
+  stateProvince: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+  emailAddress: string;
+}
+
+export interface DomainPurchase {
+  id: string;
+  uid: string;
+  projectId: string | null;
+  domain: string;
+  years: number;
+  priceUsd: number;
+  namecheapChargedUsd: number | null;
+  stripeSessionId: string | null;
+  status: DomainPurchaseStatus;
+  registrant: RegistrantContact;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type GenerationStatus =
   | 'starting'
   | 'generating'

@@ -65,6 +65,7 @@ src/
     SubscriptionScreen.tsx          Real plans/credit-pack pricing (demo purchase for now)
     EditorScreen.tsx                Main canvas editor
     PublishScreen.tsx               Publish/unpublish + connect-your-own-domain
+    BuyDomainScreen.tsx             Real domain search, registrant form, Stripe checkout
   navigation/
     RootNavigator.tsx               Switches Auth stack vs. App stack on auth state
     AuthNavigator.tsx
@@ -76,7 +77,9 @@ firebase/
                                     resumeGeneration, askBuildQuestion, ensureAccount,
                                     onUserCreated, assistantChat (OpenAI-backed),
                                     publishProject/unpublishProject/servePublishedSite,
-                                    connectDomain/getDomainStatus/disconnectDomain
+                                    connectDomain/getDomainStatus/disconnectDomain,
+                                    checkDomainAvailability/createDomainCheckout/
+                                    stripeWebhook (real Namecheap + Stripe)
 public/                           Firebase Hosting's static root (placeholder landing
                                     page) -- /s/** is rewritten to servePublishedSite
 ```
@@ -106,8 +109,9 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   pre-filled with a site description it wrote from your message. Conversation history
   is saved per-account so it's still there next time you open the app.
 - Real one-tap publishing: tap the cloud icon in the editor header to make a project a
-  real, publicly reachable website, or connect a domain you already own to it — see
-  `PublishScreen` and Phase 7 in ROADMAP.md.
+  real, publicly reachable website, connect a domain you already own to it, or buy a
+  brand-new domain (real Namecheap registration, real Stripe payment) from inside the
+  app — see `PublishScreen`, `BuyDomainScreen`, and Phase 7 in ROADMAP.md.
 - Projects and unlocked themes are stored in Firestore per-account, so signing in
   restores your builds.
 - Create a project for Web Page, Video Page, Social (9:16) Page, or Logo Page.

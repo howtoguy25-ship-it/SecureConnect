@@ -182,3 +182,35 @@ export interface AssistantAction {
   pageType: PageType | null;
   prompt: string | null;
 }
+
+// -- Buying a new domain (Phase 7b) --
+
+export type DomainPurchaseStatus = 'pending' | 'paid' | 'registering' | 'registered' | 'failed';
+
+export interface RegistrantContact {
+  firstName: string;
+  lastName: string;
+  address1: string;
+  city: string;
+  stateProvince: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+  emailAddress: string;
+}
+
+export interface DomainPurchase {
+  id: string;
+  uid: string;
+  projectId: string | null;
+  domain: string;
+  years: number;
+  priceUsd: number;
+  namecheapChargedUsd: number | null;
+  stripeSessionId: string | null;
+  status: DomainPurchaseStatus;
+  registrant: RegistrantContact;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
