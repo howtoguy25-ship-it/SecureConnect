@@ -46,6 +46,8 @@ import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "@/utils/mapStyles";
 import { calculateSunTimes } from "@/utils/sunTimes";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmPoint } from "@/services/osmTrafficData";
+import { fetchLiveTrafficCameras, type LiveTrafficCamera } from "@/services/liveTrafficCameras";
+import { LiveCamerasPanel } from "@/components/LiveCamerasPanel";
 import { SpeedLimitSign } from "@/components/SpeedLimitSign";
 import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
 import "./App.css";
@@ -156,6 +158,28 @@ function trafficLightIcon(scale: number): google.maps.Icon {
   return icon;
 }
 
+const liveCameraIconCache = new Map<number, google.maps.Icon>();
+function liveCameraIcon(scale: number): google.maps.Icon {
+  const w = Math.round(24 * scale);
+  const h = Math.round(18 * scale);
+  let icon = liveCameraIconCache.get(w);
+  if (!icon) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 34 26">
+      <rect x="1" y="4" width="22" height="18" rx="4" fill="#EA580C" stroke="#ffffff" stroke-width="2"/>
+      <path d="M23 11.5 L32 6 V20 L23 14.5 Z" fill="#EA580C" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+      <circle cx="12" cy="13" r="4.5" fill="#ffffff"/>
+      <circle cx="12" cy="13" r="2.3" fill="#EA580C"/>
+    </svg>`;
+    icon = {
+      url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+      scaledSize: new google.maps.Size(w, h),
+      anchor: new google.maps.Point(w / 2, h / 2),
+    };
+    liveCameraIconCache.set(w, icon);
+  }
+  return icon;
+}
+
 // A real, classic map-pin glyph for the destination -- distinct from every other marker on
 // the map (alerts, current location, OSM layer) so it's unambiguous which point you're
 // actually driving to, whatever kind of place it is (house, warehouse, carpark, park...).
@@ -201,6 +225,7 @@ export default function App() {
     setTheme,
     setShowTrafficLights,
     setShowSpeedCameras,
+    setShowLiveCameras,
   } = useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -321,6 +346,19 @@ export default function App() {
   const [osmSpeedCameras, setOsmSpeedCameras] = useState<OsmPoint[]>([]);
   const osmFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOsmBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
+
+  // Real NSW government live traffic cameras (see services/liveTrafficCameras.ts) -- a small,
+  // near-static dataset (~200 cameras), fetched once and cached, not re-queried per pan like
+  // the OSM layer above.
+  const [liveCameras, setLiveCameras] = useState<LiveTrafficCamera[]>([]);
+  const [selectedLiveCamera, setSelectedLiveCamera] = useState<LiveTrafficCamera | null>(null);
+
+  useEffect(() => {
+    if (!settings.showLiveCameras || liveCameras.length > 0) return;
+    fetchLiveTrafficCameras()
+      .then(setLiveCameras)
+      .catch((err) => console.warn("[live-cameras] fetch failed", err));
+  }, [settings.showLiveCameras, liveCameras.length]);
 
   // Real satellite imagery toggle -- "hybrid" (not plain "satellite") so road/place names stay
   // legible over the photo, matching what Google's own Maps app actually shows under its
@@ -1404,6 +1442,20 @@ export default function App() {
             />
           ))}
 
+        {/* Real NSW government live traffic cameras -- see services/liveTrafficCameras.ts.
+            Clicking a marker opens that camera's live image in the panel below. */}
+        {settings.showLiveCameras &&
+          liveCameras.map((camera) => (
+            <Marker
+              key={`cam-${camera.id}`}
+              position={{ lat: camera.lat, lng: camera.lng }}
+              icon={liveCameraIcon(osmIconScale)}
+              title={camera.title}
+              zIndex={500}
+              onClick={() => setSelectedLiveCamera(camera)}
+            />
+          ))}
+
         {pendingLocation && (
           <Marker
             position={pendingLocation}
@@ -1676,6 +1728,19 @@ export default function App() {
           >
             🛰️
           </button>
+
+          <button
+            className={`fab fab-senary${settings.showLiveCameras ? " fab-toggle-active" : ""}`}
+            onClick={() => {
+              const next = !settings.showLiveCameras;
+              setShowLiveCameras(next);
+              if (!next) setSelectedLiveCamera(null);
+            }}
+            aria-label={settings.showLiveCameras ? "Hide live traffic cameras" : "Show live traffic cameras"}
+            title="Live traffic cameras (NSW)"
+          >
+            📹
+          </button>
         </>
       )}
 
@@ -1701,6 +1766,18 @@ export default function App() {
         >
           {hideAlertsWhileNavigating ? "🚫" : "🚩"}
         </button>
+      )}
+
+      {settings.showLiveCameras && (
+        <LiveCamerasPanel
+          location={location}
+          onClose={() => {
+            setShowLiveCameras(false);
+            setSelectedLiveCamera(null);
+          }}
+          onSelectCamera={setSelectedLiveCamera}
+          selectedCameraId={selectedLiveCamera?.id ?? null}
+        />
       )}
 
       {show3DPrompt && (

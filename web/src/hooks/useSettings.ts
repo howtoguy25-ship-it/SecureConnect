@@ -24,6 +24,10 @@ export interface WebSettings {
   // layer only renders its own markers when its own switch is on. Both on by default.
   showTrafficLights: boolean;
   showSpeedCameras: boolean;
+  // Real NSW government live traffic camera markers (see services/liveTrafficCameras.ts) --
+  // a heavier, opt-in layer, off by default, separate from the lightweight OSM signal/camera
+  // points above.
+  showLiveCameras: boolean;
 }
 
 const DEFAULT_SETTINGS: WebSettings = {
@@ -34,6 +38,7 @@ const DEFAULT_SETTINGS: WebSettings = {
   theme: "system",
   showTrafficLights: true,
   showSpeedCameras: true,
+  showLiveCameras: false,
 };
 const STORAGE_KEY = "trackline.settings";
 
@@ -63,5 +68,7 @@ export function useSettings() {
       setSettings((s) => ({ ...s, showTrafficLights })),
     setShowSpeedCameras: (showSpeedCameras: boolean) =>
       setSettings((s) => ({ ...s, showSpeedCameras })),
+    setShowLiveCameras: (showLiveCameras: boolean) =>
+      setSettings((s) => ({ ...s, showLiveCameras })),
   };
 }

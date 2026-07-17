@@ -347,6 +347,18 @@ button:focus-visible {
   font-size: 20px;
 }
 
+.fab-senary {
+  bottom: calc(368px + env(safe-area-inset-bottom, 0px));
+  background: var(--fab-surface);
+  color: var(--fab-icon);
+  font-size: 20px;
+}
+
+.fab-senary.fab-toggle-active {
+  background: #111827;
+  color: #fff;
+}
+
 .fab-quinary.fab-toggle-active {
   background: #111827;
   color: #fff;
