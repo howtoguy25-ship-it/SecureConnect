@@ -14,5 +14,15 @@
   ],
   "storage": {
     "rules": "firebase/storage.rules"
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/s/**",
+        "function": "servePublishedSite"
+      }
+    ]
   }
 }

@@ -10,5 +10,6 @@ export type RootStackParamList = {
   AIBuildProgress: { sessionId: string; pageType: PageType; prompt: string; complexity: BuildComplexity };
   Subscription: undefined;
   Editor: { projectId: string };
+  Publish: { projectId: string };
   Account: undefined;
 };

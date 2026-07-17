@@ -114,7 +114,9 @@ function EditorInner({ navigation }: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {project.name}
         </Text>
-        <View style={{ width: 26 }} />
+        <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
+          <Ionicons name="cloud-upload-outline" size={24} color="#0F172A" />
+        </Pressable>
       </View>
 
       <View style={styles.canvasArea}>

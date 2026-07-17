@@ -93,6 +93,19 @@ export interface Project {
   announcements: AnnouncementSettings;
   createdAt: number;
   updatedAt: number;
+  publishSlug?: string | null;
+  publishedAt?: number | null;
+  customDomain?: string | null;
+  domainStatus?: 'pending' | 'active' | 'failed' | null;
+}
+
+// A published project's rendered output, looked up by slug (or by custom domain hostname
+// via domainMappings) when serving public traffic -- see servePublishedSite in index.ts.
+export interface PublishedSite {
+  uid: string;
+  projectId: string;
+  html: string;
+  updatedAt: number;
 }
 
 export type GenerationStatus =

@@ -117,6 +117,10 @@ export interface Project {
   announcements: AnnouncementSettings;
   createdAt: number;
   updatedAt: number;
+  publishSlug?: string | null;
+  publishedAt?: number | null;
+  customDomain?: string | null;
+  domainStatus?: 'pending' | 'active' | 'failed' | null;
 }
 
 // -- AI Site Builder (Phase 3) --

@@ -17,6 +17,7 @@ import AIPromptScreen from '@/screens/AIPromptScreen';
 import AIBuildProgressScreen from '@/screens/AIBuildProgressScreen';
 import SubscriptionScreen from '@/screens/SubscriptionScreen';
 import EditorScreen from '@/screens/EditorScreen';
+import PublishScreen from '@/screens/PublishScreen';
 import AccountScreen from '@/screens/AccountScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -32,6 +33,7 @@ function AppStack() {
       <Stack.Screen name="AIBuildProgress" component={AIBuildProgressScreen} options={{ gestureEnabled: false }} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Editor" component={EditorScreen} />
+      <Stack.Screen name="Publish" component={PublishScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Account" component={AccountScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );

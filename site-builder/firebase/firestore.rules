@@ -38,5 +38,16 @@ service cloud.firestore {
     match /users/{uid}/assistantMessages/{messageId} {
       allow read, write: if isOwner(uid);
     }
+
+    // Published-site content and custom-domain routing -- written only by Cloud Functions
+    // (publishProject/connectDomain) and read only by servePublishedSite, which uses the
+    // Admin SDK and so bypasses these rules entirely. No client, including the owning
+    // user, ever reads/writes these directly.
+    match /publishedSites/{slug} {
+      allow read, write: if false;
+    }
+    match /domainMappings/{hostname} {
+      allow read, write: if false;
+    }
   }
 }

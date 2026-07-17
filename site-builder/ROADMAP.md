@@ -178,14 +178,38 @@ isn't part of this phase.
   (likely `expo-av`/`react-native-video` + a custom timeline UI) and was intentionally
   left out of Phase 1 rather than faked.
 
-## Phase 7 — Domains
+## Phase 7 — Publishing & Domains — publish + connect-your-own-domain done
 
-- Real domain search/purchase and **ownership transfer** requires a registrar with a
-  transactional API (e.g., Namecheap, Cloudflare Registrar, GoDaddy) and real payment
-  processing on your business entity — I can wire the integration once you have that
-  account and key, but cannot create the account or hold funds on your behalf. Domain
-  transfer specifically also requires EPP/auth codes from the losing registrar and
-  ICANN-mandated wait periods that are outside any app's control.
+**Publishing (done).** `PublishScreen` (open via the cloud-upload icon in the editor
+header) turns a project into a real, publicly reachable static page:
+
+- The client uploads any locally-picked photos (device `file://` URIs) to Storage first
+  (`uploadProjectImage`), since Cloud Functions can't reach a file that only exists on
+  the user's phone.
+- `publishProject` renders the project's canvas elements into real static HTML/CSS
+  (`firebase/functions/src/siteHtml.ts`) and stores it in `publishedSites/{slug}`.
+- `servePublishedSite` (a Hosting rewrite, `firebase.json`'s `hosting.rewrites`) serves
+  it publicly at `https://<project>.web.app/s/{slug}` — no auth required to view it.
+- `unpublishProject` takes it back down.
+
+**Connect your own domain (done, needs one manual IAM step).** Also in `PublishScreen`:
+`connectDomain`/`getDomainStatus`/`disconnectDomain` call the real Firebase Hosting
+Domains REST API (`firebase/functions/src/hostingApi.ts`) so a user can point a domain
+they already own at their published site — just DNS records at whatever registrar they
+already use, no new accounts. **One-time setup needed from you:** grant the Cloud
+Functions service account the **Firebase Hosting Admin** IAM role (Google Cloud Console
+→ IAM → find `<project-id>@appspot.gserviceaccount.com` → Edit → Add Role → "Firebase
+Hosting Admin"), or `connectDomain` will fail with a permission error. This API surface
+hasn't been exercised against your live project yet — treat the first real attempt as
+something we debug together from a screenshot, like the rest of this build.
+
+**Buying a brand-new domain from inside the app, and ownership transfer, are still not
+built.** Both require becoming a reseller with a registrar (e.g. Namecheap, Cloudflare
+Registrar, GoDaddy) with a real transactional API and your own payment processing (this
+is a real-world good, not IAP digital content) — I can wire the integration once you
+have that account and key, but can't create the account or hold funds on your behalf.
+Transfer specifically also needs EPP/auth codes from the losing registrar and
+ICANN-mandated wait periods outside any app's control.
 
 ## Phase 8 — Policies & Support
 

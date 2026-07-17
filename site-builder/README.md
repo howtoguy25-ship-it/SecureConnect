@@ -1,13 +1,14 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 5)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 5 + 7)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
-real Firebase accounts, with a persistent AI chat assistant that can drive the app for you.
+real Firebase accounts, with a persistent AI chat assistant that can drive the app for
+you, and real one-tap publishing to a live public URL.
 
 This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder) +
-Phase 5 (AI chat assistant)** of a larger product (subscriptions/IAP, video editor,
-domains — see `ROADMAP.md` for what's built vs. what's next and what real accounts each
-later phase needs).
+Phase 5 (AI chat assistant) + Phase 7 (publishing & connect-your-domain)** of a larger
+product (subscriptions/IAP, video editor, buying new domains — see `ROADMAP.md` for
+what's built vs. what's next and what real accounts each later phase needs).
 
 ## Stack
 
@@ -63,6 +64,7 @@ src/
     AIBuildProgressScreen.tsx       Live status/credits/pause (max 2) while the AI builds
     SubscriptionScreen.tsx          Real plans/credit-pack pricing (demo purchase for now)
     EditorScreen.tsx                Main canvas editor
+    PublishScreen.tsx               Publish/unpublish + connect-your-own-domain
   navigation/
     RootNavigator.tsx               Switches Auth stack vs. App stack on auth state
     AuthNavigator.tsx
@@ -72,8 +74,11 @@ firebase/
   storage.rules                    Locked down entirely (Admin SDK + signed URLs only)
   functions/                       Cloud Functions: startGeneration, requestPause,
                                     resumeGeneration, askBuildQuestion, ensureAccount,
-                                    onUserCreated, assistantChat (OpenAI-backed, see its
-                                    own README below)
+                                    onUserCreated, assistantChat (OpenAI-backed),
+                                    publishProject/unpublishProject/servePublishedSite,
+                                    connectDomain/getDomainStatus/disconnectDomain
+public/                           Firebase Hosting's static root (placeholder landing
+                                    page) -- /s/** is rewritten to servePublishedSite
 ```
 
 ## Setup
@@ -100,6 +105,9 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   your projects, open the build picker for a page type, or open the AI prompt screen
   pre-filled with a site description it wrote from your message. Conversation history
   is saved per-account so it's still there next time you open the app.
+- Real one-tap publishing: tap the cloud icon in the editor header to make a project a
+  real, publicly reachable website, or connect a domain you already own to it — see
+  `PublishScreen` and Phase 7 in ROADMAP.md.
 - Projects and unlocked themes are stored in Firestore per-account, so signing in
   restores your builds.
 - Create a project for Web Page, Video Page, Social (9:16) Page, or Logo Page.

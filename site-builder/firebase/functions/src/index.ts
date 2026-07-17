@@ -1,15 +1,18 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import * as functionsV1 from 'firebase-functions/v1';
 
-import { GenerationSession, Project, UserAccount } from './types';
+import { GenerationSession, Project, PublishedSite, UserAccount } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
+import { renderProjectHtml } from './siteHtml';
+import { slugify, uniqueSlug } from './publish';
+import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
 
 initializeApp();
 const db = getFirestore();
@@ -21,6 +24,8 @@ const PAUSE_POLL_INTERVAL_MS = 3000;
 const PAUSE_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_ASSISTANT_MESSAGE_WORDS = 500;
 const MAX_ASSISTANT_HISTORY = 20;
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const HOSTING_DOMAIN = `${process.env.GCLOUD_PROJECT}.web.app`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -330,4 +335,173 @@ export const assistantChat = onCall({ secrets: [openaiApiKey] }, async (request)
     plan: account?.plan ?? 'free',
     projectCount: projectsCount.data().count,
   });
+});
+
+// Moves a locally-picked photo (only readable by the device, via a file:// URI) into
+// Storage so it has a real https:// URL a published static page can actually load. The
+// client reads the file itself (Admin SDK can't reach a device's local filesystem) and
+// sends the bytes up as base64 -- mirrors the same signed-URL pattern already used for
+// AI-generated images in startGeneration above.
+export const uploadProjectImage = onCall({ memory: '256MiB' }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { base64, contentType } = request.data as { base64: string; contentType: string };
+  if (!base64) throw new HttpsError('invalid-argument', 'Missing image data.');
+
+  const buffer = Buffer.from(base64, 'base64');
+  if (buffer.byteLength > MAX_UPLOAD_BYTES) {
+    throw new HttpsError('invalid-argument', 'Image is too large (max 8MB).');
+  }
+
+  const ext = (contentType || 'image/jpeg').includes('png') ? 'png' : 'jpg';
+  const path = `users/${uid}/uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const bucket = getStorage().bucket();
+  const file = bucket.file(path);
+  await file.save(buffer, { contentType: contentType || 'image/jpeg' });
+  const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+
+  return { url };
+});
+
+// Publishes a project as a real, publicly-reachable static page -- servePublishedSite
+// below answers for it at https://{HOSTING_DOMAIN}/s/{slug} (and at any custom domain
+// connected via connectDomain).
+export const publishProject = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { projectId } = request.data as { projectId: string };
+  if (!projectId) throw new HttpsError('invalid-argument', 'Missing projectId.');
+
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const snap = await projectRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Project not found.');
+  const project = snap.data() as Project;
+
+  const hasLocalImage = project.elements.some(
+    (el) =>
+      (el.type === 'image' && !!el.uri && !el.uri.startsWith('http')) ||
+      (el.type === 'slideshow' && el.images.some((u) => !u.startsWith('http')))
+  );
+  if (hasLocalImage) {
+    throw new HttpsError('failed-precondition', 'Some images are still uploading — try publishing again in a moment.');
+  }
+
+  const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
+  const html = renderProjectHtml(project);
+
+  const site: PublishedSite = { uid, projectId, html, updatedAt: Date.now() };
+  await db.collection('publishedSites').doc(slug).set(site);
+  await projectRef.update({ publishSlug: slug, publishedAt: Date.now(), updatedAt: Date.now() });
+
+  const url = project.customDomain && project.domainStatus === 'active'
+    ? `https://${project.customDomain}`
+    : `https://${HOSTING_DOMAIN}/s/${slug}`;
+  return { slug, url };
+});
+
+export const unpublishProject = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { projectId } = request.data as { projectId: string };
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const snap = await projectRef.get();
+  const project = snap.data() as Project | undefined;
+  if (!project?.publishSlug) return { ok: true };
+
+  await db.collection('publishedSites').doc(project.publishSlug).delete();
+  await projectRef.update({ publishSlug: null, publishedAt: null, updatedAt: Date.now() });
+  return { ok: true };
+});
+
+// Public, unauthenticated -- serves whatever was last published, either at
+// /s/{slug} on the default Hosting domain, or at a connected custom domain (looked up by
+// request hostname via domainMappings). See firebase.json's hosting.rewrites for how
+// requests reach this function.
+export const servePublishedSite = onRequest(async (req, res) => {
+  const hostname = req.hostname;
+  let slug: string | null = null;
+
+  if (hostname && hostname !== HOSTING_DOMAIN && !hostname.endsWith('.web.app') && !hostname.endsWith('.firebaseapp.com')) {
+    const mapping = await db.collection('domainMappings').doc(hostname).get();
+    slug = (mapping.data()?.slug as string | undefined) ?? null;
+  } else {
+    slug = req.path.replace(/^\/s\//, '').replace(/\/$/, '') || null;
+  }
+
+  if (!slug) {
+    res.status(404).send('Site not found.');
+    return;
+  }
+
+  const doc = await db.collection('publishedSites').doc(slug).get();
+  if (!doc.exists) {
+    res.status(404).send('Site not found.');
+    return;
+  }
+
+  const site = doc.data() as PublishedSite;
+  res.set('Cache-Control', 'public, max-age=60');
+  res.status(200).send(site.html);
+});
+
+// Attaches a domain the user already owns to their published project via the real
+// Firebase Hosting Domains API (see hostingApi.ts) -- requires the project to already be
+// published, and requires the Cloud Functions service account to have the "Firebase
+// Hosting Admin" IAM role (see ROADMAP.md).
+export const connectDomain = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { projectId, domain } = request.data as { projectId: string; domain: string };
+  if (!domain?.trim()) throw new HttpsError('invalid-argument', 'Missing domain.');
+
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const snap = await projectRef.get();
+  const project = snap.data() as Project | undefined;
+  if (!project) throw new HttpsError('not-found', 'Project not found.');
+  if (!project.publishSlug) {
+    throw new HttpsError('failed-precondition', 'Publish your site before connecting a domain.');
+  }
+
+  const cleanDomain = domain.trim().toLowerCase();
+  const result = await createHostingDomain(cleanDomain);
+
+  await db.collection('domainMappings').doc(cleanDomain).set({ uid, projectId, slug: project.publishSlug });
+  await projectRef.update({ customDomain: cleanDomain, domainStatus: 'pending', updatedAt: Date.now() });
+
+  return result;
+});
+
+export const getDomainStatus = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { projectId } = request.data as { projectId: string };
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const project = (await projectRef.get()).data() as Project | undefined;
+  if (!project?.customDomain) throw new HttpsError('failed-precondition', 'No domain connected for this project.');
+
+  const result = await getHostingDomain(project.customDomain);
+  if (!result) throw new HttpsError('not-found', 'Domain not found on Hosting.');
+
+  const domainStatus: Project['domainStatus'] = result.status === 'DOMAIN_ACTIVE' ? 'active'
+    : result.status?.includes('FAILED') ? 'failed'
+    : 'pending';
+  await projectRef.update({ domainStatus, updatedAt: Date.now() });
+
+  return { ...result, domainStatus };
+});
+
+export const disconnectDomain = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { projectId } = request.data as { projectId: string };
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const project = (await projectRef.get()).data() as Project | undefined;
+  if (!project?.customDomain) return { ok: true };
+
+  await deleteHostingDomain(project.customDomain);
+  await db.collection('domainMappings').doc(project.customDomain).delete();
+  await projectRef.update({ customDomain: null, domainStatus: null, updatedAt: Date.now() });
+  return { ok: true };
 });
