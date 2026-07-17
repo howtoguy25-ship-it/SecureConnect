@@ -34,5 +34,12 @@ module.exports = ({ config }) => ({
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',
     supportEmail: process.env.SUPPORT_EMAIL || 'adisssal7@hotmail.com',
+    eas: {
+      // Not a secret -- EAS project IDs are meant to live directly in config, which is
+      // also the only way `eas build`/`eas submit` can reliably find it, since this file
+      // being a dynamic app.config.js (not static app.json) means the EAS CLI can't write
+      // to it automatically the way `eas init` normally would.
+      projectId: 'bebfca66-0b8b-43c9-98da-bdde6cd12cc8',
+    },
   },
 });
