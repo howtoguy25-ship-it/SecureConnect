@@ -67,6 +67,8 @@ src/
     PublishScreen.tsx               Publish/unpublish + connect-your-own-domain
     BuyDomainScreen.tsx             Real domain search, registrant form, Stripe checkout
     TransferDomainScreen.tsx        Inbound domain transfer (EPP code + registrant form)
+    PolicyScreen.tsx                Privacy Policy / Return & Refund Policy
+    SupportScreen.tsx               Contact info + FAQ
   navigation/
     RootNavigator.tsx               Switches Auth stack vs. App stack on auth state
     AuthNavigator.tsx

@@ -311,13 +311,27 @@ site:
    Namecheap (Domain List → Manage → Advanced DNS)
 3. Wait for Firebase to verify + issue the SSL cert (can take a few hours)
 
-## Phase 8 — Policies & Support
+## Phase 8 — Policies & Support — done
 
-- Privacy Policy, Support, and Return/Refund Policy screens, populated with the contact
-  details you gave (`+61 408 680 813`, `support@buildsitespark.com` — already wired into
-  `app.config.js` under `extra.supportPhone` / `extra.supportEmail` for reuse). Return
-  policy content should be reviewed against Apple's own subscription-refund rules (Apple
-  handles IAP refunds, not the app) before publishing.
+`AccountScreen` now links to three real screens instead of just a raw mailto/tel row:
+
+- **Privacy Policy** (`PolicyScreen`, `policyType: 'privacy'`) — real content
+  (`src/data/policies.ts`) describing what's actually collected and who it's actually
+  shared with given what's built: Firebase (hosting/auth/data), OpenAI (AI Site Builder +
+  assistant prompts), Stripe (domain payments), Namecheap (real registrant contact for
+  domain purchases/transfers, WHOIS privacy noted), and Apple IAP (once live).
+- **Return & Refund Policy** (`policyType: 'returns'`) — correctly splits Apple-handled
+  refunds (subscriptions, credit packs, theme unlocks — all IAP) from Stripe-handled
+  domain purchases/transfers (generally non-refundable once registered, standard
+  industry/ICANN practice, with the app's own fail-safe: payment is only captured and the
+  domain only registered once both succeed).
+- **Support** (`SupportScreen`) — contact info plus a real FAQ reflecting actual features
+  (credits, editing an AI-generated site afterward, unpublishing, custom domains, card
+  data never touching SiteSpark's own servers).
+
+**This is accurate-to-the-code, not legally reviewed.** Have an actual lawyer check this
+before App Store submission — especially anything GDPR/CCPA-shaped depending on where
+your users are, which this content doesn't attempt to cover.
 
 ## Notes on the "animal-tier" AI speed/strength framing
 

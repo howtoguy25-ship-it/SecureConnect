@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, Linking } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
-import { env } from '@/config/env';
 import { userAccountStore } from '@/storage/userAccountStore';
 import { UserAccount } from '@/types';
 import { getPlan } from '@/data/pricing';
@@ -59,15 +58,20 @@ export default function AccountScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.section}>
-        <Pressable style={styles.row} onPress={() => Linking.openURL(`mailto:${env.supportEmail}`)}>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('Support')}>
           <Ionicons name="help-circle-outline" size={20} color="#334155" />
           <Text style={styles.rowText}>Support</Text>
-          <Text style={styles.rowValue}>{env.supportEmail}</Text>
+          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
         </Pressable>
-        <Pressable style={styles.row} onPress={() => Linking.openURL(`tel:${env.supportPhone.replace(/\s/g, '')}`)}>
-          <Ionicons name="call-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Contact</Text>
-          <Text style={styles.rowValue}>{env.supportPhone}</Text>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('Policy', { policyType: 'privacy' })}>
+          <Ionicons name="shield-checkmark-outline" size={20} color="#334155" />
+          <Text style={styles.rowText}>Privacy Policy</Text>
+          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        </Pressable>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('Policy', { policyType: 'returns' })}>
+          <Ionicons name="receipt-outline" size={20} color="#334155" />
+          <Text style={styles.rowText}>Return & Refund Policy</Text>
+          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
         </Pressable>
       </View>
 

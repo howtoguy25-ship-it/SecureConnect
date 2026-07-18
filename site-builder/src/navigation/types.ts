@@ -13,5 +13,7 @@ export type RootStackParamList = {
   Publish: { projectId: string };
   BuyDomain: { projectId: string };
   TransferDomain: undefined;
+  Policy: { policyType: 'privacy' | 'returns' };
+  Support: undefined;
   Account: undefined;
 };

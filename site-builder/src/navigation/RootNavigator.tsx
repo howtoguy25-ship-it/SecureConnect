@@ -20,6 +20,8 @@ import EditorScreen from '@/screens/EditorScreen';
 import PublishScreen from '@/screens/PublishScreen';
 import BuyDomainScreen from '@/screens/BuyDomainScreen';
 import TransferDomainScreen from '@/screens/TransferDomainScreen';
+import PolicyScreen from '@/screens/PolicyScreen';
+import SupportScreen from '@/screens/SupportScreen';
 import AccountScreen from '@/screens/AccountScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -38,6 +40,8 @@ function AppStack() {
       <Stack.Screen name="Publish" component={PublishScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="BuyDomain" component={BuyDomainScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="TransferDomain" component={TransferDomainScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Policy" component={PolicyScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Support" component={SupportScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Account" component={AccountScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );

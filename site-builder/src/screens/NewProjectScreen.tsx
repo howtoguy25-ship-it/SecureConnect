@@ -83,5 +83,4 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
   cardSubtitle: { fontSize: 13, color: '#64748B', marginTop: 2 },
-  badge: { fontSize: 11, color: '#B45309', marginTop: 6, fontWeight: '600' },
 });
