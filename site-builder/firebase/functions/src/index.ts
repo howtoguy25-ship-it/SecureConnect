@@ -11,7 +11,7 @@ import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
-import { renderProjectHtml } from './siteHtml';
+import { renderProjectHtml, renderLandingPageHtml } from './siteHtml';
 import { slugify, uniqueSlug } from './publish';
 import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
 import {
@@ -56,6 +56,10 @@ const MAX_ASSISTANT_MESSAGE_WORDS = 500;
 const MAX_ASSISTANT_HISTORY = 20;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const HOSTING_DOMAIN = `${process.env.GCLOUD_PROJECT}.web.app`;
+// The product's own real domain -- every published project gets a free subdomain of
+// this by default (https://{slug}.buildsitespark.com), via a wildcard custom domain
+// attached to this Hosting site (see ROADMAP.md Phase 7 setup).
+const PRODUCT_DOMAIN = 'buildsitespark.com';
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -421,8 +425,8 @@ export const createUploadUrl = onCall(async (request) => {
 });
 
 // Publishes a project as a real, publicly-reachable static page -- servePublishedSite
-// below answers for it at https://{HOSTING_DOMAIN}/s/{slug} (and at any custom domain
-// connected via connectDomain).
+// below answers for it at https://{slug}.buildsitespark.com by default (and at any
+// custom domain connected via connectDomain).
 export const publishProject = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -454,7 +458,7 @@ export const publishProject = onCall(async (request) => {
 
   const url = project.customDomain && project.domainStatus === 'active'
     ? `https://${project.customDomain}`
-    : `https://${HOSTING_DOMAIN}/s/${slug}`;
+    : `https://${slug}.${PRODUCT_DOMAIN}`;
   return { slug, url };
 });
 
@@ -472,23 +476,35 @@ export const unpublishProject = onCall(async (request) => {
   return { ok: true };
 });
 
-// Public, unauthenticated -- serves whatever was last published, either at
-// /s/{slug} on the default Hosting domain, or at a connected custom domain (looked up by
-// request hostname via domainMappings). See firebase.json's hosting.rewrites for how
-// requests reach this function.
+// Public, unauthenticated -- every request to this Hosting site (any of its attached
+// domains) routes here, since Firebase Hosting can't vary rewrites by Host header (see
+// firebase.json's catch-all rewrite). This function decides what to serve based on the
+// request's actual hostname:
+//   - {slug}.buildsitespark.com  -> that project's published page (the free default URL)
+//   - bare buildsitespark.com / www. / the raw *.web.app or *.firebaseapp.com domain
+//     with no /s/ path -> the product's own landing page
+//   - *.web.app or *.firebaseapp.com with a /s/{slug} path -> legacy URLs from before
+//     buildsitespark.com existed, kept working rather than broken
+//   - anything else -> a user's own connected custom domain, looked up via domainMappings
 export const servePublishedSite = onRequest(async (req, res) => {
-  const hostname = req.hostname;
+  const hostname = (req.hostname || '').toLowerCase();
+  const isDefaultHostingDomain = hostname === HOSTING_DOMAIN || hostname.endsWith('.web.app') || hostname.endsWith('.firebaseapp.com');
+  const isBareProductDomain = hostname === PRODUCT_DOMAIN || hostname === `www.${PRODUCT_DOMAIN}`;
+
   let slug: string | null = null;
 
-  if (hostname && hostname !== HOSTING_DOMAIN && !hostname.endsWith('.web.app') && !hostname.endsWith('.firebaseapp.com')) {
+  if (hostname.endsWith(`.${PRODUCT_DOMAIN}`) && !isBareProductDomain) {
+    slug = hostname.slice(0, hostname.length - PRODUCT_DOMAIN.length - 1);
+  } else if (isDefaultHostingDomain && req.path.startsWith('/s/')) {
+    slug = req.path.replace(/^\/s\//, '').replace(/\/$/, '') || null;
+  } else if (!isDefaultHostingDomain && !isBareProductDomain) {
     const mapping = await db.collection('domainMappings').doc(hostname).get();
     slug = (mapping.data()?.slug as string | undefined) ?? null;
-  } else {
-    slug = req.path.replace(/^\/s\//, '').replace(/\/$/, '') || null;
   }
 
   if (!slug) {
-    res.status(404).send('Site not found.');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.status(200).send(renderLandingPageHtml());
     return;
   }
 

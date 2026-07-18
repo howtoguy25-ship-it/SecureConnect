@@ -219,3 +219,47 @@ export function renderProjectHtml(project: Project): string {
 </body>
 </html>`;
 }
+
+// Served for the bare product domain (buildsitespark.com / www.) and any request that
+// doesn't resolve to a specific published project or connected custom domain -- see
+// servePublishedSite's hostname handling in index.ts. Lives here (not a static file in
+// public/) because Firebase Hosting can't vary static content by Host header -- every
+// custom domain attached to this Hosting site shares the same rewrites/config, so the
+// landing page has to be rendered dynamically alongside everything else.
+export function renderLandingPageHtml(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SiteSpark</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0B1220;
+      color: #F8FAFC;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      padding: 24px;
+    }
+    h1 { font-size: 30px; margin-bottom: 8px; }
+    p { color: #94A3B8; font-size: 15px; line-height: 1.5; max-width: 420px; margin: 0 auto; }
+    a { color: #818CF8; }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>SiteSpark</h1>
+    <p>Build a website, social page, or logo by hand or with a real AI builder — then
+    publish it at its own real link, like <code>yourproject.buildsitespark.com</code>,
+    or connect a domain of your own.</p>
+    <p style="margin-top:16px;"><a href="mailto:support@buildsitespark.com">support@buildsitespark.com</a></p>
+  </div>
+</body>
+</html>`;
+}

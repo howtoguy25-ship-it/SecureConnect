@@ -85,8 +85,10 @@ firebase/
                                     stripeWebhook (real Namecheap + Stripe),
                                     startDomainTransfer/getDomainTransferStatus,
                                     verifyApplePurchase (real Apple IAP)
-public/                           Firebase Hosting's static root (placeholder landing
-                                    page) -- /s/** is rewritten to servePublishedSite
+public/                           Empty on purpose -- Firebase Hosting requires this dir
+                                    to exist, but every request (any attached domain,
+                                    any path) is rewritten to servePublishedSite, which
+                                    renders content dynamically based on hostname
 ```
 
 ## Setup
@@ -114,9 +116,10 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   pre-filled with a site description it wrote from your message. Conversation history
   is saved per-account so it's still there next time you open the app.
 - Real one-tap publishing: tap the cloud icon in the editor header to make a project a
-  real, publicly reachable website, connect a domain you already own to it, or buy a
-  brand-new domain (real Namecheap registration, real Stripe payment) from inside the
-  app — see `PublishScreen`, `BuyDomainScreen`, and Phase 7 in ROADMAP.md.
+  real, publicly reachable website at its own free `yourproject.buildsitespark.com`
+  link, connect a domain you already own to it, or buy a brand-new domain (real
+  Namecheap registration, real Stripe payment) from inside the app — see
+  `PublishScreen`, `BuyDomainScreen`, and Phase 7 in ROADMAP.md.
 - Projects and unlocked themes are stored in Firestore per-account, so signing in
   restores your builds.
 - Create a project for Web Page, Video Page, Social (9:16) Page, or Logo Page.

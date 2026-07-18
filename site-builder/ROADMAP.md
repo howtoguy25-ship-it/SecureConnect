@@ -230,9 +230,25 @@ header) turns a project into a real, publicly reachable static page:
   the user's phone.
 - `publishProject` renders the project's canvas elements into real static HTML/CSS
   (`firebase/functions/src/siteHtml.ts`) and stores it in `publishedSites/{slug}`.
-- `servePublishedSite` (a Hosting rewrite, `firebase.json`'s `hosting.rewrites`) serves
-  it publicly at `https://<project>.web.app/s/{slug}` — no auth required to view it.
+- **Free branded subdomain.** Every published project's default URL is a real subdomain
+  of the product's own domain — `https://{slug}.buildsitespark.com` — not a generic
+  Firebase URL. Because Firebase Hosting can't vary its rewrites/content by Host header
+  (every custom domain attached to a Hosting site shares the same config), a single
+  catch-all rewrite (`firebase.json`'s `hosting.rewrites`, `"source": "**"`) routes
+  *every* request on *every* attached domain to `servePublishedSite`, which resolves
+  what to serve purely from the request's hostname: a `{slug}.buildsitespark.com`
+  subdomain maps directly to that project; the bare domain (or any unrecognized host)
+  falls back to the product's own landing page (`renderLandingPageHtml` in
+  `siteHtml.ts` — there's no static `public/index.html` anymore, since a static file
+  would otherwise take priority over the rewrite and break per-subdomain routing);
+  old `*.web.app/s/{slug}` links from before this domain existed still work too.
 - `unpublishProject` takes it back down.
+
+**One-time setup needed for the free-subdomain scheme:** add `*.buildsitespark.com`
+(the literal wildcard) as a second custom domain on the same Firebase Hosting site that
+already serves `buildsitespark.com` — Firebase Console → Hosting → Add custom domain →
+`*.buildsitespark.com`. It'll ask for a wildcard DNS record (A or CNAME, per what
+Firebase's UI shows) at GoDaddy, same as the root domain's setup.
 
 **Connect your own domain (done, needs one manual IAM step).** Also in `PublishScreen`:
 `connectDomain`/`getDomainStatus`/`disconnectDomain` call the real Firebase Hosting
@@ -324,16 +340,18 @@ account:
   rather than ship code that might silently not work, this is left as: use Namecheap's
   own dashboard directly (Domain List → Manage → unlock + "Get EPP Code") for now.
 
-**The product's own domain:** `buildsitespark.com` (owned on Namecheap) is SiteSpark's
-official company site — the placeholder page at `public/index.html` — **not** an
-end-user project, so it's connected differently from the in-app "Connect a domain"
-feature (which maps one user's domain to one published project via `domainMappings`).
-Instead it's added as a native Firebase Hosting custom domain for the whole default
-site:
+**The product's own domain:** `buildsitespark.com` (registered via GoDaddy) is
+SiteSpark's official company site — the dynamically-rendered landing page
+(`renderLandingPageHtml` in `siteHtml.ts`, see Phase 7 above) — **not** an end-user
+project, so it's connected differently from the in-app "Connect a domain" feature
+(which maps one user's domain to one published project via `domainMappings`). Instead
+it's added as a native Firebase Hosting custom domain for the whole default site:
 1. Firebase Console → Hosting → **Add custom domain** → enter `buildsitespark.com`
 2. Add the TXT ownership-verification record it shows you, and the A records, at
-   Namecheap (Domain List → Manage → Advanced DNS)
+   GoDaddy (My Products → DNS → Manage DNS)
 3. Wait for Firebase to verify + issue the SSL cert (can take a few hours)
+4. Repeat for `*.buildsitespark.com` (the wildcard needed for every project's free
+   subdomain — see Phase 7 above) on the same Hosting site
 
 ## Phase 8 — Policies & Support — done
 

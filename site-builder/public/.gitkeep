@@ -1,0 +1,5 @@
+This directory is intentionally left with no reachable static files -- every request
+is rewritten to the servePublishedSite Cloud Function (see firebase.json), which
+decides what to serve based on the request's hostname (see index.ts / siteHtml.ts's
+renderLandingPageHtml). Firebase Hosting still requires this "public" directory to
+exist even though nothing in it is ever actually served as a static file.
