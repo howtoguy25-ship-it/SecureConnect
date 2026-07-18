@@ -33,7 +33,7 @@ module.exports = ({ config }) => ({
   ],
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',
-    supportEmail: process.env.SUPPORT_EMAIL || 'adisssal7@hotmail.com',
+    supportEmail: process.env.SUPPORT_EMAIL || 'support@buildsitespark.com',
     eas: {
       // Not a secret -- EAS project IDs are meant to live directly in config, which is
       // also the only way `eas build`/`eas submit` can reliably find it, since this file

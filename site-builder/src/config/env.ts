@@ -19,7 +19,7 @@ function optional(name: string, value: string | undefined): string {
 // right mechanism, not a secret-handling concern.
 export const env = {
   supportPhone: extra.supportPhone || '+61 408 680 813',
-  supportEmail: extra.supportEmail || 'adisssal7@hotmail.com',
+  supportEmail: extra.supportEmail || 'support@buildsitespark.com',
   firebase: {
     apiKey: optional('EXPO_PUBLIC_FIREBASE_API_KEY', process.env.EXPO_PUBLIC_FIREBASE_API_KEY),
     authDomain: optional('EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN', process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN),

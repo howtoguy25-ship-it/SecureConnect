@@ -254,10 +254,21 @@ published site (Namecheap's own DNS records aren't wired to Firebase Hosting
 automatically yet). **Ownership transfer** (EPP/auth codes, ICANN wait periods) also
 isn't built — it's a distinct, finicky flow even with a real registrar API in place.
 
+**The product's own domain:** `buildsitespark.com` (owned on Namecheap) is SiteSpark's
+official company site — the placeholder page at `public/index.html` — **not** an
+end-user project, so it's connected differently from the in-app "Connect a domain"
+feature (which maps one user's domain to one published project via `domainMappings`).
+Instead it's added as a native Firebase Hosting custom domain for the whole default
+site:
+1. Firebase Console → Hosting → **Add custom domain** → enter `buildsitespark.com`
+2. Add the TXT ownership-verification record it shows you, and the A records, at
+   Namecheap (Domain List → Manage → Advanced DNS)
+3. Wait for Firebase to verify + issue the SSL cert (can take a few hours)
+
 ## Phase 8 — Policies & Support
 
 - Privacy Policy, Support, and Return/Refund Policy screens, populated with the contact
-  details you gave (`+61 408 680 813`, `adisssal7@hotmail.com` — already wired into
+  details you gave (`+61 408 680 813`, `support@buildsitespark.com` — already wired into
   `app.config.js` under `extra.supportPhone` / `extra.supportEmail` for reuse). Return
   policy content should be reviewed against Apple's own subscription-refund rules (Apple
   handles IAP refunds, not the app) before publishing.
