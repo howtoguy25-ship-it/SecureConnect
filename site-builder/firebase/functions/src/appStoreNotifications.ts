@@ -2,6 +2,15 @@ import { SignedDataVerifier, Environment, NotificationTypeV2, Subtype } from '@a
 import { APPLE_ROOT_CERTIFICATES } from './appleRootCert';
 import { APPLE_BUNDLE_ID } from './iapProducts';
 
+// The app's numeric App Store ID (NOT the bundle ID) -- App Store Connect -> your app ->
+// App Information -> General Information -> "Apple ID" (also the number in the app's public
+// apps.apple.com/.../id<this> URL once listed). Not a secret, just not known until the app
+// exists in App Store Connect -- fill it in once it does. Apple's library requires it to
+// construct a Production-environment verifier (it throws otherwise), so until it's set here,
+// production notification verification fails at call time -- see getProductionVerifier below --
+// rather than crashing the whole functions deploy the way a module-level throw would.
+const APPLE_APP_STORE_ID: number | undefined = undefined;
+
 // Real verification of Apple's App Store Server Notifications V2 -- the inbound webhook
 // Apple calls on subscription lifecycle events (renewal, renewal failure, cancellation).
 // Unlike appStoreApi.ts's outbound calls (where trusting the HTTPS channel to Apple is
@@ -10,8 +19,31 @@ import { APPLE_BUNDLE_ID } from './iapProducts';
 // anyone could forge a "payment failed"/"payment succeeded" event to take down or revive any
 // user's live site. `enableOnlineChecks: true` also has the verifier check each certificate's
 // OCSP revocation status with Apple, not just its expiry.
-const productionVerifier = new SignedDataVerifier(APPLE_ROOT_CERTIFICATES, true, Environment.PRODUCTION, APPLE_BUNDLE_ID);
-const sandboxVerifier = new SignedDataVerifier(APPLE_ROOT_CERTIFICATES, true, Environment.SANDBOX, APPLE_BUNDLE_ID);
+//
+// Built lazily (constructed on first use, not at module load) so a missing/wrong
+// APPLE_APP_STORE_ID only breaks actual production-notification verification at call time --
+// it must NOT throw during `firebase deploy`, which loads this whole file just to read its
+// exports and would otherwise take down every other function's deploy along with it.
+let _productionVerifier: SignedDataVerifier | null = null;
+function getProductionVerifier(): SignedDataVerifier {
+  if (!_productionVerifier) {
+    if (!APPLE_APP_STORE_ID) {
+      throw new Error(
+        'APPLE_APP_STORE_ID is not set in appStoreNotifications.ts -- fill it in from App Store Connect (App Information -> Apple ID) before production notifications can be verified.'
+      );
+    }
+    _productionVerifier = new SignedDataVerifier(APPLE_ROOT_CERTIFICATES, true, Environment.PRODUCTION, APPLE_BUNDLE_ID, APPLE_APP_STORE_ID);
+  }
+  return _productionVerifier;
+}
+
+let _sandboxVerifier: SignedDataVerifier | null = null;
+function getSandboxVerifier(): SignedDataVerifier {
+  if (!_sandboxVerifier) {
+    _sandboxVerifier = new SignedDataVerifier(APPLE_ROOT_CERTIFICATES, true, Environment.SANDBOX, APPLE_BUNDLE_ID);
+  }
+  return _sandboxVerifier;
+}
 
 export type BillingEventKind = 'payment_failed' | 'payment_resolved' | 'ignored';
 
@@ -37,9 +69,9 @@ const RESOLVED_TYPES = new Set<string>([NotificationTypeV2.DID_RENEW, Notificati
 export async function verifyAndClassifyNotification(signedPayload: string): Promise<BillingEvent> {
   let decoded;
   try {
-    decoded = await productionVerifier.verifyAndDecodeNotification(signedPayload);
+    decoded = await getProductionVerifier().verifyAndDecodeNotification(signedPayload);
   } catch {
-    decoded = await sandboxVerifier.verifyAndDecodeNotification(signedPayload);
+    decoded = await getSandboxVerifier().verifyAndDecodeNotification(signedPayload);
   }
 
   const notificationType = String(decoded.notificationType ?? '');
@@ -47,7 +79,7 @@ export async function verifyAndClassifyNotification(signedPayload: string): Prom
 
   let originalTransactionId: string | null = null;
   if (decoded.data?.signedTransactionInfo) {
-    const verifier = decoded.data.environment === Environment.SANDBOX ? sandboxVerifier : productionVerifier;
+    const verifier = decoded.data.environment === Environment.SANDBOX ? getSandboxVerifier() : getProductionVerifier();
     const tx = await verifier.verifyAndDecodeTransaction(decoded.data.signedTransactionInfo);
     originalTransactionId = tx.originalTransactionId ?? null;
   }
