@@ -19,6 +19,7 @@ import SubscriptionScreen from '@/screens/SubscriptionScreen';
 import EditorScreen from '@/screens/EditorScreen';
 import PublishScreen from '@/screens/PublishScreen';
 import BuyDomainScreen from '@/screens/BuyDomainScreen';
+import TransferDomainScreen from '@/screens/TransferDomainScreen';
 import AccountScreen from '@/screens/AccountScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -36,6 +37,7 @@ function AppStack() {
       <Stack.Screen name="Editor" component={EditorScreen} />
       <Stack.Screen name="Publish" component={PublishScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="BuyDomain" component={BuyDomainScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="TransferDomain" component={TransferDomainScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Account" component={AccountScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );

@@ -269,8 +269,36 @@ deployed `stripeWebhook` function's URL, listening for `checkout.session.complet
 **Not built:** auto-configuring DNS after registration — once a domain is bought here,
 use the existing "Connect a domain you already own" flow above to point it at the
 published site (Namecheap's own DNS records aren't wired to Firebase Hosting
-automatically yet). **Ownership transfer** (EPP/auth codes, ICANN wait periods) also
-isn't built — it's a distinct, finicky flow even with a real registrar API in place.
+automatically yet).
+
+## Phase 7c — Inbound domain transfer — done (with real scoping limits)
+
+`TransferDomainScreen` (Publish → Custom domain → "Own one elsewhere? Transfer it in")
+brings a domain the user already owns at a **different** registrar into this Namecheap
+account:
+
+- `startDomainTransfer`/`getDomainTransferStatus` call Namecheap's real
+  `domains.transfer.create`/`transfer.getStatus` API (`namecheapApi.ts`). The user
+  supplies the domain, its EPP/auth code (from their current registrar — outside this
+  app), and registrant contact.
+- A `DomainTransfer` record (owner-read/server-write-only Firestore doc) tracks status
+  for the "Check status" button — transfers are approved by the *losing* registrar and
+  ICANN mandates a ~5-7 day window, so this is inherently slow and nothing any app can
+  speed up.
+- **Untested territory, flagged in code:** unlike domains.check/create/pricing (already
+  run for real this session), the transfer API's exact response shape
+  (`TransferCreateResult`/`DomainGetTransferStatusResult` fields) hasn't been exercised
+  against a live account — treat the first real attempt as something to debug together.
+- **Not charged.** Unlike buying a new domain, an inbound transfer isn't gated behind
+  Stripe payment yet — the ~1 year renewal cost Namecheap charges on transfer completion
+  is absorbed on the product's own Namecheap balance for now. Add a Stripe charge here
+  before this scales past you personally testing it.
+- **Outbound transfer** (moving a domain *out* of this Namecheap account to another
+  registrar) is **not built**. That needs unlocking the domain and retrieving its EPP
+  code — Namecheap's public API support for scripting that specific pair of actions
+  isn't something I could confidently verify without testing against a live account, so
+  rather than ship code that might silently not work, this is left as: use Namecheap's
+  own dashboard directly (Domain List → Manage → unlock + "Get EPP Code") for now.
 
 **The product's own domain:** `buildsitespark.com` (owned on Namecheap) is SiteSpark's
 official company site — the placeholder page at `public/index.html` — **not** an

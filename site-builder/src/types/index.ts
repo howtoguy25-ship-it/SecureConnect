@@ -227,3 +227,17 @@ export interface DomainPurchase {
   createdAt: number;
   updatedAt: number;
 }
+
+// -- Transferring a domain in from another registrar (Phase 7c) --
+
+export interface DomainTransfer {
+  id: string;
+  uid: string;
+  domain: string;
+  transferId: string;
+  status: string;
+  statusDescription: string;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}

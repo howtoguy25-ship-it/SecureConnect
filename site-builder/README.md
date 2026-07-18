@@ -66,6 +66,7 @@ src/
     EditorScreen.tsx                Main canvas editor
     PublishScreen.tsx               Publish/unpublish + connect-your-own-domain
     BuyDomainScreen.tsx             Real domain search, registrant form, Stripe checkout
+    TransferDomainScreen.tsx        Inbound domain transfer (EPP code + registrant form)
   navigation/
     RootNavigator.tsx               Switches Auth stack vs. App stack on auth state
     AuthNavigator.tsx
@@ -79,7 +80,8 @@ firebase/
                                     publishProject/unpublishProject/servePublishedSite,
                                     connectDomain/getDomainStatus/disconnectDomain,
                                     checkDomainAvailability/createDomainCheckout/
-                                    stripeWebhook (real Namecheap + Stripe)
+                                    stripeWebhook (real Namecheap + Stripe),
+                                    startDomainTransfer/getDomainTransferStatus
 public/                           Firebase Hosting's static root (placeholder landing
                                     page) -- /s/** is rewritten to servePublishedSite
 ```

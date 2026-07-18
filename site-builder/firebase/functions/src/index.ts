@@ -6,7 +6,7 @@ import { defineSecret } from 'firebase-functions/params';
 import * as functionsV1 from 'firebase-functions/v1';
 
 import Stripe from 'stripe';
-import { GenerationSession, Project, PublishedSite, DomainPurchase, UserAccount } from './types';
+import { GenerationSession, Project, PublishedSite, DomainPurchase, DomainTransfer, UserAccount } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
@@ -14,7 +14,14 @@ import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import { renderProjectHtml } from './siteHtml';
 import { slugify, uniqueSlug } from './publish';
 import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
-import { checkAvailability, getRegistrationPriceUsd, registerDomain, RegistrantContact } from './namecheapApi';
+import {
+  checkAvailability,
+  getRegistrationPriceUsd,
+  registerDomain,
+  createTransfer,
+  getTransferStatus,
+  RegistrantContact,
+} from './namecheapApi';
 import { createStripeClient, createCheckoutSession } from './stripeApi';
 
 initializeApp();
@@ -685,5 +692,62 @@ export const stripeWebhook = onRequest(
     }
 
     res.status(200).send('ok');
+  }
+);
+
+// Inbound domain transfer -- brings a domain the user already owns at a different
+// registrar into this Namecheap account. Requires the domain to already be unlocked at
+// its current registrar and a valid EPP/auth code from them (the user gets that from
+// their current registrar's dashboard/support -- outside this app). Not charged via
+// Stripe (see ROADMAP.md Phase 7c) -- the cost is absorbed on the product's own Namecheap
+// balance for now.
+export const startDomainTransfer = onCall(
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { domain, eppCode, registrant } = request.data as { domain: string; eppCode: string; registrant: RegistrantContact };
+    if (!domain?.trim() || !eppCode?.trim() || !registrant) {
+      throw new HttpsError('invalid-argument', 'Missing domain, EPP code, or registrant contact.');
+    }
+
+    const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+    const result = await createTransfer(creds, domain.trim().toLowerCase(), eppCode.trim(), registrant);
+
+    const transferRef = db.collection('users').doc(uid).collection('domainTransfers').doc();
+    const transfer: DomainTransfer = {
+      id: transferRef.id,
+      uid,
+      domain: result.domain,
+      transferId: result.transferId,
+      status: 'submitted',
+      statusDescription: result.statusDescription,
+      errorMessage: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await transferRef.set(transfer);
+    return transfer;
+  }
+);
+
+export const getDomainTransferStatus = onCall(
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { transferDocId } = request.data as { transferDocId: string };
+    const transferRef = db.collection('users').doc(uid).collection('domainTransfers').doc(transferDocId);
+    const transfer = (await transferRef.get()).data() as DomainTransfer | undefined;
+    if (!transfer) throw new HttpsError('not-found', 'Transfer not found.');
+
+    const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+    const status = await getTransferStatus(creds, transfer.transferId);
+    await transferRef.update({
+      status: status.status,
+      statusDescription: status.statusDescription,
+      updatedAt: Date.now(),
+    });
+    return { ...transfer, status: status.status, statusDescription: status.statusDescription };
   }
 );

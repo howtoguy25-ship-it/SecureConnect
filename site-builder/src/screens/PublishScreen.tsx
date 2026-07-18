@@ -222,6 +222,9 @@ export default function PublishScreen({ navigation, route }: Props) {
               <Pressable style={styles.secondaryButton} onPress={() => navigation.navigate('BuyDomain', { projectId })}>
                 <Text style={styles.secondaryButtonText}>Don't have one? Buy a new domain</Text>
               </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={() => navigation.navigate('TransferDomain')}>
+                <Text style={styles.secondaryButtonText}>Own one elsewhere? Transfer it in</Text>
+              </Pressable>
             </>
           ) : (
             <>

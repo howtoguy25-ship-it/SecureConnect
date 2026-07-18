@@ -57,5 +57,13 @@ service cloud.firestore {
       allow read: if isOwner(uid);
       allow write: if false;
     }
+
+    // Inbound domain transfer records -- same pattern as domainPurchases: client reads
+    // its own for the transfer-progress UI, only startDomainTransfer/getDomainTransferStatus
+    // (Admin SDK) ever write one.
+    match /users/{uid}/domainTransfers/{transferId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
   }
 }

@@ -153,6 +153,21 @@ export interface DomainPurchase {
   updatedAt: number;
 }
 
+// Inbound domain transfer -- bringing a domain the user already owns at a different
+// registrar into this Namecheap account. Not charged via Stripe (see ROADMAP Phase 7c
+// scoping note) -- costs are absorbed on the product's own Namecheap balance for now.
+export interface DomainTransfer {
+  id: string;
+  uid: string;
+  domain: string;
+  transferId: string;
+  status: string;
+  statusDescription: string;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type GenerationStatus =
   | 'starting'
   | 'generating'

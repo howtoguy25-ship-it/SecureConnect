@@ -158,3 +158,74 @@ export async function registerDomain(
     domainId: String(result?.DomainID ?? ''),
   };
 }
+
+// NOTE: the transfer.create / transfer.getStatus response field names below
+// (TransferCreateResult, DomainGetTransferStatusResult, StatusID) follow Namecheap's
+// documented API structure, but -- unlike domains.check/create/pricing above, which this
+// project has now run for real -- this transfer path has not been exercised against a
+// live account from here. Treat the first real inbound transfer attempt as something to
+// debug together from a screenshot if the response shape differs from what's coded here.
+export interface DomainTransferResult {
+  transferId: string;
+  domain: string;
+  statusDescription: string;
+}
+
+// Inbound transfer -- brings a domain a user already owns at a DIFFERENT registrar into
+// this Namecheap account. Requires the domain be unlocked at its current registrar and a
+// valid EPP/auth code from them. ICANN mandates the losing registrar gets ~5-7 days to
+// approve/reject before this completes, so this is inherently a slow, async process --
+// see getDomainTransferStatus for polling it.
+export async function createTransfer(
+  creds: NamecheapCredentials,
+  domain: string,
+  eppCode: string,
+  contact: RegistrantContact
+): Promise<DomainTransferResult> {
+  const contactParams: Record<string, string> = {};
+  (['Registrant', 'Tech', 'Admin', 'AuxBilling'] as const).forEach((role) => {
+    contactParams[`${role}FirstName`] = contact.firstName;
+    contactParams[`${role}LastName`] = contact.lastName;
+    contactParams[`${role}Address1`] = contact.address1;
+    contactParams[`${role}City`] = contact.city;
+    contactParams[`${role}StateProvince`] = contact.stateProvince;
+    contactParams[`${role}PostalCode`] = contact.postalCode;
+    contactParams[`${role}Country`] = contact.country;
+    contactParams[`${role}Phone`] = contact.phone;
+    contactParams[`${role}EmailAddress`] = contact.emailAddress;
+  });
+
+  const commandResponse = await callNamecheap(creds, 'namecheap.domains.transfer.create', {
+    DomainName: domain,
+    Years: '1',
+    EPPCode: eppCode,
+    AddFreeWhoisguard: 'yes',
+    WGEnabled: 'yes',
+    ...contactParams,
+  });
+
+  const result = commandResponse?.TransferCreateResult;
+  return {
+    transferId: String(result?.TransferID ?? ''),
+    domain: result?.Domain ?? domain,
+    statusDescription: result?.StatusDescription ?? 'Submitted',
+  };
+}
+
+export interface DomainTransferStatus {
+  transferId: string;
+  status: string;
+  statusDescription: string;
+}
+
+export async function getTransferStatus(creds: NamecheapCredentials, transferId: string): Promise<DomainTransferStatus> {
+  const commandResponse = await callNamecheap(creds, 'namecheap.domains.transfer.getStatus', {
+    TransferID: transferId,
+  });
+  const result = commandResponse?.DomainGetTransferStatusResult;
+  return {
+    transferId: String(result?.TransferID ?? transferId),
+    status: result?.StatusID ?? 'unknown',
+    statusDescription: result?.StatusDescription ?? 'Status unavailable',
+  };
+}
