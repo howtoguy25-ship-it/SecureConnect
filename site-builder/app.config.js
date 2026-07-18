@@ -30,6 +30,8 @@ module.exports = ({ config }) => ({
     ],
     'expo-apple-authentication',
     'expo-web-browser',
+    'expo-video',
+    'expo-audio',
   ],
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',

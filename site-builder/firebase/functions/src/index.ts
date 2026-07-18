@@ -381,6 +381,32 @@ export const uploadProjectImage = onCall({ memory: '256MiB' }, async (request) =
   return { url };
 });
 
+// Video/audio clips are typically far too large for the base64-over-onCall approach
+// uploadProjectImage uses above (onCall request bodies are capped well below what even a
+// short clip needs) -- instead this hands the client a short-lived signed PUT URL and lets
+// it upload the bytes straight to Storage, then returns a long-lived signed GET URL for
+// later reference (rendering in the canvas, publishing, etc.).
+export const createUploadUrl = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { contentType, extension } = request.data as { contentType: string; extension: string };
+  if (!contentType || !extension) throw new HttpsError('invalid-argument', 'Missing contentType or extension.');
+
+  const path = `users/${uid}/uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+  const bucket = getStorage().bucket();
+  const file = bucket.file(path);
+
+  const [uploadUrl] = await file.getSignedUrl({
+    action: 'write',
+    expires: Date.now() + 15 * 60 * 1000,
+    contentType,
+  });
+  const [readUrl] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+
+  return { uploadUrl, readUrl };
+});
+
 // Publishes a project as a real, publicly-reachable static page -- servePublishedSite
 // below answers for it at https://{HOSTING_DOMAIN}/s/{slug} (and at any custom domain
 // connected via connectDomain).
@@ -396,13 +422,14 @@ export const publishProject = onCall(async (request) => {
   if (!snap.exists) throw new HttpsError('not-found', 'Project not found.');
   const project = snap.data() as Project;
 
-  const hasLocalImage = project.elements.some(
+  const hasLocalMedia = project.elements.some(
     (el) =>
       (el.type === 'image' && !!el.uri && !el.uri.startsWith('http')) ||
-      (el.type === 'slideshow' && el.images.some((u) => !u.startsWith('http')))
+      (el.type === 'slideshow' && el.images.some((u) => !u.startsWith('http'))) ||
+      (el.type === 'video' && ((!!el.uri && !el.uri.startsWith('http')) || (!!el.audioUri && !el.audioUri.startsWith('http'))))
   );
-  if (hasLocalImage) {
-    throw new HttpsError('failed-precondition', 'Some images are still uploading — try publishing again in a moment.');
+  if (hasLocalMedia) {
+    throw new HttpsError('failed-precondition', 'Some media is still uploading — try publishing again in a moment.');
   }
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));

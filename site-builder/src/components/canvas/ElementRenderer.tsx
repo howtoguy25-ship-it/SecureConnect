@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, StyleSheet, Animated } from 'react-native';
 import Svg, { Rect, Circle, Polygon, Line, Path } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
-import { CanvasElement } from '@/types';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { useAudioPlayer } from 'expo-audio';
+import { CanvasElement, VideoElement } from '@/types';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -89,6 +91,70 @@ function SlideshowView({ images, autoPlay, intervalMs, width, height }: { images
   );
 }
 
+// A second clip's audio can stand in for (or layer over) the main clip's own sound --
+// kept in sync by mirroring play/pause state and resetting position together on loop,
+// since expo-video and expo-audio are independent native players with no built-in link.
+function VideoElementView({ element, width, height }: { element: VideoElement; width: number; height: number }) {
+  const player = useVideoPlayer(element.uri, (p) => {
+    p.loop = element.loop;
+    p.muted = element.muted;
+    if (element.trimStartMs > 0) p.currentTime = element.trimStartMs / 1000;
+  });
+  const audioPlayer = useAudioPlayer(element.audioUri);
+
+  useEffect(() => {
+    player.muted = element.muted;
+    player.loop = element.loop;
+  }, [player, element.muted, element.loop]);
+
+  useEffect(() => {
+    if (element.audioUri) audioPlayer.volume = element.audioVolume;
+  }, [audioPlayer, element.audioUri, element.audioVolume]);
+
+  useEffect(() => {
+    if (!element.uri) return;
+    const timeSub = player.addListener('timeUpdate', (payload) => {
+      const endSec = element.trimEndMs != null ? element.trimEndMs / 1000 : player.duration;
+      if (endSec > 0 && payload.currentTime >= endSec) {
+        if (element.loop) {
+          player.currentTime = element.trimStartMs / 1000;
+          if (element.audioUri) audioPlayer.currentTime = 0;
+        } else {
+          player.pause();
+          audioPlayer.pause();
+        }
+      }
+    });
+    const playingSub = player.addListener('playingChange', (payload) => {
+      if (!element.audioUri) return;
+      if (payload.isPlaying) audioPlayer.play();
+      else audioPlayer.pause();
+    });
+    return () => {
+      timeSub.remove();
+      playingSub.remove();
+    };
+  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.loop]);
+
+  if (!element.uri) {
+    return (
+      <View style={[styles.placeholder, { width, height }]}>
+        <Ionicons name="videocam-outline" size={28} color="#94A3B8" />
+        <Text style={styles.placeholderText}>Tap to add video</Text>
+      </View>
+    );
+  }
+
+  return (
+    <VideoView
+      player={player}
+      style={{ width, height, borderRadius: 8, backgroundColor: '#000' }}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+}
+
 export default function ElementRenderer({ element }: { element: CanvasElement }) {
   const { width, height } = element;
 
@@ -154,6 +220,8 @@ export default function ElementRenderer({ element }: { element: CanvasElement })
           height={height}
         />
       );
+    case 'video':
+      return <VideoElementView element={element} width={width} height={height} />;
     default:
       return null;
   }

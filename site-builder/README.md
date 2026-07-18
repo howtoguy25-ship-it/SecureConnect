@@ -1,4 +1,4 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 5 + 7)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 5 + 6 + 7)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
@@ -118,8 +118,9 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 - Pick Blank, a free theme, or a locked luxury theme ($189) / luxury-crazy theme ($399)
   — locked themes show a purchase modal (demo unlock, no real payment yet).
 - Canvas editor: drag to move, corner-handle to resize, tap to select any element.
-- Add text, images (from the photo library), shapes, icons, buttons, flags, and a
-  slideshow block from the Elements tab.
+- Add text, images (from the photo library), shapes, icons, buttons, flags, a
+  slideshow block, and a real video block (trim in/out, loop, mute, and an optional
+  second clip used just for its audio) from the Elements tab.
 - Page-level announcement bar: up to 2 bars, on/off toggle, auto-slide toggle, per-bar
   text/color editing.
 - Projects list: rename (long-press), delete, reopen. Account screen: sign out.

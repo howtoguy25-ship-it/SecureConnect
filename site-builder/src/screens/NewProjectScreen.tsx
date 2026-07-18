@@ -38,9 +38,6 @@ export default function NewProjectScreen({ navigation }: Props) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>{info.title}</Text>
                 <Text style={styles.cardSubtitle}>{info.subtitle}</Text>
-                {pageType === 'video' && (
-                  <Text style={styles.badge}>Editor tools land in a later update — see Roadmap</Text>
-                )}
               </View>
               <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
             </Pressable>

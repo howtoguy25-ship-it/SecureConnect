@@ -89,6 +89,37 @@ function renderElement(el: CanvasElement): string {
         : '';
       return `<div id="${id}" style="${base}overflow:hidden;">${images}</div>${script}`;
     }
+    case 'video': {
+      if (!el.uri) return '';
+      const videoId = `video-${el.id}`;
+      const audioId = `video-audio-${el.id}`;
+      const trimStartSec = el.trimStartMs / 1000;
+      const trimEndSec = el.trimEndMs != null ? el.trimEndMs / 1000 : null;
+      const audioTag = el.audioUri
+        ? `<audio id="${audioId}" src="${escapeAttr(el.audioUri)}" style="display:none;" ${
+            el.audioVolume === 0 ? 'muted' : ''
+          }></audio>`
+        : '';
+      const script = `<script>(function(){
+  var v=document.getElementById(${JSON.stringify(videoId)});
+  var a=document.getElementById(${JSON.stringify(audioId)});
+  if(!v)return;
+  if(a){a.volume=${el.audioVolume};}
+  v.addEventListener('loadedmetadata',function(){v.currentTime=${trimStartSec};});
+  v.addEventListener('play',function(){if(a){a.currentTime=0;a.play();}});
+  v.addEventListener('pause',function(){if(a){a.pause();}});
+  v.addEventListener('timeupdate',function(){
+    var end=${trimEndSec != null ? trimEndSec : 'v.duration'};
+    if(end && v.currentTime>=end){
+      if(${el.loop ? 'true' : 'false'}){v.currentTime=${trimStartSec};if(a){a.currentTime=0;}}
+      else{v.pause();}
+    }
+  });
+})();</script>`;
+      return `<video id="${videoId}" src="${escapeAttr(el.uri)}" style="${base}object-fit:cover;background:#000;" ${
+        el.muted ? 'muted' : ''
+      } playsinline controls></video>${audioTag}${script}`;
+    }
     default:
       return '';
   }

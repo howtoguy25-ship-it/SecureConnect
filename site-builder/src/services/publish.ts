@@ -2,7 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/services/firebase';
 import { requireFunctions } from '@/services/requireFunctions';
 import { projectsStore } from '@/storage/projectsStore';
-import { uploadLocalImage, isLocalUri } from '@/services/uploads';
+import { uploadLocalImage, uploadLocalVideo, isLocalUri } from '@/services/uploads';
 import { Project, CanvasElement } from '@/types';
 
 export interface PublishResult {
@@ -10,10 +10,10 @@ export interface PublishResult {
   url: string;
 }
 
-// Local images (device file:// URIs from the picker) can't be read by Cloud Functions --
+// Local media (device file:// URIs from the picker) can't be read by Cloud Functions --
 // only the client has access to them -- so this uploads any that haven't made it to
 // Storage yet before asking the server to render/publish the page.
-async function uploadLocalProjectImages(uid: string, project: Project): Promise<Project> {
+async function uploadLocalProjectMedia(uid: string, project: Project): Promise<Project> {
   let changed = false;
 
   const elements: CanvasElement[] = await Promise.all(
@@ -28,6 +28,14 @@ async function uploadLocalProjectImages(uid: string, project: Project): Promise<
         changed = true;
         return { ...el, images };
       }
+      if (el.type === 'video') {
+        const uri = el.uri && isLocalUri(el.uri) ? await uploadLocalVideo(el.uri) : el.uri;
+        const audioUri = el.audioUri && isLocalUri(el.audioUri) ? await uploadLocalVideo(el.audioUri) : el.audioUri;
+        if (uri !== el.uri || audioUri !== el.audioUri) {
+          changed = true;
+          return { ...el, uri, audioUri };
+        }
+      }
       return el;
     })
   );
@@ -39,7 +47,7 @@ async function uploadLocalProjectImages(uid: string, project: Project): Promise<
 }
 
 export async function publishProject(uid: string, project: Project): Promise<PublishResult> {
-  await uploadLocalProjectImages(uid, project);
+  await uploadLocalProjectMedia(uid, project);
   const call = httpsCallable<{ projectId: string }, PublishResult>(requireFunctions(functions), 'publishProject');
   const result = await call({ projectId: project.id });
   return result.data;

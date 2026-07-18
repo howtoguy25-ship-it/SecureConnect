@@ -22,7 +22,8 @@ export type ElementType =
   | 'shape'
   | 'button'
   | 'icon'
-  | 'slideshow';
+  | 'slideshow'
+  | 'video';
 
 interface BaseElement {
   id: string;
@@ -78,13 +79,25 @@ export interface SlideshowElement extends BaseElement {
   intervalMs: number;
 }
 
+export interface VideoElement extends BaseElement {
+  type: 'video';
+  uri: string | null;
+  trimStartMs: number;
+  trimEndMs: number | null; // null = play to the natural end
+  muted: boolean; // mute the clip's own audio -- useful when overlaying audioUri instead
+  loop: boolean;
+  audioUri: string | null; // optional second clip used only for its audio track (overlay/replace)
+  audioVolume: number; // 0-1, only relevant when audioUri is set
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
   | ShapeElement
   | ButtonElement
   | IconElement
-  | SlideshowElement;
+  | SlideshowElement
+  | VideoElement;
 
 export interface AnnouncementBarConfig {
   id: string;

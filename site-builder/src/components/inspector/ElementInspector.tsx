@@ -24,6 +24,16 @@ async function pickImage(): Promise<string | null> {
   return result.assets[0].uri;
 }
 
+async function pickVideo(): Promise<string | null> {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) return null;
+  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
+  if (result.canceled || result.assets.length === 0) return null;
+  return result.assets[0].uri;
+}
+
+const MAX_TRIM_MS = 5 * 60 * 1000;
+
 export default function ElementInspector({ element, onChange, onDelete, onBringToFront }: Props) {
   return (
     <View style={styles.container}>
@@ -169,6 +179,90 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             />
           </>
         )}
+
+        {element.type === 'video' && (
+          <>
+            <Pressable
+              style={styles.uploadBtn}
+              onPress={async () => {
+                const uri = await pickVideo();
+                if (uri) onChange({ uri, trimStartMs: 0, trimEndMs: null } as any);
+              }}
+            >
+              <Ionicons name="videocam-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.uploadBtnText}>{element.uri ? 'Replace Video' : 'Choose Video'}</Text>
+            </Pressable>
+
+            <SliderRow
+              label="Trim Start (ms)"
+              value={element.trimStartMs}
+              min={0}
+              max={MAX_TRIM_MS}
+              step={500}
+              onChange={(v) => onChange({ trimStartMs: v } as any)}
+            />
+            <Pressable
+              style={[styles.toggleBtn, element.trimEndMs == null && styles.toggleBtnActive]}
+              onPress={() => onChange({ trimEndMs: element.trimEndMs == null ? element.trimStartMs + 5000 : null } as any)}
+            >
+              <Text style={styles.toggleBtnText}>
+                {element.trimEndMs == null ? 'Playing to natural end' : 'Trimmed end — tap for full clip'}
+              </Text>
+            </Pressable>
+            {element.trimEndMs != null && (
+              <SliderRow
+                label="Trim End (ms)"
+                value={element.trimEndMs}
+                min={element.trimStartMs + 500}
+                max={MAX_TRIM_MS}
+                step={500}
+                onChange={(v) => onChange({ trimEndMs: v } as any)}
+              />
+            )}
+
+            <View style={styles.rowButtons}>
+              <Pressable
+                style={[styles.toggleBtn, element.muted && styles.toggleBtnActive]}
+                onPress={() => onChange({ muted: !element.muted } as any)}
+              >
+                <Text style={styles.toggleBtnText}>{element.muted ? 'Muted' : 'Sound On'}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.toggleBtn, element.loop && styles.toggleBtnActive]}
+                onPress={() => onChange({ loop: !element.loop } as any)}
+              >
+                <Text style={styles.toggleBtnText}>Loop {element.loop ? 'On' : 'Off'}</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.fieldLabel}>Sound source (optional)</Text>
+            <Pressable
+              style={styles.uploadBtn}
+              onPress={async () => {
+                const uri = await pickVideo();
+                if (uri) onChange({ audioUri: uri } as any);
+              }}
+            >
+              <Ionicons name="musical-notes-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.uploadBtnText}>{element.audioUri ? 'Replace Sound Source' : 'Pick a Clip for Its Audio'}</Text>
+            </Pressable>
+            {element.audioUri && (
+              <>
+                <Pressable style={styles.removeChip} onPress={() => onChange({ audioUri: null } as any)}>
+                  <Text style={styles.removeChipText}>Remove sound source ✕</Text>
+                </Pressable>
+                <SliderRow
+                  label="Sound Source Volume"
+                  value={element.audioVolume}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onChange={(v) => onChange({ audioVolume: v } as any)}
+                />
+              </>
+            )}
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -188,6 +282,8 @@ function labelFor(element: CanvasElement): string {
       return 'Icon';
     case 'slideshow':
       return 'Slideshow';
+    case 'video':
+      return 'Video';
     default:
       return 'Element';
   }

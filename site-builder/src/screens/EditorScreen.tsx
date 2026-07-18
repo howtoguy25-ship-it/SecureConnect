@@ -11,7 +11,7 @@ import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
@@ -76,6 +76,33 @@ function EditorInner({ navigation }: Props) {
       zIndex: 5,
     };
     addElement(el);
+    setPanel(null);
+  };
+
+  const addVideo = async () => {
+    const ImagePicker = await import('expo-image-picker');
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
+    if (result.canceled || result.assets.length === 0) return;
+    const el: VideoElement = {
+      id: generateId('el'),
+      type: 'video',
+      uri: result.assets[0].uri,
+      trimStartMs: 0,
+      trimEndMs: null,
+      muted: false,
+      loop: true,
+      audioUri: null,
+      audioVolume: 1,
+      x: canvasCenterX - 100,
+      y: canvasCenterY - 70,
+      width: 200,
+      height: 140,
+      zIndex: 5,
+    };
+    addElement(el);
+    select(el.id);
     setPanel(null);
   };
 
@@ -166,6 +193,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="text-outline" label="Text" active={false} onPress={addTextBox} />
             <TabButton icon="image-outline" label="Image" active={false} onPress={addImage} />
             <TabButton icon="images-outline" label="Slideshow" active={false} onPress={addSlideshow} />
+            <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
           </View>
         </>

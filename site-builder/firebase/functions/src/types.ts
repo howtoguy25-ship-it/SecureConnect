@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video';
 
 interface BaseElement {
   id: string;
@@ -61,13 +61,25 @@ export interface SlideshowElement extends BaseElement {
   intervalMs: number;
 }
 
+export interface VideoElement extends BaseElement {
+  type: 'video';
+  uri: string | null;
+  trimStartMs: number;
+  trimEndMs: number | null;
+  muted: boolean;
+  loop: boolean;
+  audioUri: string | null;
+  audioVolume: number;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
   | ShapeElement
   | ButtonElement
   | IconElement
-  | SlideshowElement;
+  | SlideshowElement
+  | VideoElement;
 
 export interface CanvasSize {
   width: number;

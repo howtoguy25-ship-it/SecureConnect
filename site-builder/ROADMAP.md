@@ -171,12 +171,30 @@ Not covered yet: the assistant can't edit canvas elements directly (add/move/sty
 specific element via chat) — that's a larger scope than "app control" navigation and
 isn't part of this phase.
 
-## Phase 6 — Video Page Editor
+## Phase 6 — Video Page Editor — done
 
-- Real cut/split timeline, an audio track layer, and picking a video from the camera
-  roll to use as a sound source. This is a substantial native-video feature on its own
-  (likely `expo-av`/`react-native-video` + a custom timeline UI) and was intentionally
-  left out of Phase 1 rather than faked.
+Video is a real element type now (`VideoElement`), addable from the editor's **Video**
+tab (picks a clip from the camera roll, same as Image/Slideshow):
+
+- **Real trim.** `trimStartMs`/`trimEndMs` play back only that range — both in the app
+  (via `expo-video`'s player, seeking/looping in `ElementRenderer.tsx`) and on a published
+  page (`siteHtml.ts` renders a real `<video>` with a small inline script enforcing the
+  same range). This is playback-time trimming, not physical re-encoding — no ffmpeg
+  dependency, no native rebuild, and it's genuinely what plays back either way.
+- **Real audio-track overlay.** Picking a second clip "for its sound" (`audioUri`) plays
+  that clip's audio in sync with the main video's play/pause state, via `expo-audio` in
+  the app and a synced `<audio>` element on the published page — with the main clip's own
+  audio optionally muted (`muted`) so the picked track can replace or layer over it.
+- **Real upload path for large files.** Video/audio don't fit through the
+  base64-over-onCall approach images use (`uploadProjectImage`) — request bodies are
+  capped well below what even a short clip needs. Instead `createUploadUrl` hands the
+  client a short-lived signed **PUT** URL and it uploads bytes straight to Storage
+  (`uploadLocalVideo` in `src/services/uploads.ts`), sidestepping that ceiling entirely.
+
+Not built: a visual multi-clip timeline/splice UI (currently one video element at a time,
+positioned/resized like any other canvas element) and physical video re-encoding (e.g. for
+downloading a merged export) — both real, separate pieces of scope beyond in-app/published
+playback.
 
 ## Phase 7 — Publishing & Domains — publish + connect-your-own-domain done
 
