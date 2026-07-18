@@ -79,5 +79,14 @@ service cloud.firestore {
     match /processedAppleTransactions/{transactionId} {
       allow read, write: if false;
     }
+
+    // Maps an Apple subscription's originalTransactionId back to the uid that owns it, so
+    // appStoreServerNotifications (which only ever sees Apple's own transaction IDs, never
+    // our uid) can find whose account a renewal-failure/renewal-success webhook is about.
+    // Admin SDK only -- a client being able to write this could redirect someone else's
+    // subscription events onto their own account.
+    match /appleOriginalTransactions/{originalTransactionId} {
+      allow read, write: if false;
+    }
   }
 }

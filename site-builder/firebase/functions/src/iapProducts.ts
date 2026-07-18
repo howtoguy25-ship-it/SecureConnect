@@ -3,6 +3,8 @@ import { PlanId } from './types';
 // Mirrors app/src/data/iapProducts.ts -- see that file's comment for why this is
 // duplicated rather than shared (separate Node project, no shared `@/` alias).
 
+export const APPLE_BUNDLE_ID = 'com.sitespark.app';
+
 export const SUBSCRIPTION_PRODUCT_IDS: Record<string, Exclude<PlanId, 'free'>> = {
   'com.sitespark.app.sub.beginner': 'beginner',
   'com.sitespark.app.sub.middle': 'middle',

@@ -165,12 +165,27 @@ export interface GenerationSession {
   updatedAt: number;
 }
 
+// 'active': no known payment problem. 'past_due': the most recent subscription renewal
+// failed and the site is still up but a warning banner shows (see BillingBanner.tsx).
+// 'suspended': the grace period elapsed with no successful payment and every published site
+// on this account has been taken down.
+export type BillingStatus = 'active' | 'past_due' | 'suspended';
+
+export interface BillingNotice {
+  type: 'payment_failed' | 'suspended' | 'resolved';
+  message: string;
+  createdAt: number;
+}
+
 export interface UserAccount {
   uid: string;
   credits: number;
   plan: 'free' | 'beginner' | 'middle' | 'advanced';
   planRenewsAt: number | null;
   createdAt: number;
+  billingStatus?: BillingStatus;
+  paymentFailedAt?: number | null;
+  billingNotice?: BillingNotice | null;
 }
 
 // -- Persistent AI chat assistant (Phase 5) --

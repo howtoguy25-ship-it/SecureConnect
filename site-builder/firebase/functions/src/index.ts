@@ -11,7 +11,7 @@ import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
-import { renderProjectHtml, renderLandingPageHtml } from './siteHtml';
+import { renderProjectHtml, renderLandingPageHtml, renderSuspendedSiteHtml } from './siteHtml';
 import { slugify, uniqueSlug } from './publish';
 import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
 import {
@@ -24,7 +24,9 @@ import {
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession } from './stripeApi';
 import { getTransactionInfo } from './appStoreApi';
-import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN } from './iapProducts';
+import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN, APPLE_BUNDLE_ID } from './iapProducts';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { verifyAndClassifyNotification } from './appStoreNotifications';
 
 initializeApp();
 const db = getFirestore();
@@ -37,7 +39,10 @@ const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
 const appleIapKeyId = defineSecret('APPLE_IAP_KEY_ID');
 const appleIapIssuerId = defineSecret('APPLE_IAP_ISSUER_ID');
 const appleIapPrivateKey = defineSecret('APPLE_IAP_PRIVATE_KEY');
-const APPLE_BUNDLE_ID = 'com.sitespark.app';
+
+// How long a site stays up after the first payment-failure notification before it's
+// automatically suspended -- the user asked for "3-5 hours"; 4 hours is the midpoint.
+const BILLING_GRACE_PERIOD_MS = 4 * 60 * 60 * 1000;
 
 // Namecheap only accepts API calls from a whitelisted IP -- these functions must route
 // egress through the static-IP Cloud NAT set up for this project (see ROADMAP.md Phase 7
@@ -515,6 +520,11 @@ export const servePublishedSite = onRequest(async (req, res) => {
   }
 
   const site = doc.data() as PublishedSite;
+  if (site.suspended) {
+    res.set('Cache-Control', 'no-store');
+    res.status(200).send(renderSuspendedSiteHtml());
+    return;
+  }
   res.set('Cache-Control', 'public, max-age=60');
   res.status(200).send(site.html);
 });
@@ -812,9 +822,18 @@ export const verifyApplePurchase = onCall(
           plan: planId,
           planRenewsAt: info.expiresDate,
           credits: FieldValue.increment(MONTHLY_CREDITS_FOR_PLAN[planId]),
+          billingStatus: 'active',
+          paymentFailedAt: null,
         },
         { merge: true }
       );
+      // Lets appStoreServerNotifications map a future renewal-failure webhook (which only
+      // carries Apple's own transaction IDs, never our uid) back to this account.
+      await db
+        .collection('appleOriginalTransactions')
+        .doc(info.originalTransactionId)
+        .set({ uid, updatedAt: Date.now() });
+      await unsuspendUserSites(uid);
     } else if (CREDIT_PACK_PRODUCT_IDS[info.productId] != null) {
       await userRef.set({ credits: FieldValue.increment(CREDIT_PACK_PRODUCT_IDS[info.productId]) }, { merge: true });
     } else if (THEME_IDS_BY_PRODUCT[info.productId]) {
@@ -837,3 +856,140 @@ export const verifyApplePurchase = onCall(
     return { productId: info.productId, environment: info.environment };
   }
 );
+
+// -- Billing failure notifications & site suspension --
+//
+// "Monthly bill payment" maps to the real recurring payment in this app: the
+// beginner/middle/advanced subscription plan (there's no separate "hosting fee" product).
+// When Apple reports a renewal failure, the account is marked "past_due" and a banner shows
+// in the app (see BillingBanner.tsx) -- the site itself stays up. If the failure isn't
+// resolved within BILLING_GRACE_PERIOD_MS, enforceBillingSuspensions takes every published
+// site for that account down and shows a "temporarily unavailable" page instead (see
+// servePublishedSite's `suspended` check). The moment Apple reports a successful renewal (or
+// the user buys/restores the subscription again from inside the app), the account and every
+// suspended site are restored automatically.
+//
+// Deliberately scoped to payment *failure*, not the full subscription lifecycle: a voluntary
+// cancellation (Subtype.VOLUNTARY) is not treated as a billing failure and does not suspend
+// anything -- the user keeps their site through the period they already paid for, same as
+// Apple's own model. What happens to their plan/credits after that period fully lapses is a
+// separate "downgrade to free" feature, not built here (see ROADMAP.md).
+
+async function unsuspendUserSites(uid: string): Promise<void> {
+  const sitesSnap = await db.collection('publishedSites').where('uid', '==', uid).where('suspended', '==', true).get();
+  if (sitesSnap.empty) return;
+  const batch = db.batch();
+  sitesSnap.forEach((d) => batch.update(d.ref, { suspended: false }));
+  await batch.commit();
+}
+
+// Public webhook Apple calls on every subscription lifecycle event -- configure its URL as
+// this function's URL in App Store Connect -> your app -> App Store Server Notifications (see
+// ROADMAP.md Phase 9 setup steps). Every payload is verified against Apple's real root CA
+// (see appStoreNotifications.ts) before anything in it is trusted, since this is a public URL
+// anyone could otherwise POST a forged "payment failed"/"payment succeeded" event to.
+export const appStoreServerNotifications = onRequest(async (req, res) => {
+  const signedPayload = (req.body as { signedPayload?: string } | undefined)?.signedPayload;
+  if (!signedPayload) {
+    res.status(400).send('Missing signedPayload.');
+    return;
+  }
+
+  let event;
+  try {
+    event = await verifyAndClassifyNotification(signedPayload);
+  } catch (err) {
+    console.error('Rejected App Store Server Notification: failed verification', err);
+    res.status(200).send('ignored'); // 200 so Apple doesn't treat this as a delivery failure and keep retrying
+    return;
+  }
+
+  if (event.kind === 'ignored' || !event.originalTransactionId) {
+    res.status(200).send('ok');
+    return;
+  }
+
+  const mappingSnap = await db.collection('appleOriginalTransactions').doc(event.originalTransactionId).get();
+  const uid = mappingSnap.data()?.uid as string | undefined;
+  if (!uid) {
+    // A notification (often a sandbox test one) for a subscription we haven't seen a
+    // verifyApplePurchase call for yet -- nothing in our data to update.
+    res.status(200).send('ok');
+    return;
+  }
+
+  const userRef = db.collection('users').doc(uid);
+
+  if (event.kind === 'payment_failed') {
+    const existing = (await userRef.get()).data() as UserAccount | undefined;
+    if (existing?.billingStatus === 'active' || !existing?.billingStatus) {
+      await userRef.set(
+        {
+          billingStatus: 'past_due',
+          paymentFailedAt: Date.now(),
+          billingNotice: {
+            type: 'payment_failed',
+            message:
+              "Payment failed. We couldn't process your subscription renewal — please update your payment method. Your site will be taken offline automatically if this isn't resolved within a few hours.",
+            createdAt: Date.now(),
+          },
+        },
+        { merge: true }
+      );
+    }
+    // Already past_due or suspended -- Apple's own billing retries continue in the
+    // background for weeks; don't reset our grace-period clock or re-notify on each one.
+  } else if (event.kind === 'payment_resolved') {
+    await userRef.set(
+      {
+        billingStatus: 'active',
+        paymentFailedAt: null,
+        billingNotice: {
+          type: 'resolved',
+          message: 'Your payment went through — your site is back online.',
+          createdAt: Date.now(),
+        },
+      },
+      { merge: true }
+    );
+    await unsuspendUserSites(uid);
+  }
+
+  res.status(200).send('ok');
+});
+
+// Runs every 15 minutes: any account that's been "past_due" for longer than the grace period
+// gets every one of its published sites suspended. Split from the webhook handler above
+// because the grace period (hours) is independent of whenever Apple happens to deliver
+// notifications, and because this is also what recovers from a GRACE_PERIOD_EXPIRED webhook
+// arriving before this sweep would otherwise have caught it.
+export const enforceBillingSuspensions = onSchedule('every 15 minutes', async () => {
+  const cutoff = Date.now() - BILLING_GRACE_PERIOD_MS;
+  const pastDueSnap = await db.collection('users').where('billingStatus', '==', 'past_due').get();
+
+  for (const userDoc of pastDueSnap.docs) {
+    const account = userDoc.data() as UserAccount;
+    if (!account.paymentFailedAt || account.paymentFailedAt > cutoff) continue;
+
+    const uid = userDoc.id;
+    await userDoc.ref.set(
+      {
+        billingStatus: 'suspended',
+        billingNotice: {
+          type: 'suspended',
+          message:
+            'Your site has been taken down because your subscription payment could not be processed. Renew your subscription to bring it back online.',
+          createdAt: Date.now(),
+        },
+      },
+      { merge: true }
+    );
+
+    const sitesSnap = await db.collection('publishedSites').where('uid', '==', uid).get();
+    if (!sitesSnap.empty) {
+      const batch = db.batch();
+      sitesSnap.forEach((d) => batch.update(d.ref, { suspended: true }));
+      await batch.commit();
+    }
+  }
+});

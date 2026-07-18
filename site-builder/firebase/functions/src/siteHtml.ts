@@ -263,3 +263,43 @@ export function renderLandingPageHtml(): string {
 </body>
 </html>`;
 }
+
+// Served in place of a project's real published HTML once enforceBillingSuspensions has
+// marked its PublishedSite doc `suspended` (see index.ts) -- a failed subscription payment
+// that went unresolved past the grace period. Distinct from renderLandingPageHtml (that's the
+// bare product-domain fallback); this page is scoped to the one project that's actually down,
+// so a visitor isn't left thinking the whole site is broken with no explanation.
+export function renderSuspendedSiteHtml(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Site unavailable</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0B1220;
+      color: #F8FAFC;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      padding: 24px;
+    }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    p { color: #94A3B8; font-size: 15px; line-height: 1.5; max-width: 420px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>This site is temporarily unavailable</h1>
+    <p>The owner's subscription payment could not be processed. The site will come back
+    online automatically as soon as it's resolved.</p>
+  </div>
+</body>
+</html>`;
+}

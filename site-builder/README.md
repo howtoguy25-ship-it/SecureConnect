@@ -1,4 +1,4 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
@@ -6,9 +6,10 @@ real Firebase accounts, with a persistent AI chat assistant that can drive the a
 you, and real one-tap publishing to a live public URL.
 
 This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder) +
-Phase 5 (AI chat assistant) + Phase 7 (publishing & connect-your-domain)** of a larger
-product (subscriptions/IAP, video editor, buying new domains — see `ROADMAP.md` for
-what's built vs. what's next and what real accounts each later phase needs).
+Phase 4 (subscriptions/IAP) + Phase 5 (AI chat assistant) + Phase 6 (video editor) +
+Phase 7 (publishing & domains) + Phase 8 (policies/support) + Phase 9 (billing-failure
+notifications & site suspension)** — see `ROADMAP.md` for what's built vs. what's next and
+what real accounts each phase needs.
 
 ## Stack
 
@@ -47,6 +48,8 @@ src/
     assistantMessagesStore.ts      Persistent chat-assistant message history
   data/pricing.ts                  Plans, credit packs, build-cost estimator (client copy)
   components/
+    BillingBanner.tsx               Real-time in-app warning when a subscription payment
+                                    fails, and when a site's been suspended over it
     canvas/                        Canvas, DraggableElement (drag+resize), ElementRenderer,
                                     AnnouncementBarView
     inspector/                     Per-element style controls (color, size, text, image)
@@ -84,7 +87,10 @@ firebase/
                                     checkDomainAvailability/createDomainCheckout/
                                     stripeWebhook (real Namecheap + Stripe),
                                     startDomainTransfer/getDomainTransferStatus,
-                                    verifyApplePurchase (real Apple IAP)
+                                    verifyApplePurchase (real Apple IAP),
+                                    appStoreServerNotifications (real Apple billing
+                                    webhook, JWS-verified) + enforceBillingSuspensions
+                                    (scheduled site suspension on payment failure)
 public/                           Empty on purpose -- Firebase Hosting requires this dir
                                     to exist, but every request (any attached domain,
                                     any path) is rewritten to servePublishedSite, which
@@ -133,6 +139,10 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 - Page-level announcement bar: up to 2 bars, on/off toggle, auto-slide toggle, per-bar
   text/color editing.
 - Projects list: rename (long-press), delete, reopen. Account screen: sign out.
+- Real billing-failure handling: if a subscription renewal fails, a real-time in-app
+  banner warns you, your published sites stay up for a grace period, and if payment still
+  isn't resolved they're automatically taken down (and automatically restored the moment
+  payment succeeds) — see Phase 9 in ROADMAP.md.
 
 ## Known gaps (see ROADMAP.md for the full breakdown)
 
@@ -146,5 +156,8 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   played back at the trim in the app and on a published page.
 - AI-build credit costs are checked and deducted upfront, not mid-build — see
   ROADMAP.md Phase 3 "Scoping decisions" for why.
-- A persistent AI chat assistant with full app control, and real domain purchase/transfer,
-  are not part of this phase.
+- A voluntary subscription cancellation doesn't trigger any billing-failure handling (by
+  design — see Phase 9), and what happens to a plan/credits after a cancelled
+  subscription's period fully lapses isn't built yet. There's also no real OS push
+  notification infrastructure anywhere in the app — the Phase 9 warning is a real-time
+  in-app banner, not a push notification.

@@ -375,6 +375,65 @@ it's added as a native Firebase Hosting custom domain for the whole default site
 before App Store submission — especially anything GDPR/CCPA-shaped depending on where
 your users are, which this content doesn't attempt to cover.
 
+## Phase 9 — Billing failure notifications & site suspension — done
+
+"Monthly bill payment" maps to the one real recurring payment this app has: the
+beginner/middle/advanced subscription (there's no separate "hosting fee" product). When a
+renewal payment fails, the account gets a warning and a grace period; if it isn't resolved,
+every site the account has published comes down automatically — and comes back the moment
+payment succeeds.
+
+- **Real inbound webhook, really verified.** `appStoreServerNotifications` (public
+  `onRequest`) is Apple's **App Store Server Notifications V2** endpoint. Unlike every other
+  Apple integration in this app (which only ever calls *out* to Apple, so trusting the HTTPS
+  channel is enough), this is a URL anyone could POST a forged "payment failed"/"payment
+  succeeded" event to — so every payload's JWS signature chain is verified against Apple's
+  real root CA (`firebase/functions/src/appStoreNotifications.ts`, using Apple's own
+  `@apple/app-store-server-library`, with online OCSP revocation checks enabled) before any
+  of its contents are trusted.
+- **Two-stage response, matching what was asked for:**
+  1. First renewal-failure notification (`DID_FAIL_TO_RENEW`) → the account's `billingStatus`
+     becomes `past_due` and a `billingNotice` is written — surfaced in the app as a real-time
+     banner (`src/components/BillingBanner.tsx`, mounted alongside every signed-in screen,
+     same pattern as the assistant's floating button) reading "Payment failed... your site
+     will be taken offline automatically if this isn't resolved within a few hours." The
+     site itself stays fully up during this window.
+  2. `enforceBillingSuspensions` (scheduled function, every 15 minutes) suspends every
+     published site once `paymentFailedAt` is older than `BILLING_GRACE_PERIOD_MS` (4 hours —
+     the midpoint of the requested 3-5 hour window, change the constant in `index.ts` to
+     adjust it). A suspended site serves a real "temporarily unavailable" page
+     (`renderSuspendedSiteHtml` in `siteHtml.ts`) instead of a raw 404 or its real content.
+  3. The moment Apple reports a successful renewal (`DID_RENEW`)/`SUBSCRIBED`, or the user
+     buys/restores the subscription again from inside the app (`verifyApplePurchase`),
+     `billingStatus` goes back to `active` and every suspended site is unsuspended in the
+     same request — no manual re-publish needed.
+- **Idempotent against Apple's own retry behavior.** Apple keeps retrying a failed renewal
+  in the background for weeks; repeat `DID_FAIL_TO_RENEW` notifications for an account
+  that's already `past_due` (or already `suspended`) don't reset the grace-period clock or
+  re-fire the warning.
+- **Mapping Apple's transaction IDs back to an account.** Apple's notifications only ever
+  carry its own `originalTransactionId`, never this app's `uid` — `verifyApplePurchase`
+  records that mapping (`appleOriginalTransactions/{originalTransactionId} -> {uid}`,
+  Admin-SDK-only) the first time a subscription purchase is verified, so the webhook can
+  look the right account up.
+
+**Deliberately out of scope:** a *voluntary* cancellation (`Subtype.VOLUNTARY`) is not
+treated as a billing failure and never suspends anything — same as Apple's own model, the
+user keeps their site through the period they already paid for. What happens to their
+plan/credits after that period fully lapses (downgrade to the free plan, etc.) is a
+separate subscription-lifecycle feature, not built here. Push notifications (an actual OS
+notification, not just an in-app banner) also aren't built — there's no APNs/device-token
+infrastructure anywhere in this app yet, so "display a notification" is implemented as a
+real-time in-app banner instead, which needed no new infrastructure and is seen the moment
+the app is open, same as the assistant's chat history.
+
+**One-time setup needed from you:** App Store Connect → your app → **App Store Server
+Notifications** → set the **Production** and **Sandbox Server URLs** to the deployed
+`appStoreServerNotifications` function's URL (same place/format as `stripeWebhook`'s Stripe
+Dashboard setup in Phase 7 — `firebase deploy` prints the URL after deploying). No new
+secrets are needed — verification uses Apple's public root certificate, embedded directly
+in `appleRootCert.ts`.
+
 ## Notes on the "animal-tier" AI speed/strength framing
 
 The Beginner/Immediate/Advanced plans map to different underlying model

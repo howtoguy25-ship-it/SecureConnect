@@ -118,6 +118,11 @@ export interface PublishedSite {
   projectId: string;
   html: string;
   updatedAt: number;
+  // Set by enforceBillingSuspensions when the owning account's subscription payment has
+  // failed and the grace period has elapsed -- servePublishedSite shows a suspended-site
+  // page instead of `html` while this is true, and clears it automatically once the
+  // subscription is paid again (see appStoreServerNotifications in index.ts).
+  suspended?: boolean;
 }
 
 export type DomainPurchaseStatus = 'pending' | 'paid' | 'registering' | 'registered' | 'failed';
@@ -198,10 +203,25 @@ export interface GenerationSession {
 
 export type PlanId = 'free' | 'beginner' | 'middle' | 'advanced';
 
+// 'active': no known payment problem. 'past_due': the most recent subscription renewal
+// failed and paymentFailedAt marks when the grace period started -- the site is still up,
+// but a warning banner shows. 'suspended': the grace period elapsed with no successful
+// payment, and every published site owned by this account has been taken down.
+export type BillingStatus = 'active' | 'past_due' | 'suspended';
+
+export interface BillingNotice {
+  type: 'payment_failed' | 'suspended' | 'resolved';
+  message: string;
+  createdAt: number;
+}
+
 export interface UserAccount {
   uid: string;
   credits: number;
   plan: PlanId;
   planRenewsAt: number | null;
   createdAt: number;
+  billingStatus?: BillingStatus;
+  paymentFailedAt?: number | null;
+  billingNotice?: BillingNotice | null;
 }

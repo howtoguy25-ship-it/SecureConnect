@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { env } from '@/config/env';
 import AuthNavigator from '@/navigation/AuthNavigator';
 import AssistantLauncher from '@/components/assistant/AssistantLauncher';
+import BillingBanner from '@/components/BillingBanner';
 import FirebaseSetupScreen from '@/screens/FirebaseSetupScreen';
 import ProjectsScreen from '@/screens/ProjectsScreen';
 import NewProjectScreen from '@/screens/NewProjectScreen';
@@ -68,6 +69,7 @@ export default function RootNavigator() {
         <>
           <AppStack />
           <AssistantLauncher />
+          <BillingBanner />
         </>
       ) : (
         <AuthNavigator />
