@@ -7,15 +7,45 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "image": "latest" }
+      "ios": { "image": "latest" },
+      "env": {
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "sitespark-a5817.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "sitespark-a5817",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "sitespark-a5817.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "776375566908",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:776375566908:web:1c7c75437bf1d3a415b939",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "776375566908-pv268kun8creegf7qb2og2vb1i0i4ltg.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "776375566908-ghkmtupqop73v4ei0ulvvfu5phen76ei.apps.googleusercontent.com"
+      }
     },
     "preview": {
       "distribution": "internal",
-      "ios": { "image": "latest" }
+      "ios": { "image": "latest" },
+      "env": {
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "sitespark-a5817.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "sitespark-a5817",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "sitespark-a5817.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "776375566908",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:776375566908:web:1c7c75437bf1d3a415b939",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "776375566908-pv268kun8creegf7qb2og2vb1i0i4ltg.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "776375566908-ghkmtupqop73v4ei0ulvvfu5phen76ei.apps.googleusercontent.com"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "ios": { "image": "latest" }
+      "ios": { "image": "latest" },
+      "env": {
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "sitespark-a5817.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "sitespark-a5817",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "sitespark-a5817.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "776375566908",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:776375566908:web:1c7c75437bf1d3a415b939",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "776375566908-pv268kun8creegf7qb2og2vb1i0i4ltg.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "776375566908-ghkmtupqop73v4ei0ulvvfu5phen76ei.apps.googleusercontent.com"
+      }
     }
   },
   "submit": {

@@ -35,12 +35,22 @@ Everything under "Still to come" is *not yet built*.
 ## Setup — making auth actually work
 
 1. **Firebase project**: console.firebase.google.com → create a project → add an iOS app
-   with bundle ID `com.sitespark.app` → Project Settings → General → copy the Web app
-   config into `.env` (`EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`,
-   `EXPO_PUBLIC_FIREBASE_PROJECT_ID`, `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET`,
-   `EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `EXPO_PUBLIC_FIREBASE_APP_ID`). These use the
-   `EXPO_PUBLIC_` prefix so Expo inlines them into the client bundle at build time — that's
-   correct for Firebase's client config, which is meant to be public.
+   with bundle ID `com.sitespark.app` (needed so Firebase can generate `GoogleService-Info`
+   for native Sign in with Apple/Google) → **also add a Web app** (Project Settings →
+   General → Your apps → Add app → Web `</>`) → copy **that Web app's** config (click the
+   "Config" radio button in its SDK setup panel) into `.env` (`EXPO_PUBLIC_FIREBASE_API_KEY`,
+   `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`, `EXPO_PUBLIC_FIREBASE_PROJECT_ID`,
+   `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET`, `EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`,
+   `EXPO_PUBLIC_FIREBASE_APP_ID`). These use the `EXPO_PUBLIC_` prefix so Expo inlines them
+   into the client bundle at build time — that's correct for Firebase's client config, which
+   is meant to be public.
+   **Don't use the iOS app's `apiKey`/`appId` here** — this app talks to Firebase through the
+   JS SDK (`firebase/app`, not the native iOS SDK), and the iOS app's API key is typically
+   restricted in Google Cloud Console to only accept requests from the iOS bundle, so it can
+   silently fail to authenticate when used from the JS SDK instead. The Web app's `appId`
+   contains `:web:`; the iOS app's contains `:ios:` — easy to tell apart at a glance.
+   These same values are also duplicated into `eas.json`'s `build.*.env` (they're public, so
+   committing them there is fine) so cloud EAS builds have them even without a local `.env`.
 2. **Enable providers**: Firebase Console → Authentication → Sign-in method → enable
    Email/Password, Phone, Google, and Apple.
    - Phone auth requires the Blaze (pay-as-you-go) plan for SMS delivery.
