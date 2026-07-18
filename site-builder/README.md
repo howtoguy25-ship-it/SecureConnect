@@ -1,4 +1,4 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 5 + 6 + 7)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
@@ -83,7 +83,8 @@ firebase/
                                     connectDomain/getDomainStatus/disconnectDomain,
                                     checkDomainAvailability/createDomainCheckout/
                                     stripeWebhook (real Namecheap + Stripe),
-                                    startDomainTransfer/getDomainTransferStatus
+                                    startDomainTransfer/getDomainTransferStatus,
+                                    verifyApplePurchase (real Apple IAP)
 public/                           Firebase Hosting's static root (placeholder landing
                                     page) -- /s/** is rewritten to servePublishedSite
 ```
@@ -120,7 +121,8 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   restores your builds.
 - Create a project for Web Page, Video Page, Social (9:16) Page, or Logo Page.
 - Pick Blank, a free theme, or a locked luxury theme ($189) / luxury-crazy theme ($399)
-  — locked themes show a purchase modal (demo unlock, no real payment yet).
+  — locked themes purchase via real Apple In-App Purchase, verified server-side before
+  unlocking (see Phase 4 in ROADMAP.md).
 - Canvas editor: drag to move, corner-handle to resize, tap to select any element.
 - Add text, images (from the photo library), shapes, icons, buttons, flags, a
   slideshow block, and a real video block (trim in/out, loop, mute, and an optional
@@ -131,10 +133,14 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 
 ## Known gaps (see ROADMAP.md for the full breakdown)
 
-- Theme purchases, credit packs, and subscriptions all show real pricing but no real
-  charge yet — need Apple In-App Purchase wiring (App Store Connect setup).
-- Video Page's cut/split/audio-overlay tools aren't built yet — the New Project screen
-  says so rather than pretending they work.
+- A post-signup "here's what you get" offer modal, and scheduled weekly credit
+  reset/minimum-usage enforcement for the Middle Class plan, aren't built yet.
+- Buying a brand-new domain from inside the app requires you to have a registrar API
+  account already set up (Namecheap) — done for this project, but a new deploy would
+  need its own.
+- Video's multi-clip timeline/splice UI and physical video re-encoding (for a merged
+  export) aren't built — current support is one trimmed clip + optional audio overlay,
+  played back at the trim in the app and on a published page.
 - AI-build credit costs are checked and deducted upfront, not mid-build — see
   ROADMAP.md Phase 3 "Scoping decisions" for why.
 - A persistent AI chat assistant with full app control, and real domain purchase/transfer,

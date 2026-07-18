@@ -23,6 +23,8 @@ import {
   RegistrantContact,
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession } from './stripeApi';
+import { getTransactionInfo } from './appStoreApi';
+import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN } from './iapProducts';
 
 initializeApp();
 const db = getFirestore();
@@ -32,6 +34,10 @@ const namecheapApiKey = defineSecret('NAMECHEAP_API_KEY');
 const namecheapUserName = defineSecret('NAMECHEAP_USERNAME');
 const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
+const appleIapKeyId = defineSecret('APPLE_IAP_KEY_ID');
+const appleIapIssuerId = defineSecret('APPLE_IAP_ISSUER_ID');
+const appleIapPrivateKey = defineSecret('APPLE_IAP_PRIVATE_KEY');
+const APPLE_BUNDLE_ID = 'com.sitespark.app';
 
 // Namecheap only accepts API calls from a whitelisted IP -- these functions must route
 // egress through the static-IP Cloud NAT set up for this project (see ROADMAP.md Phase 7
@@ -749,5 +755,69 @@ export const getDomainTransferStatus = onCall(
       updatedAt: Date.now(),
     });
     return { ...transfer, status: status.status, statusDescription: status.statusDescription };
+  }
+);
+
+// Verifies a real StoreKit purchase server-side via Apple's App Store Server API before
+// applying its effect (credits, plan, or theme unlock) -- never trusts a client's own
+// claim that it paid. Idempotent against Apple redelivering the same transaction (app
+// relaunch, retry) via processedAppleTransactions; a subscription renewal is a distinct
+// transactionId each period, so each renewal still tops up credits exactly once.
+export const verifyApplePurchase = onCall(
+  { secrets: [appleIapKeyId, appleIapIssuerId, appleIapPrivateKey] },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { transactionId } = request.data as { transactionId: string };
+    if (!transactionId) throw new HttpsError('invalid-argument', 'Missing transactionId.');
+
+    const processedRef = db.collection('processedAppleTransactions').doc(transactionId);
+    if ((await processedRef.get()).exists) {
+      return { alreadyProcessed: true };
+    }
+
+    const creds = {
+      keyId: appleIapKeyId.value(),
+      issuerId: appleIapIssuerId.value(),
+      privateKey: appleIapPrivateKey.value(),
+      bundleId: APPLE_BUNDLE_ID,
+    };
+    const info = await getTransactionInfo(creds, transactionId);
+    if (info.bundleId !== APPLE_BUNDLE_ID) {
+      throw new HttpsError('failed-precondition', 'Transaction does not belong to this app.');
+    }
+
+    const userRef = db.collection('users').doc(uid);
+
+    if (SUBSCRIPTION_PRODUCT_IDS[info.productId]) {
+      const planId = SUBSCRIPTION_PRODUCT_IDS[info.productId];
+      await userRef.set(
+        {
+          plan: planId,
+          planRenewsAt: info.expiresDate,
+          credits: FieldValue.increment(MONTHLY_CREDITS_FOR_PLAN[planId]),
+        },
+        { merge: true }
+      );
+    } else if (CREDIT_PACK_PRODUCT_IDS[info.productId] != null) {
+      await userRef.set({ credits: FieldValue.increment(CREDIT_PACK_PRODUCT_IDS[info.productId]) }, { merge: true });
+    } else if (THEME_IDS_BY_PRODUCT[info.productId]) {
+      await userRef
+        .collection('meta')
+        .doc('unlockedThemes')
+        .set({ themeIds: FieldValue.arrayUnion(...THEME_IDS_BY_PRODUCT[info.productId]) }, { merge: true });
+    } else {
+      throw new HttpsError('invalid-argument', `Unknown product: ${info.productId}`);
+    }
+
+    await processedRef.set({
+      uid,
+      productId: info.productId,
+      transactionId: info.transactionId,
+      environment: info.environment,
+      processedAt: Date.now(),
+    });
+
+    return { productId: info.productId, environment: info.environment };
   }
 );

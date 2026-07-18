@@ -32,6 +32,7 @@ module.exports = ({ config }) => ({
     'expo-web-browser',
     'expo-video',
     'expo-audio',
+    'react-native-iap',
   ],
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',

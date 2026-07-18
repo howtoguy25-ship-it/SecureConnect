@@ -125,24 +125,48 @@ editor afterward, fully editable.
 5. From then on, signing in provisions 8 free credits automatically, and the AI Site
    Builder button (New Project → pick a page type → "AI Site Builder") is live.
 
-## Phase 4 — Credits, Subscriptions & Paywall
+## Phase 4 — Credits, Subscriptions & Paywall — real purchases done
 
-**Partially built in Phase 3**: the credit ledger itself is real (server-side balance,
-transactional deduction, refund-on-failure — see `firebase/functions/src/index.ts`), and
-`src/data/pricing.ts` has the real Beginner/Middle Class/Advanced plans and credit-pack
-pricing you specified. `SubscriptionScreen` shows all of it. What's still missing:
+`SubscriptionScreen` (plans + credit packs) and `ThemeGalleryScreen` (luxury/luxury-crazy
+tier unlocks) now trigger **real Apple In-App Purchase** instead of a demo close-the-screen
+button, using `react-native-iap` (`src/services/iap.ts`):
 
-- **Real purchases.** Selecting a plan or pack on `SubscriptionScreen` currently just
-  closes the screen — no charge happens, matching the existing theme-purchase "demo mode"
-  pattern. Making it real means Apple In-App Purchase / StoreKit, **not** card payments —
-  Apple requires IAP for digital goods consumed inside an iOS app (guideline 3.1.1).
-  Needed from you: App Store Connect access to create the IAP products (you have this
-  now), plus server-side receipt validation wired into the same credit ledger.
-- **Post-signup/sign-in offer modal** with a dismiss-after-5-seconds close button,
-  shown until the user hits their credit limit — not built yet.
-- **Weekly credit reset + minimum-usage requirement** for the Middle Class plan, and
-  monthly resets for Beginner/Advanced — the pricing data models this
-  (`minimumUsageNote`/`billingPeriod`) but no scheduled function enforces it yet.
+- **9 real products** — see the exact product IDs/prices in `src/data/iapProducts.ts`
+  (mirrored server-side in `firebase/functions/src/iapProducts.ts`): 3 auto-renewable
+  subscriptions, 4 consumable credit packs, 2 non-consumable theme-tier unlocks (one
+  tier purchase unlocks every theme currently in that tier, not per individual theme).
+- **Server-authoritative verification.** `verifyApplePurchase` (Cloud Function) calls
+  Apple's real App Store Server API (`firebase/functions/src/appStoreApi.ts`) to fetch
+  and decode the actual signed transaction — the client never gets to just claim "I paid."
+  Only after that succeeds does the function apply the real effect: top up credits,
+  set the account's plan, or unlock a theme tier. Idempotent against Apple redelivering
+  the same transaction (`processedAppleTransactions` collection).
+- **Theme unlocks are no longer client-writable.** `users/{uid}/meta/unlockedThemes` was
+  fully client-writable before (fine when it was a no-payment demo) — now that it's a
+  real $189/$399 purchase, `firestore.rules` locks it to server-write-only so nobody can
+  grant themselves a theme for free.
+- **Untested territory, flagged in code:** like the Namecheap transfer API and Firebase
+  Hosting Domains API before it, the App Store Server API integration hasn't been
+  exercised against a real Apple transaction from this sandbox — treat the first real
+  purchase as something to debug together from a screenshot.
+
+**One-time setup needed from you** (in addition to the 9 App Store Connect products —
+exact IDs/prices in `iapProducts.ts`):
+1. App Store Connect → **Users and Access → Integrations → In-App Purchase** → generate
+   a new key. Note the **Key ID** and **Issuer ID**, and download the `.p8` file (Apple
+   only lets you download it once).
+2. Set three secrets the same safe way as every other credential in this project
+   (`firebase functions:secrets:set <NAME> --data-file <path>`, never pasted in chat):
+   `APPLE_IAP_KEY_ID`, `APPLE_IAP_ISSUER_ID`, and `APPLE_IAP_PRIVATE_KEY` (the full
+   contents of the downloaded `.p8` file).
+3. `expo-video`/`expo-audio`-style native module — **`react-native-iap` needs a fresh
+   `eas build`** (a JS-only reload/pull isn't enough) before purchases will work on a
+   real device.
+
+**Still not built:** a post-signup "here's what you get" offer modal, and the scheduled
+weekly credit reset + minimum-usage enforcement for the Middle Class plan (the pricing
+data models this via `minimumUsageNote`/`billingPeriod`, but no Cloud Scheduler function
+enforces it yet).
 
 ## Phase 5 — AI Chat Assistant (full app control) — done
 

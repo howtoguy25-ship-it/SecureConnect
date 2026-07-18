@@ -1,14 +1,56 @@
-import React from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { PLANS, CREDIT_PACKS } from '@/data/pricing';
+import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS } from '@/data/iapProducts';
+import { buySubscription, buyProduct, attachPurchaseListeners } from '@/services/iap';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Subscription'>;
 
 export default function SubscriptionScreen({ navigation }: Props) {
+  const [purchasingId, setPurchasingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const detach = attachPurchaseListeners(
+      () => {
+        setPurchasingId(null);
+        Alert.alert('Purchase complete', 'Your credits/plan have been updated.', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      },
+      (message) => {
+        setPurchasingId(null);
+        Alert.alert('Purchase failed', message);
+      }
+    );
+    return detach;
+  }, [navigation]);
+
+  const handleSelectPlan = async (planId: keyof typeof SUBSCRIPTION_PRODUCT_IDS) => {
+    setPurchasingId(planId);
+    try {
+      await buySubscription(SUBSCRIPTION_PRODUCT_IDS[planId]);
+    } catch (err: any) {
+      setPurchasingId(null);
+      Alert.alert('Could not start purchase', err?.message ?? 'Try again in a moment.');
+    }
+  };
+
+  const handleBuyPack = async (packId: string) => {
+    const productId = CREDIT_PACK_PRODUCT_IDS[packId];
+    if (!productId) return;
+    setPurchasingId(packId);
+    try {
+      await buyProduct(productId);
+    } catch (err: any) {
+      setPurchasingId(null);
+      Alert.alert('Could not start purchase', err?.message ?? 'Try again in a moment.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -36,8 +78,16 @@ export default function SubscriptionScreen({ navigation }: Props) {
               {plan.buildCostRange[0]}-{plan.buildCostRange[1]} credits · {plan.aiTierLabel}-tier AI ({plan.aiSpeedMultiplier}x)
             </Text>
             {plan.minimumUsageNote && <Text style={styles.planNote}>{plan.minimumUsageNote}</Text>}
-            <Pressable style={styles.selectButton} onPress={() => navigation.goBack()}>
-              <Text style={styles.selectButtonText}>Select {plan.name}</Text>
+            <Pressable
+              style={styles.selectButton}
+              onPress={() => handleSelectPlan(plan.id as keyof typeof SUBSCRIPTION_PRODUCT_IDS)}
+              disabled={purchasingId === plan.id}
+            >
+              {purchasingId === plan.id ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.selectButtonText}>Select {plan.name}</Text>
+              )}
             </Pressable>
           </View>
         ))}
@@ -45,17 +95,28 @@ export default function SubscriptionScreen({ navigation }: Props) {
         <Text style={styles.sectionTitle}>Or buy a credit pack</Text>
         <View style={styles.packsGrid}>
           {CREDIT_PACKS.map((pack) => (
-            <Pressable key={pack.id} style={styles.packCard} onPress={() => navigation.goBack()}>
-              <Text style={styles.packCredits}>{pack.credits}</Text>
-              <Text style={styles.packLabel}>credits</Text>
-              <Text style={styles.packPrice}>{pack.priceLabel}</Text>
+            <Pressable
+              key={pack.id}
+              style={styles.packCard}
+              onPress={() => handleBuyPack(pack.id)}
+              disabled={purchasingId === pack.id}
+            >
+              {purchasingId === pack.id ? (
+                <ActivityIndicator color="#4338CA" />
+              ) : (
+                <>
+                  <Text style={styles.packCredits}>{pack.credits}</Text>
+                  <Text style={styles.packLabel}>credits</Text>
+                  <Text style={styles.packPrice}>{pack.priceLabel}</Text>
+                </>
+              )}
             </Pressable>
           ))}
         </View>
 
         <Text style={styles.demoNote}>
-          Demo mode: no real payment is processed yet. Real purchases will use Apple's In-App
-          Purchase once App Store Connect products are configured (see ROADMAP.md).
+          Payments are processed by Apple through In-App Purchase. Manage or cancel a
+          subscription any time from your Apple ID settings.
         </Text>
       </ScrollView>
     </SafeAreaView>

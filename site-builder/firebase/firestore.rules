@@ -16,12 +16,21 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Projects and unlocked-theme purchases are fully owned/edited by the client.
+    // Projects are fully owned/edited by the client.
     match /users/{uid}/projects/{projectId} {
       allow read, write: if isOwner(uid);
     }
+
+    // Other per-account meta docs are client-owned, EXCEPT unlockedThemes below, which
+    // is now a real paid unlock (verifyApplePurchase) and must not be client-writable --
+    // otherwise anyone could grant themselves a $189/$399 theme for free.
     match /users/{uid}/meta/{docId} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid) && docId != 'unlockedThemes';
+    }
+    match /users/{uid}/meta/unlockedThemes {
+      allow read: if isOwner(uid);
+      allow write: if false;
     }
 
     // AI builder generation sessions (progress, pause state, credit deductions) are
@@ -64,6 +73,11 @@ service cloud.firestore {
     match /users/{uid}/domainTransfers/{transferId} {
       allow read: if isOwner(uid);
       allow write: if false;
+    }
+
+    // Idempotency ledger for verifyApplePurchase -- Admin SDK only, no client access.
+    match /processedAppleTransactions/{transactionId} {
+      allow read, write: if false;
     }
   }
 }

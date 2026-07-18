@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,8 @@ import { projectsStore } from '@/storage/projectsStore';
 import { createProject } from '@/utils/createProject';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { useAuth } from '@/context/AuthContext';
+import { THEME_TIER_PRODUCT_IDS } from '@/data/iapProducts';
+import { buyProduct, attachPurchaseListeners } from '@/services/iap';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeGallery'>;
 
@@ -38,6 +41,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const uid = user!.uid;
   const [unlocked, setUnlocked] = useState<string[]>([]);
   const [purchaseTheme, setPurchaseTheme] = useState<Theme | null>(null);
+  const [purchasing, setPurchasing] = useState(false);
   const [nameModal, setNameModal] = useState<Theme | null>(null);
   const [nameValue, setNameValue] = useState('');
 
@@ -46,6 +50,32 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
       unlockedThemesStore.list(uid).then(setUnlocked);
     }, [uid])
   );
+
+  useEffect(() => {
+    const detach = attachPurchaseListeners(
+      async (productId) => {
+        const tier = (Object.keys(THEME_TIER_PRODUCT_IDS) as ThemeTier[]).find(
+          (t) => THEME_TIER_PRODUCT_IDS[t as 'luxury' | 'luxury-crazy'] === productId
+        );
+        setPurchasing(false);
+        if (!tier) return;
+        const freshlyUnlocked = await unlockedThemesStore.list(uid);
+        setUnlocked(freshlyUnlocked);
+        const theme = purchaseTheme;
+        setPurchaseTheme(null);
+        if (theme) {
+          setNameValue(`My ${PAGE_TYPE_INFO[pageType].title}`);
+          setNameModal(theme);
+        }
+      },
+      (message) => {
+        setPurchasing(false);
+        Alert.alert('Purchase failed', message);
+      }
+    );
+    return detach;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, purchaseTheme, pageType]);
 
   const isLocked = (theme: Theme) => theme.price > 0 && !unlocked.includes(theme.id);
 
@@ -60,12 +90,15 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
 
   const confirmPurchase = async () => {
     if (!purchaseTheme) return;
-    await unlockedThemesStore.unlock(uid, purchaseTheme.id);
-    setUnlocked((prev) => [...prev, purchaseTheme.id]);
-    const theme = purchaseTheme;
-    setPurchaseTheme(null);
-    setNameValue(`My ${PAGE_TYPE_INFO[pageType].title}`);
-    setNameModal(theme);
+    const productId = THEME_TIER_PRODUCT_IDS[purchaseTheme.tier as 'luxury' | 'luxury-crazy'];
+    if (!productId) return;
+    setPurchasing(true);
+    try {
+      await buyProduct(productId);
+    } catch (err: any) {
+      setPurchasing(false);
+      Alert.alert('Could not start purchase', err?.message ?? 'Try again in a moment.');
+    }
   };
 
   const createAndOpen = async () => {
@@ -133,16 +166,19 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Unlock "{purchaseTheme?.name}"</Text>
             <Text style={styles.modalBody}>
-              This is a one-time purchase of ${purchaseTheme?.price} for this theme.{'\n\n'}
-              Demo mode: no real payment is processed yet — real purchases will use Apple's
-              In-App Purchase once App Store Connect products are configured (see Roadmap).
+              A one-time Apple In-App Purchase of ${purchaseTheme?.price} unlocks every theme in this
+              tier, not just this one. Payment is handled entirely by Apple.
             </Text>
             <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancel} onPress={() => setPurchaseTheme(null)}>
+              <Pressable style={styles.modalCancel} onPress={() => setPurchaseTheme(null)} disabled={purchasing}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.modalConfirm} onPress={confirmPurchase}>
-                <Text style={styles.modalConfirmText}>Buy ${purchaseTheme?.price}</Text>
+              <Pressable style={styles.modalConfirm} onPress={confirmPurchase} disabled={purchasing}>
+                {purchasing ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Buy ${purchaseTheme?.price}</Text>
+                )}
               </Pressable>
             </View>
           </View>
