@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
-import { PLANS, CREDIT_PACKS } from '@/data/pricing';
+import { PLANS, CREDIT_PACKS, computeBuildCost } from '@/data/pricing';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS } from '@/data/iapProducts';
 import { buySubscription, buyProduct, attachPurchaseListeners } from '@/services/iap';
 
@@ -74,8 +74,10 @@ export default function SubscriptionScreen({ navigation }: Props) {
               <Text style={styles.planPrice}>{plan.priceLabel}</Text>
             </View>
             <Text style={styles.planDetail}>
-              {plan.monthlyCredits} credits {plan.billingPeriod === 'weekly-reset' ? '(resets weekly)' : '/mo'} · builds cost{' '}
-              {plan.buildCostRange[0]}-{plan.buildCostRange[1]} credits · {plan.aiTierLabel}-tier AI ({plan.aiSpeedMultiplier}x)
+              {plan.monthlyCredits} credits {plan.billingPeriod === 'weekly-reset' ? '(resets weekly)' : '/mo'} · {plan.aiTierLabel}-tier AI ({plan.aiSpeedMultiplier}x)
+            </Text>
+            <Text style={styles.planDetail}>
+              Per build: Simple {computeBuildCost(plan.id, 'simple')} · Professional {computeBuildCost(plan.id, 'standard')} · Go All Out {computeBuildCost(plan.id, 'crazy')} credits
             </Text>
             {plan.minimumUsageNote && <Text style={styles.planNote}>{plan.minimumUsageNote}</Text>}
             <Pressable

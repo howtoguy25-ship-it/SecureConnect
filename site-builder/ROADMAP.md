@@ -109,7 +109,7 @@ editor afterward, fully editable.
   session doc in real time — shows exactly what step it's on, minutes elapsed, credits
   used, and a **Pause** button (max 2 per build) that lets you type an extra instruction
   before it continues.
-- **Credits**: 8 free on signup; a build's cost is checked and deducted **server-side**
+- **Credits**: 30 free on signup; a build's cost is checked and deducted **server-side**
   in a Firestore transaction before generation starts (never trust the client for this);
   refunded automatically if generation errors out. Running short routes to a
   subscription/credit-pack screen (`SubscriptionScreen` — pricing is real, purchases are
@@ -156,7 +156,7 @@ editor afterward, fully editable.
    ```
    firebase deploy --only functions,firestore:rules,storage
    ```
-5. From then on, signing in provisions 8 free credits automatically, and the AI Site
+5. From then on, signing in provisions 30 free credits automatically, and the AI Site
    Builder button (New Project → pick a page type → "AI Site Builder") is live.
 
 ## Phase 4 — Credits, Subscriptions & Paywall — real purchases done

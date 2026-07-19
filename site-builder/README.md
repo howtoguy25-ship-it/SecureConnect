@@ -137,7 +137,7 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 - Real AI Site Builder: describe a site in up to 4,000 words, pick a detail level, and a
   Cloud Functions backend calls OpenAI to write real copy and generate real images,
   laying them onto an editable canvas — with live progress, pause-to-add-something (max
-  2), and server-side credit deduction (8 free on signup).
+  2), and server-side credit deduction (30 free on signup).
 - Real persistent AI chat assistant ("Spark"): a floating button on every signed-in
   screen opens a chat that answers questions and can drive the app for you — jump to
   your projects, open the build picker for a page type, or open the AI prompt screen

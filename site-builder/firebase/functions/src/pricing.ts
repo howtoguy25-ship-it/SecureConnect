@@ -4,7 +4,7 @@ import { PlanId } from './types';
 // rather than shared. This copy is the one that's actually authoritative for credit
 // deduction, since it runs server-side.
 
-export const FREE_SIGNUP_CREDITS = 8;
+export const FREE_SIGNUP_CREDITS = 30;
 
 const BUILD_COST_RANGE: Record<Exclude<PlanId, 'free'>, [number, number]> = {
   beginner: [15, 30],

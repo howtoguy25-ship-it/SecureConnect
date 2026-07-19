@@ -15,7 +15,7 @@ export interface Plan {
   minimumUsageNote?: string;
 }
 
-export const FREE_SIGNUP_CREDITS = 8;
+export const FREE_SIGNUP_CREDITS = 30;
 
 // Plan pricing/credit mechanics exactly as specified in the product brief. Kept as one
 // source of truth here for client display; firebase/functions/src/pricing.ts mirrors this
