@@ -6,21 +6,26 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '@/navigation/authTypes';
 import { usePhoneVerification } from '@/hooks/usePhoneVerification';
 import { friendlyAuthError } from '@/utils/authErrors';
+import CountryCodePicker from '@/components/CountryCodePicker';
+import { COUNTRY_DIAL_CODES, DEFAULT_COUNTRY_ISO2 } from '@/data/countryCodes';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'PhoneAuth'>;
 
 const E164 = /^\+[1-9]\d{6,14}$/;
+const DEFAULT_COUNTRY = COUNTRY_DIAL_CODES.find((c) => c.iso2 === DEFAULT_COUNTRY_ISO2)!;
 
 export default function PhoneAuthScreen({ navigation }: Props) {
   const { recaptchaRef, RecaptchaModal, sendCode } = usePhoneVerification();
-  const [phoneNumber, setPhoneNumber] = useState('+');
+  const [country, setCountry] = useState(DEFAULT_COUNTRY);
+  const [nationalNumber, setNationalNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
     setError(null);
+    const phoneNumber = `${country.dialCode}${nationalNumber.replace(/[^0-9]/g, '')}`;
     if (!E164.test(phoneNumber)) {
-      setError('Enter your full number with country code, e.g. +61 408 680 813.');
+      setError('Enter your full phone number.');
       return;
     }
     setBusy(true);
@@ -47,13 +52,16 @@ export default function PhoneAuthScreen({ navigation }: Props) {
       <View style={styles.form}>
         <Text style={styles.body}>We'll text you a verification code. Standard message rates may apply.</Text>
         <Text style={styles.label}>Phone Number</Text>
-        <TextInput
-          style={styles.input}
-          value={phoneNumber}
-          onChangeText={setPhoneNumber}
-          keyboardType="phone-pad"
-          placeholder="+61 408 680 813"
-        />
+        <View style={styles.phoneRow}>
+          <CountryCodePicker value={country} onChange={setCountry} />
+          <TextInput
+            style={styles.phoneInput}
+            value={nationalNumber}
+            onChangeText={(t) => setNationalNumber(t.replace(/[^0-9]/g, ''))}
+            keyboardType="phone-pad"
+            placeholder="408 680 813"
+          />
+        </View>
         {error && <Text style={styles.error}>{error}</Text>}
         <Pressable style={styles.submitButton} onPress={submit} disabled={busy}>
           {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>Send Code</Text>}
@@ -72,7 +80,16 @@ const styles = StyleSheet.create({
   form: { paddingHorizontal: 24, marginTop: 20 },
   body: { fontSize: 14, color: '#64748B', marginBottom: 20, lineHeight: 20 },
   label: { fontSize: 13, fontWeight: '600', color: '#334155', marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  phoneRow: { flexDirection: 'row', gap: 10 },
+  phoneInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+  },
   error: { color: '#DC2626', fontSize: 13, marginTop: 12 },
   submitButton: {
     marginTop: 24,
