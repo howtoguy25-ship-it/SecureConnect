@@ -150,7 +150,7 @@ editor afterward, fully editable.
 
 `SubscriptionScreen` (plans + credit packs) and `ThemeGalleryScreen` (luxury/luxury-crazy
 tier unlocks) now trigger **real Apple In-App Purchase** instead of a demo close-the-screen
-button, using `react-native-iap` (`src/services/iap.ts`):
+button, using `expo-iap` (`src/services/iap.ts`):
 
 - **9 real products** — see the exact product IDs/prices in `src/data/iapProducts.ts`
   (mirrored server-side in `firebase/functions/src/iapProducts.ts`): 3 auto-renewable
@@ -180,9 +180,14 @@ exact IDs/prices in `iapProducts.ts`):
    (`firebase functions:secrets:set <NAME> --data-file <path>`, never pasted in chat):
    `APPLE_IAP_KEY_ID`, `APPLE_IAP_ISSUER_ID`, and `APPLE_IAP_PRIVATE_KEY` (the full
    contents of the downloaded `.p8` file).
-3. `expo-video`/`expo-audio`-style native module — **`react-native-iap` needs a fresh
+3. `expo-video`/`expo-audio`-style native module — **`expo-iap` needs a fresh
    `eas build`** (a JS-only reload/pull isn't enough) before purchases will work on a
-   real device.
+   real device. (This app originally used `react-native-iap` v13, which turned out to be
+   incompatible with React Native's mandatory New Architecture on RN 0.86/Expo SDK 57 --
+   its podspec depends on a standalone `RCT-Folly` pod that no longer exists now that
+   Folly ships bundled inside RN's own prebuilt core, so `pod install` failed with
+   `Unable to find a specification for 'RCT-Folly' depended upon by 'RNIap'`. Migrated to
+   `expo-iap`, an actively maintained Expo-native module with the same purchase flow.)
 
 **Still not built:** a post-signup "here's what you get" offer modal, and the scheduled
 weekly credit reset + minimum-usage enforcement for the Middle Class plan (the pricing

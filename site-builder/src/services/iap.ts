@@ -1,16 +1,14 @@
 import {
   initConnection,
-  getProducts,
-  getSubscriptions,
+  fetchProducts,
   requestPurchase,
-  requestSubscription,
   finishTransaction,
   purchaseUpdatedListener,
   purchaseErrorListener,
   Purchase,
   Product,
-  Subscription,
-} from 'react-native-iap';
+  ProductSubscription,
+} from 'expo-iap';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/services/firebase';
 import { requireFunctions } from '@/services/requireFunctions';
@@ -24,11 +22,11 @@ export async function ensureIapConnection(): Promise<void> {
   connected = true;
 }
 
-export async function loadIapCatalog(): Promise<{ subscriptions: Subscription[]; products: Product[] }> {
+export async function loadIapCatalog(): Promise<{ subscriptions: ProductSubscription[]; products: Product[] }> {
   await ensureIapConnection();
   const [subscriptions, products] = await Promise.all([
-    getSubscriptions({ skus: SUBSCRIPTION_SKUS }),
-    getProducts({ skus: [...CONSUMABLE_SKUS, ...NON_CONSUMABLE_SKUS] }),
+    fetchProducts({ skus: SUBSCRIPTION_SKUS, type: 'subs' }) as Promise<ProductSubscription[]>,
+    fetchProducts({ skus: [...CONSUMABLE_SKUS, ...NON_CONSUMABLE_SKUS], type: 'in-app' }) as Promise<Product[]>,
   ]);
   return { subscriptions, products };
 }
@@ -70,10 +68,10 @@ export function attachPurchaseListeners(
 
 export async function buySubscription(sku: string): Promise<void> {
   await ensureIapConnection();
-  await requestSubscription({ sku });
+  await requestPurchase({ request: { apple: { sku } }, type: 'subs' });
 }
 
 export async function buyProduct(sku: string): Promise<void> {
   await ensureIapConnection();
-  await requestPurchase({ sku });
+  await requestPurchase({ request: { apple: { sku } }, type: 'in-app' });
 }

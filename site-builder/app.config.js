@@ -41,7 +41,7 @@ module.exports = ({ config }) => ({
     'expo-web-browser',
     'expo-video',
     'expo-audio',
-    'react-native-iap',
+    'expo-iap',
     [
       'expo-notifications',
       {
