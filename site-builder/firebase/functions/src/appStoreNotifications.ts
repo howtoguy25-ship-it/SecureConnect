@@ -4,12 +4,8 @@ import { APPLE_BUNDLE_ID } from './iapProducts';
 
 // The app's numeric App Store ID (NOT the bundle ID) -- App Store Connect -> your app ->
 // App Information -> General Information -> "Apple ID" (also the number in the app's public
-// apps.apple.com/.../id<this> URL once listed). Not a secret, just not known until the app
-// exists in App Store Connect -- fill it in once it does. Apple's library requires it to
-// construct a Production-environment verifier (it throws otherwise), so until it's set here,
-// production notification verification fails at call time -- see getProductionVerifier below --
-// rather than crashing the whole functions deploy the way a module-level throw would.
-const APPLE_APP_STORE_ID: number | undefined = undefined;
+// apps.apple.com/.../id<this> URL once listed).
+const APPLE_APP_STORE_ID: number | undefined = 6792486209;
 
 // Real verification of Apple's App Store Server Notifications V2 -- the inbound webhook
 // Apple calls on subscription lifecycle events (renewal, renewal failure, cancellation).
