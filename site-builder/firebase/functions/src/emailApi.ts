@@ -15,22 +15,35 @@ export async function sendOrderNotificationEmail(apiKey: string, sellerEmail: st
   const resend = new Resend(apiKey);
   const itemsList = order.items.map((item) => `${item.quantity} × ${item.name} — $${(item.priceUsd * item.quantity).toFixed(2)}`).join('<br>');
 
+  // A booking's date/time/notes are shown prominently -- this is what makes it read as a
+  // real, specific reservation to fulfill, not just an anonymous charge that arrived.
+  const bookingBlock = order.bookingDetails
+    ? `<div style="background:#EEF2FF;border-radius:8px;padding:12px;margin:12px 0;">
+        <strong>Booking requested:</strong> ${order.bookingDetails.preferredDate} at ${order.bookingDetails.preferredTime}<br>
+        ${order.bookingDetails.notes ? `<em>Notes: ${order.bookingDetails.notes}</em>` : ''}
+      </div>`
+    : '';
+
   await resend.emails.send({
     from: 'SiteSpark Orders <orders@buildsitespark.com>',
     to: sellerEmail,
-    subject: `New order — $${order.sellerNetUsd.toFixed(2)} after fees`,
+    subject: order.bookingDetails
+      ? `New booking request — $${order.sellerNetUsd.toFixed(2)} after fees`
+      : `New order — $${order.sellerNetUsd.toFixed(2)} after fees`,
     html: `
       <div style="font-family:-apple-system,sans-serif;max-width:480px;margin:0 auto;">
-        <h2>You've got a new order</h2>
+        <h2>${order.bookingDetails ? "You've got a new booking" : "You've got a new order"}</h2>
         <p>${itemsList}</p>
+        ${bookingBlock}
         <p>
           Subtotal: $${order.subtotalUsd.toFixed(2)}<br>
           Platform fee: -$${order.platformFeeUsd.toFixed(2)}<br>
           <strong>Your payout: $${order.sellerNetUsd.toFixed(2)}</strong>
         </p>
         <p style="color:#64748B;font-size:13px;">
-          Buyer: ${order.buyerName ?? 'Unknown'} (${order.buyerEmail ?? 'no email provided'})<br>
-          View this order and your full payout history in the SiteSpark app.
+          ${order.bookingDetails ? 'Customer' : 'Buyer'}: ${order.buyerName ?? 'Unknown'} (${order.buyerEmail ?? 'no email provided'})<br>
+          This was a single real payment via Stripe -- not a recurring charge.<br>
+          View this ${order.bookingDetails ? 'booking' : 'order'} and your full payout history in the SiteSpark app.
         </p>
       </div>
     `,

@@ -15,6 +15,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '@/services/firebase';
 import { ensureAccount } from '@/services/aiBuilder';
+import { registerForPushNotifications, unregisterCurrentDeviceToken } from '@/services/pushNotifications';
 
 function requireAuth() {
   if (!auth) {
@@ -56,6 +57,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Fire-and-forget: guarantees the credits doc exists so the balance UI has
         // something to show immediately, even for accounts older than this function.
         ensureAccount().catch(() => {});
+        // Also fire-and-forget -- a denied/skipped permission prompt shouldn't block
+        // sign-in, and most of the time this is a no-op after the very first launch.
+        registerForPushNotifications(nextUser.uid).catch(() => {});
       }
     });
     return unsubscribe;
@@ -97,6 +101,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    const currentUid = requireAuth().currentUser?.uid;
+    // Must run before firebaseSignOut -- deleting the token doc needs to still be
+    // authenticated as this uid, otherwise Firestore rules would reject the delete.
+    if (currentUid) await unregisterCurrentDeviceToken(currentUid).catch(() => {});
     await firebaseSignOut(requireAuth());
   };
 

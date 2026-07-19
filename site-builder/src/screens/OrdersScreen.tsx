@@ -15,9 +15,19 @@ function OrderRow({ order }: { order: StoreOrder }) {
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
+        {order.bookingDetails && (
+          <Text style={styles.bookingBadge}>
+            📅 {order.bookingDetails.preferredDate} at {order.bookingDetails.preferredTime}
+          </Text>
+        )}
         <Text style={styles.itemsText} numberOfLines={2}>
           {itemsSummary}
         </Text>
+        {order.bookingDetails?.notes ? (
+          <Text style={styles.notesText} numberOfLines={2}>
+            Note: {order.bookingDetails.notes}
+          </Text>
+        ) : null}
         <Text style={styles.buyerText}>{order.buyerName ?? order.buyerEmail ?? 'Buyer'} · {new Date(order.createdAt).toLocaleDateString()}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
@@ -75,6 +85,8 @@ const styles = StyleSheet.create({
   },
   itemsText: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
   buyerText: { fontSize: 12, color: '#94A3B8', marginTop: 4 },
+  bookingBadge: { fontSize: 11, fontWeight: '700', color: '#4338CA', marginBottom: 2 },
+  notesText: { fontSize: 12, color: '#64748B', fontStyle: 'italic', marginTop: 2 },
   netText: { fontSize: 15, fontWeight: '800', color: '#16A34A' },
   feeText: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
 });

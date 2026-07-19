@@ -121,23 +121,33 @@ function renderElement(el: CanvasElement): string {
       } playsinline controls></video>${audioTag}${script}`;
     }
     case 'product': {
+      const isService = el.saleType === 'service';
       const imgTag = el.images[0]
         ? `<img src="${escapeAttr(el.images[0])}" style="width:100%;height:55%;object-fit:cover;display:block;" />`
         : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
       const qtyId = `qty-${el.id}`;
+      const badge = isService
+        ? `📅 Service booking${el.serviceDurationMinutes ? ` · ${el.serviceDurationMinutes} min` : ''}`
+        : el.fulfillment === 'delivery'
+          ? '📦 Delivery'
+          : el.fulfillment === 'both'
+            ? '📦 Delivery or pickup'
+            : '🏬 Pickup';
       return `<div style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
-    <div style="font-weight:700;font-size:14px;color:#0F172A;">${escapeHtml(el.name)}</div>
+    <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
+    <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name)}</div>
     <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
       <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
       <input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />
     </div>
     <button
-      onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value)"
+      onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value,${JSON.stringify(el.saleType)})"
       style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
-    >Add to Cart</button>
+    >${isService ? 'Book Now' : 'Add to Cart'}</button>
+    ${isService ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">One-time payment for a real reservation — not a recurring charge.</div>' : ''}
   </div>
 </div>`;
     }
@@ -156,9 +166,18 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
   return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
   🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
 </div>
-<div id="sitespark-cart-panel" style="display:none;position:fixed;bottom:88px;right:20px;z-index:9998;width:280px;max-height:60vh;overflow-y:auto;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
+<div id="sitespark-cart-panel" style="display:none;position:fixed;bottom:88px;right:20px;z-index:9998;width:280px;max-height:70vh;overflow-y:auto;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
   <div style="font-weight:700;margin-bottom:8px;color:#0F172A;">Your cart</div>
   <div id="sitespark-cart-items"></div>
+  <div id="sitespark-booking-fields" style="display:none;margin-top:10px;border-top:1px solid #F1F5F9;padding-top:10px;">
+    <div style="font-size:11px;font-weight:700;color:#4338CA;text-transform:uppercase;margin-bottom:6px;">Booking details</div>
+    <label style="font-size:11px;color:#64748B;">Preferred date</label>
+    <input id="sitespark-booking-date" type="date" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
+    <label style="font-size:11px;color:#64748B;">Preferred time</label>
+    <input id="sitespark-booking-time" type="time" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
+    <label style="font-size:11px;color:#64748B;">Notes (optional)</label>
+    <textarea id="sitespark-booking-notes" rows="2" placeholder="Anything the business should know" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin-top:2px;resize:vertical;"></textarea>
+  </div>
   <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:10px;color:#0F172A;">
     <span>Total</span><span id="sitespark-cart-total">$0.00</span>
   </div>
@@ -171,27 +190,30 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
   var STORAGE_KEY='sitespark_cart_'+SLUG;
   function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]; } catch(e){ return []; } }
   function save(items){ localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); render(); }
+  function hasService(items){ return items.some(function(i){ return i.saleType === 'service'; }); }
   function render(){
     var items = load();
     var count = items.reduce(function(s,i){return s+i.quantity;},0);
     var total = items.reduce(function(s,i){return s+i.priceUsd*i.quantity;},0);
     document.getElementById('sitespark-cart-count').textContent = String(count);
     document.getElementById('sitespark-cart-total').textContent = '$'+total.toFixed(2);
+    document.getElementById('sitespark-booking-fields').style.display = hasService(items) ? 'block' : 'none';
     var list = document.getElementById('sitespark-cart-items');
     if (items.length === 0) { list.innerHTML = '<div style="color:#94A3B8;font-size:13px;">Cart is empty</div>'; return; }
     list.innerHTML = items.map(function(i){
+      var badge = i.saleType === 'service' ? '📅 ' : '';
       return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px;">'
-        + '<span>'+i.quantity+'&times; '+i.name+'</span>'
+        + '<span>'+badge+i.quantity+'&times; '+i.name+'</span>'
         + '<span style="display:flex;align-items:center;gap:6px;"><span>$'+(i.priceUsd*i.quantity).toFixed(2)+'</span>'
         + '<a href="#" onclick="siteSparkCart.remove('+JSON.stringify(i.productId)+');return false;" style="color:#DC2626;">&times;</a></span>'
         + '</div>';
     }).join('');
   }
-  function add(productId, name, priceUsd, qtyRaw){
+  function add(productId, name, priceUsd, qtyRaw, saleType){
     var qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
     var items = load();
     var existing = items.filter(function(i){ return i.productId === productId; })[0];
-    if (existing) { existing.quantity += qty; } else { items.push({ productId: productId, name: name, priceUsd: priceUsd, quantity: qty }); }
+    if (existing) { existing.quantity += qty; } else { items.push({ productId: productId, name: name, priceUsd: priceUsd, quantity: qty, saleType: saleType }); }
     save(items);
     document.getElementById('sitespark-cart-panel').style.display = 'block';
   }
@@ -203,10 +225,23 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
   function checkout(){
     var items = load();
     if (items.length === 0) return;
+    var needsBooking = hasService(items);
+    var booking = undefined;
+    if (needsBooking) {
+      var date = document.getElementById('sitespark-booking-date').value;
+      var time = document.getElementById('sitespark-booking-time').value;
+      var notes = document.getElementById('sitespark-booking-notes').value;
+      if (!date || !time) { alert('Please pick a preferred date and time for your booking.'); return; }
+      booking = { preferredDate: date, preferredTime: time, notes: notes };
+    }
     fetch(CHECKOUT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slug: SLUG, items: items.map(function(i){ return { productId: i.productId, quantity: i.quantity }; }) }),
+      body: JSON.stringify({
+        slug: SLUG,
+        items: items.map(function(i){ return { productId: i.productId, quantity: i.quantity }; }),
+        booking: booking,
+      }),
     })
       .then(function(r){ return r.json(); })
       .then(function(data){
@@ -221,9 +256,12 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
   var params = new URLSearchParams(window.location.search);
   var order = params.get('order');
   if (order === 'success' || order === 'cancelled') {
+    var wasBooking = hasService(load());
     localStorage.removeItem(STORAGE_KEY);
     var banner = document.getElementById('sitespark-order-banner');
-    banner.textContent = order === 'success' ? 'Thanks — your order is confirmed!' : 'Checkout was cancelled.';
+    banner.textContent = order === 'success'
+      ? (wasBooking ? 'Thanks — your booking is confirmed!' : 'Thanks — your order is confirmed!')
+      : 'Checkout was cancelled.';
     banner.style.background = order === 'success' ? '#16A34A' : '#64748B';
     banner.style.color = '#fff';
     banner.style.display = 'block';

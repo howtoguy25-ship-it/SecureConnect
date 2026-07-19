@@ -33,6 +33,14 @@ module.exports = ({ config }) => ({
     'expo-video',
     'expo-audio',
     'react-native-iap',
+    [
+      'expo-notifications',
+      {
+        // Shown briefly on Android when a notification arrives -- iOS uses the app icon.
+        // No custom sound/icon assets exist for this yet, so this uses expo-notifications'
+        // own defaults rather than pointing at files that don't exist.
+      },
+    ],
   ],
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',

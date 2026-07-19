@@ -57,6 +57,13 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    // Real push-notification device tokens -- an opaque routing address (like a phone
+    // number for push), not a secret, so the client registers/removes its own directly
+    // rather than through a Cloud Function.
+    match /users/{uid}/pushTokens/{token} {
+      allow read, write: if isOwner(uid);
+    }
+
     // Published-site content and custom-domain routing -- written only by Cloud Functions
     // (publishProject/connectDomain) and read only by servePublishedSite, which uses the
     // Admin SDK and so bypasses these rules entirely. No client, including the owning

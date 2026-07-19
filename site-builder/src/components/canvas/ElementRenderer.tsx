@@ -170,7 +170,16 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         </View>
       )}
       <View style={{ padding: 8 }}>
-        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
+        <Text style={{ fontSize: 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
+          {element.saleType === 'service'
+            ? `Service${element.serviceDurationMinutes ? ` · ${element.serviceDurationMinutes}m` : ''}`
+            : element.fulfillment === 'delivery'
+              ? 'Delivery'
+              : element.fulfillment === 'both'
+                ? 'Delivery/Pickup'
+                : 'Pickup'}
+        </Text>
+        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A', marginTop: 1 }}>
           {element.name || 'Untitled product'}
         </Text>
         <Text style={{ fontSize: 13, color: '#4338CA', fontWeight: '700', marginTop: 2 }}>
@@ -178,7 +187,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         </Text>
         {element.trackInventory ? (
           <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
-            {element.initialStock ?? 0} in stock
+            {element.initialStock ?? 0} {element.saleType === 'service' ? 'bookings left' : 'in stock'}
           </Text>
         ) : null}
       </View>

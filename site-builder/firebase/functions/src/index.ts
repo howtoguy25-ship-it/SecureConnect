@@ -20,6 +20,7 @@ import {
   StoreOrderItem,
   SellerAccount,
   OrderNotice,
+  BookingDetails,
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
@@ -46,6 +47,7 @@ import {
 import { createStripeClient, createCheckoutSession } from './stripeApi';
 import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink } from './stripeConnect';
 import { sendOrderNotificationEmail } from './emailApi';
+import { sendPushNotification } from './pushApi';
 import { getTransactionInfo } from './appStoreApi';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN, APPLE_BUNDLE_ID } from './iapProducts';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -533,6 +535,9 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
       images: el.images,
       trackInventory: el.trackInventory,
       stockQuantity,
+      saleType: el.saleType,
+      fulfillment: el.fulfillment,
+      serviceDurationMinutes: el.serviceDurationMinutes,
       updatedAt: Date.now(),
     };
     batch.set(refs[i], item);
@@ -830,6 +835,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
   if ((await orderRef.get()).exists) return;
 
   const items = JSON.parse(itemsJson) as StoreOrderItem[];
+  const bookingDetails: BookingDetails | null = session.metadata?.booking ? (JSON.parse(session.metadata.booking) as BookingDetails) : null;
   const subtotalUsd = items.reduce((sum, item) => sum + item.priceUsd * item.quantity, 0);
   const platformFeeUsd = Math.round(subtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
   const sellerNetUsd = Math.round((subtotalUsd - platformFeeUsd) * 100) / 100;
@@ -860,6 +866,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
     platformFeeUsd,
     sellerNetUsd,
     stripeSessionId: session.id,
+    bookingDetails,
     status: 'paid',
     createdAt: Date.now(),
   };
@@ -867,10 +874,18 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
 
   const notice: OrderNotice = {
     orderId: session.id,
-    message: `New order — $${sellerNetUsd.toFixed(2)} after fees.`,
+    message: bookingDetails
+      ? `New booking for ${bookingDetails.preferredDate} at ${bookingDetails.preferredTime} — $${sellerNetUsd.toFixed(2)} after fees.`
+      : `New order — $${sellerNetUsd.toFixed(2)} after fees.`,
     createdAt: Date.now(),
   };
   await db.collection('users').doc(sellerUid).set({ lastOrderNotice: notice }, { merge: true });
+
+  await sendPushNotification(
+    sellerUid,
+    bookingDetails ? 'New booking' : 'New order',
+    bookingDetails ? `${bookingDetails.preferredDate} at ${bookingDetails.preferredTime} — $${sellerNetUsd.toFixed(2)} after fees.` : `$${sellerNetUsd.toFixed(2)} after fees.`
+  ).catch((err) => console.error('Push notification failed', err));
 
   try {
     const sellerAuthRecord = await getAuth().getUser(sellerUid);
@@ -1093,6 +1108,11 @@ export const appStoreServerNotifications = onRequest(async (req, res) => {
         },
         { merge: true }
       );
+      await sendPushNotification(
+        uid,
+        'Payment failed',
+        "We couldn't process your subscription renewal — your site will go offline in a few hours if this isn't resolved."
+      ).catch((err) => console.error('Push notification failed', err));
     }
     // Already past_due or suspended -- Apple's own billing retries continue in the
     // background for weeks; don't reset our grace-period clock or re-notify on each one.
@@ -1110,6 +1130,9 @@ export const appStoreServerNotifications = onRequest(async (req, res) => {
       { merge: true }
     );
     await unsuspendUserSites(uid);
+    await sendPushNotification(uid, 'Payment received', 'Your site is back online.').catch((err) =>
+      console.error('Push notification failed', err)
+    );
   }
 
   res.status(200).send('ok');
@@ -1140,6 +1163,10 @@ export const enforceBillingSuspensions = onSchedule('every 15 minutes', async ()
         },
       },
       { merge: true }
+    );
+
+    await sendPushNotification(uid, 'Site suspended', 'Your site has been taken down over a failed payment — renew to bring it back online.').catch(
+      (err) => console.error('Push notification failed', err)
     );
 
     const sitesSnap = await db.collection('publishedSites').where('uid', '==', uid).get();
@@ -1244,7 +1271,11 @@ export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey] }, 
 // baked into the PaymentIntent itself.
 export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors: true }, async (req, res) => {
   try {
-    const { slug, items } = req.body as { slug: string; items: { productId: string; quantity: number }[] };
+    const { slug, items, booking } = req.body as {
+      slug: string;
+      items: { productId: string; quantity: number }[];
+      booking?: { preferredDate?: string; preferredTime?: string; notes?: string };
+    };
     if (!slug || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'Missing slug or items.' });
       return;
@@ -1256,6 +1287,8 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
 
     let sellerUid: string | null = null;
     let subtotalUsd = 0;
+    let hasService = false;
+    let needsShipping = false;
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
     const orderItems: StoreOrderItem[] = [];
 
@@ -1276,19 +1309,35 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       }
       sellerUid = product.sellerUid;
       if (product.trackInventory && (product.stockQuantity ?? 0) < quantity) {
-        res.status(400).json({ error: `Not enough stock left for ${product.name}.` });
+        res.status(400).json({
+          error: product.saleType === 'service' ? `No more bookings available for ${product.name}.` : `Not enough stock left for ${product.name}.`,
+        });
         return;
       }
+      if (product.saleType === 'service') hasService = true;
+      if (product.saleType === 'product' && product.fulfillment !== 'pickup') needsShipping = true;
+
       subtotalUsd += product.priceUsd * quantity;
       lineItems.push({
-        price_data: { currency: 'usd', product_data: { name: product.name }, unit_amount: Math.round(product.priceUsd * 100) },
+        price_data: {
+          currency: 'usd',
+          product_data: { name: product.saleType === 'service' ? `${product.name} (booking)` : product.name },
+          unit_amount: Math.round(product.priceUsd * 100),
+        },
         quantity,
       });
-      orderItems.push({ productId: product.productId, name: product.name, priceUsd: product.priceUsd, quantity });
+      orderItems.push({ productId: product.productId, name: product.name, priceUsd: product.priceUsd, quantity, saleType: product.saleType });
     }
 
     if (!sellerUid) {
       res.status(400).json({ error: 'No valid items.' });
+      return;
+    }
+
+    // A booking needs a real preferred date/time -- this is what makes it a real
+    // reservation record instead of just an anonymous charge (see BookingDetails).
+    if (hasService && (!booking?.preferredDate?.trim() || !booking?.preferredTime?.trim())) {
+      res.status(400).json({ error: 'Please provide a preferred date and time for your booking.' });
       return;
     }
 
@@ -1300,11 +1349,19 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
 
     const platformFeeUsd = Math.round(subtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
     const stripe = createStripeClient(stripeSecretKey.value());
+    const bookingDetails: BookingDetails | null = hasService
+      ? {
+          preferredDate: (booking?.preferredDate ?? '').trim().slice(0, 40),
+          preferredTime: (booking?.preferredTime ?? '').trim().slice(0, 40),
+          notes: (booking?.notes ?? '').trim().slice(0, 500),
+        }
+      : null;
+
     const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
+      mode: 'payment', // always a single real one-time charge -- never a subscription, booking or not
       payment_method_types: ['card'],
       line_items: lineItems,
-      shipping_address_collection: { allowed_countries: ['US', 'CA', 'GB', 'AU', 'NZ'] },
+      ...(needsShipping ? { shipping_address_collection: { allowed_countries: ['US', 'CA', 'GB', 'AU', 'NZ'] as Stripe.Checkout.SessionCreateParams.ShippingAddressCollection.AllowedCountry[] } } : {}),
       success_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=success`,
       cancel_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=cancelled`,
       payment_intent_data: {
@@ -1316,6 +1373,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         slug,
         sellerUid,
         items: JSON.stringify(orderItems),
+        ...(bookingDetails ? { booking: JSON.stringify(bookingDetails) } : {}),
       },
     });
 

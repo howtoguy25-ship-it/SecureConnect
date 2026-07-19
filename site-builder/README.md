@@ -1,16 +1,22 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1-11)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
 real Firebase accounts, with a persistent AI chat assistant that can drive the app for
-you, real one-tap publishing to a live public URL, and a real storefront with payouts to
-your own bank account.
+you, real one-tap publishing to a live public URL, a real storefront (products or
+real-life service bookings) with payouts to your own bank account, and real OS push
+notifications.
+
+> ⚠️ **This folder is nested inside a different app's repo** (the parent folder is
+> TrackLine, a separate unrelated app) — always run commands from *this* folder, never the
+> parent one. See the callout at the top of `ROADMAP.md` for why this matters.
 
 This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder) +
 Phase 4 (subscriptions/IAP) + Phase 5 (AI chat assistant) + Phase 6 (video editor) +
 Phase 7 (publishing & domains) + Phase 8 (policies/support) + Phase 9 (billing-failure
-notifications & site suspension) + Phase 10 (storefront/payouts)** — see `ROADMAP.md` for
-what's built vs. what's next and what real accounts each phase needs.
+notifications & site suspension) + Phase 10 (storefront/payouts) + Phase 10b (real-life
+service bookings) + Phase 11 (real push notifications)** — see `ROADMAP.md` for what's
+built vs. what's next and what real accounts each phase needs.
 
 ## Stack
 
@@ -33,6 +39,7 @@ src/
   services/
     firebase.ts                   Firebase app/auth (RN-persisted)/firestore init
     recaptcha/                    Custom invisible-reCAPTCHA WebView for phone auth
+    pushNotifications.ts           Real Expo push token registration/removal
   context/
     AuthContext.tsx                Firebase Auth state + email/phone/Google/Apple methods
     EditorContext.tsx               Selected project/element state + mutations, autosaves
@@ -97,9 +104,12 @@ firebase/
                                     (scheduled site suspension on payment failure),
                                     createSellerOnboardingLink/getSellerAccountStatus/
                                     createSellerDashboardLink (real Stripe Connect payouts),
-                                    createStoreCheckout (public, real multi-item cart
-                                    checkout), stripeWebhook also creates real Order docs
-                                    + decrements inventory on a completed store sale
+                                    createStoreCheckout (public, real multi-item cart +
+                                    booking checkout), stripeWebhook also creates real
+                                    Order docs + decrements inventory on a completed store
+                                    sale/booking, sends a real push notification
+                                    (pushApi.ts, via Expo's push service) for billing
+                                    warnings and new orders/bookings
 public/                           Empty on purpose -- Firebase Hosting requires this dir
                                     to exist, but every request (any attached domain,
                                     any path) is rewritten to servePublishedSite, which
@@ -160,6 +170,13 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   own Stripe account (set up once in "My Store & Payouts"), never routed through
   SiteSpark's own balance. Real order records, a real-time in-app new-order banner, and a
   real email the moment someone buys something — see Phase 10 in ROADMAP.md.
+- Each Product block picks what it is: a physical good (buyer chooses pickup/delivery/both)
+  or a real-life service booking (buyer picks a date/time + notes, one real one-time
+  payment, never a subscription) — mix both on the same page, e.g. a car wash's bookable
+  wash plus a physical add-on. See Phase 10b in ROADMAP.md.
+- Real OS push notifications for billing warnings and new orders/bookings, on top of the
+  existing in-app banners and order emails — reaches you even with the app closed. See
+  Phase 11 in ROADMAP.md.
 
 ## Known gaps (see ROADMAP.md for the full breakdown)
 
@@ -175,10 +192,10 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   ROADMAP.md Phase 3 "Scoping decisions" for why.
 - A voluntary subscription cancellation doesn't trigger any billing-failure handling (by
   design — see Phase 9), and what happens to a plan/credits after a cancelled
-  subscription's period fully lapses isn't built yet. There's also no real OS push
-  notification infrastructure anywhere in the app — the Phase 9 warning (and Phase 10's
-  new-order notice) are real-time in-app banners plus, for orders, a real email — not an
-  OS push notification.
+  subscription's period fully lapses isn't built yet.
+- Bookings (Phase 10b) have no real calendar/time-slot availability — nothing stops two
+  buyers from booking the same date/time for the same service; a seller confirms/manages
+  their actual schedule outside the app for now.
 - Storefront (Phase 10) doesn't support product variants (size/color), in-app refunds (use
   the Stripe Dashboard directly for now), or shipping/fulfillment tracking — a seller
   handles fulfillment themselves once they see an order, same as most small storefronts.

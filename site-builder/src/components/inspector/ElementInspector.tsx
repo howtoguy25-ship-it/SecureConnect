@@ -265,6 +265,27 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
         )}
         {element.type === 'product' && (
           <>
+            <Text style={styles.fieldLabel}>What is this?</Text>
+            <View style={styles.rowButtons}>
+              <Pressable
+                style={[styles.toggleBtn, element.saleType === 'product' && styles.toggleBtnActive]}
+                onPress={() => onChange({ saleType: 'product' } as any)}
+              >
+                <Text style={styles.toggleBtnText}>🛍️ Physical product</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.toggleBtn, element.saleType === 'service' && styles.toggleBtnActive]}
+                onPress={() => onChange({ saleType: 'service' } as any)}
+              >
+                <Text style={styles.toggleBtnText}>📅 Real-life service</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.fieldLabel}>
+              {element.saleType === 'service'
+                ? 'Buyers pick a date/time and pay once to reserve it — a real one-time booking payment, never a recurring charge.'
+                : 'Buyers add it to their cart and pay once — you choose pickup, delivery, or both below.'}
+            </Text>
+
             <Text style={styles.fieldLabel}>Name</Text>
             <TextInput style={styles.textInput} value={element.name} onChangeText={(name) => onChange({ name } as any)} />
 
@@ -309,6 +330,32 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               ))}
             </View>
 
+            {element.saleType === 'product' ? (
+              <>
+                <Text style={styles.fieldLabel}>How do buyers get it?</Text>
+                <View style={styles.rowButtons}>
+                  {(['pickup', 'delivery', 'both'] as const).map((option) => (
+                    <Pressable
+                      key={option}
+                      style={[styles.toggleBtn, element.fulfillment === option && styles.toggleBtnActive]}
+                      onPress={() => onChange({ fulfillment: option } as any)}
+                    >
+                      <Text style={styles.toggleBtnText}>{option === 'pickup' ? 'Pickup' : option === 'delivery' ? 'Delivery' : 'Both'}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <SliderRow
+                label="Service duration (minutes)"
+                value={element.serviceDurationMinutes ?? 30}
+                min={5}
+                max={480}
+                step={5}
+                onChange={(v) => onChange({ serviceDurationMinutes: v } as any)}
+              />
+            )}
+
             <Pressable
               style={[styles.toggleBtn, element.trackInventory && styles.toggleBtnActive, { marginTop: 4 }]}
               onPress={() =>
@@ -318,11 +365,13 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
                 } as any)
               }
             >
-              <Text style={styles.toggleBtnText}>Track stock quantity {element.trackInventory ? 'On' : 'Off'}</Text>
+              <Text style={styles.toggleBtnText}>
+                {element.saleType === 'service' ? 'Limit bookings' : 'Track stock quantity'} {element.trackInventory ? 'On' : 'Off'}
+              </Text>
             </Pressable>
             {element.trackInventory && (
               <SliderRow
-                label="Starting stock"
+                label={element.saleType === 'service' ? 'Bookings available' : 'Starting stock'}
                 value={element.initialStock ?? 0}
                 min={0}
                 max={1000}
@@ -331,8 +380,10 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             )}
             <Text style={styles.fieldLabel}>
               {element.trackInventory
-                ? 'Stock only sets on first publish — after that, only real orders (or editing it here) change it.'
-                : 'Unlimited stock — buyers can always check out.'}
+                ? `${element.saleType === 'service' ? 'Booking limit' : 'Stock'} only sets on first publish — after that, only real ${element.saleType === 'service' ? 'bookings' : 'orders'} (or editing it here) change it.`
+                : element.saleType === 'service'
+                  ? 'No limit on bookings — buyers can always reserve a slot.'
+                  : 'Unlimited stock — buyers can always check out.'}
             </Text>
           </>
         )}

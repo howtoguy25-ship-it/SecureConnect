@@ -9,6 +9,17 @@ Cloud Functions pipeline that writes real content and generates real images for 
 prompted site, with live progress, pause-to-inject, and server-side credit deduction.
 Everything under "Still to come" is *not yet built*.
 
+**⚠️ This folder lives nested inside a different app's repo.** The parent folder (one level
+up from this one) is a completely separate Expo app called **TrackLine**
+(`com.trackline.navigate`) with its own `app.config.js`/`eas.json`/EAS project — it is not
+related to SiteSpark and the two are never meant to share a build. Always run
+`npm install`/`eas build`/`firebase deploy`/etc. from *this* folder
+(`.../site-builder`), never from the parent folder — running a command one directory too
+high builds/deploys TrackLine instead of SiteSpark, which is exactly what happened once
+already (a TrackLine build appeared in TestFlight when a SiteSpark build was intended). If
+this keeps being confusing, the real fix is moving this folder out into its own separate
+git repository entirely, so there's no nested folder to run a command from by mistake.
+
 ## What's real vs. mocked right now
 
 - Auth is wired to real Firebase Auth APIs (not mocked) — but it can't actually run until
@@ -521,6 +532,73 @@ beyond Stripe Checkout's own built-in address collection; no physical shipping/f
 tracking — a seller manages fulfillment themselves outside the app once they see an order,
 same as most small storefronts; no way to refund an order from inside the app yet (do it
 directly from the Stripe Dashboard for now).
+
+## Phase 10b — Real-life services & bookings — done
+
+Each Product block now picks what it actually is (Editor → select a product → "What is
+this?"), per product rather than per page/project — a car wash's page can mix a bookable
+service with a couple of physical add-ons on the same site:
+
+- **🛍️ Physical product**: unchanged from Phase 10 — buyers add to cart, and the seller
+  picks how it's fulfilled (**Pickup / Delivery / Both**, `ProductElement.fulfillment`).
+  `createStoreCheckout` only turns on Stripe's shipping-address collection when the cart
+  actually contains something needing delivery — a pickup-only cart never asks for an
+  address.
+- **📅 Real-life service**: the button reads "Book Now" instead of "Add to Cart", shows an
+  optional duration (`serviceDurationMinutes`), and checkout collects a **preferred
+  date, preferred time, and optional notes** for the reservation (added right in the cart
+  panel on the published page) — stored as real `BookingDetails` on the order, shown
+  prominently in the seller's order list, push notification, and email, so it reads as an
+  actual, specific reservation to fulfill, not an anonymous charge.
+- **Real one-time payment either way.** Every checkout — product or service — is
+  `mode: 'payment'` on Stripe, a single real charge. Nothing in this app ever sets up a
+  recurring/subscription charge for a storefront sale; the published page's service card
+  says so explicitly ("One-time payment for a real reservation — not a recurring charge")
+  so a buyer isn't left wondering if they just signed up for something ongoing.
+- The "track stock" mechanism from Phase 10 doubles as a **booking cap** for services (e.g.
+  "only accept 5 bookings for this slot type") — same underlying `storeInventory`
+  decrement-on-order mechanism, just relabeled in the UI.
+
+**Deliberately out of scope (a real scheduling/calendar system is its own large project):**
+no real calendar or time-slot availability — two buyers can both "book" the same date/time
+for the same service, since nothing here checks for conflicts; no seller-defined business
+hours/blackout dates; no automatic reminder emails as the appointment approaches. A seller
+manages their actual calendar/scheduling outside the app for now and treats each booking
+notification as a request to confirm, the same way a lot of small real-world businesses
+already handle phone/DM bookings today.
+
+## Phase 11 — Real OS push notifications — done
+
+Billing-failure warnings (Phase 9) and new-order/booking notices (Phase 10) now also send a
+real push notification, on top of the existing in-app banners and (for orders) the real
+email — the same events, just reaching a seller even when the app is closed, without
+needing to build a fake/placeholder version first.
+
+- **Real Expo push tokens, not a mock.** `src/services/pushNotifications.ts` requests
+  notification permission and registers a real Expo push token
+  (`Notifications.getExpoPushTokenAsync`) to `users/{uid}/pushTokens/{token}` the moment
+  someone signs in (fire-and-forget — a denied prompt never blocks sign-in), and removes it
+  on sign-out so a shared/reset device doesn't keep receiving another account's pushes.
+- **No separate APNs credential to manage.** Unlike the App Store Server API integrations
+  (which need their own `.p8` key), Expo/EAS manages the actual Apple Push Notification
+  service credentials for this project automatically — `firebase/functions/src/pushApi.ts`
+  just calls Expo's own push-relay service (`expo-server-sdk`) with the token, and Expo
+  forwards it to APNs.
+- **Wired into the two places that already had in-app banners**: `appStoreServerNotifications`
+  /`enforceBillingSuspensions` (payment failed/resolved/suspended) and
+  `handleStoreOrderCompleted` (new order/booking) each now also call `sendPushNotification`
+  — never allowed to fail the underlying billing/order logic itself, same "best-effort
+  side channel" treatment as the order email.
+
+**Untested territory, flagged in code:** like every other real integration in this project,
+an actual push notification has never been sent/received from this sandbox — requires a
+real EAS build on a physical device (simulators can't receive push) to verify for the first
+time; treat that first real notification as something to debug together from a screenshot.
+
+**One-time setup needed from you:** none beyond the EAS build itself — the first time a
+build requests a push token, EAS provisions the Apple Push Notification service credentials
+for `com.sitespark.app` automatically (you may be prompted once to confirm this during
+`eas build`).
 
 ## Notes on the "animal-tier" AI speed/strength framing
 

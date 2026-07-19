@@ -91,6 +91,13 @@ export interface VideoElement extends BaseElement {
   audioVolume: number; // 0-1, only relevant when audioUri is set
 }
 
+// 'product': a physical (or shippable/holdable) good -- fulfillment says how the buyer
+// gets it. 'service': a real-life, in-person service (a car wash, a haircut, a table) --
+// booked for a specific date/time instead of shipped, and paid for as one real one-time
+// reservation charge (never a recurring/subscription charge).
+export type ProductSaleType = 'product' | 'service';
+export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
+
 // A sellable product block -- positioned/resized like any other canvas element, and also
 // mirrored server-side into a StoreInventoryItem at publish time (see storeInventory in
 // firebase/functions), since checkout validates price/stock authoritatively there, not
@@ -105,7 +112,12 @@ export interface ProductElement extends BaseElement {
   trackInventory: boolean;
   // Only used to *initialize* stockQuantity the first time this product is published --
   // after that, republishing never overwrites stock, only real orders/direct edits do.
+  // For a 'service', this doubles as a cap on how many bookings will be accepted (no real
+  // calendar/time-slot conflict checking is built).
   initialStock: number | null;
+  saleType: ProductSaleType;
+  fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
+  serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
 }
 
 export type CanvasElement =
@@ -235,12 +247,22 @@ export interface StoreOrderItem {
   name: string;
   priceUsd: number;
   quantity: number;
+  saleType: ProductSaleType;
 }
 
 export type StoreOrderStatus = 'paid' | 'refunded';
 
+// A real-life service's requested date/time + any special request -- one per checkout
+// (not per line item), present only when the order contains at least one 'service' item.
+export interface BookingDetails {
+  preferredDate: string;
+  preferredTime: string;
+  notes: string;
+}
+
 // One per completed checkout -- the seller's real accounting record, written only by the
-// Stripe webhook.
+// Stripe webhook. A single real one-time payment either way (never a subscription) -- for
+// a service, bookingDetails is what makes it a real reservation instead of just a charge.
 export interface StoreOrder {
   id: string;
   sellerUid: string;
@@ -254,6 +276,7 @@ export interface StoreOrder {
   sellerNetUsd: number;
   stripeSessionId: string;
   status: StoreOrderStatus;
+  bookingDetails: BookingDetails | null;
   createdAt: number;
 }
 

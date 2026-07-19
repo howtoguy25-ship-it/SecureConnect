@@ -72,6 +72,14 @@ export interface VideoElement extends BaseElement {
   audioVolume: number;
 }
 
+// 'product': a physical (or shippable/holdable) good -- fulfillment says how the buyer
+// gets it. 'service': a real-life, in-person service (a car wash, a haircut, a table) --
+// booked for a specific date/time instead of shipped, and paid for as one real one-time
+// reservation charge (never a recurring/subscription charge) -- see createStoreCheckout's
+// booking handling in index.ts.
+export type ProductSaleType = 'product' | 'service';
+export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
+
 // A sellable product block -- part of the canvas like any other element (positioned,
 // resized), but also mirrored server-side into a StoreInventoryItem at publish time (see
 // storeInventory in index.ts) since checkout has to validate price/stock authoritatively,
@@ -87,7 +95,12 @@ export interface ProductElement extends BaseElement {
   // Only used to *initialize* the inventory doc's stockQuantity the first time this
   // product is published -- after that, stock is only ever changed by real orders
   // decrementing it (or the seller editing it directly), never overwritten by a republish.
+  // For a 'service', this doubles as a cap on how many bookings will be accepted (no real
+  // calendar/time-slot conflict checking is built -- see ROADMAP.md Phase 10b scoping note).
   initialStock: number | null;
+  saleType: ProductSaleType;
+  fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
+  serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
 }
 
 export type CanvasElement =
@@ -287,6 +300,9 @@ export interface StoreInventoryItem {
   images: string[];
   trackInventory: boolean;
   stockQuantity: number | null; // null = not tracked / unlimited
+  saleType: ProductSaleType;
+  fulfillment: ProductFulfillment;
+  serviceDurationMinutes: number | null;
   updatedAt: number;
 }
 
@@ -295,12 +311,25 @@ export interface StoreOrderItem {
   name: string;
   priceUsd: number;
   quantity: number;
+  saleType: ProductSaleType;
 }
 
 export type StoreOrderStatus = 'paid' | 'refunded';
 
+// A real-life service's requested date/time + any special request -- collected once per
+// checkout (not per line item), since a booking checkout is inherently one reservation
+// even if it bundles a couple of add-on services together. Present only when the order
+// contains at least one 'service' item.
+export interface BookingDetails {
+  preferredDate: string;
+  preferredTime: string;
+  notes: string;
+}
+
 // One per completed checkout, written by the Stripe webhook only -- never client-writable,
-// since it's also the seller's real accounting record of what they were actually paid.
+// since it's also the seller's real accounting record of what they were actually paid. A
+// single real one-time payment either way (mode: 'payment', never a subscription) -- for a
+// service, bookingDetails is what makes it a real reservation instead of just a charge.
 export interface StoreOrder {
   id: string;
   sellerUid: string;
@@ -314,5 +343,6 @@ export interface StoreOrder {
   sellerNetUsd: number;
   stripeSessionId: string;
   status: StoreOrderStatus;
+  bookingDetails: BookingDetails | null;
   createdAt: number;
 }
