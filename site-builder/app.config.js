@@ -17,6 +17,12 @@ module.exports = ({ config }) => ({
     supportsTablet: false,
     bundleIdentifier: 'com.sitespark.app',
     usesAppleSignIn: true,
+    infoPlist: {
+      // Accurate: this app only ever uses standard HTTPS/TLS, no custom/proprietary
+      // encryption -- declaring this upfront skips Apple's export-compliance questionnaire
+      // on every future submission.
+      ITSAppUsesNonExemptEncryption: false,
+    },
   },
   android: {
     package: 'com.sitespark.app',
