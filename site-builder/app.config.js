@@ -31,6 +31,8 @@ module.exports = ({ config }) => ({
     bundler: 'metro',
   },
   plugins: [
+    'expo-font',
+    'expo-asset',
     [
       'expo-image-picker',
       {
