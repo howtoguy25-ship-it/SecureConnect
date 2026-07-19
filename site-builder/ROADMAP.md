@@ -20,6 +20,19 @@ already (a TrackLine build appeared in TestFlight when a SiteSpark build was int
 this keeps being confusing, the real fix is moving this folder out into its own separate
 git repository entirely, so there's no nested folder to run a command from by mistake.
 
+Separately: since neither app is its own git repo, **every** `eas build`/`eas submit`
+(for either app, run from either folder) uploads the *entire* repository as one archive —
+that's normal EAS monorepo behavior (it archives from the git root, not your cwd), not the
+two apps' code actually being merged into one build. The uploaded archive containing both
+apps' folders side by side doesn't mean TrackLine's code ends up inside the SiteSpark
+binary — Metro only bundles what `site-builder/App.tsx` actually imports. The one thing
+worth trimming is upload size/time: `../.easignore` (repo root) excludes `training/`
+(TrackLine's ~9MB offline model-training scripts/data, never imported by either app at
+runtime) from every build's archive. See that file's comments before adding more
+exclusions — since an `.easignore` fully replaces `.gitignore` for archiving purposes and
+is shared by both apps, an overly broad rule there can silently break TrackLine's own
+builds too.
+
 ## What's real vs. mocked right now
 
 - Auth is wired to real Firebase Auth APIs (not mocked) — but it can't actually run until
