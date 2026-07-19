@@ -10,6 +10,9 @@ module.exports = ({ config }) => ({
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
   assetBundlePatterns: ['**/*'],
+  // App Store icon -- Apple requires this fully opaque (no transparency), which is exactly
+  // what assets/icon.png is (the SiteSpark logo on its real white background).
+  icon: './assets/icon.png',
   ios: {
     supportsTablet: false,
     bundleIdentifier: 'com.sitespark.app',
@@ -37,8 +40,18 @@ module.exports = ({ config }) => ({
       'expo-notifications',
       {
         // Shown briefly on Android when a notification arrives -- iOS uses the app icon.
-        // No custom sound/icon assets exist for this yet, so this uses expo-notifications'
-        // own defaults rather than pointing at files that don't exist.
+      },
+    ],
+    [
+      'expo-splash-screen',
+      {
+        // The same SiteSpark logo as the App Store icon, but with its white background
+        // removed (assets/splash-icon.png) so it floats on the splash screen's own
+        // background color instead of showing a white box around it.
+        image: './assets/splash-icon.png',
+        imageWidth: 220,
+        resizeMode: 'contain',
+        backgroundColor: '#0B1220',
       },
     ],
   ],
