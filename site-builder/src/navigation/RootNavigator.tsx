@@ -9,6 +9,7 @@ import { env } from '@/config/env';
 import AuthNavigator from '@/navigation/AuthNavigator';
 import AssistantLauncher from '@/components/assistant/AssistantLauncher';
 import BillingBanner from '@/components/BillingBanner';
+import OrderBanner from '@/components/OrderBanner';
 import FirebaseSetupScreen from '@/screens/FirebaseSetupScreen';
 import ProjectsScreen from '@/screens/ProjectsScreen';
 import NewProjectScreen from '@/screens/NewProjectScreen';
@@ -24,6 +25,8 @@ import TransferDomainScreen from '@/screens/TransferDomainScreen';
 import PolicyScreen from '@/screens/PolicyScreen';
 import SupportScreen from '@/screens/SupportScreen';
 import AccountScreen from '@/screens/AccountScreen';
+import SellerAccountScreen from '@/screens/SellerAccountScreen';
+import OrdersScreen from '@/screens/OrdersScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -44,6 +47,8 @@ function AppStack() {
       <Stack.Screen name="Policy" component={PolicyScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Support" component={SupportScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Account" component={AccountScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="SellerAccount" component={SellerAccountScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Orders" component={OrdersScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }
@@ -70,6 +75,7 @@ export default function RootNavigator() {
           <AppStack />
           <AssistantLauncher />
           <BillingBanner />
+          <OrderBanner />
         </>
       ) : (
         <AuthNavigator />

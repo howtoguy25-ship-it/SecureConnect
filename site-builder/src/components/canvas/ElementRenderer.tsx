@@ -4,7 +4,7 @@ import Svg, { Rect, Circle, Polygon, Line, Path } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useAudioPlayer } from 'expo-audio';
-import { CanvasElement, VideoElement } from '@/types';
+import { CanvasElement, VideoElement, ProductElement } from '@/types';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -155,6 +155,37 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
   );
 }
 
+// Editor-only preview of a sellable product block -- the real published version (with a
+// working "Add to Cart" button and live stock) is rendered separately in
+// firebase/functions/src/siteHtml.ts, since that has to be real static HTML a buyer's
+// browser can actually check out from, not a React Native view.
+function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
+  return (
+    <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
+      {element.images[0] ? (
+        <Image source={{ uri: element.images[0] }} style={{ width, height: height * 0.55 }} resizeMode="cover" />
+      ) : (
+        <View style={[styles.placeholder, { width, height: height * 0.55, borderRadius: 0 }]}>
+          <Ionicons name="pricetag-outline" size={24} color="#94A3B8" />
+        </View>
+      )}
+      <View style={{ padding: 8 }}>
+        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
+          {element.name || 'Untitled product'}
+        </Text>
+        <Text style={{ fontSize: 13, color: '#4338CA', fontWeight: '700', marginTop: 2 }}>
+          ${element.priceUsd.toFixed(2)}
+        </Text>
+        {element.trackInventory ? (
+          <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
+            {element.initialStock ?? 0} in stock
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 export default function ElementRenderer({ element }: { element: CanvasElement }) {
   const { width, height } = element;
 
@@ -222,6 +253,8 @@ export default function ElementRenderer({ element }: { element: CanvasElement })
       );
     case 'video':
       return <VideoElementView element={element} width={width} height={height} />;
+    case 'product':
+      return <ProductCardView element={element} width={width} height={height} />;
     default:
       return null;
   }

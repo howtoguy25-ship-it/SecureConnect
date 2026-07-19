@@ -455,6 +455,73 @@ Dashboard setup in Phase 7 — `firebase deploy` prints the URL after deploying)
 secrets are needed — verification uses Apple's public root certificate, embedded directly
 in `appleRootCert.ts`.
 
+## Phase 10 — Storefront: sell products with real payouts — done
+
+Any project can now include real **Product** blocks (Editor → Elements tab → Product),
+turning a published page into an actual storefront with a real multi-item cart, real
+checkout, and real money reaching the site owner's own bank account — not a mockup, and not
+routed through SiteSpark's own balance first.
+
+- **Real Stripe Connect payouts.** Each seller gets a real Stripe **Express** connected
+  account (`SellerAccountScreen` → "Set Up Payouts" → `createSellerOnboardingLink` →
+  Stripe's own hosted onboarding for identity/bank/tax info — SiteSpark never sees any of
+  it). At checkout, the charge is split at the moment it's created
+  (`application_fee_amount` + `transfer_data.destination` on the PaymentIntent, see
+  `createStoreCheckout`) — the seller's share lands directly in their own Stripe account on
+  Stripe's own payout schedule, and "View Stripe Dashboard" (`createSellerDashboardLink`)
+  gives them Stripe's own real balance/payout-history UI instead of SiteSpark needing to
+  build one.
+- **SiteSpark's commission**: `PLATFORM_FEE_PERCENT` in `index.ts`, currently 8% — a
+  business knob, change it there. Taken as Stripe's own application fee, not a manual
+  transfer SiteSpark has to chase down or reconcile.
+- **Real multi-item cart on the published page itself.** `siteHtml.ts`'s `renderCartWidget`
+  injects a localStorage-backed cart + floating panel whenever a project has any product
+  elements — add several different products, one Stripe Checkout for the whole cart.
+  "Checkout" POSTs to `createStoreCheckout` (public, CORS-enabled), which re-validates every
+  item's real price and stock against `storeInventory` server-side — a stale cached page can
+  never let someone buy at an old price or oversell what's actually left.
+- **Real inventory, synced (not reset) on republish.** `storeInventory/{slug}/products/
+  {productId}` is the authoritative source checkout validates against, kept in sync with a
+  project's product elements by `publishProject` on every publish — except `stockQuantity`,
+  which republishing never overwrites once the doc exists. Only a real order (decrementing
+  it inside a Firestore transaction, so two near-simultaneous buyers can't both win the last
+  unit) or the seller directly editing the product's stock field changes it after that.
+- **Real order records + two real notification channels.** Every completed checkout
+  (`handleStoreOrderCompleted`, idempotent against Stripe's webhook retries via the Checkout
+  Session id) writes a real `StoreOrder` under `users/{uid}/orders` (`OrdersScreen`) — the
+  seller's real accounting record of what they were actually paid, net of the platform fee —
+  and fires both a real-time in-app banner (`OrderBanner`, same Firestore-field pattern as
+  `BillingBanner`) and a real transactional email (`emailApi.ts`, via Resend) so a seller
+  finds out even with the app closed, without needing to build real push-notification
+  infrastructure (same reasoning as Phase 9's banner-instead-of-push decision — there's
+  still no APNs/device-token system anywhere in this app).
+
+**Untested territory, flagged in code:** like every other real-money integration in this
+project, the actual Stripe Connect account creation/onboarding flow and a real split charge
+against a live connected account haven't been exercised from this sandbox — treat the first
+real onboarding + first real sale as something to debug together from a screenshot.
+
+**One-time setup needed from you:**
+1. Stripe Dashboard → **Connect** → make sure Connect is activated for your platform account
+   (Stripe walks you through this the first time `stripe.accounts.create` is called if it
+   isn't yet).
+2. **Resend** (real transactional email — resend.com): sign up, then **Domains → Add
+   Domain** → add `buildsitespark.com`, and add the DNS records it shows you at GoDaddy
+   (same pattern as `buildsitespark.com`'s own Hosting setup) so it can actually send as
+   `orders@buildsitespark.com`. Then **API Keys → Create API Key**, and set it the same safe
+   way as every other secret in this project:
+   `firebase functions:secrets:set RESEND_API_KEY --data-file <path>` (never pasted in
+   chat, never typed at a bare/unmasked prompt).
+3. No new Stripe secret needed — storefront payments reuse the existing `STRIPE_SECRET_KEY`/
+   `STRIPE_WEBHOOK_SECRET` from Phase 7.
+
+**Deliberately out of scope:** no product variants (size/color — one price/one stock count
+per product block, matching exactly what was asked for); no shipping-cost calculation
+beyond Stripe Checkout's own built-in address collection; no physical shipping/fulfillment
+tracking — a seller manages fulfillment themselves outside the app once they see an order,
+same as most small storefronts; no way to refund an order from inside the app yet (do it
+directly from the Stripe Dashboard for now).
+
 ## Notes on the "animal-tier" AI speed/strength framing
 
 The Beginner/Immediate/Advanced plans map to different underlying model

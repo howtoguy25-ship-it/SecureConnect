@@ -120,9 +120,116 @@ function renderElement(el: CanvasElement): string {
         el.muted ? 'muted' : ''
       } playsinline controls></video>${audioTag}${script}`;
     }
+    case 'product': {
+      const imgTag = el.images[0]
+        ? `<img src="${escapeAttr(el.images[0])}" style="width:100%;height:55%;object-fit:cover;display:block;" />`
+        : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
+      const qtyId = `qty-${el.id}`;
+      return `<div style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
+  ${imgTag}
+  <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
+    <div style="font-weight:700;font-size:14px;color:#0F172A;">${escapeHtml(el.name)}</div>
+    <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
+      <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
+      <input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />
+    </div>
+    <button
+      onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value)"
+      style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
+    >Add to Cart</button>
+  </div>
+</div>`;
+    }
     default:
       return '';
   }
+}
+
+// A real floating cart (localStorage-backed) + slide-out panel + checkout button, injected
+// once per page (not per product) when a project has any product elements. Multi-item cart
+// as requested -- add several different products, one Stripe Checkout for all of them.
+// Stock/price are re-validated server-side in createStoreCheckout regardless of what's
+// baked into this page, so a stale published page can never let someone buy at an old
+// price or oversell what's actually left.
+function renderCartWidget(slug: string, checkoutUrl: string): string {
+  return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
+  🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
+</div>
+<div id="sitespark-cart-panel" style="display:none;position:fixed;bottom:88px;right:20px;z-index:9998;width:280px;max-height:60vh;overflow-y:auto;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
+  <div style="font-weight:700;margin-bottom:8px;color:#0F172A;">Your cart</div>
+  <div id="sitespark-cart-items"></div>
+  <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:10px;color:#0F172A;">
+    <span>Total</span><span id="sitespark-cart-total">$0.00</span>
+  </div>
+  <button onclick="siteSparkCart.checkout()" style="margin-top:10px;width:100%;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">Checkout</button>
+</div>
+<div id="sitespark-order-banner" style="display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;padding:12px 20px;border-radius:10px;font-family:-apple-system,sans-serif;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);"></div>
+<script>(function(){
+  var SLUG=${JSON.stringify(slug)};
+  var CHECKOUT_URL=${JSON.stringify(checkoutUrl)};
+  var STORAGE_KEY='sitespark_cart_'+SLUG;
+  function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]; } catch(e){ return []; } }
+  function save(items){ localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); render(); }
+  function render(){
+    var items = load();
+    var count = items.reduce(function(s,i){return s+i.quantity;},0);
+    var total = items.reduce(function(s,i){return s+i.priceUsd*i.quantity;},0);
+    document.getElementById('sitespark-cart-count').textContent = String(count);
+    document.getElementById('sitespark-cart-total').textContent = '$'+total.toFixed(2);
+    var list = document.getElementById('sitespark-cart-items');
+    if (items.length === 0) { list.innerHTML = '<div style="color:#94A3B8;font-size:13px;">Cart is empty</div>'; return; }
+    list.innerHTML = items.map(function(i){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px;">'
+        + '<span>'+i.quantity+'&times; '+i.name+'</span>'
+        + '<span style="display:flex;align-items:center;gap:6px;"><span>$'+(i.priceUsd*i.quantity).toFixed(2)+'</span>'
+        + '<a href="#" onclick="siteSparkCart.remove('+JSON.stringify(i.productId)+');return false;" style="color:#DC2626;">&times;</a></span>'
+        + '</div>';
+    }).join('');
+  }
+  function add(productId, name, priceUsd, qtyRaw){
+    var qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
+    var items = load();
+    var existing = items.filter(function(i){ return i.productId === productId; })[0];
+    if (existing) { existing.quantity += qty; } else { items.push({ productId: productId, name: name, priceUsd: priceUsd, quantity: qty }); }
+    save(items);
+    document.getElementById('sitespark-cart-panel').style.display = 'block';
+  }
+  function remove(productId){ save(load().filter(function(i){ return i.productId !== productId; })); }
+  function togglePanel(){
+    var panel = document.getElementById('sitespark-cart-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }
+  function checkout(){
+    var items = load();
+    if (items.length === 0) return;
+    fetch(CHECKOUT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: SLUG, items: items.map(function(i){ return { productId: i.productId, quantity: i.quantity }; }) }),
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.checkoutUrl) { window.location.href = data.checkoutUrl; }
+        else { alert(data.error || 'Could not start checkout.'); }
+      })
+      .catch(function(){ alert('Could not start checkout.'); });
+  }
+  window.siteSparkCart = { add: add, remove: remove, togglePanel: togglePanel, checkout: checkout };
+  render();
+
+  var params = new URLSearchParams(window.location.search);
+  var order = params.get('order');
+  if (order === 'success' || order === 'cancelled') {
+    localStorage.removeItem(STORAGE_KEY);
+    var banner = document.getElementById('sitespark-order-banner');
+    banner.textContent = order === 'success' ? 'Thanks — your order is confirmed!' : 'Checkout was cancelled.';
+    banner.style.background = order === 'success' ? '#16A34A' : '#64748B';
+    banner.style.color = '#fff';
+    banner.style.display = 'block';
+    render();
+  }
+})();</script>`;
 }
 
 function renderAnnouncementBars(project: Project): string {
@@ -148,7 +255,8 @@ function renderAnnouncementBars(project: Project): string {
 <script>(function(){var c=document.getElementById('announcement-bars');var bars=c.querySelectorAll('[data-bar]');var i=0;setInterval(function(){bars[i].style.display='none';i=(i+1)%bars.length;bars[i].style.display='block';bars[i].style.padding='10px 16px';},${announcements.intervalMs});bars[0].style.padding='10px 16px';})();</script>`;
 }
 
-export function renderProjectHtml(project: Project): string {
+export function renderProjectHtml(project: Project, slug: string, storeCheckoutUrl: string): string {
+  const hasProducts = project.elements.some((el) => el.type === 'product');
   const usesMdi = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'MaterialCommunityIcons');
   const usesFa = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'FontAwesome5');
   const usesIon = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'Ionicons');
@@ -203,6 +311,7 @@ export function renderProjectHtml(project: Project): string {
     </div>
   </div>
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
+  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl) : ''}
   <script>
     (function () {
       var canvas = document.getElementById('canvas');

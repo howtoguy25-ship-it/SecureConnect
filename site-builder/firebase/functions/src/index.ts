@@ -1,12 +1,26 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import { getAuth } from 'firebase-admin/auth';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import * as functionsV1 from 'firebase-functions/v1';
 
 import Stripe from 'stripe';
-import { GenerationSession, Project, PublishedSite, DomainPurchase, DomainTransfer, UserAccount } from './types';
+import {
+  GenerationSession,
+  Project,
+  PublishedSite,
+  DomainPurchase,
+  DomainTransfer,
+  UserAccount,
+  ProductElement,
+  StoreInventoryItem,
+  StoreOrder,
+  StoreOrderItem,
+  SellerAccount,
+  OrderNotice,
+} from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
@@ -30,6 +44,8 @@ import {
   RegistrantContact,
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession } from './stripeApi';
+import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink } from './stripeConnect';
+import { sendOrderNotificationEmail } from './emailApi';
 import { getTransactionInfo } from './appStoreApi';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN, APPLE_BUNDLE_ID } from './iapProducts';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -46,10 +62,16 @@ const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
 const appleIapKeyId = defineSecret('APPLE_IAP_KEY_ID');
 const appleIapIssuerId = defineSecret('APPLE_IAP_ISSUER_ID');
 const appleIapPrivateKey = defineSecret('APPLE_IAP_PRIVATE_KEY');
+const resendApiKey = defineSecret('RESEND_API_KEY');
 
 // How long a site stays up after the first payment-failure notification before it's
 // automatically suspended -- the user asked for "3-5 hours"; 4 hours is the midpoint.
 const BILLING_GRACE_PERIOD_MS = 4 * 60 * 60 * 1000;
+
+// SiteSpark's commission on every store sale (Phase 10) -- a business knob, change it here.
+// Taken via Stripe's own application_fee_amount at the moment of charge, not a separate
+// invoice/transfer SiteSpark has to chase down.
+const PLATFORM_FEE_PERCENT = 8;
 
 // Namecheap only accepts API calls from a whitelisted IP -- these functions must route
 // egress through the static-IP Cloud NAT set up for this project (see ROADMAP.md Phase 7
@@ -72,6 +94,10 @@ const HOSTING_DOMAIN = `${process.env.GCLOUD_PROJECT}.web.app`;
 // this by default (https://{slug}.buildsitespark.com), via a wildcard custom domain
 // attached to this Hosting site (see ROADMAP.md Phase 7 setup).
 const PRODUCT_DOMAIN = 'buildsitespark.com';
+// The real, callable URL for createStoreCheckout (defined further down) -- built from the
+// live project id rather than hardcoded, since 2nd-gen HTTPS function URLs always follow
+// this exact shape. Baked into a published page's cart checkout button (see siteHtml.ts).
+const STORE_CHECKOUT_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/createStoreCheckout`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -455,24 +481,64 @@ export const publishProject = onCall(async (request) => {
     (el) =>
       (el.type === 'image' && !!el.uri && !el.uri.startsWith('http')) ||
       (el.type === 'slideshow' && el.images.some((u) => !u.startsWith('http'))) ||
-      (el.type === 'video' && ((!!el.uri && !el.uri.startsWith('http')) || (!!el.audioUri && !el.audioUri.startsWith('http'))))
+      (el.type === 'video' && ((!!el.uri && !el.uri.startsWith('http')) || (!!el.audioUri && !el.audioUri.startsWith('http')))) ||
+      (el.type === 'product' && el.images.some((u) => !u.startsWith('http')))
   );
   if (hasLocalMedia) {
     throw new HttpsError('failed-precondition', 'Some media is still uploading — try publishing again in a moment.');
   }
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
-  const html = renderProjectHtml(project);
+  const html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL);
 
   const site: PublishedSite = { uid, projectId, html, updatedAt: Date.now() };
   await db.collection('publishedSites').doc(slug).set(site);
   await projectRef.update({ publishSlug: slug, publishedAt: Date.now(), updatedAt: Date.now() });
+  await syncStoreInventory(uid, projectId, slug, project);
 
   const url = project.customDomain && project.domainStatus === 'active'
     ? `https://${project.customDomain}`
     : `https://${slug}.${PRODUCT_DOMAIN}`;
   return { slug, url };
 });
+
+// Mirrors a project's ProductElements into storeInventory/{slug}/products/{productId} --
+// the authoritative source createStoreCheckout validates against. Never overwrites
+// stockQuantity on an existing doc (only real orders or the seller directly editing it
+// change that after the first publish) so republishing a project never silently restocks
+// or resets what a seller already sold.
+async function syncStoreInventory(uid: string, projectId: string, slug: string, project: Project): Promise<void> {
+  const productElements = project.elements.filter((el): el is ProductElement => el.type === 'product');
+  if (productElements.length === 0) return;
+
+  const refs = productElements.map((el) => db.collection('storeInventory').doc(slug).collection('products').doc(el.productId));
+  const existingDocs = await Promise.all(refs.map((ref) => ref.get()));
+
+  const batch = db.batch();
+  productElements.forEach((el, i) => {
+    const existing = existingDocs[i];
+    const stockQuantity = existing.exists
+      ? (existing.data() as StoreInventoryItem).stockQuantity
+      : el.trackInventory
+        ? (el.initialStock ?? 0)
+        : null;
+    const item: StoreInventoryItem = {
+      productId: el.productId,
+      sellerUid: uid,
+      projectId,
+      slug,
+      name: el.name,
+      description: el.description,
+      priceUsd: el.priceUsd,
+      images: el.images,
+      trackInventory: el.trackInventory,
+      stockQuantity,
+      updatedAt: Date.now(),
+    };
+    batch.set(refs[i], item);
+  });
+  await batch.commit();
+}
 
 export const unpublishProject = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -703,7 +769,7 @@ export const createDomainCheckout = onCall(
 // is confirmed. Registration only ever happens from here, never from the client, so a
 // domain can't be registered without payment actually clearing first.
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName, resendApiKey], ...NAMECHEAP_VPC_OPTS },
   async (req, res) => {
     const stripe = createStripeClient(stripeSecretKey.value());
     const signature = req.headers['stripe-signature'];
@@ -741,12 +807,82 @@ export const stripeWebhook = onRequest(
             await purchaseRef.update({ status: 'failed', errorMessage: message, updatedAt: Date.now() });
           }
         }
+      } else if (session.metadata?.kind === 'store_order') {
+        await handleStoreOrderCompleted(session, resendApiKey.value());
       }
     }
 
     res.status(200).send('ok');
   }
 );
+
+// Idempotent against Stripe's webhook retries -- keyed by the Checkout Session's own id, so
+// a redelivered event never double-counts an order or double-decrements stock. Runs the
+// stock decrement inside a transaction so two near-simultaneous orders for the last unit of
+// something can't both succeed.
+async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resendKey: string): Promise<void> {
+  const sellerUid = session.metadata?.sellerUid;
+  const slug = session.metadata?.slug;
+  const itemsJson = session.metadata?.items;
+  if (!sellerUid || !slug || !itemsJson) return;
+
+  const orderRef = db.collection('users').doc(sellerUid).collection('orders').doc(session.id);
+  if ((await orderRef.get()).exists) return;
+
+  const items = JSON.parse(itemsJson) as StoreOrderItem[];
+  const subtotalUsd = items.reduce((sum, item) => sum + item.priceUsd * item.quantity, 0);
+  const platformFeeUsd = Math.round(subtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+  const sellerNetUsd = Math.round((subtotalUsd - platformFeeUsd) * 100) / 100;
+
+  const inventoryRefs = items.map((item) => db.collection('storeInventory').doc(slug).collection('products').doc(item.productId));
+  let projectId = '';
+  await db.runTransaction(async (tx) => {
+    const docs = await Promise.all(inventoryRefs.map((ref) => tx.get(ref)));
+    docs.forEach((doc, i) => {
+      if (!doc.exists) return;
+      const data = doc.data() as StoreInventoryItem;
+      if (i === 0) projectId = data.projectId;
+      if (data.trackInventory && data.stockQuantity != null) {
+        tx.update(inventoryRefs[i], { stockQuantity: Math.max(0, data.stockQuantity - items[i].quantity) });
+      }
+    });
+  });
+
+  const order: StoreOrder = {
+    id: session.id,
+    sellerUid,
+    slug,
+    projectId,
+    buyerEmail: session.customer_details?.email ?? null,
+    buyerName: session.customer_details?.name ?? null,
+    items,
+    subtotalUsd,
+    platformFeeUsd,
+    sellerNetUsd,
+    stripeSessionId: session.id,
+    status: 'paid',
+    createdAt: Date.now(),
+  };
+  await orderRef.set(order);
+
+  const notice: OrderNotice = {
+    orderId: session.id,
+    message: `New order — $${sellerNetUsd.toFixed(2)} after fees.`,
+    createdAt: Date.now(),
+  };
+  await db.collection('users').doc(sellerUid).set({ lastOrderNotice: notice }, { merge: true });
+
+  try {
+    const sellerAuthRecord = await getAuth().getUser(sellerUid);
+    if (sellerAuthRecord.email) {
+      await sendOrderNotificationEmail(resendKey, sellerAuthRecord.email, order);
+    }
+  } catch (err) {
+    // Never fails the order itself over an email hiccup -- the order and payout already
+    // succeeded via Stripe regardless of whether this notification goes out.
+    console.error('Order notification email failed', err);
+  }
+}
 
 // Inbound domain transfer -- brings a domain the user already owns at a different
 // registrar into this Namecheap account. Requires the domain to already be unlocked at
@@ -1012,5 +1148,180 @@ export const enforceBillingSuspensions = onSchedule('every 15 minutes', async ()
       sitesSnap.forEach((d) => batch.update(d.ref, { suspended: true }));
       await batch.commit();
     }
+  }
+});
+
+// -- Storefront: selling products from a published site, with real payouts (Phase 10) --
+//
+// Money never sits in SiteSpark's own Stripe balance -- every store charge is split at the
+// moment it's created (application_fee_amount + transfer_data.destination on the
+// PaymentIntent, see createStoreCheckout below), so a seller's share lands directly in
+// their own Stripe Express connected account, on Stripe's own payout schedule. SiteSpark's
+// cut (PLATFORM_FEE_PERCENT) is Stripe's application fee, not a manual transfer.
+
+const sellerAccountRef = (uid: string) => db.collection('users').doc(uid).collection('meta').doc('sellerAccount');
+
+// Creates (or reuses) a real Stripe Express connected account for this seller and returns
+// a one-time hosted onboarding link (identity, bank details, tax info -- all handled by
+// Stripe directly, never touching SiteSpark's own servers).
+export const createSellerOnboardingLink = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const stripe = createStripeClient(stripeSecretKey.value());
+  const ref = sellerAccountRef(uid);
+  const existing = (await ref.get()).data() as SellerAccount | undefined;
+
+  const accountId = await ensureExpressAccount(stripe, existing?.stripeAccountId ?? null, request.auth?.token?.email as string | undefined);
+
+  if (!existing?.stripeAccountId) {
+    const seller: SellerAccount = {
+      uid,
+      stripeAccountId: accountId,
+      onboardingStatus: 'pending',
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await ref.set(seller);
+  }
+
+  // Custom URL scheme, same pattern as createDomainCheckout's success/cancel URLs -- the
+  // in-app browser closes and control returns to the app (registered scheme, see
+  // app.config.js) whether Stripe redirects here or the user just backs out manually; the
+  // app re-checks real status via getSellerAccountStatus rather than trusting this redirect.
+  const url = await createOnboardingLink(stripe, accountId, 'sitespark://seller-onboarding-refresh', 'sitespark://seller-onboarding-complete');
+  return { url };
+});
+
+// Refreshes this seller's real charges_enabled/payouts_enabled flags from Stripe -- the
+// client calls this after returning from onboarding (or pull-to-refresh) rather than
+// trusting the redirect URL, since Stripe's own account state is the only source of truth
+// for whether this account can actually accept a charge yet.
+export const getSellerAccountStatus = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const ref = sellerAccountRef(uid);
+  const existing = (await ref.get()).data() as SellerAccount | undefined;
+  if (!existing?.stripeAccountId) {
+    return { onboardingStatus: 'not_connected', chargesEnabled: false, payoutsEnabled: false };
+  }
+
+  const stripe = createStripeClient(stripeSecretKey.value());
+  const flags = await getAccountFlags(stripe, existing.stripeAccountId);
+  const onboardingStatus: SellerAccount['onboardingStatus'] = flags.chargesEnabled ? 'active' : 'pending';
+
+  await ref.set(
+    { onboardingStatus, chargesEnabled: flags.chargesEnabled, payoutsEnabled: flags.payoutsEnabled, updatedAt: Date.now() },
+    { merge: true }
+  );
+
+  return { onboardingStatus, chargesEnabled: flags.chargesEnabled, payoutsEnabled: flags.payoutsEnabled };
+});
+
+// A real link into the seller's own Stripe Express dashboard -- their actual balance,
+// payout schedule, and payment history, hosted entirely by Stripe. SiteSpark doesn't need
+// to build its own payout ledger UI on top of this.
+export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const existing = (await sellerAccountRef(uid).get()).data() as SellerAccount | undefined;
+  if (!existing?.stripeAccountId) {
+    throw new HttpsError('failed-precondition', 'Set up payouts before viewing your Stripe dashboard.');
+  }
+
+  const stripe = createStripeClient(stripeSecretKey.value());
+  const url = await createDashboardLoginLink(stripe, existing.stripeAccountId);
+  return { url };
+});
+
+// Public webhook (no auth -- a buyer's browser calls this), computes the real order total
+// against storeInventory (never trusting whatever price/stock the static page happened to
+// have baked in), and creates a real Stripe Checkout Session with the commission split
+// baked into the PaymentIntent itself.
+export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors: true }, async (req, res) => {
+  try {
+    const { slug, items } = req.body as { slug: string; items: { productId: string; quantity: number }[] };
+    if (!slug || !Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Missing slug or items.' });
+      return;
+    }
+
+    const inventoryDocs = await Promise.all(
+      items.map((item) => db.collection('storeInventory').doc(slug).collection('products').doc(item.productId).get())
+    );
+
+    let sellerUid: string | null = null;
+    let subtotalUsd = 0;
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+    const orderItems: StoreOrderItem[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const doc = inventoryDocs[i];
+      const quantity = Math.max(1, Math.floor(items[i].quantity));
+      if (!doc.exists) {
+        res.status(400).json({ error: `Product ${items[i].productId} is no longer available.` });
+        return;
+      }
+      const product = doc.data() as StoreInventoryItem;
+      if (sellerUid && product.sellerUid !== sellerUid) {
+        // Every product on a single published project belongs to the same seller, so this
+        // never happens in practice -- guarded anyway since checkout only ever pays out to
+        // one connected account per Checkout Session.
+        res.status(400).json({ error: 'All items in an order must be from the same site.' });
+        return;
+      }
+      sellerUid = product.sellerUid;
+      if (product.trackInventory && (product.stockQuantity ?? 0) < quantity) {
+        res.status(400).json({ error: `Not enough stock left for ${product.name}.` });
+        return;
+      }
+      subtotalUsd += product.priceUsd * quantity;
+      lineItems.push({
+        price_data: { currency: 'usd', product_data: { name: product.name }, unit_amount: Math.round(product.priceUsd * 100) },
+        quantity,
+      });
+      orderItems.push({ productId: product.productId, name: product.name, priceUsd: product.priceUsd, quantity });
+    }
+
+    if (!sellerUid) {
+      res.status(400).json({ error: 'No valid items.' });
+      return;
+    }
+
+    const seller = (await sellerAccountRef(sellerUid).get()).data() as SellerAccount | undefined;
+    if (!seller?.stripeAccountId || !seller.chargesEnabled) {
+      res.status(400).json({ error: 'This store cannot accept payments yet.' });
+      return;
+    }
+
+    const platformFeeUsd = Math.round(subtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+    const stripe = createStripeClient(stripeSecretKey.value());
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: lineItems,
+      shipping_address_collection: { allowed_countries: ['US', 'CA', 'GB', 'AU', 'NZ'] },
+      success_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=success`,
+      cancel_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=cancelled`,
+      payment_intent_data: {
+        application_fee_amount: Math.round(platformFeeUsd * 100),
+        transfer_data: { destination: seller.stripeAccountId },
+      },
+      metadata: {
+        kind: 'store_order',
+        slug,
+        sellerUid,
+        items: JSON.stringify(orderItems),
+      },
+    });
+
+    res.status(200).json({ checkoutUrl: session.url });
+  } catch (err) {
+    console.error('createStoreCheckout failed', err);
+    res.status(500).json({ error: 'Could not start checkout.' });
   }
 });

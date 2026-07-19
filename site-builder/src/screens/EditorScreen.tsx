@@ -11,7 +11,7 @@ import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
@@ -124,6 +124,28 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
+  const addProduct = () => {
+    const el: ProductElement = {
+      id: generateId('el'),
+      type: 'product',
+      productId: generateId('prod'),
+      name: 'New product',
+      description: '',
+      priceUsd: 10,
+      images: [],
+      trackInventory: false,
+      initialStock: null,
+      x: canvasCenterX - 90,
+      y: canvasCenterY - 100,
+      width: 180,
+      height: 220,
+      zIndex: 5,
+    };
+    addElement(el);
+    select(el.id);
+    setPanel(null);
+  };
+
   const confirmDelete = () => {
     if (!selectedElement) return;
     Alert.alert('Delete element?', undefined, [
@@ -194,6 +216,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="image-outline" label="Image" active={false} onPress={addImage} />
             <TabButton icon="images-outline" label="Slideshow" active={false} onPress={addSlideshow} />
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
+            <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
           </View>
         </>

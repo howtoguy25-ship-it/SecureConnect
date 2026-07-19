@@ -1,15 +1,16 @@
-# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)
+# SiteSpark — iOS Site/Video/Social/Logo Builder (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10)
 
 An Expo + React Native + TypeScript app for building site pages, logo canvases, and
 social/video-sized pages — by hand, or generated for you by a real AI builder — behind
 real Firebase accounts, with a persistent AI chat assistant that can drive the app for
-you, and real one-tap publishing to a live public URL.
+you, real one-tap publishing to a live public URL, and a real storefront with payouts to
+your own bank account.
 
 This is **Phase 1 (manual editor) + Phase 2 (accounts/auth) + Phase 3 (AI site builder) +
 Phase 4 (subscriptions/IAP) + Phase 5 (AI chat assistant) + Phase 6 (video editor) +
 Phase 7 (publishing & domains) + Phase 8 (policies/support) + Phase 9 (billing-failure
-notifications & site suspension)** — see `ROADMAP.md` for what's built vs. what's next and
-what real accounts each phase needs.
+notifications & site suspension) + Phase 10 (storefront/payouts)** — see `ROADMAP.md` for
+what's built vs. what's next and what real accounts each phase needs.
 
 ## Stack
 
@@ -50,6 +51,7 @@ src/
   components/
     BillingBanner.tsx               Real-time in-app warning when a subscription payment
                                     fails, and when a site's been suspended over it
+    OrderBanner.tsx                 Real-time in-app notice when a store order comes in
     canvas/                        Canvas, DraggableElement (drag+resize), ElementRenderer,
                                     AnnouncementBarView
     inspector/                     Per-element style controls (color, size, text, image)
@@ -72,6 +74,8 @@ src/
     TransferDomainScreen.tsx        Inbound domain transfer (EPP code + registrant form)
     PolicyScreen.tsx                Privacy Policy / Return & Refund Policy
     SupportScreen.tsx               Contact info + FAQ
+    SellerAccountScreen.tsx         Real Stripe Connect payout onboarding + dashboard link
+    OrdersScreen.tsx                Real store orders, net of platform fee
   navigation/
     RootNavigator.tsx               Switches Auth stack vs. App stack on auth state
     AuthNavigator.tsx
@@ -90,7 +94,12 @@ firebase/
                                     verifyApplePurchase (real Apple IAP),
                                     appStoreServerNotifications (real Apple billing
                                     webhook, JWS-verified) + enforceBillingSuspensions
-                                    (scheduled site suspension on payment failure)
+                                    (scheduled site suspension on payment failure),
+                                    createSellerOnboardingLink/getSellerAccountStatus/
+                                    createSellerDashboardLink (real Stripe Connect payouts),
+                                    createStoreCheckout (public, real multi-item cart
+                                    checkout), stripeWebhook also creates real Order docs
+                                    + decrements inventory on a completed store sale
 public/                           Empty on purpose -- Firebase Hosting requires this dir
                                     to exist, but every request (any attached domain,
                                     any path) is rewritten to servePublishedSite, which
@@ -146,6 +155,11 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
   banner warns you, your published sites stay up for a grace period, and if payment still
   isn't resolved they're automatically taken down (and automatically restored the moment
   payment succeeds) — see Phase 9 in ROADMAP.md.
+- Real storefront: add Product blocks to any page, and buyers can add several to a real
+  cart and check out for real — the money is split at checkout and lands directly in your
+  own Stripe account (set up once in "My Store & Payouts"), never routed through
+  SiteSpark's own balance. Real order records, a real-time in-app new-order banner, and a
+  real email the moment someone buys something — see Phase 10 in ROADMAP.md.
 
 ## Known gaps (see ROADMAP.md for the full breakdown)
 
@@ -162,5 +176,9 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 - A voluntary subscription cancellation doesn't trigger any billing-failure handling (by
   design — see Phase 9), and what happens to a plan/credits after a cancelled
   subscription's period fully lapses isn't built yet. There's also no real OS push
-  notification infrastructure anywhere in the app — the Phase 9 warning is a real-time
-  in-app banner, not a push notification.
+  notification infrastructure anywhere in the app — the Phase 9 warning (and Phase 10's
+  new-order notice) are real-time in-app banners plus, for orders, a real email — not an
+  OS push notification.
+- Storefront (Phase 10) doesn't support product variants (size/color), in-app refunds (use
+  the Stripe Dashboard directly for now), or shipping/fulfillment tracking — a seller
+  handles fulfillment themselves once they see an order, same as most small storefronts.

@@ -21,14 +21,23 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
-    // Other per-account meta docs are client-owned, EXCEPT unlockedThemes below, which
-    // is now a real paid unlock (verifyApplePurchase) and must not be client-writable --
-    // otherwise anyone could grant themselves a $189/$399 theme for free.
+    // Other per-account meta docs are client-owned, EXCEPT unlockedThemes/sellerAccount
+    // below, which must not be client-writable.
     match /users/{uid}/meta/{docId} {
       allow read: if isOwner(uid);
-      allow write: if isOwner(uid) && docId != 'unlockedThemes';
+      allow write: if isOwner(uid) && docId != 'unlockedThemes' && docId != 'sellerAccount';
     }
     match /users/{uid}/meta/unlockedThemes {
+      // Now a real paid unlock (verifyApplePurchase) -- client-writable would let anyone
+      // grant themselves a $189/$399 theme for free.
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+    match /users/{uid}/meta/sellerAccount {
+      // Holds this seller's real Stripe Connect account id + charges_enabled/payouts_enabled
+      // flags -- client-writable would let anyone fake "charges enabled" to bypass
+      // createStoreCheckout's payout-readiness gate, or worse, redirect their own future
+      // payouts to an attacker-controlled Stripe account id.
       allow read: if isOwner(uid);
       allow write: if false;
     }
@@ -87,6 +96,25 @@ service cloud.firestore {
     // subscription events onto their own account.
     match /appleOriginalTransactions/{originalTransactionId} {
       allow read, write: if false;
+    }
+
+    // Storefront (Phase 10) -- a published site's real inventory, the authoritative
+    // source createStoreCheckout validates price/stock against. Same pattern as
+    // publishedSites: written only by publishProject, read only by createStoreCheckout,
+    // both via the Admin SDK, which bypasses these rules entirely. No client ever reads or
+    // writes this directly -- a buyer's browser never talks to Firestore, only to the
+    // Cloud Function, and the app itself only ever edits a project's product elements,
+    // never this server-side mirror of them.
+    match /storeInventory/{slug}/products/{productId} {
+      allow read, write: if false;
+    }
+
+    // A seller's real order/payout record -- written only by the Stripe webhook
+    // (handleStoreOrderCompleted), since it's also their accounting record of what they
+    // were actually paid. Client reads its own for the Orders screen.
+    match /users/{uid}/orders/{orderId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
     }
   }
 }

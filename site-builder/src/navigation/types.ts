@@ -16,4 +16,6 @@ export type RootStackParamList = {
   Policy: { policyType: 'privacy' | 'returns' };
   Support: undefined;
   Account: undefined;
+  SellerAccount: undefined;
+  Orders: undefined;
 };

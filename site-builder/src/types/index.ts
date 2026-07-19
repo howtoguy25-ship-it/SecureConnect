@@ -23,7 +23,8 @@ export type ElementType =
   | 'button'
   | 'icon'
   | 'slideshow'
-  | 'video';
+  | 'video'
+  | 'product';
 
 interface BaseElement {
   id: string;
@@ -90,6 +91,23 @@ export interface VideoElement extends BaseElement {
   audioVolume: number; // 0-1, only relevant when audioUri is set
 }
 
+// A sellable product block -- positioned/resized like any other canvas element, and also
+// mirrored server-side into a StoreInventoryItem at publish time (see storeInventory in
+// firebase/functions), since checkout validates price/stock authoritatively there, not
+// against whatever the client last rendered.
+export interface ProductElement extends BaseElement {
+  type: 'product';
+  productId: string; // stable across republishes -- ties this element to its inventory doc
+  name: string;
+  description: string;
+  priceUsd: number;
+  images: string[];
+  trackInventory: boolean;
+  // Only used to *initialize* stockQuantity the first time this product is published --
+  // after that, republishing never overwrites stock, only real orders/direct edits do.
+  initialStock: number | null;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -97,7 +115,8 @@ export type CanvasElement =
   | ButtonElement
   | IconElement
   | SlideshowElement
-  | VideoElement;
+  | VideoElement
+  | ProductElement;
 
 export interface AnnouncementBarConfig {
   id: string;
@@ -177,6 +196,12 @@ export interface BillingNotice {
   createdAt: number;
 }
 
+export interface OrderNotice {
+  orderId: string;
+  message: string;
+  createdAt: number;
+}
+
 export interface UserAccount {
   uid: string;
   credits: number;
@@ -186,6 +211,50 @@ export interface UserAccount {
   billingStatus?: BillingStatus;
   paymentFailedAt?: number | null;
   billingNotice?: BillingNotice | null;
+  lastOrderNotice?: OrderNotice | null;
+}
+
+// -- Storefront: selling products from a published site, with real payouts (Phase 10) --
+
+// One per seller (uid) -- mirrors their real Stripe Express connected account status.
+// Money from their store's sales goes directly to this account at checkout time (Stripe's
+// application_fee_amount/transfer_data split), never routed through SiteSpark's own
+// balance. Read-only client-side; only Cloud Functions ever write it.
+export interface SellerAccount {
+  uid: string;
+  stripeAccountId: string | null;
+  onboardingStatus: 'not_connected' | 'pending' | 'active';
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StoreOrderItem {
+  productId: string;
+  name: string;
+  priceUsd: number;
+  quantity: number;
+}
+
+export type StoreOrderStatus = 'paid' | 'refunded';
+
+// One per completed checkout -- the seller's real accounting record, written only by the
+// Stripe webhook.
+export interface StoreOrder {
+  id: string;
+  sellerUid: string;
+  slug: string;
+  projectId: string;
+  buyerEmail: string | null;
+  buyerName: string | null;
+  items: StoreOrderItem[];
+  subtotalUsd: number;
+  platformFeeUsd: number;
+  sellerNetUsd: number;
+  stripeSessionId: string;
+  status: StoreOrderStatus;
+  createdAt: number;
 }
 
 // -- Persistent AI chat assistant (Phase 5) --

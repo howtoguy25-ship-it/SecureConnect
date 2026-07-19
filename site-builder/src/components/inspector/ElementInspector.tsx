@@ -263,6 +263,79 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             )}
           </>
         )}
+        {element.type === 'product' && (
+          <>
+            <Text style={styles.fieldLabel}>Name</Text>
+            <TextInput style={styles.textInput} value={element.name} onChangeText={(name) => onChange({ name } as any)} />
+
+            <Text style={styles.fieldLabel}>Description</Text>
+            <TextInput
+              style={styles.textInput}
+              value={element.description}
+              onChangeText={(description) => onChange({ description } as any)}
+              multiline
+            />
+
+            <Text style={styles.fieldLabel}>Price (USD)</Text>
+            <TextInput
+              style={styles.textInput}
+              value={String(element.priceUsd)}
+              keyboardType="decimal-pad"
+              onChangeText={(text) => {
+                const value = parseFloat(text);
+                onChange({ priceUsd: Number.isFinite(value) ? Math.max(0, value) : 0 } as any);
+              }}
+            />
+
+            <Pressable
+              style={styles.uploadBtn}
+              onPress={async () => {
+                const uri = await pickImage();
+                if (uri) onChange({ images: [...element.images, uri] } as any);
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.uploadBtnText}>Add Product Photo</Text>
+            </Pressable>
+            <View style={styles.rowButtons}>
+              {element.images.map((uri, idx) => (
+                <Pressable
+                  key={uri + idx}
+                  style={styles.removeChip}
+                  onPress={() => onChange({ images: element.images.filter((_, i) => i !== idx) } as any)}
+                >
+                  <Text style={styles.removeChipText}>Photo {idx + 1} ✕</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Pressable
+              style={[styles.toggleBtn, element.trackInventory && styles.toggleBtnActive, { marginTop: 4 }]}
+              onPress={() =>
+                onChange({
+                  trackInventory: !element.trackInventory,
+                  initialStock: !element.trackInventory ? (element.initialStock ?? 10) : null,
+                } as any)
+              }
+            >
+              <Text style={styles.toggleBtnText}>Track stock quantity {element.trackInventory ? 'On' : 'Off'}</Text>
+            </Pressable>
+            {element.trackInventory && (
+              <SliderRow
+                label="Starting stock"
+                value={element.initialStock ?? 0}
+                min={0}
+                max={1000}
+                onChange={(v) => onChange({ initialStock: v } as any)}
+              />
+            )}
+            <Text style={styles.fieldLabel}>
+              {element.trackInventory
+                ? 'Stock only sets on first publish — after that, only real orders (or editing it here) change it.'
+                : 'Unlimited stock — buyers can always check out.'}
+            </Text>
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -284,6 +357,8 @@ function labelFor(element: CanvasElement): string {
       return 'Slideshow';
     case 'video':
       return 'Video';
+    case 'product':
+      return 'Product';
     default:
       return 'Element';
   }

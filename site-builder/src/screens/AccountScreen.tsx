@@ -58,6 +58,16 @@ export default function AccountScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.section}>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('SellerAccount')}>
+          <Ionicons name="storefront-outline" size={20} color="#334155" />
+          <Text style={styles.rowText}>My Store & Payouts</Text>
+          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        </Pressable>
+        <Pressable style={styles.row} onPress={() => navigation.navigate('Orders')}>
+          <Ionicons name="receipt-outline" size={20} color="#334155" />
+          <Text style={styles.rowText}>Orders</Text>
+          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        </Pressable>
         <Pressable style={styles.row} onPress={() => navigation.navigate('Support')}>
           <Ionicons name="help-circle-outline" size={20} color="#334155" />
           <Text style={styles.rowText}>Support</Text>

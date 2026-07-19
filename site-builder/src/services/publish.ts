@@ -36,6 +36,11 @@ async function uploadLocalProjectMedia(uid: string, project: Project): Promise<P
           return { ...el, uri, audioUri };
         }
       }
+      if (el.type === 'product' && el.images.some(isLocalUri)) {
+        const images = await Promise.all(el.images.map((u) => (isLocalUri(u) ? uploadLocalImage(u) : u)));
+        changed = true;
+        return { ...el, images };
+      }
       return el;
     })
   );

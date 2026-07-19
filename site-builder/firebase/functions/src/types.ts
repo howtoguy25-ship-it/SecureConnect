@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'product';
 
 interface BaseElement {
   id: string;
@@ -72,6 +72,24 @@ export interface VideoElement extends BaseElement {
   audioVolume: number;
 }
 
+// A sellable product block -- part of the canvas like any other element (positioned,
+// resized), but also mirrored server-side into a StoreInventoryItem at publish time (see
+// storeInventory in index.ts) since checkout has to validate price/stock authoritatively,
+// not trust whatever the client last rendered.
+export interface ProductElement extends BaseElement {
+  type: 'product';
+  productId: string; // stable across republishes -- ties this element to its inventory doc
+  name: string;
+  description: string;
+  priceUsd: number;
+  images: string[];
+  trackInventory: boolean;
+  // Only used to *initialize* the inventory doc's stockQuantity the first time this
+  // product is published -- after that, stock is only ever changed by real orders
+  // decrementing it (or the seller editing it directly), never overwritten by a republish.
+  initialStock: number | null;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -79,7 +97,8 @@ export type CanvasElement =
   | ButtonElement
   | IconElement
   | SlideshowElement
-  | VideoElement;
+  | VideoElement
+  | ProductElement;
 
 export interface CanvasSize {
   width: number;
@@ -215,6 +234,12 @@ export interface BillingNotice {
   createdAt: number;
 }
 
+export interface OrderNotice {
+  orderId: string;
+  message: string;
+  createdAt: number;
+}
+
 export interface UserAccount {
   uid: string;
   credits: number;
@@ -224,4 +249,70 @@ export interface UserAccount {
   billingStatus?: BillingStatus;
   paymentFailedAt?: number | null;
   billingNotice?: BillingNotice | null;
+  lastOrderNotice?: OrderNotice | null;
+}
+
+// -- Storefront: selling products from a published site, with real payouts (Phase 10) --
+
+// One per seller (uid), tracking their real Stripe Express connected account -- money from
+// their store's sales is transferred here directly by Stripe at checkout time (via
+// application_fee_amount/transfer_data on the PaymentIntent), not routed through
+// SiteSpark's own balance first. `chargesEnabled`/`payoutsEnabled` mirror Stripe's own
+// account flags (refreshed by getSellerAccountStatus) -- checkout refuses to run for a
+// seller whose account isn't charges_enabled yet.
+export interface SellerAccount {
+  uid: string;
+  stripeAccountId: string | null;
+  onboardingStatus: 'not_connected' | 'pending' | 'active';
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Real-time, server-only snapshot of a published project's sellable products, keyed by
+// slug -- the authoritative source createStoreCheckout validates price/stock against
+// (never the static HTML a buyer's browser already loaded, which could be stale or
+// tampered with). Synced from a project's ProductElements on every publishProject call,
+// except stockQuantity, which republishing never overwrites once the doc exists -- only a
+// real order (decrementing it) or the seller editing it directly changes it after that.
+export interface StoreInventoryItem {
+  productId: string;
+  sellerUid: string;
+  projectId: string;
+  slug: string;
+  name: string;
+  description: string;
+  priceUsd: number;
+  images: string[];
+  trackInventory: boolean;
+  stockQuantity: number | null; // null = not tracked / unlimited
+  updatedAt: number;
+}
+
+export interface StoreOrderItem {
+  productId: string;
+  name: string;
+  priceUsd: number;
+  quantity: number;
+}
+
+export type StoreOrderStatus = 'paid' | 'refunded';
+
+// One per completed checkout, written by the Stripe webhook only -- never client-writable,
+// since it's also the seller's real accounting record of what they were actually paid.
+export interface StoreOrder {
+  id: string;
+  sellerUid: string;
+  slug: string;
+  projectId: string;
+  buyerEmail: string | null;
+  buyerName: string | null;
+  items: StoreOrderItem[];
+  subtotalUsd: number;
+  platformFeeUsd: number;
+  sellerNetUsd: number;
+  stripeSessionId: string;
+  status: StoreOrderStatus;
+  createdAt: number;
 }
