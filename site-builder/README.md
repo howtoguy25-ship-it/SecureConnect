@@ -94,7 +94,10 @@ firebase/
 public/                           Empty on purpose -- Firebase Hosting requires this dir
                                     to exist, but every request (any attached domain,
                                     any path) is rewritten to servePublishedSite, which
-                                    renders content dynamically based on hostname
+                                    renders content dynamically based on hostname. That
+                                    includes buildsitespark.com's own real marketing site
+                                    (home/pricing, /privacy, /returns, /support) --
+                                    see siteHtml.ts's marketingShell and friends
 ```
 
 ## Setup

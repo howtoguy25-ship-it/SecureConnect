@@ -355,7 +355,18 @@ SiteSpark's official company site — the dynamically-rendered landing page
 (`renderLandingPageHtml` in `siteHtml.ts`, see Phase 7 above) — **not** an end-user
 project, so it's connected differently from the in-app "Connect a domain" feature
 (which maps one user's domain to one published project via `domainMappings`). Instead
-it's added as a native Firebase Hosting custom domain for the whole default site:
+it's added as a native Firebase Hosting custom domain for the whole default site. Its
+bare-domain content is now a real marketing site, not a one-paragraph placeholder --
+`siteHtml.ts`'s `renderLandingPageHtml` covers page types/features/pricing (kept in sync
+with `src/data/pricing.ts` by hand), and `renderPrivacyPolicyHtml`/`renderReturnPolicyHtml`/
+`renderSupportHtml` are real public web versions of the in-app Policy/Support screens'
+content (mirrored from `src/data/policies.ts`, since Cloud Functions can't import from the
+app project) at `/privacy`, `/returns`, `/support` -- Apple requires a public Privacy Policy
+URL for App Store submission, so this isn't just cosmetic. No App Store download link is
+wired in yet since the app isn't live there -- swap the "Coming soon" badge in
+`renderLandingPageHtml` for a real link once it is.
+
+Setting it up:
 1. Firebase Console → Hosting → **Add custom domain** → enter `buildsitespark.com`
 2. Add the TXT ownership-verification record it shows you, and the A records, at
    GoDaddy (My Products → DNS → Manage DNS)

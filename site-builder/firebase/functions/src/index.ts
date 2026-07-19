@@ -11,7 +11,14 @@ import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
-import { renderProjectHtml, renderLandingPageHtml, renderSuspendedSiteHtml } from './siteHtml';
+import {
+  renderProjectHtml,
+  renderLandingPageHtml,
+  renderSuspendedSiteHtml,
+  renderPrivacyPolicyHtml,
+  renderReturnPolicyHtml,
+  renderSupportHtml,
+} from './siteHtml';
 import { slugify, uniqueSlug } from './publish';
 import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
 import {
@@ -508,6 +515,20 @@ export const servePublishedSite = onRequest(async (req, res) => {
   }
 
   if (!slug) {
+    const path = req.path.replace(/\/$/, '') || '/';
+    res.set('Cache-Control', 'public, max-age=3600');
+    if (path === '/privacy') {
+      res.status(200).send(renderPrivacyPolicyHtml());
+      return;
+    }
+    if (path === '/returns') {
+      res.status(200).send(renderReturnPolicyHtml());
+      return;
+    }
+    if (path === '/support') {
+      res.status(200).send(renderSupportHtml());
+      return;
+    }
     res.set('Cache-Control', 'public, max-age=300');
     res.status(200).send(renderLandingPageHtml());
     return;
