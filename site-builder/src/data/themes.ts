@@ -1,4 +1,4 @@
-import { Theme, TextElement, ShapeElement, ButtonElement } from '@/types';
+import { Theme, TextElement, ShapeElement, ButtonElement, IconElement } from '@/types';
 
 function textEl(partial: Partial<TextElement> & Pick<TextElement, 'id' | 'text' | 'y'>): TextElement {
   return {
@@ -37,6 +37,17 @@ function buttonEl(partial: Partial<ButtonElement> & Pick<ButtonElement, 'id' | '
     backgroundColor: '#111827',
     textColor: '#FFFFFF',
     borderRadius: 10,
+    ...partial,
+  };
+}
+
+function iconEl(partial: Partial<IconElement> & Pick<IconElement, 'id' | 'x' | 'y' | 'iconName' | 'color'>): IconElement {
+  return {
+    type: 'icon',
+    width: 32,
+    height: 32,
+    zIndex: 2,
+    iconSet: 'Ionicons',
     ...partial,
   };
 }
@@ -107,16 +118,61 @@ export const THEMES: Theme[] = [
     name: 'Noir Luxury',
     tier: 'luxury',
     price: 189,
-    description: 'Premium dark theme with gold accents, layered blocks and refined type.',
+    description: 'A full premium site already built: nav, hero, story, services, gallery, and testimonial — dark with gold accents.',
     swatch: ['#111827', '#D4AF37'],
     background: '#0B0B0D',
     accent: '#D4AF37',
     textColor: '#F5F5F4',
     seedElements: [
-      shapeEl({ id: 'seed-block', y: 0, color: '#16161A', height: 260 }),
-      textEl({ id: 'seed-h1', text: 'Timeless. Refined.', y: 90, fontSize: 30, color: '#F5F5F4' }),
-      textEl({ id: 'seed-sub', text: 'A premium experience, crafted in every detail.', y: 138, fontSize: 15, color: '#D4AF37', fontWeight: 'normal', height: 40 }),
-      buttonEl({ id: 'seed-btn', label: 'Discover', y: 280, backgroundColor: '#D4AF37', textColor: '#0B0B0D' }),
+      shapeEl({ id: 'seed-nav', y: 0, color: '#16161A', height: 54 }),
+      textEl({ id: 'seed-brand', text: 'MAISON', x: 20, width: 160, y: 16, fontSize: 16, color: '#D4AF37', height: 24 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Book', x: 290, width: 80, y: 10, height: 34, backgroundColor: '#D4AF37', textColor: '#0B0B0D', borderRadius: 8 }),
+
+      textEl({ id: 'seed-h1', text: 'Timeless. Refined.', y: 64, fontSize: 32, color: '#F5F5F4', height: 44 }),
+      textEl({ id: 'seed-sub', text: 'A premium experience, crafted in every detail.', y: 112, fontSize: 15, color: '#D4AF37', fontWeight: 'normal', height: 40 }),
+      buttonEl({ id: 'seed-btn', label: 'Discover', y: 164, backgroundColor: '#D4AF37', textColor: '#0B0B0D' }),
+
+      textEl({ id: 'seed-about-eyebrow', text: 'OUR STORY', x: 24, width: 200, y: 240, fontSize: 11, color: '#D4AF37', height: 20 }),
+      textEl({
+        id: 'seed-about-body',
+        text: 'Three generations of craft, one uncompromising standard. Every piece is made to be kept, not replaced.',
+        x: 24,
+        width: 342,
+        y: 264,
+        fontSize: 14,
+        color: '#CBD5E1',
+        fontWeight: 'normal',
+        height: 64,
+      }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 352, iconName: 'diamond-outline', color: '#D4AF37' }),
+      textEl({ id: 'seed-feat1-label', text: 'Bespoke Craft', x: 20, width: 110, y: 390, fontSize: 12, color: '#F5F5F4', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 352, iconName: 'ribbon-outline', color: '#D4AF37' }),
+      textEl({ id: 'seed-feat2-label', text: 'White-Glove Service', x: 140, width: 110, y: 390, fontSize: 12, color: '#F5F5F4', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 352, iconName: 'star-outline', color: '#D4AF37' }),
+      textEl({ id: 'seed-feat3-label', text: 'Timeless Quality', x: 260, width: 110, y: 390, fontSize: 12, color: '#F5F5F4', align: 'center', fontWeight: 'normal', height: 32 }),
+
+      shapeEl({ id: 'seed-gallery1', x: 20, width: 110, y: 450, color: '#1F1F24', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery2', x: 140, width: 110, y: 450, color: '#26221A', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery3', x: 260, width: 110, y: 450, color: '#1F1F24', height: 100, shapeKind: 'rounded-rectangle' }),
+
+      textEl({
+        id: 'seed-quote',
+        text: '"The most thoughtfully made thing I own."',
+        x: 24,
+        width: 342,
+        y: 580,
+        fontSize: 15,
+        color: '#F5F5F4',
+        fontWeight: 'normal',
+        align: 'center',
+        height: 56,
+      }),
+      textEl({ id: 'seed-quote-attr', text: '— A. Whitfield', x: 24, width: 342, y: 640, fontSize: 12, color: '#D4AF37', fontWeight: 'normal', align: 'center', height: 20 }),
+
+      shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#16161A', height: 120 }),
+      textEl({ id: 'seed-footer-text', text: 'Visit by appointment', x: 24, width: 342, y: 740, fontSize: 14, color: '#F5F5F4', align: 'center', fontWeight: 'normal', height: 24 }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Get in Touch', x: 115, width: 160, y: 772, backgroundColor: '#D4AF37', textColor: '#0B0B0D' }),
     ],
   },
   {
@@ -124,16 +180,61 @@ export const THEMES: Theme[] = [
     name: 'Coastal Estate',
     tier: 'luxury',
     price: 189,
-    description: 'Airy, high-end look with soft neutrals and serif-style headlines.',
+    description: 'A full premium site already built: nav, hero, story, amenities, gallery, and testimonial — airy neutrals throughout.',
     swatch: ['#F5F1EA', '#B8A88A'],
     background: '#FBF9F5',
     accent: '#8A7A5C',
     textColor: '#2B2620',
     seedElements: [
-      shapeEl({ id: 'seed-block', y: 0, color: '#EFE9DC', height: 240 }),
-      textEl({ id: 'seed-h1', text: 'Effortless Elegance', y: 90, fontSize: 28, color: '#2B2620' }),
-      textEl({ id: 'seed-sub', text: 'Where every detail feels considered.', y: 136, fontSize: 15, color: '#6B5F49', fontWeight: 'normal', height: 40 }),
-      buttonEl({ id: 'seed-btn', label: 'View More', y: 260, backgroundColor: '#8A7A5C' }),
+      shapeEl({ id: 'seed-nav', y: 0, color: '#EFE9DC', height: 54 }),
+      textEl({ id: 'seed-brand', text: 'ESTATE CO.', x: 20, width: 180, y: 16, fontSize: 15, color: '#6B5F49', height: 24 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Inquire', x: 280, width: 90, y: 10, height: 34, backgroundColor: '#8A7A5C', textColor: '#FBF9F5', borderRadius: 8 }),
+
+      textEl({ id: 'seed-h1', text: 'Effortless Elegance', y: 64, fontSize: 30, color: '#2B2620', height: 44 }),
+      textEl({ id: 'seed-sub', text: 'Where every detail feels considered.', y: 112, fontSize: 15, color: '#6B5F49', fontWeight: 'normal', height: 40 }),
+      buttonEl({ id: 'seed-btn', label: 'View More', y: 164, backgroundColor: '#8A7A5C' }),
+
+      textEl({ id: 'seed-about-eyebrow', text: 'THE PROPERTY', x: 24, width: 200, y: 240, fontSize: 11, color: '#8A7A5C', height: 20 }),
+      textEl({
+        id: 'seed-about-body',
+        text: 'Set above the shoreline, designed for slow mornings and long dinners — a home that feels like a permanent vacation.',
+        x: 24,
+        width: 342,
+        y: 264,
+        fontSize: 14,
+        color: '#4B4438',
+        fontWeight: 'normal',
+        height: 64,
+      }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 352, iconName: 'sunny-outline', color: '#8A7A5C' }),
+      textEl({ id: 'seed-feat1-label', text: 'Ocean Views', x: 20, width: 110, y: 390, fontSize: 12, color: '#2B2620', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 352, iconName: 'leaf-outline', color: '#8A7A5C' }),
+      textEl({ id: 'seed-feat2-label', text: 'Private Grounds', x: 140, width: 110, y: 390, fontSize: 12, color: '#2B2620', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 352, iconName: 'boat-outline', color: '#8A7A5C' }),
+      textEl({ id: 'seed-feat3-label', text: 'Effortless Living', x: 260, width: 110, y: 390, fontSize: 12, color: '#2B2620', align: 'center', fontWeight: 'normal', height: 32 }),
+
+      shapeEl({ id: 'seed-gallery1', x: 20, width: 110, y: 450, color: '#EFE9DC', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery2', x: 140, width: 110, y: 450, color: '#E3D9C6', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery3', x: 260, width: 110, y: 450, color: '#EFE9DC', height: 100, shapeKind: 'rounded-rectangle' }),
+
+      textEl({
+        id: 'seed-quote',
+        text: '"We never wanted to leave."',
+        x: 24,
+        width: 342,
+        y: 580,
+        fontSize: 15,
+        color: '#2B2620',
+        fontWeight: 'normal',
+        align: 'center',
+        height: 56,
+      }),
+      textEl({ id: 'seed-quote-attr', text: '— The Harringtons', x: 24, width: 342, y: 640, fontSize: 12, color: '#8A7A5C', fontWeight: 'normal', align: 'center', height: 20 }),
+
+      shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#EFE9DC', height: 120 }),
+      textEl({ id: 'seed-footer-text', text: 'Private tours available', x: 24, width: 342, y: 740, fontSize: 14, color: '#2B2620', align: 'center', fontWeight: 'normal', height: 24 }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Schedule a Visit', x: 105, width: 180, y: 772, backgroundColor: '#8A7A5C' }),
     ],
   },
   {
@@ -141,17 +242,62 @@ export const THEMES: Theme[] = [
     name: 'Neon Overdrive',
     tier: 'luxury-crazy',
     price: 399,
-    description: 'Maximalist neon gradients, motion-ready blocks, and statement type.',
+    description: 'A full maximalist site already built: nav, hero, story, drops, gallery, and testimonial — neon gradients throughout.',
     swatch: ['#FF00E5', '#00F0FF'],
     background: '#0A0014',
     accent: '#00F0FF',
     textColor: '#FFFFFF',
     seedElements: [
-      shapeEl({ id: 'seed-block-1', y: 0, color: '#FF00E5', height: 160 }),
-      shapeEl({ id: 'seed-block-2', y: 130, color: '#00F0FF', height: 140 }),
-      textEl({ id: 'seed-h1', text: 'GO ALL OUT', y: 200, fontSize: 34, color: '#FFFFFF' }),
-      textEl({ id: 'seed-sub', text: 'A site as loud as your brand.', y: 250, fontSize: 15, color: '#00F0FF', fontWeight: 'normal', height: 40 }),
-      buttonEl({ id: 'seed-btn', label: 'Enter', y: 310, backgroundColor: '#FF00E5' }),
+      shapeEl({ id: 'seed-nav', y: 0, color: '#1A0033', height: 54 }),
+      textEl({ id: 'seed-brand', text: 'OVERDRIVE', x: 20, width: 180, y: 16, fontSize: 16, color: '#00F0FF', height: 24 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Shop', x: 290, width: 80, y: 10, height: 34, backgroundColor: '#FF00E5', textColor: '#FFFFFF', borderRadius: 8 }),
+
+      shapeEl({ id: 'seed-hero-block', y: 54, color: '#1A0033', height: 160 }),
+      textEl({ id: 'seed-h1', text: 'GO ALL OUT', y: 74, fontSize: 32, color: '#FFFFFF', height: 44 }),
+      textEl({ id: 'seed-sub', text: 'A site as loud as your brand.', y: 122, fontSize: 15, color: '#00F0FF', fontWeight: 'normal', height: 40 }),
+      buttonEl({ id: 'seed-btn', label: 'Enter', y: 174, backgroundColor: '#FF00E5' }),
+
+      textEl({ id: 'seed-about-eyebrow', text: 'THE DROP', x: 24, width: 200, y: 240, fontSize: 11, color: '#FF00E5', height: 20 }),
+      textEl({
+        id: 'seed-about-body',
+        text: 'Limited runs, made for people who refuse to blend in. If it is not loud, it is not us.',
+        x: 24,
+        width: 342,
+        y: 264,
+        fontSize: 14,
+        color: '#E0E0FF',
+        fontWeight: 'normal',
+        height: 64,
+      }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 352, iconName: 'flash-outline', color: '#00F0FF' }),
+      textEl({ id: 'seed-feat1-label', text: 'Bold Drops', x: 20, width: 110, y: 390, fontSize: 12, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 352, iconName: 'color-palette-outline', color: '#FF00E5' }),
+      textEl({ id: 'seed-feat2-label', text: 'Neon Nights', x: 140, width: 110, y: 390, fontSize: 12, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 352, iconName: 'rocket-outline', color: '#00F0FF' }),
+      textEl({ id: 'seed-feat3-label', text: 'Zero Limits', x: 260, width: 110, y: 390, fontSize: 12, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 32 }),
+
+      shapeEl({ id: 'seed-gallery1', x: 20, width: 110, y: 450, color: '#FF00E5', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery2', x: 140, width: 110, y: 450, color: '#00F0FF', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery3', x: 260, width: 110, y: 450, color: '#7C3AED', height: 100, shapeKind: 'rounded-rectangle' }),
+
+      textEl({
+        id: 'seed-quote',
+        text: '"Sold out in four minutes. Again."',
+        x: 24,
+        width: 342,
+        y: 580,
+        fontSize: 15,
+        color: '#FFFFFF',
+        fontWeight: 'normal',
+        align: 'center',
+        height: 56,
+      }),
+      textEl({ id: 'seed-quote-attr', text: '— @nightcrew', x: 24, width: 342, y: 640, fontSize: 12, color: '#00F0FF', fontWeight: 'normal', align: 'center', height: 20 }),
+
+      shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#1A0033', height: 120 }),
+      textEl({ id: 'seed-footer-text', text: 'Next drop: Friday', x: 24, width: 342, y: 740, fontSize: 14, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 24 }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Notify Me', x: 115, width: 160, y: 772, backgroundColor: '#FF00E5' }),
     ],
   },
   {
@@ -159,16 +305,61 @@ export const THEMES: Theme[] = [
     name: 'Editorial Maximal',
     tier: 'luxury-crazy',
     price: 399,
-    description: 'Magazine-grade layered layout, oversized type, dramatic contrast.',
+    description: 'A full magazine-grade site already built: nav, hero, story, sections, gallery, and testimonial — dramatic contrast throughout.',
     swatch: ['#0F0F0F', '#E63946'],
     background: '#0F0F0F',
     accent: '#E63946',
     textColor: '#FFFFFF',
     seedElements: [
-      shapeEl({ id: 'seed-block', y: 0, color: '#E63946', height: 90 }),
-      textEl({ id: 'seed-h1', text: 'THE STATEMENT ISSUE', y: 110, fontSize: 32, color: '#FFFFFF' }),
-      textEl({ id: 'seed-sub', text: 'Bold storytelling for a brand that leads.', y: 160, fontSize: 15, color: '#E63946', fontWeight: 'normal', height: 40 }),
-      buttonEl({ id: 'seed-btn', label: 'Read More', y: 300, backgroundColor: '#FFFFFF', textColor: '#0F0F0F' }),
+      shapeEl({ id: 'seed-nav', y: 0, color: '#000000', height: 54 }),
+      textEl({ id: 'seed-brand', text: 'THE ISSUE', x: 20, width: 180, y: 16, fontSize: 16, color: '#E63946', height: 24 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Read', x: 290, width: 80, y: 10, height: 34, backgroundColor: '#E63946', textColor: '#FFFFFF', borderRadius: 8 }),
+
+      shapeEl({ id: 'seed-hero-block', y: 54, color: '#E63946', height: 60 }),
+      textEl({ id: 'seed-h1', text: 'THE STATEMENT ISSUE', y: 128, fontSize: 30, color: '#FFFFFF', height: 60 }),
+      textEl({ id: 'seed-sub', text: 'Bold storytelling for a brand that leads.', y: 192, fontSize: 15, color: '#E63946', fontWeight: 'normal', height: 40 }),
+      buttonEl({ id: 'seed-btn', label: 'Read More', y: 244, backgroundColor: '#FFFFFF', textColor: '#0F0F0F' }),
+
+      textEl({ id: 'seed-about-eyebrow', text: 'EDITOR’S NOTE', x: 24, width: 200, y: 310, fontSize: 11, color: '#E63946', height: 20 }),
+      textEl({
+        id: 'seed-about-body',
+        text: 'This issue is for the brands unafraid of a headline. No filler, no whitespace wasted — every page earns its place.',
+        x: 24,
+        width: 342,
+        y: 334,
+        fontSize: 14,
+        color: '#D1D5DB',
+        fontWeight: 'normal',
+        height: 64,
+      }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 412, iconName: 'newspaper-outline', color: '#E63946' }),
+      textEl({ id: 'seed-feat1-label', text: 'Cover Stories', x: 20, width: 110, y: 450, fontSize: 12, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 412, iconName: 'megaphone-outline', color: '#E63946' }),
+      textEl({ id: 'seed-feat2-label', text: 'Bold Voices', x: 140, width: 110, y: 450, fontSize: 12, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 412, iconName: 'bookmark-outline', color: '#E63946' }),
+      textEl({ id: 'seed-feat3-label', text: 'Curated Drops', x: 260, width: 110, y: 450, fontSize: 12, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 32 }),
+
+      shapeEl({ id: 'seed-gallery1', x: 20, width: 110, y: 510, color: '#1A1A1A', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery2', x: 140, width: 110, y: 510, color: '#E63946', height: 100, shapeKind: 'rounded-rectangle' }),
+      shapeEl({ id: 'seed-gallery3', x: 260, width: 110, y: 510, color: '#1A1A1A', height: 100, shapeKind: 'rounded-rectangle' }),
+
+      textEl({
+        id: 'seed-quote',
+        text: '"Every page hits like a headline."',
+        x: 24,
+        width: 342,
+        y: 636,
+        fontSize: 15,
+        color: '#FFFFFF',
+        fontWeight: 'normal',
+        align: 'center',
+        height: 56,
+      }),
+      textEl({ id: 'seed-quote-attr', text: '— Design Weekly', x: 24, width: 342, y: 696, fontSize: 12, color: '#E63946', fontWeight: 'normal', align: 'center', height: 20 }),
+
+      shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 752, color: '#000000', height: 92 }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Subscribe', x: 115, width: 160, y: 780, backgroundColor: '#E63946' }),
     ],
   },
 ];

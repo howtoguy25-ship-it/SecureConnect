@@ -12,11 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { THEMES } from '@/data/themes';
+import ThemeMiniPreview from '@/components/ThemeMiniPreview';
 import { Theme, ThemeTier } from '@/types';
 import { unlockedThemesStore } from '@/storage/unlockedThemesStore';
 import { projectsStore } from '@/storage/projectsStore';
@@ -77,6 +77,8 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, purchaseTheme, pageType]);
 
+  const [swatchWidth, setSwatchWidth] = useState(0);
+
   const isLocked = (theme: Theme) => theme.price > 0 && !unlocked.includes(theme.id);
 
   const openTheme = (theme: Theme) => {
@@ -125,13 +127,16 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
         <View style={styles.grid}>
           {items.map((theme) => (
             <Pressable key={theme.id} style={styles.themeCard} onPress={() => openTheme(theme)}>
-              <LinearGradient colors={theme.swatch} style={styles.swatch}>
+              <View style={styles.swatch} onLayout={(e) => setSwatchWidth(e.nativeEvent.layout.width)}>
+                {swatchWidth > 0 && (
+                  <ThemeMiniPreview theme={theme} width={swatchWidth} height={styles.swatch.height} />
+                )}
                 {isLocked(theme) && (
                   <View style={styles.lockOverlay}>
                     <Ionicons name="lock-closed" size={18} color="#FFFFFF" />
                   </View>
                 )}
-              </LinearGradient>
+              </View>
               <Text style={styles.themeName}>{theme.name}</Text>
               <Text style={styles.themeDesc} numberOfLines={2}>
                 {theme.description}
@@ -237,13 +242,15 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   swatch: {
-    height: 90,
+    height: 190,
     borderRadius: 10,
-    alignItems: 'flex-end',
-    justifyContent: 'flex-start',
-    padding: 6,
+    overflow: 'hidden',
+    position: 'relative',
   },
   lockOverlay: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
     backgroundColor: '#00000066',
     borderRadius: 12,
     padding: 4,
