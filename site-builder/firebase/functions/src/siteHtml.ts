@@ -469,9 +469,6 @@ export function renderLandingPageHtml(): string {
     <h1>Build a real website — by hand, or with a real AI builder</h1>
     <p class="lead" style="margin:0 auto 20px;">Website, video, social, and logo pages, published at their own real
     link the moment you're done. No mockups, no "coming soon" placeholders inside the app itself.</p>
-    <div style="display:inline-block;padding:10px 20px;border:1px solid #334155;border-radius:999px;color:#94A3B8;font-size:14px;">
-      Coming soon on the App Store
-    </div>
   </section>
 
   <section id="features" class="wrap" style="padding:40px 24px 56px;">
