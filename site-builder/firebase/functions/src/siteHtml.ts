@@ -565,7 +565,7 @@ export function renderLandingPageHtml(): string {
 // Mirrors src/data/policies.ts -- functions run in a separate Node project from the app
 // (no shared `@/` alias across them), so this is duplicated rather than imported. Keep in
 // sync by hand if either side's policy copy changes.
-const PRIVACY_POLICY_UPDATED = 'Last updated: 18 July 2026';
+const PRIVACY_POLICY_UPDATED = 'Last updated: 20 July 2026';
 const PRIVACY_SECTIONS: { heading: string; body: string }[] = [
   {
     heading: 'What we collect',
@@ -586,7 +586,9 @@ const PRIVACY_SECTIONS: { heading: string; body: string }[] = [
       'card number. Namecheap is our domain registrar partner — for any domain you buy, register, or transfer ' +
       'through the app, your registrant contact is submitted to them to complete the real ICANN registration; ' +
       'free WHOIS privacy protection is requested automatically so it isn’t publicly visible in WHOIS lookups. ' +
-      'Apple processes subscription and credit-pack purchases through In-App Purchase.',
+      'Apple processes subscription and credit-pack purchases through In-App Purchase. Google AdMob serves the ' +
+      'banner and rewarded-credit ads inside the app — ads are requested as non-personalized, so AdMob does not ' +
+      'receive advertising identifiers or build a profile of you for tracking.',
   },
   {
     heading: 'Publishing makes content public',
@@ -610,7 +612,7 @@ const PRIVACY_SECTIONS: { heading: string; body: string }[] = [
   },
 ];
 
-const RETURN_POLICY_UPDATED = 'Last updated: 18 July 2026';
+const RETURN_POLICY_UPDATED = 'Last updated: 20 July 2026';
 const RETURN_SECTIONS: { heading: string; body: string }[] = [
   {
     heading: 'Subscriptions and credit packs',
@@ -669,6 +671,19 @@ const FAQ_ITEMS: { question: string; answer: string }[] = [
     answer:
       'No. Domain purchases are processed by Stripe, and subscriptions/credit packs by Apple’s In-App ' +
       'Purchase — SiteSpark never sees or stores your full card details.',
+  },
+  {
+    question: 'How do the "watch an ad for credits" and banner ads work?',
+    answer:
+      'Every 2 days, you can watch a short rewarded ad from Google AdMob for 15 free credits — the button on ' +
+      'your Projects screen shows when it’s available again. Ads shown in the app are non-personalized and ' +
+      'don’t track you across other apps or websites.',
+  },
+  {
+    question: 'Can I use SiteSpark from a computer, not just the iOS app?',
+    answer:
+      'Yes — sign in at app.buildsitespark.com with the same Google, Apple, or phone number account to access ' +
+      'your projects from a browser.',
   },
 ];
 

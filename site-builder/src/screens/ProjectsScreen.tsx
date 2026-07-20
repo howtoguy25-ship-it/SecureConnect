@@ -19,6 +19,7 @@ import { projectsStore } from '@/storage/projectsStore';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { useAuth } from '@/context/AuthContext';
 import RewardedAdCard from '@/components/RewardedAdCard';
+import AdBanner from '@/components/AdBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Projects'>;
 
@@ -144,6 +145,8 @@ export default function ProjectsScreen({ navigation }: Props) {
           )}
         />
       )}
+
+      <AdBanner />
     </SafeAreaView>
   );
 }
