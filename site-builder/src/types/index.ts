@@ -224,6 +224,7 @@ export interface UserAccount {
   paymentFailedAt?: number | null;
   billingNotice?: BillingNotice | null;
   lastOrderNotice?: OrderNotice | null;
+  lastAdRewardClaimedAt?: number | null;
 }
 
 // -- Storefront: selling products from a published site, with real payouts (Phase 10) --

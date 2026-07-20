@@ -145,6 +145,34 @@ export const ensureAccount = onCall(async (request) => {
   return snap.data();
 });
 
+// Real, server-enforced rewarded-ad credit grant -- the client only ever *reports* that a
+// real AdMob rewarded ad finished playing; the 48h cooldown and the actual credit increment
+// happen here, inside a transaction, so retrying the client call (or a modified/rooted
+// client) can't claim it twice or skip the cooldown.
+const AD_REWARD_CREDITS = 15;
+const AD_REWARD_COOLDOWN_MS = 2 * 24 * 60 * 60 * 1000;
+
+export const claimAdReward = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const userRef = db.collection('users').doc(uid);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const account = snap.data() as UserAccount | undefined;
+    const lastClaim = account?.lastAdRewardClaimedAt ?? null;
+    const now = Date.now();
+    if (lastClaim && now - lastClaim < AD_REWARD_COOLDOWN_MS) {
+      throw new HttpsError('failed-precondition', 'You can watch another ad for credits once the cooldown ends.');
+    }
+    tx.update(userRef, {
+      credits: FieldValue.increment(AD_REWARD_CREDITS),
+      lastAdRewardClaimedAt: now,
+    });
+    return { creditsAwarded: AD_REWARD_CREDITS, claimedAt: now };
+  });
+});
+
 async function checkForPause(sessionRef: FirebaseFirestore.DocumentReference, pausesUsed: number): Promise<string | null> {
   const snap = await sessionRef.get();
   const session = snap.data() as GenerationSession | undefined;

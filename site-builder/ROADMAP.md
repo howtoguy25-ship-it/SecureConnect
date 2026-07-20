@@ -618,6 +618,38 @@ build requests a push token, EAS provisions the Apple Push Notification service 
 for `com.sitespark.app` automatically (you may be prompted once to confirm this during
 `eas build`).
 
+## Phase 12 — Real rewarded-ad credits — done
+
+Projects dashboard now shows a "Watch an ad for 15 free credits" card, once every 2 days
+per account — a real Google AdMob rewarded ad, not a fake timer.
+
+- **Real ad SDK**: `react-native-google-mobile-ads` (Invertase), wired via its Expo config
+  plugin in `app.config.js`. Ships with Google's own public **test** App ID/ad unit ID as
+  the default (`TestIds.REWARDED`) so it builds and shows real, clearly-labeled test ads
+  before a real AdMob account exists — swap in real IDs via `EXPO_PUBLIC_ADMOB_IOS_APP_ID`
+  / `EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID` once you create an AdMob account and ad unit at
+  admob.google.com.
+- **Non-personalized ads only** (`requestNonPersonalizedAdsOnly: true` in
+  `src/services/rewardedAd.ts`) — deliberately matches the "No" answers already given in
+  the App Store's Data Collection questionnaire for tracking/third-party advertising; no
+  IDFA use means no App Tracking Transparency prompt is needed either.
+- **Server-enforced, not client-trusted**: the client only reports "the user watched a real
+  ad and AdMob fired `EARNED_REWARD`" — the actual 48-hour cooldown check and the +15
+  credit grant happen inside `claimAdReward` (`firebase/functions/src/index.ts`), in a
+  Firestore transaction keyed off `users/{uid}.lastAdRewardClaimedAt`. A modified client
+  retrying the call can't claim twice or skip the cooldown.
+
+**Follow-up needed in App Store Connect:** since real ads are now shown, go back into
+**App Privacy → Data Collection** and add **Advertising Data** as a collected type
+(purpose: Third-Party Advertising; not linked to identity; not used for tracking, since
+ads are non-personalized) — this wasn't declared when we filled that section out earlier,
+before this feature existed.
+
+**One-time setup needed from you:** create a real AdMob account + rewarded ad unit at
+admob.google.com once you're ready to show real (non-test) ads, then set
+`EXPO_PUBLIC_ADMOB_IOS_APP_ID` and `EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID` (in `.env` and
+`eas.json`'s `build.*.env`, same pattern as the Firebase/Google config) and rebuild.
+
 ## Notes on the "animal-tier" AI speed/strength framing
 
 The Beginner/Immediate/Advanced plans map to different underlying model

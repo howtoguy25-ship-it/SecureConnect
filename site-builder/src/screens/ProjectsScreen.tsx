@@ -18,6 +18,7 @@ import { Project } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { useAuth } from '@/context/AuthContext';
+import RewardedAdCard from '@/components/RewardedAdCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Projects'>;
 
@@ -83,6 +84,8 @@ export default function ProjectsScreen({ navigation }: Props) {
           <Ionicons name="add" size={26} color="#FFFFFF" />
         </Pressable>
       </View>
+
+      <RewardedAdCard />
 
       {loading ? (
         <View style={styles.emptyState}>

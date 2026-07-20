@@ -62,6 +62,17 @@ module.exports = ({ config }) => ({
         backgroundColor: '#0B1220',
       },
     ],
+    [
+      'react-native-google-mobile-ads',
+      {
+        // Google's own public test App IDs -- safe to ship as the default so builds work
+        // and show real (test-labeled) ads before a real AdMob account exists. Swap in the
+        // real App ID from admob.google.com via EXPO_PUBLIC_ADMOB_IOS_APP_ID once you have
+        // one; see src/services/rewardedAd.ts for the matching ad-unit-id side of this.
+        iosAppId: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID || 'ca-app-pub-3940256099942544~1458002511',
+        androidAppId: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || 'ca-app-pub-3940256099942544~3347511713',
+      },
+    ],
   ],
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',
