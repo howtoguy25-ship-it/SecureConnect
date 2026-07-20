@@ -777,6 +777,33 @@ Cloud Function, `reportPublishedSite`, the same way the storefront cart widget p
   guideline's blocking requirement is aimed at social/messaging-style apps. If direct
   user-to-user interaction is ever added, revisit this.
 
+## Phase 15 — AI prompt UX: visible typing, reference images, cleaner editor toolbar — done
+
+Three small but real UX fixes:
+
+- **Text input visibility**: `AIPromptScreen`'s textarea and the Spark Assistant chat input
+  both now set an explicit `placeholderTextColor` and (for the textarea) an explicit white
+  background, rather than relying on defaults that could render low-contrast on some
+  platforms.
+- **Reference images for the AI Site Builder**: users can now attach up to 3 photos on
+  `AIPromptScreen` as visual inspiration (style/color/mood) before generating a site.
+  Picked via `expo-image-picker` with `base64: true` at reduced quality (0.5) -- small
+  enough to send as `data:image/...;base64,...` strings directly in the `startGeneration`
+  callable payload, no separate upload step needed since there's no project to attach them
+  to yet at prompt time. Server-side, `generateSitePlan` (`openai.ts`) passes them to
+  gpt-4o/gpt-4o-mini as vision content parts alongside the text prompt, with an explicit
+  instruction to use them for inspiration only, not to describe them literally in the
+  copy -- they're never inserted into the site itself. Validated server-side (max 3, must
+  be `data:image/` URIs) in `startGeneration` (`index.ts`).
+- **Editor bottom toolbar + assistant launcher overlap**: the floating Spark Assistant
+  button (`AssistantLauncher.tsx`) used one fixed bottom offset globally, which put it
+  directly on top of the last tab ("Bar") in the Editor screen's own 7-button toolbar --
+  the only screen with a bottom bar tall enough to collide with it. The launcher now
+  tracks the current screen via `navigationRef`'s `state` listener and adds extra
+  clearance specifically on the Editor screen. The toolbar itself also got tightened up
+  (smaller icons, `numberOfLines={1}` + `adjustsFontSizeToFit` on labels so text never
+  wraps, a subtle top shadow) so all 7 tabs read cleanly instead of looking cramped.
+
 ## Notes on the "animal-tier" AI speed/strength framing
 
 The Beginner/Immediate/Advanced plans map to different underlying model

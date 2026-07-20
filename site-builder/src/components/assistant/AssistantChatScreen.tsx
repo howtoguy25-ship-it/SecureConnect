@@ -151,6 +151,7 @@ export default function AssistantChatScreen({ onClose }: Props) {
             value={input}
             onChangeText={setInput}
             placeholder="Message Spark..."
+            placeholderTextColor="#94A3B8"
             multiline
           />
           <Pressable style={styles.sendButton} onPress={handleSend} disabled={sending || !input.trim()}>

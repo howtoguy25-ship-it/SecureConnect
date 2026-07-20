@@ -9,6 +9,9 @@ export interface StartGenerationArgs {
   prompt: string;
   pageType: PageType;
   complexity: BuildComplexity;
+  // Up to 3 data URIs (data:image/jpeg;base64,...) the user picked as visual inspiration --
+  // shown to the model alongside the prompt, never inserted directly into the site.
+  referenceImages?: string[];
 }
 
 export async function startGeneration(args: StartGenerationArgs): Promise<{ sessionId: string; projectId: string }> {

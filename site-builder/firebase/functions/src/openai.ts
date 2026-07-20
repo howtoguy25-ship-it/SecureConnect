@@ -80,9 +80,22 @@ export async function generateSitePlan(
   model: string,
   prompt: string,
   complexity: 'simple' | 'standard' | 'crazy',
-  extraInstruction?: string
+  extraInstruction?: string,
+  referenceImages?: string[]
 ): Promise<SitePlan> {
-  const userContent = extraInstruction ? `${prompt}\n\nAdditional instruction from the user mid-build: ${extraInstruction}` : prompt;
+  const userText = extraInstruction ? `${prompt}\n\nAdditional instruction from the user mid-build: ${extraInstruction}` : prompt;
+
+  // Reference images are shown to the model as visual inspiration (style/color/mood) only
+  // -- gpt-4o/gpt-4o-mini both accept image content parts directly alongside text in a
+  // single user message, no separate vision call needed. Text-only prompts (the common
+  // case) skip this entirely and keep the plain string content from before.
+  const userContent =
+    referenceImages && referenceImages.length > 0
+      ? [
+          { type: 'text' as const, text: `${userText}\n\nUse the attached image(s) as visual inspiration for style, color, and mood -- do not describe or reference them literally in the copy.` },
+          ...referenceImages.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+        ]
+      : userText;
 
   const completion = await client.chat.completions.create({
     model,

@@ -247,16 +247,20 @@ export const startGeneration = onCall(
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
-    const { sessionId, prompt, pageType, complexity } = request.data as {
+    const { sessionId, prompt, pageType, complexity, referenceImages } = request.data as {
       sessionId: string;
       prompt: string;
       pageType: Project['pageType'];
       complexity: 'simple' | 'standard' | 'crazy';
+      referenceImages?: string[];
     };
 
     if (!sessionId || !prompt?.trim()) throw new HttpsError('invalid-argument', 'Missing sessionId or prompt.');
     if (wordCount(prompt) > MAX_PROMPT_WORDS) {
       throw new HttpsError('invalid-argument', `Prompt is over the ${MAX_PROMPT_WORDS}-word limit.`);
+    }
+    if (referenceImages && (referenceImages.length > 3 || referenceImages.some((img) => !img.startsWith('data:image/')))) {
+      throw new HttpsError('invalid-argument', 'Reference images must be at most 3 valid images.');
     }
 
     const userRef = db.collection('users').doc(uid);
@@ -329,14 +333,14 @@ export const startGeneration = onCall(
 
     try {
       await sessionRef.update({ status: 'generating', statusMessage: 'Writing your site\'s content...', updatedAt: Date.now() });
-      let plan = await generateSitePlan(client, model, prompt, complexity);
+      let plan = await generateSitePlan(client, model, prompt, complexity, undefined, referenceImages);
 
       let pausesUsed = 0;
       const injected1 = await checkForPause(sessionRef, pausesUsed);
       if (injected1) {
         pausesUsed += 1;
         await sessionRef.update({ statusMessage: 'Reworking your content with your changes...', updatedAt: Date.now() });
-        plan = await generateSitePlan(client, model, prompt, complexity, injected1);
+        plan = await generateSitePlan(client, model, prompt, complexity, injected1, referenceImages);
       }
 
       await sessionRef.update({ statusMessage: 'Creating original artwork for your site...', updatedAt: Date.now() });

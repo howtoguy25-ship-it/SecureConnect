@@ -1,19 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AssistantChatScreen from '@/components/assistant/AssistantChatScreen';
+import { navigationRef, currentScreenName } from '@/navigation/navigationRef';
+
+// The Editor screen has its own persistent bottom toolbar (Elements/Text/Image/Slideshow/
+// Video/Product/Bar) -- lift the launcher above it there so it doesn't sit on top of the
+// last tab button, which is the only screen with a bottom bar tall enough to collide with
+// the launcher's default position.
+const EDITOR_TOOLBAR_CLEARANCE = 72;
 
 // Rendered as a sibling of the main Stack.Navigator (see RootNavigator) so it floats above
 // every signed-in screen rather than living inside one of them.
 export default function AssistantLauncher() {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
+  const [screenName, setScreenName] = useState(currentScreenName());
+
+  useEffect(() => {
+    const unsubscribe = navigationRef.addListener('state', () => {
+      setScreenName(currentScreenName());
+    });
+    return unsubscribe;
+  }, []);
+
+  const bottomOffset = insets.bottom + 20 + (screenName === 'Editor' ? EDITOR_TOOLBAR_CLEARANCE : 0);
 
   return (
     <>
       <Pressable
-        style={[styles.fab, { bottom: insets.bottom + 20 }]}
+        style={[styles.fab, { bottom: bottomOffset }]}
         onPress={() => setOpen(true)}
         hitSlop={8}
       >

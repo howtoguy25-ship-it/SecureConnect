@@ -241,8 +241,10 @@ function TabButton({
 }) {
   return (
     <Pressable style={styles.tabButton} onPress={onPress}>
-      <Ionicons name={icon as any} size={22} color={active ? '#2563EB' : '#334155'} />
-      <Text style={[styles.tabButtonLabel, active && { color: '#2563EB' }]}>{label}</Text>
+      <Ionicons name={icon as any} size={20} color={active ? '#2563EB' : '#334155'} />
+      <Text style={[styles.tabButtonLabel, active && { color: '#2563EB' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -274,11 +276,16 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
+    paddingTop: 10,
     paddingBottom: 14,
+    paddingHorizontal: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: -2 },
   },
-  tabButton: { flex: 1, alignItems: 'center', gap: 2 },
-  tabButtonLabel: { fontSize: 10, color: '#334155', fontWeight: '600' },
+  tabButton: { flex: 1, alignItems: 'center', gap: 4, paddingHorizontal: 2 },
+  tabButtonLabel: { fontSize: 10, color: '#334155', fontWeight: '600', textAlign: 'center' },
   panel: {
     height: 240,
     backgroundColor: '#FFFFFF',
