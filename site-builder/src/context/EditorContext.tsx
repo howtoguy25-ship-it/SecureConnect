@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { CanvasElement, Project } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
+import { generateId } from '@/utils/id';
 
 interface EditorContextValue {
   project: Project | null;
@@ -17,7 +18,9 @@ interface EditorContextValue {
   addElement: (el: CanvasElement) => void;
   updateElement: (id: string, patch: Partial<CanvasElement>) => void;
   removeElement: (id: string) => void;
+  duplicateElement: (id: string) => void;
   bringToFront: (id: string) => void;
+  reorderElement: (id: string, direction: 'up' | 'down') => void;
   updateProject: (patch: Partial<Project>) => void;
   selectedElement: CanvasElement | null;
 }
@@ -38,7 +41,12 @@ export function EditorProvider({
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    projectsStore.get(uid, projectId).then((p) => setProject(p));
+    // A live subscription, not a one-time get(): an AI build can still be writing the
+    // finished project (real name + elements) to this doc after this screen has already
+    // opened it with the pre-generation placeholder. A one-time fetch could permanently
+    // miss that later write and leave the canvas looking stuck on "Generating...".
+    const unsubscribe = projectsStore.subscribe(uid, projectId, (p) => setProject(p));
+    return unsubscribe;
   }, [uid, projectId]);
 
   const scheduleSave = useCallback(
@@ -104,6 +112,55 @@ export function EditorProvider({
     [scheduleSave]
   );
 
+  const duplicateElement = useCallback(
+    (id: string) => {
+      let newId: string | null = null;
+      setProject((prev) => {
+        if (!prev) return prev;
+        const source = prev.elements.find((el) => el.id === id);
+        if (!source) return prev;
+        const maxZ = Math.max(0, ...prev.elements.map((e) => e.zIndex));
+        newId = generateId('el');
+        const clone = { ...source, id: newId, x: source.x + 16, y: source.y + 16, zIndex: maxZ + 1 } as CanvasElement;
+        const next = { ...prev, elements: [...prev.elements, clone] };
+        scheduleSave(next);
+        return next;
+      });
+      if (newId) setSelectedId(newId);
+    },
+    [scheduleSave]
+  );
+
+  // Swaps z-index with the neighboring element in stacking order -- 'up' moves this
+  // element in front of (visually over) whatever is currently just above it, 'down' moves
+  // it behind whatever is currently just below it. Lets the Layers panel reorder overlaps
+  // without needing a drag-to-reorder gesture inside its own list.
+  const reorderElement = useCallback(
+    (id: string, direction: 'up' | 'down') => {
+      setProject((prev) => {
+        if (!prev) return prev;
+        const sorted = [...prev.elements].sort((a, b) => a.zIndex - b.zIndex);
+        const index = sorted.findIndex((el) => el.id === id);
+        if (index === -1) return prev;
+        const swapIndex = direction === 'up' ? index + 1 : index - 1;
+        if (swapIndex < 0 || swapIndex >= sorted.length) return prev;
+        const a = sorted[index];
+        const b = sorted[swapIndex];
+        const next = {
+          ...prev,
+          elements: prev.elements.map((el) => {
+            if (el.id === a.id) return { ...el, zIndex: b.zIndex };
+            if (el.id === b.id) return { ...el, zIndex: a.zIndex };
+            return el;
+          }),
+        };
+        scheduleSave(next);
+        return next;
+      });
+    },
+    [scheduleSave]
+  );
+
   const bringToFront = useCallback(
     (id: string) => {
       setProject((prev) => {
@@ -132,7 +189,9 @@ export function EditorProvider({
     addElement,
     updateElement,
     removeElement,
+    duplicateElement,
     bringToFront,
+    reorderElement,
     updateProject,
     selectedElement,
   };

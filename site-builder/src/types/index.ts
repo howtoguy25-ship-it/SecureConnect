@@ -34,6 +34,7 @@ interface BaseElement {
   width: number;
   height: number;
   zIndex: number;
+  locked?: boolean; // when true, stays put in the canvas -- no drag, resize, or pinch
 }
 
 export interface TextElement extends BaseElement {

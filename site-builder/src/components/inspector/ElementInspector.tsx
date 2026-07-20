@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { CanvasElement } from '@/types';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import SliderRow from '@/components/inspector/SliderRow';
+import { labelForElement } from '@/utils/elementLabel';
 
 interface Props {
   element: CanvasElement;
@@ -38,7 +39,7 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{labelFor(element)}</Text>
+        <Text style={styles.title}>{labelForElement(element)}</Text>
         <View style={styles.headerActions}>
           <Pressable onPress={onBringToFront} hitSlop={8} style={styles.iconBtn}>
             <Ionicons name="layers-outline" size={20} color="#334155" />
@@ -390,29 +391,6 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
       </ScrollView>
     </View>
   );
-}
-
-function labelFor(element: CanvasElement): string {
-  switch (element.type) {
-    case 'text':
-      return 'Text';
-    case 'image':
-      return 'Image';
-    case 'shape':
-      return 'Shape';
-    case 'button':
-      return 'Button';
-    case 'icon':
-      return 'Icon';
-    case 'slideshow':
-      return 'Slideshow';
-    case 'video':
-      return 'Video';
-    case 'product':
-      return 'Product';
-    default:
-      return 'Element';
-  }
 }
 
 const styles = StyleSheet.create({

@@ -9,9 +9,12 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onChange: (id: string, patch: any) => void;
+  onDuplicate: (id: string) => void;
+  onDelete: (id: string) => void;
+  onToggleLock: (id: string) => void;
 }
 
-export default function Canvas({ project, selectedId, onSelect, onChange }: Props) {
+export default function Canvas({ project, selectedId, onSelect, onChange, onDuplicate, onDelete, onToggleLock }: Props) {
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
 
   return (
@@ -30,6 +33,9 @@ export default function Canvas({ project, selectedId, onSelect, onChange }: Prop
           isSelected={el.id === selectedId}
           onSelect={() => onSelect(el.id)}
           onChange={(patch) => onChange(el.id, patch)}
+          onDuplicate={() => onDuplicate(el.id)}
+          onDelete={() => onDelete(el.id)}
+          onToggleLock={() => onToggleLock(el.id)}
         />
       ))}
     </View>

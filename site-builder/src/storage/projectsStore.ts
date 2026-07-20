@@ -6,6 +6,7 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
+  onSnapshot,
   query,
   orderBy,
 } from 'firebase/firestore';
@@ -26,6 +27,15 @@ export const projectsStore = {
   async get(uid: string, id: string): Promise<Project | null> {
     const snapshot = await getDoc(doc(projectsCollection(uid), id));
     return snapshot.exists() ? (snapshot.data() as Project) : null;
+  },
+
+  // Live updates -- needed for the Editor: an AI build can still be writing the finished
+  // elements to this doc after the screen has already opened it, so a one-time get() can
+  // permanently show the pre-generation placeholder. onSnapshot picks up that later write.
+  subscribe(uid: string, id: string, onChange: (project: Project | null) => void): () => void {
+    return onSnapshot(doc(projectsCollection(uid), id), (snap) => {
+      onChange(snap.exists() ? (snap.data() as Project) : null);
+    });
   },
 
   async save(uid: string, project: Project): Promise<void> {

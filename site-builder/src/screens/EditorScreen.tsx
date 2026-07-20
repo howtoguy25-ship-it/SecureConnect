@@ -9,6 +9,7 @@ import Canvas from '@/components/canvas/Canvas';
 import ElementsPanel from '@/components/elements/ElementsPanel';
 import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
+import LayersPanel from '@/components/elements/LayersPanel';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement } from '@/types';
@@ -17,11 +18,22 @@ import GeneratingOverlay from '@/components/GeneratingOverlay';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
-type PanelTab = 'elements' | 'text' | 'image' | 'slideshow' | 'bar' | null;
+type PanelTab = 'elements' | 'text' | 'image' | 'slideshow' | 'bar' | 'layers' | null;
 
 function EditorInner({ navigation }: Props) {
-  const { project, selectedId, select, addElement, updateElement, removeElement, bringToFront, updateProject, selectedElement } =
-    useEditor();
+  const {
+    project,
+    selectedId,
+    select,
+    addElement,
+    updateElement,
+    removeElement,
+    duplicateElement,
+    bringToFront,
+    reorderElement,
+    updateProject,
+    selectedElement,
+  } = useEditor();
   const [panel, setPanel] = useState<PanelTab>(null);
 
   if (!project) {
@@ -157,12 +169,17 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
-  const confirmDelete = () => {
-    if (!selectedElement) return;
+  const confirmDeleteId = (id: string) => {
     Alert.alert('Delete element?', undefined, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => removeElement(selectedElement.id) },
+      { text: 'Delete', style: 'destructive', onPress: () => removeElement(id) },
     ]);
+  };
+
+  const toggleLock = (id: string) => {
+    const target = project.elements.find((el) => el.id === id);
+    if (!target) return;
+    updateElement(id, { locked: !target.locked });
   };
 
   return (
@@ -184,7 +201,16 @@ function EditorInner({ navigation }: Props) {
       </View>
 
       {isGenerating ? (
-        <GeneratingOverlay />
+        <View style={styles.canvasArea}>
+          <View
+            style={[
+              styles.generatingFrame,
+              { width: project.canvasSize.width, height: project.canvasSize.height, backgroundColor: project.backgroundColor },
+            ]}
+          >
+            <GeneratingOverlay />
+          </View>
+        </View>
       ) : (
         <>
       <View style={styles.canvasArea}>
@@ -198,6 +224,9 @@ function EditorInner({ navigation }: Props) {
             selectedId={selectedId}
             onSelect={select}
             onChange={(id, patch) => updateElement(id, patch as Partial<CanvasElement>)}
+            onDuplicate={duplicateElement}
+            onDelete={confirmDeleteId}
+            onToggleLock={toggleLock}
           />
         </ScrollView>
       </View>
@@ -208,7 +237,7 @@ function EditorInner({ navigation }: Props) {
           <ElementInspector
             element={selectedElement}
             onChange={(patch) => updateElement(selectedElement.id, patch)}
-            onDelete={confirmDelete}
+            onDelete={() => confirmDeleteId(selectedElement.id)}
             onBringToFront={() => bringToFront(selectedElement.id)}
           />
           <Pressable style={styles.doneBtn} onPress={() => select(null)}>
@@ -227,6 +256,15 @@ function EditorInner({ navigation }: Props) {
                   onChange={(patch) => updateProject({ announcements: { ...project.announcements, ...patch } })}
                 />
               )}
+              {panel === 'layers' && (
+                <LayersPanel
+                  elements={project.elements}
+                  selectedId={selectedId}
+                  onSelect={select}
+                  onReorder={reorderElement}
+                  onToggleLock={toggleLock}
+                />
+              )}
             </View>
           )}
           <View style={styles.tabBar}>
@@ -237,6 +275,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
+            <TabButton icon="layers-outline" label="Layers" active={panel === 'layers'} onPress={() => setPanel(panel === 'layers' ? null : 'layers')} />
           </View>
         </>
       )}
@@ -289,6 +328,15 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1, textAlign: 'center' },
   canvasArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   canvasScroll: { alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
+  generatingFrame: {
+    overflow: 'hidden',
+    borderRadius: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
   tabBar: {
     flexDirection: 'row',
     borderTopWidth: StyleSheet.hairlineWidth,
