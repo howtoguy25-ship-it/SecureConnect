@@ -8,6 +8,7 @@ import {
   sendPasswordResetEmail,
   signInWithPhoneNumber,
   signInWithCredential,
+  signInWithPopup,
   GoogleAuthProvider,
   OAuthProvider,
   onAuthStateChanged,
@@ -36,6 +37,8 @@ interface AuthContextValue {
   confirmPhoneCode: (code: string) => Promise<void>;
   signInWithGoogleIdToken: (idToken: string) => Promise<void>;
   signInWithAppleToken: (idToken: string, rawNonce: string) => Promise<void>;
+  signInWithGooglePopup: () => Promise<void>;
+  signInWithApplePopup: () => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
 }
@@ -103,6 +106,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signInWithCredential(requireAuth(), credential);
   };
 
+  // Web-only: native platforms use the on-device Google/Apple flows above (an id token
+  // handed to signInWithCredential). A real browser has no native Google/Apple SDK, but
+  // Firebase Auth's own popup flow works directly against a real DOM window, so web just
+  // asks Firebase to open the provider's real OAuth consent screen itself.
+  const signInWithGooglePopup = async () => {
+    await signInWithPopup(requireAuth(), new GoogleAuthProvider());
+  };
+
+  const signInWithApplePopup = async () => {
+    const provider = new OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+    await signInWithPopup(requireAuth(), provider);
+  };
+
   const signOut = async () => {
     const currentUid = requireAuth().currentUser?.uid;
     // Must run before firebaseSignOut -- deleting the token doc needs to still be
@@ -132,6 +150,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     confirmPhoneCode,
     signInWithGoogleIdToken,
     signInWithAppleToken,
+    signInWithGooglePopup,
+    signInWithApplePopup,
     signOut,
     deleteAccount,
   };

@@ -17,14 +17,18 @@ WebBrowser.maybeCompleteAuthSession();
 type Props = NativeStackScreenProps<AuthStackParamList, 'Welcome'>;
 
 export default function WelcomeScreen({ navigation }: Props) {
-  const { signInWithGoogleIdToken, signInWithAppleToken } = useAuth();
+  const { signInWithGoogleIdToken, signInWithAppleToken, signInWithGooglePopup, signInWithApplePopup } = useAuth();
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // expo-auth-session's native Google flow needs a real redirect scheme, which a browser
+  // tab doesn't have — web signs in via Firebase's own popup flow instead (see handleGoogle).
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
     iosClientId: env.google.iosClientId,
     webClientId: env.google.webClientId,
   });
+
+  const isWeb = Platform.OS === 'web';
 
   useEffect(() => {
     if (Platform.OS === 'ios') {
@@ -67,6 +71,33 @@ export default function WelcomeScreen({ navigation }: Props) {
     }
   };
 
+  const handleGoogleWeb = async () => {
+    try {
+      setBusy(true);
+      await signInWithGooglePopup();
+    } catch (err: any) {
+      // Firebase throws this if the user just closes the popup — not a real failure.
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        Alert.alert('Sign-in failed', friendlyAuthError(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAppleWeb = async () => {
+    try {
+      setBusy(true);
+      await signInWithApplePopup();
+    } catch (err: any) {
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        Alert.alert('Sign-in failed', friendlyAuthError(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.hero}>
@@ -90,10 +121,17 @@ export default function WelcomeScreen({ navigation }: Props) {
           />
         )}
 
+        {isWeb && (
+          <Pressable style={[styles.button, styles.darkButton]} onPress={handleAppleWeb}>
+            <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
+            <Text style={styles.darkButtonText}>Continue with Apple</Text>
+          </Pressable>
+        )}
+
         <Pressable
           style={[styles.button, styles.googleButton]}
-          disabled={!request}
-          onPress={() => promptAsync()}
+          disabled={!isWeb && !request}
+          onPress={isWeb ? handleGoogleWeb : () => promptAsync()}
         >
           <Ionicons name="logo-google" size={18} color="#0F172A" />
           <Text style={styles.googleButtonText}>Continue with Google</Text>

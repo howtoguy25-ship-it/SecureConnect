@@ -650,6 +650,84 @@ admob.google.com once you're ready to show real (non-test) ads, then set
 `EXPO_PUBLIC_ADMOB_IOS_APP_ID` and `EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID` (in `.env` and
 `eas.json`'s `build.*.env`, same pattern as the Firebase/Google config) and rebuild.
 
+## Phase 13 — Real web sign-in + a real web app, plus a richer marketing page — code done, hosting setup pending
+
+`buildsitespark.com` used to be marketing-only, with no way to actually sign in or use the
+app from a browser. Two changes:
+
+**1. Real sign-in from the web, not a mock.** The app already runs on web via Expo's
+`react-native-web` support (`app.config.js`'s `web.bundler: 'metro'`) — the gap was that
+Google/Apple/phone sign-in only had native implementations:
+
+- **Google**: web now calls `signInWithPopup(auth, new GoogleAuthProvider())` directly
+  (`AuthContext.signInWithGooglePopup`) instead of `expo-auth-session`'s native redirect
+  flow, which needs a real app scheme a browser tab doesn't have.
+- **Apple**: web now calls `signInWithPopup(auth, new OAuthProvider('apple.com'))`
+  (`AuthContext.signInWithApplePopup`) instead of `expo-apple-authentication`, which has no
+  web build at all.
+- **Phone**: `src/services/recaptcha/RecaptchaVerifierModal.web.tsx` now uses Firebase's
+  real `RecaptchaVerifier` attached to a real DOM element (invisible, solves silently in
+  the common case) — the native build's WebView-hosted reCAPTCHA hack was only ever needed
+  because native has no real DOM; on an actual browser tab this is simpler than native, not
+  harder.
+- `WelcomeScreen.tsx` branches on `Platform.OS === 'web'` to use these popup flows instead
+  of the native ones; everything downstream (`AuthContext`, Firestore, credits, projects)
+  is unchanged since it was never platform-specific to begin with.
+
+**One-time setup needed from you before Apple sign-in works on web:** Firebase's Apple
+*popup* flow (unlike the native flow, which just verifies an on-device identity token)
+needs Sign in with Apple registered as a real web OAuth provider:
+1. Apple Developer → Certificates, IDs & Profiles → Identifiers → create a **Services ID**
+   (not the app's existing App ID) for `com.sitespark.app.web` or similar.
+2. On that Services ID, enable "Sign in with Apple", and add a **Return URL** of
+   `https://<your-firebase-authDomain>/__/auth/handler` (the exact value of
+   `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN` from `.env` — usually `<project-id>.firebaseapp.com`).
+   This is fixed regardless of which domain the web app itself is served from.
+3. Create a Sign in with Apple **private key** (Certificates, IDs & Profiles → Keys), note
+   its Key ID and your Team ID.
+4. Firebase Console → Authentication → Sign-in method → Apple → fill in the Services ID,
+   Team ID, Key ID, and the private key file.
+5. Firebase Console → Authentication → Settings → Authorized domains → make sure
+   `buildsitespark.com` and (once created, see below) `app.buildsitespark.com` are listed —
+   `signInWithPopup` rejects from any origin not on this list.
+
+Google's web popup flow needs no extra setup beyond what's already in `.env`
+(`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`) as long as that origin is also in the Google Cloud
+Console OAuth client's **Authorized JavaScript origins**.
+
+**2. A real place to host the web app.** `firebase.json`'s `hosting` is now two targets
+instead of one:
+- `marketing` — unchanged, still the dynamic `servePublishedSite` function serving
+  `buildsitespark.com`, every user's `{slug}.buildsitespark.com`, and connected custom
+  domains.
+- `webapp` — new, a static export of the real Expo app (`npm run web:build`, outputs to
+  `dist/`), meant to be served from `app.buildsitespark.com`.
+
+The marketing page's nav bar (`marketingShell` in
+`firebase/functions/src/siteHtml.ts`) now has real "Sign In" and "Get Started" links
+pointing at `app.buildsitespark.com` (the `WEBAPP_URL` constant there).
+
+**One-time setup needed from you to make `app.buildsitespark.com` actually resolve:**
+1. `firebase hosting:sites:create sitespark-webapp` (any unused site name in your project).
+2. `firebase target:apply hosting webapp sitespark-webapp` and
+   `firebase target:apply hosting marketing <your-existing-default-site-id>` — one-time,
+   stored in your local `.firebaserc` (not committed).
+3. In Firebase Console → Hosting → the new `sitespark-webapp` site → Add custom domain →
+   `app.buildsitespark.com`, then add the CNAME/TXT records it gives you at GoDaddy (same
+   pattern as the Resend domain verification you already did).
+4. Build + deploy: `npm run web:build && firebase deploy --only hosting:webapp`. Deploy the
+   marketing site as usual with `firebase deploy --only hosting:marketing,functions`.
+
+Until that domain is verified, `app.buildsitespark.com` won't resolve — the "Sign In" /
+"Get Started" links will 404. You can sanity-check the web build immediately after step 4
+at Firebase's own default URL for that site (`https://sitespark-webapp.web.app`, shown in
+the Console) without waiting on DNS.
+
+**3. A richer marketing page.** Same dark base, but real gradients (soft indigo/pink/cyan
+radial glows behind the hero), per-page-type accent colors, icon chips on each feature
+card, and a highlighted "Most Popular" plan card — all still pure inline CSS (no build
+step, since this page is server-rendered by a Cloud Function, not a static bundle).
+
 ## Notes on the "animal-tier" AI speed/strength framing
 
 The Beginner/Immediate/Advanced plans map to different underlying model

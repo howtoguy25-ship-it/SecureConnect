@@ -374,6 +374,12 @@ export function renderProjectHtml(project: Project, slug: string, storeCheckoutU
 // public/) because Firebase Hosting can't vary static content by Host header -- every
 // custom domain attached to this Hosting site shares the same rewrites/config, so these
 // pages have to be rendered dynamically alongside everything else.
+// Where the real web app (sign-in + the full canvas editor/AI builder running via Expo's
+// web export) is hosted -- a separate Firebase Hosting site/target from this marketing
+// page (see firebase.json's "webapp" target and ROADMAP.md's "Web app hosting setup" for
+// the one-time site-creation + DNS steps this domain depends on).
+const WEBAPP_URL = 'https://app.buildsitespark.com';
+
 function marketingShell(title: string, bodyHtml: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -386,41 +392,63 @@ function marketingShell(title: string, bodyHtml: string): string {
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      background: #0B1220;
+      background:
+        radial-gradient(1100px 520px at 12% -10%, rgba(99,102,241,0.28), transparent 60%),
+        radial-gradient(900px 460px at 88% 8%, rgba(236,72,153,0.16), transparent 55%),
+        radial-gradient(800px 500px at 50% 100%, rgba(34,211,238,0.10), transparent 60%),
+        #0B1220;
       color: #F8FAFC;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       line-height: 1.5;
     }
-    a { color: #818CF8; }
+    a { color: #A5B4FC; }
     code { background: #1E293B; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
     header.site {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 18px 24px; border-bottom: 1px solid #1E293B;
+      padding: 18px 24px; border-bottom: 1px solid rgba(148,163,184,0.15);
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(11,18,32,0.75); backdrop-filter: blur(10px);
     }
-    header.site .logo { font-weight: 800; font-size: 20px; color: #F8FAFC; text-decoration: none; }
-    header.site nav a { margin-left: 20px; font-size: 14px; color: #CBD5E1; text-decoration: none; }
-    header.site nav a:hover { color: #F8FAFC; }
+    header.site .logo {
+      font-weight: 800; font-size: 20px; text-decoration: none;
+      background: linear-gradient(90deg, #A5B4FC, #F0ABFC 60%, #67E8F9);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    header.site nav { display: flex; align-items: center; }
+    header.site nav a.navlink { margin-left: 22px; font-size: 14px; color: #CBD5E1; text-decoration: none; }
+    header.site nav a.navlink:hover { color: #F8FAFC; }
+    header.site nav a.signin {
+      margin-left: 22px; font-size: 14px; font-weight: 600; color: #F8FAFC; text-decoration: none;
+    }
+    header.site nav a.cta {
+      margin-left: 22px; font-size: 13px; font-weight: 700; text-decoration: none;
+      color: #0B1220; padding: 9px 18px; border-radius: 999px;
+      background: linear-gradient(90deg, #818CF8, #E879F9);
+      box-shadow: 0 6px 18px rgba(129,140,248,0.35);
+    }
     footer.site {
-      border-top: 1px solid #1E293B; padding: 32px 24px; text-align: center;
-      color: #64748B; font-size: 13px;
+      border-top: 1px solid rgba(148,163,184,0.15); padding: 36px 24px; text-align: center;
+      color: #64748B; font-size: 13px; margin-top: 40px;
     }
     footer.site a { color: #94A3B8; }
     footer.site .links { margin-bottom: 8px; }
     footer.site .links a { margin: 0 10px; }
-    h1 { font-size: 34px; margin: 0 0 12px; }
-    h2 { font-size: 24px; margin: 0 0 8px; }
+    h1 { font-size: 38px; margin: 0 0 12px; letter-spacing: -0.5px; }
+    h2 { font-size: 26px; margin: 0 0 8px; letter-spacing: -0.3px; }
     h3 { font-size: 16px; margin: 0 0 6px; }
-    p.lead { color: #94A3B8; font-size: 16px; max-width: 620px; }
+    p.lead { color: #B9C2D0; font-size: 17px; max-width: 640px; }
   </style>
 </head>
 <body>
   <header class="site">
     <a class="logo" href="/">SiteSpark</a>
     <nav>
-      <a href="/#features">Features</a>
-      <a href="/#pricing">Pricing</a>
-      <a href="/support">Support</a>
+      <a class="navlink" href="/#features">Features</a>
+      <a class="navlink" href="/#pricing">Pricing</a>
+      <a class="navlink" href="/support">Support</a>
+      <a class="signin" href="${WEBAPP_URL}">Sign In</a>
+      <a class="cta" href="${WEBAPP_URL}">Get Started</a>
     </nav>
   </header>
   ${bodyHtml}
@@ -436,70 +464,98 @@ function marketingShell(title: string, bodyHtml: string): string {
 </html>`;
 }
 
-const PAGE_TYPES = ['Website', 'Video', 'Social (9:16)', 'Logo'];
+const PAGE_TYPES: { name: string; icon: string; accent: string }[] = [
+  { name: 'Website', icon: '&#127760;', accent: '#818CF8' },
+  { name: 'Video', icon: '&#127909;', accent: '#F472B6' },
+  { name: 'Social (9:16)', icon: '&#128241;', accent: '#67E8F9' },
+  { name: 'Logo', icon: '&#10024;', accent: '#FBBF24' },
+];
 
-const FEATURES: { title: string; body: string }[] = [
+const FEATURES: { title: string; body: string; icon: string; accent: string }[] = [
   {
     title: 'Manual canvas editor',
     body: 'Drag-and-drop text, images, shapes, icons, buttons, slideshows, and real trimmed video with an optional synced audio overlay.',
+    icon: '&#127912;',
+    accent: '#818CF8',
   },
   {
     title: 'Real AI Site Builder',
     body: 'Describe your site in up to 4,000 words and a real AI pipeline writes the copy and generates the images, laid out on an editable canvas.',
+    icon: '&#129504;',
+    accent: '#F472B6',
   },
   {
     title: 'Spark, the AI assistant',
     body: 'A persistent chat assistant that answers questions and can open the right screen for you, on every screen of the app.',
+    icon: '&#10024;',
+    accent: '#67E8F9',
   },
   {
     title: 'Real publishing & domains',
     body: 'Every project publishes instantly to a free subdomain like <code>yourproject.buildsitespark.com</code>, or connect a domain you own, or buy a brand-new one without leaving the app.',
+    icon: '&#127760;',
+    accent: '#FBBF24',
   },
 ];
 
-const PLANS: { name: string; price: string; credits: string }[] = [
+const PLANS: { name: string; price: string; credits: string; popular?: boolean }[] = [
   { name: 'Beginner', price: '$64.99/mo', credits: '200 credits/mo' },
-  { name: 'Middle Class', price: '$109.99/mo', credits: '460 credits/mo' },
+  { name: 'Middle Class', price: '$109.99/mo', credits: '460 credits/mo', popular: true },
   { name: 'Advanced', price: '$149.99/mo', credits: '1,000 credits/mo' },
 ];
 
 export function renderLandingPageHtml(): string {
   const body = `
-  <section class="wrap" style="padding:72px 24px 56px;text-align:center;">
+  <section class="wrap" style="padding:88px 24px 64px;text-align:center;">
+    <div style="display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.4px;color:#C4B5FD;background:rgba(129,140,248,0.12);border:1px solid rgba(129,140,248,0.35);border-radius:999px;padding:6px 16px;margin-bottom:22px;">
+      NOW ON THE APP STORE
+    </div>
     <h1>Build a real website — by hand, or with a real AI builder</h1>
-    <p class="lead" style="margin:0 auto 20px;">Website, video, social, and logo pages, published at their own real
+    <p class="lead" style="margin:0 auto 28px;">Website, video, social, and logo pages, published at their own real
     link the moment you're done. No mockups, no "coming soon" placeholders inside the app itself.</p>
+    <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
+      <a href="${WEBAPP_URL}" style="text-decoration:none;font-weight:700;font-size:15px;color:#0B1220;padding:14px 28px;border-radius:12px;background:linear-gradient(90deg,#818CF8,#E879F9);box-shadow:0 10px 30px rgba(129,140,248,0.35);">Get Started Free</a>
+      <a href="/#features" style="text-decoration:none;font-weight:700;font-size:15px;color:#F8FAFC;padding:14px 28px;border-radius:12px;border:1px solid rgba(148,163,184,0.3);">See how it works</a>
+    </div>
   </section>
 
-  <section id="features" class="wrap" style="padding:40px 24px 56px;">
+  <section id="features" class="wrap" style="padding:40px 24px 64px;">
     <h2 style="text-align:center;margin-bottom:28px;">Four kinds of pages, two ways to build them</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:44px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:48px;">
       ${PAGE_TYPES.map(
         (t) =>
-          `<div style="background:#111827;border:1px solid #1E293B;border-radius:14px;padding:20px;text-align:center;font-weight:600;">${escapeHtml(t)}</div>`
+          `<div style="background:linear-gradient(160deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015));border:1px solid rgba(148,163,184,0.16);border-radius:16px;padding:22px 16px;text-align:center;">
+            <div style="font-size:26px;margin-bottom:8px;">${t.icon}</div>
+            <div style="font-weight:700;color:${t.accent};">${escapeHtml(t.name)}</div>
+          </div>`
       ).join('')}
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;">
       ${FEATURES.map(
         (f) =>
-          `<div><h3>${escapeHtml(f.title)}</h3><p style="color:#94A3B8;font-size:14px;">${f.body}</p></div>`
+          `<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(148,163,184,0.12);border-radius:16px;padding:22px;">
+            <div style="width:40px;height:40px;border-radius:10px;background:${f.accent}22;display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:12px;">${f.icon}</div>
+            <h3>${escapeHtml(f.title)}</h3>
+            <p style="color:#98A2B3;font-size:14px;">${f.body}</p>
+          </div>`
       ).join('')}
     </div>
   </section>
 
-  <section id="pricing" class="wrap" style="padding:40px 24px 72px;">
+  <section id="pricing" class="wrap" style="padding:48px 24px 80px;">
     <h2 style="text-align:center;margin-bottom:28px;">Plans</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;">
       ${PLANS.map(
         (p) => `
-      <div style="background:#111827;border:1px solid #1E293B;border-radius:16px;padding:26px;text-align:center;">
-        <div style="font-weight:700;font-size:17px;margin-bottom:4px;">${escapeHtml(p.name)}</div>
-        <div style="font-size:26px;font-weight:800;margin-bottom:4px;">${escapeHtml(p.price)}</div>
-        <div style="color:#94A3B8;font-size:14px;">${escapeHtml(p.credits)}</div>
+      <div style="position:relative;background:${p.popular ? 'linear-gradient(160deg,rgba(129,140,248,0.16),rgba(232,121,249,0.08))' : 'rgba(255,255,255,0.03)'};border:1px solid ${p.popular ? 'rgba(165,180,252,0.55)' : 'rgba(148,163,184,0.14)'};border-radius:18px;padding:30px 26px;text-align:center;${p.popular ? 'box-shadow:0 14px 34px rgba(129,140,248,0.22);' : ''}">
+        ${p.popular ? '<div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:800;letter-spacing:0.4px;color:#0B1220;background:linear-gradient(90deg,#818CF8,#E879F9);padding:4px 14px;border-radius:999px;">MOST POPULAR</div>' : ''}
+        <div style="font-weight:700;font-size:17px;margin-bottom:6px;">${escapeHtml(p.name)}</div>
+        <div style="font-size:28px;font-weight:800;margin-bottom:6px;background:linear-gradient(90deg,#F8FAFC,#C7D2FE);-webkit-background-clip:text;background-clip:text;color:transparent;">${escapeHtml(p.price)}</div>
+        <div style="color:#98A2B3;font-size:14px;">${escapeHtml(p.credits)}</div>
       </div>`
       ).join('')}
     </div>
-    <p style="text-align:center;color:#64748B;font-size:13px;margin-top:22px;">
+    <p style="text-align:center;color:#7C8797;font-size:13px;margin-top:26px;">
       Plus one-time credit packs and luxury theme unlocks, available from inside the app.
     </p>
   </section>`;

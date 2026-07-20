@@ -15,14 +15,28 @@
   "storage": {
     "rules": "firebase/storage.rules"
   },
-  "hosting": {
-    "public": "public",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {
-        "source": "**",
-        "function": "servePublishedSite"
-      }
-    ]
-  }
+  "hosting": [
+    {
+      "target": "marketing",
+      "public": "public",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [
+        {
+          "source": "**",
+          "function": "servePublishedSite"
+        }
+      ]
+    },
+    {
+      "target": "webapp",
+      "public": "dist",
+      "ignore": ["firebase.json", "**/.*"],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ]
 }
