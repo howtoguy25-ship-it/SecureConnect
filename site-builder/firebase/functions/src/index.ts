@@ -1036,63 +1036,76 @@ export const verifyApplePurchase = onCall(
     const { transactionId } = request.data as { transactionId: string };
     if (!transactionId) throw new HttpsError('invalid-argument', 'Missing transactionId.');
 
-    const processedRef = db.collection('processedAppleTransactions').doc(transactionId);
-    if ((await processedRef.get()).exists) {
-      return { alreadyProcessed: true };
+    try {
+      const processedRef = db.collection('processedAppleTransactions').doc(transactionId);
+      if ((await processedRef.get()).exists) {
+        return { alreadyProcessed: true };
+      }
+
+      const creds = {
+        keyId: appleIapKeyId.value(),
+        issuerId: appleIapIssuerId.value(),
+        privateKey: appleIapPrivateKey.value(),
+        bundleId: APPLE_BUNDLE_ID,
+      };
+      const info = await getTransactionInfo(creds, transactionId);
+      if (info.bundleId !== APPLE_BUNDLE_ID) {
+        throw new HttpsError('failed-precondition', 'Transaction does not belong to this app.');
+      }
+
+      const userRef = db.collection('users').doc(uid);
+
+      if (SUBSCRIPTION_PRODUCT_IDS[info.productId]) {
+        const planId = SUBSCRIPTION_PRODUCT_IDS[info.productId];
+        await userRef.set(
+          {
+            plan: planId,
+            planRenewsAt: info.expiresDate,
+            credits: FieldValue.increment(MONTHLY_CREDITS_FOR_PLAN[planId]),
+            billingStatus: 'active',
+            paymentFailedAt: null,
+          },
+          { merge: true }
+        );
+        // Lets appStoreServerNotifications map a future renewal-failure webhook (which only
+        // carries Apple's own transaction IDs, never our uid) back to this account.
+        await db
+          .collection('appleOriginalTransactions')
+          .doc(info.originalTransactionId)
+          .set({ uid, updatedAt: Date.now() });
+        await unsuspendUserSites(uid);
+      } else if (CREDIT_PACK_PRODUCT_IDS[info.productId] != null) {
+        await userRef.set({ credits: FieldValue.increment(CREDIT_PACK_PRODUCT_IDS[info.productId]) }, { merge: true });
+      } else if (THEME_IDS_BY_PRODUCT[info.productId]) {
+        await userRef
+          .collection('meta')
+          .doc('unlockedThemes')
+          .set({ themeIds: FieldValue.arrayUnion(...THEME_IDS_BY_PRODUCT[info.productId]) }, { merge: true });
+      } else {
+        throw new HttpsError('invalid-argument', `Unknown product: ${info.productId}`);
+      }
+
+      await processedRef.set({
+        uid,
+        productId: info.productId,
+        transactionId: info.transactionId,
+        environment: info.environment,
+        processedAt: Date.now(),
+      });
+
+      return { productId: info.productId, environment: info.environment };
+    } catch (err: any) {
+      // onCall silently replaces any thrown error that isn't already an HttpsError with a
+      // generic {code:'internal', message:'INTERNAL'} before it reaches the client -- that's
+      // exactly why a real failure here (a malformed IAP private key secret, Apple's API
+      // being briefly unreachable, etc.) shows up in the app as a bare, undiagnosable
+      // "Purchase failed / INTERNAL" instead of a message that says what actually broke.
+      // Re-throwing as HttpsError lets the real reason through while still logging the full
+      // error server-side via Cloud Functions' default error logging.
+      if (err instanceof HttpsError) throw err;
+      console.error('verifyApplePurchase failed', err);
+      throw new HttpsError('internal', err?.message ?? 'Purchase verification failed. Please try again.');
     }
-
-    const creds = {
-      keyId: appleIapKeyId.value(),
-      issuerId: appleIapIssuerId.value(),
-      privateKey: appleIapPrivateKey.value(),
-      bundleId: APPLE_BUNDLE_ID,
-    };
-    const info = await getTransactionInfo(creds, transactionId);
-    if (info.bundleId !== APPLE_BUNDLE_ID) {
-      throw new HttpsError('failed-precondition', 'Transaction does not belong to this app.');
-    }
-
-    const userRef = db.collection('users').doc(uid);
-
-    if (SUBSCRIPTION_PRODUCT_IDS[info.productId]) {
-      const planId = SUBSCRIPTION_PRODUCT_IDS[info.productId];
-      await userRef.set(
-        {
-          plan: planId,
-          planRenewsAt: info.expiresDate,
-          credits: FieldValue.increment(MONTHLY_CREDITS_FOR_PLAN[planId]),
-          billingStatus: 'active',
-          paymentFailedAt: null,
-        },
-        { merge: true }
-      );
-      // Lets appStoreServerNotifications map a future renewal-failure webhook (which only
-      // carries Apple's own transaction IDs, never our uid) back to this account.
-      await db
-        .collection('appleOriginalTransactions')
-        .doc(info.originalTransactionId)
-        .set({ uid, updatedAt: Date.now() });
-      await unsuspendUserSites(uid);
-    } else if (CREDIT_PACK_PRODUCT_IDS[info.productId] != null) {
-      await userRef.set({ credits: FieldValue.increment(CREDIT_PACK_PRODUCT_IDS[info.productId]) }, { merge: true });
-    } else if (THEME_IDS_BY_PRODUCT[info.productId]) {
-      await userRef
-        .collection('meta')
-        .doc('unlockedThemes')
-        .set({ themeIds: FieldValue.arrayUnion(...THEME_IDS_BY_PRODUCT[info.productId]) }, { merge: true });
-    } else {
-      throw new HttpsError('invalid-argument', `Unknown product: ${info.productId}`);
-    }
-
-    await processedRef.set({
-      uid,
-      productId: info.productId,
-      transactionId: info.transactionId,
-      environment: info.environment,
-      processedAt: Date.now(),
-    });
-
-    return { productId: info.productId, environment: info.environment };
   }
 );
 
