@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Platform, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
@@ -99,11 +100,16 @@ export default function WelcomeScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.hero}>
-        <View style={styles.logo}>
-          <Ionicons name="sparkles" size={32} color="#FFFFFF" />
-        </View>
+    // Same dark-navy-with-color-glow palette as the buildsitespark.com marketing page
+    // (marketingShell in siteHtml.ts) -- LinearGradient only does a straight axis, not a
+    // radial glow, but this diagonal indigo-to-cyan sweep reads as the same brand family
+    // instead of the flat single-color background this screen had before.
+    <LinearGradient colors={['#1E1B4B', '#0B1220', '#082F36']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gradientRoot}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.hero}>
+          <LinearGradient colors={['#818CF8', '#E879F9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logo}>
+            <Ionicons name="sparkles" size={32} color="#FFFFFF" />
+          </LinearGradient>
         <Text style={styles.title}>SiteSpark</Text>
         <Text style={styles.subtitle}>Build real sites, logos, and social pages — right from your phone.</Text>
       </View>
@@ -153,19 +159,20 @@ export default function WelcomeScreen({ navigation }: Props) {
         <Pressable onPress={() => navigation.navigate('EmailAuth', { mode: 'signin' })}>
           <Text style={styles.signInLink}>Already have an account? Sign in</Text>
         </Pressable>
-      </View>
-    </SafeAreaView>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B1220', justifyContent: 'space-between' },
+  gradientRoot: { flex: 1 },
+  container: { flex: 1, justifyContent: 'space-between' },
   hero: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
   logo: {
     width: 64,
     height: 64,
     borderRadius: 18,
-    backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
