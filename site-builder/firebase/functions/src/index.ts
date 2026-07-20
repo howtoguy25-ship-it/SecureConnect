@@ -173,6 +173,38 @@ export const claimAdReward = onCall(async (request) => {
   });
 });
 
+// Real account deletion -- required by App Store guideline 5.1.1(v) for any app that lets
+// people create an account. Actually removes everything, not just a "deactivated" flag:
+// unpublishes every live site first (so no stale published page or connected domain
+// survives the account), recursively deletes every Firestore doc under this user, deletes
+// their uploaded files from Storage, and finally deletes the real Firebase Auth user record
+// -- after this call the uid can never sign back in to find an empty shell of an account.
+export const deleteAccount = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const sitesSnap = await db.collection('publishedSites').where('uid', '==', uid).get();
+  for (const siteDoc of sitesSnap.docs) {
+    const site = siteDoc.data() as { customDomain?: string | null };
+    if (site.customDomain) {
+      await deleteHostingDomain(site.customDomain).catch((err) => console.error('deleteHostingDomain failed', err));
+      await db.collection('domainMappings').doc(site.customDomain).delete().catch(() => {});
+    }
+    await siteDoc.ref.delete();
+  }
+
+  await getStorage().bucket().deleteFiles({ prefix: `users/${uid}/` }).catch((err) => console.error('Storage cleanup failed', err));
+
+  // Deletes users/{uid} and every subcollection beneath it (projects, meta,
+  // generationSessions, assistantMessages, pushTokens, domainPurchases, domainTransfers,
+  // orders) in one call.
+  await db.recursiveDelete(db.collection('users').doc(uid));
+
+  await getAuth().deleteUser(uid);
+
+  return { ok: true };
+});
+
 async function checkForPause(sessionRef: FirebaseFirestore.DocumentReference, pausesUsed: number): Promise<string | null> {
   const snap = await sessionRef.get();
   const session = snap.data() as GenerationSession | undefined;

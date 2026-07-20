@@ -5,6 +5,8 @@ import {
   finishTransaction,
   purchaseUpdatedListener,
   purchaseErrorListener,
+  restorePurchases as restorePurchasesNative,
+  getAvailablePurchases,
   Purchase,
   Product,
   ProductSubscription,
@@ -74,4 +76,31 @@ export async function buySubscription(sku: string): Promise<void> {
 export async function buyProduct(sku: string): Promise<void> {
   await ensureIapConnection();
   await requestPurchase({ request: { apple: { sku } }, type: 'in-app' });
+}
+
+// Required by App Store guideline 3.1.2 for any app selling non-consumables/subscriptions
+// (the luxury theme unlocks, and the plan subscriptions) -- lets someone who reinstalled
+// the app, or signed in on a new device, get back what they already paid Apple for.
+// restorePurchases() alone only re-syncs StoreKit's own record of what was bought; each
+// restored purchase still has to go through the same server-side verifyApplePurchase every
+// fresh purchase does, since that's what actually re-grants credits/plan/theme access.
+export async function restorePurchases(): Promise<number> {
+  await ensureIapConnection();
+  await restorePurchasesNative();
+  const purchases = await getAvailablePurchases();
+
+  let restoredCount = 0;
+  for (const purchase of purchases) {
+    try {
+      const transactionId = purchase.transactionId ?? purchase.id;
+      if (!transactionId) continue;
+      await verifyPurchaseServerSide(transactionId);
+      await finishTransaction({ purchase, isConsumable: false });
+      restoredCount++;
+    } catch {
+      // Skip purchases that fail to verify (e.g. already applied, or from a different
+      // account) rather than letting one bad entry block the rest of the restore.
+    }
+  }
+  return restoredCount;
 }

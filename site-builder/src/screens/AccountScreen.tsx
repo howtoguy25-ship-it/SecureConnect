@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,12 +8,15 @@ import { useAuth } from '@/context/AuthContext';
 import { userAccountStore } from '@/storage/userAccountStore';
 import { UserAccount } from '@/types';
 import { getPlan } from '@/data/pricing';
+import { restorePurchases } from '@/services/iap';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Account'>;
 
 export default function AccountScreen({ navigation }: Props) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, deleteAccount } = useAuth();
   const [account, setAccount] = useState<UserAccount | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -28,6 +31,55 @@ export default function AccountScreen({ navigation }: Props) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
     ]);
+  };
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      const count = await restorePurchases();
+      Alert.alert(
+        count > 0 ? 'Purchases restored' : 'Nothing to restore',
+        count > 0
+          ? `${count} purchase${count === 1 ? '' : 's'} restored to this account.`
+          : 'No previous purchases were found for this Apple ID.'
+      );
+    } catch (err: any) {
+      Alert.alert('Could not restore purchases', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your account, projects, published sites, and order history. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert('Are you sure?', 'Type nothing, just confirm one more time — this is permanent.', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Yes, Delete Everything',
+                style: 'destructive',
+                onPress: async () => {
+                  setDeleting(true);
+                  try {
+                    await deleteAccount();
+                  } catch (err: any) {
+                    setDeleting(false);
+                    Alert.alert('Could not delete account', err?.message ?? 'Try again in a moment.');
+                  }
+                },
+              },
+            ]);
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -83,11 +135,27 @@ export default function AccountScreen({ navigation }: Props) {
           <Text style={styles.rowText}>Return & Refund Policy</Text>
           <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
         </Pressable>
+        <Pressable style={styles.row} onPress={handleRestore} disabled={restoring}>
+          <Ionicons name="refresh-outline" size={20} color="#334155" />
+          <Text style={styles.rowText}>Restore Purchases</Text>
+          {restoring ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />}
+        </Pressable>
       </View>
 
       <Pressable style={styles.signOutButton} onPress={confirmSignOut}>
         <Ionicons name="log-out-outline" size={18} color="#DC2626" />
         <Text style={styles.signOutText}>Sign Out</Text>
+      </Pressable>
+
+      <Pressable style={styles.deleteButton} onPress={confirmDeleteAccount} disabled={deleting}>
+        {deleting ? (
+          <ActivityIndicator size="small" color="#94A3B8" />
+        ) : (
+          <>
+            <Ionicons name="trash-outline" size={16} color="#94A3B8" />
+            <Text style={styles.deleteText}>Delete Account</Text>
+          </>
+        )}
       </Pressable>
     </SafeAreaView>
   );
@@ -146,4 +214,14 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   signOutText: { color: '#DC2626', fontWeight: '700' },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 14,
+    marginBottom: 24,
+    paddingVertical: 10,
+  },
+  deleteText: { color: '#94A3B8', fontWeight: '600', fontSize: 13 },
 });

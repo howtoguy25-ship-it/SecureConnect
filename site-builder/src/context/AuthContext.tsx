@@ -13,7 +13,9 @@ import {
   onAuthStateChanged,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
-import { auth } from '@/services/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, functions } from '@/services/firebase';
+import { requireFunctions } from '@/services/requireFunctions';
 import { ensureAccount } from '@/services/aiBuilder';
 import { registerForPushNotifications, unregisterCurrentDeviceToken } from '@/services/pushNotifications';
 
@@ -35,6 +37,7 @@ interface AuthContextValue {
   signInWithGoogleIdToken: (idToken: string) => Promise<void>;
   signInWithAppleToken: (idToken: string, rawNonce: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -108,6 +111,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await firebaseSignOut(requireAuth());
   };
 
+  // Real deletion (App Store guideline 5.1.1(v)) -- deleteAccount itself unpublishes every
+  // site, wipes every Firestore doc under this account, deletes uploaded files, and deletes
+  // the real Firebase Auth user server-side. This just clears the local session afterward
+  // so the app actually navigates back to the signed-out state instead of holding onto a
+  // now-dead user object.
+  const deleteAccount = async () => {
+    const call = httpsCallable(requireFunctions(functions), 'deleteAccount');
+    await call();
+    await firebaseSignOut(requireAuth());
+  };
+
   const value: AuthContextValue = {
     user,
     initializing,
@@ -119,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signInWithGoogleIdToken,
     signInWithAppleToken,
     signOut,
+    deleteAccount,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

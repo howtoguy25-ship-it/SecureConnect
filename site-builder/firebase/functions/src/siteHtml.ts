@@ -542,11 +542,11 @@ const PRIVACY_SECTIONS: { heading: string; body: string }[] = [
   {
     heading: 'Your choices',
     body:
-      'You can delete individual projects at any time from the Projects screen. To delete your account and all ' +
-      'associated data, contact support using the details below — we’ll remove your projects, credit ' +
-      'balance, and assistant chat history from our systems. Domain registrations already submitted to Namecheap ' +
-      'follow that registrar’s own account/data rules, since the domain itself is a real-world asset independent ' +
-      'of this app.',
+      'You can delete individual projects at any time from the Projects screen. To delete your account entirely, ' +
+      'go to Account → Delete Account — this immediately and permanently removes your projects, published sites, ' +
+      'credit balance, order history, and assistant chat history from our systems; no need to contact support. ' +
+      'Domain registrations already submitted to Namecheap follow that registrar’s own account/data rules, since ' +
+      'the domain itself is a real-world asset independent of this app.',
   },
   {
     heading: 'Contact',
