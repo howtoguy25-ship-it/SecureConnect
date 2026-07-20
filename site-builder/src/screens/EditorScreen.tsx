@@ -13,6 +13,7 @@ import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import GeneratingOverlay from '@/components/GeneratingOverlay';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
@@ -30,6 +31,13 @@ function EditorInner({ navigation }: Props) {
       </View>
     );
   }
+
+  // AIBuildProgressScreen replaces itself with this screen the instant the generation
+  // session's Firestore doc flips to 'completed' -- but the actual finished project doc
+  // (real name + elements) can land a beat later over this screen's own live subscription.
+  // Without this guard that gap renders as a blank white canvas; showing the same
+  // "building" animation through that gap keeps it reading as "still working," not broken.
+  const isGenerating = project.name === 'Generating...' && project.elements.length === 0;
 
   const canvasCenterX = project.canvasSize.width / 2;
   const canvasCenterY = project.canvasSize.height / 2;
@@ -166,11 +174,19 @@ function EditorInner({ navigation }: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {project.name}
         </Text>
-        <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
-          <Ionicons name="cloud-upload-outline" size={24} color="#0F172A" />
-        </Pressable>
+        {isGenerating ? (
+          <View style={{ width: 24 }} />
+        ) : (
+          <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
+            <Ionicons name="cloud-upload-outline" size={24} color="#0F172A" />
+          </Pressable>
+        )}
       </View>
 
+      {isGenerating ? (
+        <GeneratingOverlay />
+      ) : (
+        <>
       <View style={styles.canvasArea}>
         <ScrollView
           contentContainerStyle={styles.canvasScroll}
@@ -222,6 +238,8 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
           </View>
+        </>
+      )}
         </>
       )}
     </SafeAreaView>
