@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Platform, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform, Alert, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -107,12 +107,12 @@ export default function WelcomeScreen({ navigation }: Props) {
     <LinearGradient colors={['#1E1B4B', '#0B1220', '#082F36']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gradientRoot}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.hero}>
-          <LinearGradient colors={['#818CF8', '#E879F9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logo}>
-            <Ionicons name="sparkles" size={32} color="#FFFFFF" />
-          </LinearGradient>
-        <Text style={styles.title}>SiteSpark</Text>
-        <Text style={styles.subtitle}>Build real sites, logos, and social pages — right from your phone.</Text>
-      </View>
+          {/* The real app logo (same asset as the App Store icon/splash screen) --
+              already includes the "SiteSpark" wordmark, so no separate title text
+              underneath it. */}
+          <Image source={require('../../../assets/splash-icon.png')} style={styles.logo} resizeMode="contain" />
+          <Text style={styles.subtitle}>Build real sites, logos, and social pages — right from your phone.</Text>
+        </View>
 
       <View style={styles.actions}>
         {busy && <ActivityIndicator style={{ marginBottom: 12 }} />}
@@ -170,14 +170,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'space-between' },
   hero: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
   logo: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
+    width: 220,
+    height: 220,
+    marginBottom: 4,
   },
-  title: { fontSize: 30, fontWeight: '800', color: '#FFFFFF' },
   subtitle: { fontSize: 14, color: '#94A3B8', textAlign: 'center', marginTop: 10, lineHeight: 20 },
   actions: { padding: 24, gap: 12 },
   button: {
