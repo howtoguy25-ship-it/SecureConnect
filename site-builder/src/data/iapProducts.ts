@@ -4,9 +4,13 @@ import { PlanId } from '@/data/pricing';
 // (Monetization -> Subscriptions / In-App Purchases). See ROADMAP.md Phase 4 for the
 // full list with prices.
 
+// Note: 'com.sitespark.app.sub.middle' (no 'class') was created once in App Store Connect
+// then deleted while sorting out subscription groups -- Apple permanently reserves a
+// Product ID the moment it's used, even after deletion, so that exact id can never be
+// reused. 'middleclass' is the replacement; it was never used, so it's safe.
 export const SUBSCRIPTION_PRODUCT_IDS: Record<Exclude<PlanId, 'free'>, string> = {
   beginner: 'com.sitespark.app.sub.beginner',
-  middle: 'com.sitespark.app.sub.middle',
+  middle: 'com.sitespark.app.sub.middleclass',
   advanced: 'com.sitespark.app.sub.advanced',
 };
 

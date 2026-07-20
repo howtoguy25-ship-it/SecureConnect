@@ -5,9 +5,13 @@ import { PlanId } from './types';
 
 export const APPLE_BUNDLE_ID = 'com.sitespark.app';
 
+// Note: 'com.sitespark.app.sub.middle' (no 'class') was created once in App Store Connect
+// then deleted while sorting out subscription groups -- Apple permanently reserves a
+// Product ID the moment it's used, even after deletion, so that exact id can never be
+// reused. 'middleclass' is the replacement; it was never used, so it's safe.
 export const SUBSCRIPTION_PRODUCT_IDS: Record<string, Exclude<PlanId, 'free'>> = {
   'com.sitespark.app.sub.beginner': 'beginner',
-  'com.sitespark.app.sub.middle': 'middle',
+  'com.sitespark.app.sub.middleclass': 'middle',
   'com.sitespark.app.sub.advanced': 'advanced',
 };
 
