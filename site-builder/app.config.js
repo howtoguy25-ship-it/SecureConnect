@@ -67,9 +67,9 @@ module.exports = ({ config }) => ({
       {
         // Real AdMob App ID (from admob.google.com) -- used once for the whole app
         // regardless of which ad formats are active. Rewarded interstitial credits
-        // (src/services/rewardedAd.ts) and the banner on the Projects screen
-        // (src/components/AdBanner.tsx) are wired to real ad units; App Open ads are not
-        // built yet.
+        // (src/services/rewardedAd.ts), the banner on the Projects screen
+        // (src/components/AdBanner.tsx), and app-open ads on foreground resume
+        // (src/services/appOpenAd.ts) are all wired to real ad units.
         iosAppId: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID || 'ca-app-pub-6423632749110820~3428142480',
         androidAppId: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || 'ca-app-pub-3940256099942544~3347511713',
       },

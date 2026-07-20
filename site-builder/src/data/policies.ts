@@ -32,8 +32,8 @@ export const PRIVACY_POLICY: PolicySection[] = [
       'through the app, your registrant contact is submitted to them to complete the real ICANN registration; ' +
       'free WHOIS privacy protection is requested automatically so it isn’t publicly visible in WHOIS lookups. ' +
       'Apple processes subscription and credit-pack purchases through In-App Purchase. Google AdMob serves the ' +
-      'banner and rewarded-credit ads inside the app — ads are requested as non-personalized, so AdMob does not ' +
-      'receive advertising identifiers or build a profile of you for tracking.',
+      'app-open, banner, and rewarded-credit ads inside the app — ads are requested as non-personalized, so ' +
+      'AdMob does not receive advertising identifiers or build a profile of you for tracking.',
   },
   {
     heading: 'Publishing makes content public',
@@ -118,8 +118,8 @@ export const FAQ_ITEMS: FaqItem[] = [
     answer: 'No. Domain purchases are processed by Stripe, and subscriptions/credit packs by Apple’s In-App Purchase — SiteSpark never sees or stores your full card details.',
   },
   {
-    question: 'How do the "watch an ad for credits" and banner ads work?',
-    answer: 'Every 2 days, you can watch a short rewarded ad from Google AdMob for 15 free credits — the button on your Projects screen shows when it’s available again. Ads shown in the app are non-personalized and don’t track you across other apps or websites.',
+    question: 'How do the "watch an ad for credits", banner, and app-open ads work?',
+    answer: 'Every 2 days, you can watch a short rewarded ad from Google AdMob for 15 free credits — the button on your Projects screen shows when it’s available again. You may also see a banner ad on the Projects screen and, occasionally, a full-screen ad when you return to the app after switching away. Ads shown in the app are non-personalized and don’t track you across other apps or websites.',
   },
   {
     question: 'Can I use SiteSpark from a computer, not just the iOS app?',

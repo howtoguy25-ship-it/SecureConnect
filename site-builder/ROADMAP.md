@@ -618,37 +618,52 @@ build requests a push token, EAS provisions the Apple Push Notification service 
 for `com.sitespark.app` automatically (you may be prompted once to confirm this during
 `eas build`).
 
-## Phase 12 — Real rewarded-ad credits — done
+## Phase 12 — Real AdMob ads: rewarded credits, banner, and app-open — done
 
-Projects dashboard now shows a "Watch an ad for 15 free credits" card, once every 2 days
-per account — a real Google AdMob rewarded ad, not a fake timer.
+Three real Google AdMob ad formats are wired in, all sharing one real AdMob account
+(App ID `ca-app-pub-6423632749110820~3428142480`):
 
-- **Real ad SDK**: `react-native-google-mobile-ads` (Invertase), wired via its Expo config
-  plugin in `app.config.js`. Ships with Google's own public **test** App ID/ad unit ID as
-  the default (`TestIds.REWARDED`) so it builds and shows real, clearly-labeled test ads
-  before a real AdMob account exists — swap in real IDs via `EXPO_PUBLIC_ADMOB_IOS_APP_ID`
-  / `EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID` once you create an AdMob account and ad unit at
-  admob.google.com.
-- **Non-personalized ads only** (`requestNonPersonalizedAdsOnly: true` in
-  `src/services/rewardedAd.ts`) — deliberately matches the "No" answers already given in
-  the App Store's Data Collection questionnaire for tracking/third-party advertising; no
-  IDFA use means no App Tracking Transparency prompt is needed either.
-- **Server-enforced, not client-trusted**: the client only reports "the user watched a real
-  ad and AdMob fired `EARNED_REWARD`" — the actual 48-hour cooldown check and the +15
-  credit grant happen inside `claimAdReward` (`firebase/functions/src/index.ts`), in a
-  Firestore transaction keyed off `users/{uid}.lastAdRewardClaimedAt`. A modified client
-  retrying the call can't claim twice or skip the cooldown.
+- **Rewarded interstitial credits** (`src/services/rewardedAd.ts` + `RewardedAdCard.tsx`):
+  the Projects screen shows a "Watch an ad for 15 free credits" card, once every 2 days per
+  account. Unit type is specifically a **Rewarded Interstitial**, not a plain Rewarded ad —
+  these need different SDK classes (`RewardedInterstitialAd` vs `RewardedAd`); using the
+  wrong one for a given ad unit fails to load.
+- **Banner** (`src/components/AdBanner.tsx`): an anchored adaptive banner at the bottom of
+  the Projects screen.
+- **App open** (`src/services/appOpenAd.ts` + `AppOpenAdManager.tsx`, mounted in
+  `RootNavigator` alongside `AssistantLauncher`/`BillingBanner` for signed-in users only): a
+  full-screen ad preloaded on launch and shown whenever the app returns to the foreground
+  after being backgrounded — never on the very first cold launch, so a fresh sign-in always
+  lands straight on the Projects screen. Ads older than 4 hours are treated as stale and
+  silently reloaded instead of shown, per Google's own guidance.
 
-**Follow-up needed in App Store Connect:** since real ads are now shown, go back into
-**App Privacy → Data Collection** and add **Advertising Data** as a collected type
-(purpose: Third-Party Advertising; not linked to identity; not used for tracking, since
-ads are non-personalized) — this wasn't declared when we filled that section out earlier,
-before this feature existed.
+Shared safeguards across all three:
+- **Dev/debug builds always use Google's public test ad units** regardless of env config
+  (`TestIds.REWARDED_INTERSTITIAL` / `TestIds.BANNER` / `TestIds.APP_OPEN`) — repeatedly
+  requesting real ads from a development device risks AdMob flagging the account for
+  invalid traffic. Only release builds (`__DEV__` false) ever request the real ad units,
+  via `EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID` / `EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID` /
+  `EXPO_PUBLIC_ADMOB_APP_OPEN_UNIT_ID` (falling back to the real hardcoded IDs already in
+  each service file if those env vars aren't set).
+- **Non-personalized ads only** (`requestNonPersonalizedAdsOnly: true` everywhere) —
+  deliberately matches the "No" answers already given in the App Store's Data Collection
+  questionnaire for tracking/third-party advertising; no IDFA use means no App Tracking
+  Transparency prompt is needed either.
+- **`react-native-google-mobile-ads` has no web build** — its native ad-view codegen import
+  breaks Metro's web bundler entirely. Every file that imports it
+  (`rewardedAd.ts`/`AdBanner.tsx`/`appOpenAd.ts`) has a matching `.web.ts`/`.web.tsx` stub
+  (no-ops / renders nothing) so `npm run web:build` still works (see Phase 13).
+- **Rewarded credits are server-enforced, not client-trusted**: the client only reports
+  "the user watched a real ad and AdMob fired `EARNED_REWARD`" — the actual 48-hour cooldown
+  check and the +15 credit grant happen inside `claimAdReward`
+  (`firebase/functions/src/index.ts`), in a Firestore transaction keyed off
+  `users/{uid}.lastAdRewardClaimedAt`. A modified client retrying the call can't claim
+  twice or skip the cooldown.
 
-**One-time setup needed from you:** create a real AdMob account + rewarded ad unit at
-admob.google.com once you're ready to show real (non-test) ads, then set
-`EXPO_PUBLIC_ADMOB_IOS_APP_ID` and `EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID` (in `.env` and
-`eas.json`'s `build.*.env`, same pattern as the Firebase/Google config) and rebuild.
+**Follow-up needed in App Store Connect:** go into **App Privacy → Data Collection** and
+add **Advertising Data** as a collected type (purpose: Third-Party Advertising; not linked
+to identity; not used for tracking, since ads are non-personalized) — this wasn't declared
+when that section was filled out earlier, before any of this existed.
 
 ## Phase 13 — Real web sign-in + a real web app, plus a richer marketing page — code done, hosting setup pending
 

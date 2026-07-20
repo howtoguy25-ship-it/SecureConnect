@@ -10,6 +10,7 @@ import AuthNavigator from '@/navigation/AuthNavigator';
 import AssistantLauncher from '@/components/assistant/AssistantLauncher';
 import BillingBanner from '@/components/BillingBanner';
 import OrderBanner from '@/components/OrderBanner';
+import AppOpenAdManager from '@/components/AppOpenAdManager';
 import FirebaseSetupScreen from '@/screens/FirebaseSetupScreen';
 import ProjectsScreen from '@/screens/ProjectsScreen';
 import NewProjectScreen from '@/screens/NewProjectScreen';
@@ -76,6 +77,7 @@ export default function RootNavigator() {
           <AssistantLauncher />
           <BillingBanner />
           <OrderBanner />
+          <AppOpenAdManager />
         </>
       ) : (
         <AuthNavigator />
