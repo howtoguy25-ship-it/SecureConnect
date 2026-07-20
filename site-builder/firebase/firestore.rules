@@ -123,5 +123,13 @@ service cloud.firestore {
       allow read: if isOwner(uid);
       allow write: if false;
     }
+
+    // Reports submitted via a published page's "Report this site" link (App Store
+    // Review Guideline 1.2) -- written only by reportPublishedSite via the Admin SDK, from
+    // an unauthenticated visitor's browser talking to that Cloud Function, never directly
+    // to Firestore. No client (signed in or not) ever reads or writes this collection.
+    match /contentReports/{reportId} {
+      allow read, write: if false;
+    }
   }
 }

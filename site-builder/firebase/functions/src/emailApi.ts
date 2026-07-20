@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import { StoreOrder } from './types';
+import { escapeHtml } from './siteHtml';
 
 // Real transactional email for a new store order -- the in-app banner (lastOrderNotice)
 // only reaches a seller with the app open; this reaches them even when it's closed, without
@@ -45,6 +46,34 @@ export async function sendOrderNotificationEmail(apiKey: string, sellerEmail: st
           This was a single real payment via Stripe -- not a recurring charge.<br>
           View this ${order.bookingDetails ? 'booking' : 'order'} and your full payout history in the SiteSpark app.
         </p>
+      </div>
+    `,
+  });
+}
+
+export interface ContentReport {
+  slug: string;
+  reason: string;
+  message: string;
+  pageUrl: string;
+}
+
+// Apple App Store Review Guideline 1.2 (User-Generated Content) requires apps that let
+// users publish public content to provide a way for anyone to report objectionable
+// content -- this is that reporting path's real effect: a genuine email straight to the
+// team, not just a form that silently writes to a database nobody looks at.
+export async function sendContentReportEmail(apiKey: string, report: ContentReport): Promise<void> {
+  const resend = new Resend(apiKey);
+  await resend.emails.send({
+    from: 'SiteSpark Reports <orders@buildsitespark.com>',
+    to: 'support@buildsitespark.com',
+    subject: `Content report: ${report.slug}`,
+    html: `
+      <div style="font-family:-apple-system,sans-serif;max-width:480px;margin:0 auto;">
+        <h2>A published site was reported</h2>
+        <p><strong>Site:</strong> <a href="${escapeHtml(report.pageUrl)}">${escapeHtml(report.pageUrl)}</a></p>
+        <p><strong>Reason:</strong> ${escapeHtml(report.reason)}</p>
+        ${report.message ? `<p><strong>Details:</strong> ${escapeHtml(report.message)}</p>` : ''}
       </div>
     `,
   });

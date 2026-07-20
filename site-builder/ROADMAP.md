@@ -743,6 +743,40 @@ radial glows behind the hero), per-page-type accent colors, icon chips on each f
 card, and a highlighted "Most Popular" plan card — all still pure inline CSS (no build
 step, since this page is server-rendered by a Cloud Function, not a static bundle).
 
+## Phase 14 — Web-safe purchases, and a real content-report path (Guideline 1.2) — done
+
+Two follow-ups from the web app work in Phase 13:
+
+**Purchases on the web app are now honest, not broken.** `expo-iap` wraps StoreKit/Play
+Billing directly -- there's no such thing as an Apple in-app purchase from a browser tab,
+so `src/services/iap.web.ts` doesn't try to fake one. `buySubscription`/`buyProduct` throw
+a clear "Purchases are only available in the SiteSpark iOS app" message, `restorePurchases`
+throws the equivalent for restoring, and `loadIapCatalog` returns an empty catalog (so the
+Subscription/Theme Gallery screens fall back to their hardcoded price text, per Phase
+[live pricing] above) -- all surfaced through the same `Alert.alert` error handling those
+screens already had, instead of a cryptic native-module-not-found error. **Delete Account**
+needed no changes at all -- it's just a Firebase Functions call (`deleteAccount`) followed
+by `signOut`, both already fully cross-platform.
+
+**Every published site now has a real "Report this site" link** (bottom-left corner,
+`renderReportWidget` in `siteHtml.ts`) -- required by App Store Review Guideline 1.2 for
+any app that lets users publish content publicly. No Firebase SDK is loaded on a published
+page (it's plain static HTML), so it posts straight to a new public, unauthenticated
+Cloud Function, `reportPublishedSite`, the same way the storefront cart widget posts to
+`createStoreCheckout`.
+
+- Validates the reason against a fixed list (Spam/Abusive/Copyright/Impersonation/Other),
+  confirms the slug maps to a real published site, then does two things: stores the report
+  in a new `contentReports` collection (server-write-only -- see `firestore.rules`, no
+  client ever reads or writes it) and emails the team directly via `sendContentReportEmail`
+  (`emailApi.ts`, same Resend setup as order notifications) so a report is actually seen,
+  not just logged somewhere nobody checks.
+- This covers the "let users report objectionable content" half of Guideline 1.2. The
+  "block abusive users" half is intentionally not built -- SiteSpark has no user-to-user
+  interaction (chat, comments, follows) for one user to abuse another through; the
+  guideline's blocking requirement is aimed at social/messaging-style apps. If direct
+  user-to-user interaction is ever added, revisit this.
+
 ## Notes on the "animal-tier" AI speed/strength framing
 
 The Beginner/Immediate/Advanced plans map to different underlying model

@@ -46,7 +46,7 @@ import {
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession } from './stripeApi';
 import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink } from './stripeConnect';
-import { sendOrderNotificationEmail } from './emailApi';
+import { sendOrderNotificationEmail, sendContentReportEmail } from './emailApi';
 import { sendPushNotification } from './pushApi';
 import { getTransactionInfo } from './appStoreApi';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN, APPLE_BUNDLE_ID } from './iapProducts';
@@ -100,6 +100,9 @@ const PRODUCT_DOMAIN = 'buildsitespark.com';
 // live project id rather than hardcoded, since 2nd-gen HTTPS function URLs always follow
 // this exact shape. Baked into a published page's cart checkout button (see siteHtml.ts).
 const STORE_CHECKOUT_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/createStoreCheckout`;
+// Same pattern, for reportPublishedSite (defined further down) -- baked into every
+// published page's "Report this site" link (see siteHtml.ts).
+const REPORT_SITE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/reportPublishedSite`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -551,7 +554,7 @@ export const publishProject = onCall(async (request) => {
   }
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
-  const html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL);
+  const html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL);
 
   const site: PublishedSite = { uid, projectId, html, updatedAt: Date.now() };
   await db.collection('publishedSites').doc(slug).set(site);
@@ -1441,5 +1444,61 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
   } catch (err) {
     console.error('createStoreCheckout failed', err);
     res.status(500).json({ error: 'Could not start checkout.' });
+  }
+});
+
+const CONTENT_REPORT_REASONS = [
+  'Spam or scam',
+  'Offensive or abusive content',
+  'Copyright or trademark infringement',
+  'Impersonation',
+  'Other',
+];
+
+// Public, unauthenticated -- anyone viewing a published site can report it, same as the
+// "Report this site" link baked into every published page (see siteHtml.ts). Required by
+// App Store Review Guideline 1.2 for apps that let users publish content publicly. Stores
+// the report and emails the team directly rather than just writing to a collection nobody
+// watches -- see sendContentReportEmail.
+export const reportPublishedSite = onRequest({ secrets: [resendApiKey], cors: true }, async (req, res) => {
+  try {
+    const { slug, reason, message, pageUrl } = req.body as {
+      slug?: string;
+      reason?: string;
+      message?: string;
+      pageUrl?: string;
+    };
+    if (!slug || !reason || !CONTENT_REPORT_REASONS.includes(reason)) {
+      res.status(400).json({ error: 'Missing or invalid report reason.' });
+      return;
+    }
+
+    const siteDoc = await db.collection('publishedSites').doc(slug).get();
+    if (!siteDoc.exists) {
+      res.status(400).json({ error: 'This site could not be found.' });
+      return;
+    }
+    const site = siteDoc.data() as PublishedSite;
+
+    await db.collection('contentReports').add({
+      slug,
+      reportedUid: site.uid,
+      reason,
+      message: (message ?? '').slice(0, 2000),
+      pageUrl: pageUrl ?? `https://${slug}.${PRODUCT_DOMAIN}`,
+      createdAt: Date.now(),
+    });
+
+    await sendContentReportEmail(resendApiKey.value(), {
+      slug,
+      reason,
+      message: (message ?? '').slice(0, 2000),
+      pageUrl: pageUrl ?? `https://${slug}.${PRODUCT_DOMAIN}`,
+    }).catch((err) => console.error('sendContentReportEmail failed', err));
+
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('reportPublishedSite failed', err);
+    res.status(500).json({ error: 'Could not send report.' });
   }
 });

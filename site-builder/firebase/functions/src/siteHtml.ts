@@ -6,7 +6,7 @@ import { CanvasElement, Project } from './types';
 // visitor's viewport width via a CSS custom property + a tiny inline resize script --
 // good enough for a genuinely real published page without redesigning the data model.
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -270,6 +270,68 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
 })();</script>`;
 }
 
+// Apple App Store Review Guideline 1.2 (User-Generated Content) requires a way for
+// anyone to report objectionable content on a page like this one -- a real published
+// site, publicly reachable to anyone with the link, not just signed-in app users. This
+// has to work with no Firebase SDK loaded (published pages are plain static HTML), so it
+// posts straight to reportPublishedSite's HTTP endpoint the same way the cart widget
+// posts to createStoreCheckout.
+function renderReportWidget(slug: string, reportUrl: string, pageUrl: string): string {
+  return `<a href="#" id="sitespark-report-link" onclick="siteSparkReport.open();return false;" style="position:fixed;bottom:10px;left:10px;z-index:9999;font-family:-apple-system,sans-serif;font-size:11px;color:#94A3B8;background:#FFFFFFCC;padding:4px 8px;border-radius:8px;text-decoration:none;">Report this site</a>
+<div id="sitespark-report-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:#00000088;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:14px;padding:20px;width:90%;max-width:340px;font-family:-apple-system,sans-serif;">
+    <div style="font-weight:700;color:#0F172A;margin-bottom:10px;">Report this site</div>
+    <label style="font-size:12px;color:#64748B;">Reason</label>
+    <select id="sitespark-report-reason" style="width:100%;padding:8px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;margin:4px 0 10px;">
+      <option value="Spam or scam">Spam or scam</option>
+      <option value="Offensive or abusive content">Offensive or abusive content</option>
+      <option value="Copyright or trademark infringement">Copyright or trademark infringement</option>
+      <option value="Impersonation">Impersonation</option>
+      <option value="Other">Other</option>
+    </select>
+    <label style="font-size:12px;color:#64748B;">Details (optional)</label>
+    <textarea id="sitespark-report-message" rows="3" style="width:100%;padding:8px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;margin-top:4px;resize:vertical;"></textarea>
+    <div id="sitespark-report-status" style="font-size:12px;color:#DC2626;margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="siteSparkReport.close();" style="flex:1;background:#F1F5F9;color:#0F172A;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">Cancel</button>
+      <button onclick="siteSparkReport.submit();" style="flex:1;background:#DC2626;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">Submit</button>
+    </div>
+  </div>
+</div>
+<script>(function(){
+  var SLUG=${JSON.stringify(slug)};
+  var REPORT_URL=${JSON.stringify(reportUrl)};
+  var PAGE_URL=${JSON.stringify(pageUrl)};
+  function open(){ document.getElementById('sitespark-report-modal').style.display='flex'; }
+  function close(){ document.getElementById('sitespark-report-modal').style.display='none'; document.getElementById('sitespark-report-status').textContent=''; }
+  function submit(){
+    var reason = document.getElementById('sitespark-report-reason').value;
+    var message = document.getElementById('sitespark-report-message').value;
+    var status = document.getElementById('sitespark-report-status');
+    status.style.color = '#64748B';
+    status.textContent = 'Sending...';
+    fetch(REPORT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: SLUG, reason: reason, message: message, pageUrl: PAGE_URL }),
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.ok) {
+          status.style.color = '#16A34A';
+          status.textContent = 'Thanks — this has been reported.';
+          setTimeout(close, 1500);
+        } else {
+          status.style.color = '#DC2626';
+          status.textContent = data.error || 'Could not send report.';
+        }
+      })
+      .catch(function(){ status.style.color = '#DC2626'; status.textContent = 'Could not send report.'; });
+  }
+  window.siteSparkReport = { open: open, close: close, submit: submit };
+})();</script>`;
+}
+
 function renderAnnouncementBars(project: Project): string {
   const { announcements } = project;
   if (!announcements.enabled || announcements.bars.length === 0) return '';
@@ -293,7 +355,7 @@ function renderAnnouncementBars(project: Project): string {
 <script>(function(){var c=document.getElementById('announcement-bars');var bars=c.querySelectorAll('[data-bar]');var i=0;setInterval(function(){bars[i].style.display='none';i=(i+1)%bars.length;bars[i].style.display='block';bars[i].style.padding='10px 16px';},${announcements.intervalMs});bars[0].style.padding='10px 16px';})();</script>`;
 }
 
-export function renderProjectHtml(project: Project, slug: string, storeCheckoutUrl: string): string {
+export function renderProjectHtml(project: Project, slug: string, storeCheckoutUrl: string, reportUrl: string): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
   const usesMdi = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'MaterialCommunityIcons');
   const usesFa = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'FontAwesome5');
@@ -349,6 +411,7 @@ export function renderProjectHtml(project: Project, slug: string, storeCheckoutU
     </div>
   </div>
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
+  ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
   ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl) : ''}
   <script>
     (function () {
