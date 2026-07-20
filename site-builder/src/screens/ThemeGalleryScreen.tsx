@@ -24,7 +24,7 @@ import { createProject } from '@/utils/createProject';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { useAuth } from '@/context/AuthContext';
 import { THEME_TIER_PRODUCT_IDS } from '@/data/iapProducts';
-import { buyProduct, attachPurchaseListeners } from '@/services/iap';
+import { buyProduct, attachPurchaseListeners, loadIapCatalog } from '@/services/iap';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeGallery'>;
 
@@ -44,6 +44,29 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const [purchasing, setPurchasing] = useState(false);
   const [nameModal, setNameModal] = useState<Theme | null>(null);
   const [nameValue, setNameValue] = useState('');
+  // Real, localized prices from Apple, keyed by product id -- see the same fix on
+  // SubscriptionScreen for why theme.price (a hardcoded number) isn't trustworthy to show
+  // directly. Falls back to `$${theme.price}` below if the catalog hasn't loaded yet.
+  const [livePrices, setLivePrices] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    loadIapCatalog()
+      .then(({ products }) => {
+        const prices: Record<string, string> = {};
+        products.forEach((p) => {
+          prices[p.id] = p.displayPrice;
+        });
+        setLivePrices(prices);
+      })
+      .catch(() => {
+        // Leave livePrices empty -- the `$${theme.price}` fallback below covers this.
+      });
+  }, []);
+
+  const tierPriceLabel = (tier: 'luxury' | 'luxury-crazy', fallback: number): string => {
+    const productId = THEME_TIER_PRODUCT_IDS[tier];
+    return livePrices[productId] ?? `$${fallback}`;
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -121,8 +144,8 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
       <View style={styles.group} key={tier}>
         <Text style={styles.groupTitle}>
           {TIER_LABEL[tier]}
-          {tier === 'luxury' && '  ·  $189'}
-          {tier === 'luxury-crazy' && '  ·  $399'}
+          {tier === 'luxury' && `  ·  ${tierPriceLabel('luxury', 189)}`}
+          {tier === 'luxury-crazy' && `  ·  ${tierPriceLabel('luxury-crazy', 399)}`}
         </Text>
         <View style={styles.grid}>
           {items.map((theme) => (
@@ -141,7 +164,9 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
               <Text style={styles.themeDesc} numberOfLines={2}>
                 {theme.description}
               </Text>
-              {theme.price > 0 && <Text style={styles.themePrice}>${theme.price}</Text>}
+              {theme.price > 0 && (
+                <Text style={styles.themePrice}>{tierPriceLabel(theme.tier as 'luxury' | 'luxury-crazy', theme.price)}</Text>
+              )}
             </Pressable>
           ))}
         </View>
@@ -171,8 +196,9 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Unlock "{purchaseTheme?.name}"</Text>
             <Text style={styles.modalBody}>
-              A one-time Apple In-App Purchase of ${purchaseTheme?.price} unlocks every theme in this
-              tier, not just this one. Payment is handled entirely by Apple.
+              A one-time Apple In-App Purchase of{' '}
+              {purchaseTheme && tierPriceLabel(purchaseTheme.tier as 'luxury' | 'luxury-crazy', purchaseTheme.price)}{' '}
+              unlocks every theme in this tier, not just this one. Payment is handled entirely by Apple.
             </Text>
             <View style={styles.modalActions}>
               <Pressable style={styles.modalCancel} onPress={() => setPurchaseTheme(null)} disabled={purchasing}>
@@ -182,7 +208,9 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
                 {purchasing ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalConfirmText}>Buy ${purchaseTheme?.price}</Text>
+                  <Text style={styles.modalConfirmText}>
+                    Buy {purchaseTheme && tierPriceLabel(purchaseTheme.tier as 'luxury' | 'luxury-crazy', purchaseTheme.price)}
+                  </Text>
                 )}
               </Pressable>
             </View>

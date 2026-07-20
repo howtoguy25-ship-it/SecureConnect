@@ -6,12 +6,32 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { PLANS, CREDIT_PACKS, computeBuildCost } from '@/data/pricing';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS } from '@/data/iapProducts';
-import { buySubscription, buyProduct, attachPurchaseListeners } from '@/services/iap';
+import { buySubscription, buyProduct, attachPurchaseListeners, loadIapCatalog } from '@/services/iap';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Subscription'>;
 
 export default function SubscriptionScreen({ navigation }: Props) {
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  // Real, localized prices from Apple, keyed by product id -- e.g. "$64.99" is only ever
+  // our own guess (src/data/pricing.ts's priceLabel), which won't match what a given
+  // customer is actually charged once regional/currency-base pricing is involved. Falls
+  // back to that guess below if the catalog hasn't loaded yet (offline, IAP not
+  // connected) so the screen never shows a blank price.
+  const [livePrices, setLivePrices] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    loadIapCatalog()
+      .then(({ subscriptions, products }) => {
+        const prices: Record<string, string> = {};
+        [...subscriptions, ...products].forEach((p) => {
+          prices[p.id] = p.displayPrice;
+        });
+        setLivePrices(prices);
+      })
+      .catch(() => {
+        // Leave livePrices empty -- the hardcoded priceLabel fallback below covers this.
+      });
+  }, []);
 
   useEffect(() => {
     const detach = attachPurchaseListeners(
@@ -71,7 +91,7 @@ export default function SubscriptionScreen({ navigation }: Props) {
           <View key={plan.id} style={styles.planCard}>
             <View style={styles.planHeader}>
               <Text style={styles.planName}>{plan.name}</Text>
-              <Text style={styles.planPrice}>{plan.priceLabel}</Text>
+              <Text style={styles.planPrice}>{livePrices[SUBSCRIPTION_PRODUCT_IDS[plan.id as keyof typeof SUBSCRIPTION_PRODUCT_IDS]] ?? plan.priceLabel}</Text>
             </View>
             <Text style={styles.planDetail}>
               {plan.monthlyCredits} credits {plan.billingPeriod === 'weekly-reset' ? '(resets weekly)' : '/mo'} · {plan.aiTierLabel}-tier AI ({plan.aiSpeedMultiplier}x)
@@ -109,7 +129,7 @@ export default function SubscriptionScreen({ navigation }: Props) {
                 <>
                   <Text style={styles.packCredits}>{pack.credits}</Text>
                   <Text style={styles.packLabel}>credits</Text>
-                  <Text style={styles.packPrice}>{pack.priceLabel}</Text>
+                  <Text style={styles.packPrice}>{livePrices[CREDIT_PACK_PRODUCT_IDS[pack.id]] ?? pack.priceLabel}</Text>
                 </>
               )}
             </Pressable>
