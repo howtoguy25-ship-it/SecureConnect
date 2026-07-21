@@ -14,6 +14,7 @@ interface Props {
   onChange: (patch: Partial<CanvasElement>) => void;
   onDelete: () => void;
   onBringToFront: () => void;
+  onClose: () => void;
 }
 
 // Each chip renders its own label in its own real typeface (once downloaded) rather than a
@@ -53,7 +54,7 @@ async function pickVideo(): Promise<string | null> {
 
 const MAX_TRIM_MS = 5 * 60 * 1000;
 
-export default function ElementInspector({ element, onChange, onDelete, onBringToFront }: Props) {
+export default function ElementInspector({ element, onChange, onDelete, onBringToFront, onClose }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -64,6 +65,12 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
           </Pressable>
           <Pressable onPress={onDelete} hitSlop={8} style={styles.iconBtn}>
             <Ionicons name="trash-outline" size={20} color="#DC2626" />
+          </Pressable>
+          {/* Quick one-tap close -- users no longer have to scroll all the way down and
+              hunt for a "Done" button on every single element they tap, whether or not
+              they've actually changed anything. */}
+          <Pressable onPress={onClose} hitSlop={8} style={styles.iconBtn}>
+            <Ionicons name="chevron-down-circle-outline" size={22} color="#334155" />
           </Pressable>
         </View>
       </View>

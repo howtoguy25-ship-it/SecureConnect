@@ -272,15 +272,16 @@ function EditorInner({ navigation }: Props) {
             onChange={(patch) => updateElement(selectedElement.id, patch)}
             onDelete={() => confirmDeleteId(selectedElement.id)}
             onBringToFront={() => bringToFront(selectedElement.id)}
+            onClose={() => select(null)}
           />
-          <Pressable style={styles.doneBtn} onPress={() => select(null)}>
-            <Text style={styles.doneBtnText}>Done</Text>
-          </Pressable>
         </View>
       ) : (
         <>
           {panel && (
             <View style={styles.panel}>
+              <Pressable style={styles.panelMinimizeBtn} onPress={() => setPanel(null)} hitSlop={8}>
+                <Ionicons name="chevron-down-circle-outline" size={22} color="#334155" />
+              </Pressable>
               <View style={styles.sheetHandle} />
               {panel === 'elements' && <ElementsPanel onAdd={handleAddLibraryItem} />}
               {panel === 'bar' && (
@@ -411,6 +412,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#E2E8F0',
     paddingTop: 8,
   },
+  panelMinimizeBtn: { position: 'absolute', top: 6, right: 12, zIndex: 5, padding: 4 },
   bottomSheet: {
     maxHeight: 380,
     backgroundColor: '#FFFFFF',
@@ -426,6 +428,4 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 4,
   },
-  doneBtn: { padding: 12, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#F1F5F9' },
-  doneBtnText: { color: '#2563EB', fontWeight: '700' },
 });
