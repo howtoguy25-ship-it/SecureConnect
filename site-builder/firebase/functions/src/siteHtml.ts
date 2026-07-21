@@ -1,4 +1,4 @@
-import { CanvasElement, Project } from './types';
+import { CanvasElement, Project, SitePage } from './types';
 import { getFontOption } from './fonts';
 
 // Renders a Project's absolutely-positioned canvas into a real, self-contained static
@@ -446,7 +446,33 @@ function renderPopupAnnouncements(project: Project): string {
     .join('\n');
 }
 
-export function renderProjectHtml(project: Project, slug: string, storeCheckoutUrl: string, reportUrl: string): string {
+// Real, working nav bar for a manually-built multi-page website (see Project.pages) --
+// shared verbatim across every one of that site's rendered pages, each page's link built
+// from a root-relative path so it works identically on the free {slug}.buildsitespark.com
+// subdomain and any connected custom domain. `currentSlug` highlights which page a visitor
+// is already on ('' for Home). Returns '' for every non-multi-page project (nothing to link
+// between), which renderProjectHtml below just inlines as-is.
+export function renderPageNavHtml(pages: SitePage[], currentSlug: string): string {
+  if (pages.length <= 1) return '';
+  const links = pages
+    .map((page) => {
+      const href = page.slug ? `/${page.slug}` : '/';
+      const active = page.slug === currentSlug;
+      return `<a href="${escapeAttr(href)}" style="color:${active ? '#FFFFFF' : '#CBD5E1'};font-weight:${
+        active ? '700' : '600'
+      };text-decoration:none;padding:8px 14px;">${escapeHtml(page.name)}</a>`;
+    })
+    .join('');
+  return `<nav style="position:sticky;top:0;z-index:9997;display:flex;flex-wrap:wrap;justify-content:center;gap:2px;padding:6px 10px;background:#0F172A;font-family:-apple-system,sans-serif;font-size:14px;">${links}</nav>`;
+}
+
+export function renderProjectHtml(
+  project: Project,
+  slug: string,
+  storeCheckoutUrl: string,
+  reportUrl: string,
+  navHtml = ''
+): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
   const usesMdi = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'MaterialCommunityIcons');
   const usesFa = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'FontAwesome5');
@@ -511,6 +537,7 @@ export function renderProjectHtml(project: Project, slug: string, storeCheckoutU
   </style>
 </head>
 <body>
+  ${navHtml}
   ${renderAnnouncementBars(project)}
   <div id="site-wrapper">
     <div id="canvas">

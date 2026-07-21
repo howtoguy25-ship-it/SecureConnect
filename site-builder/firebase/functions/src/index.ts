@@ -29,6 +29,7 @@ import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import {
   renderProjectHtml,
+  renderPageNavHtml,
   renderLandingPageHtml,
   renderSuspendedSiteHtml,
   renderPrivacyPolicyHtml,
@@ -687,7 +688,11 @@ export const publishProject = onCall(async (request) => {
   if (!snap.exists) throw new HttpsError('not-found', 'Project not found.');
   const project = snap.data() as Project;
 
-  const hasLocalMedia = project.elements.some(
+  // A manually-built multi-page website's real content lives in `pages`, not the top-level
+  // `elements` mirror -- check/publish across every page it actually has.
+  const allElementsAcrossPages = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
+
+  const hasLocalMedia = allElementsAcrossPages.some(
     (el) =>
       (el.type === 'image' && !!el.uri && !el.uri.startsWith('http')) ||
       (el.type === 'slideshow' && el.images.some((u) => !u.startsWith('http'))) ||
@@ -699,9 +704,20 @@ export const publishProject = onCall(async (request) => {
   }
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
-  const html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL);
 
-  const site: PublishedSite = { uid, projectId, html, updatedAt: Date.now() };
+  const site: PublishedSite = { uid, projectId, html: '', updatedAt: Date.now() };
+  if (project.pages && project.pages.length > 0) {
+    const pagesHtml: Record<string, string> = {};
+    for (const page of project.pages) {
+      const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor };
+      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, renderPageNavHtml(project.pages, page.slug));
+    }
+    site.pages = pagesHtml;
+    site.html = pagesHtml[project.pages[0].slug];
+  } else {
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL);
+  }
+
   await db.collection('publishedSites').doc(slug).set(site);
   await projectRef.update({ publishSlug: slug, publishedAt: Date.now(), updatedAt: Date.now() });
   await syncStoreInventory(uid, projectId, slug, project);
@@ -718,7 +734,8 @@ export const publishProject = onCall(async (request) => {
 // change that after the first publish) so republishing a project never silently restocks
 // or resets what a seller already sold.
 async function syncStoreInventory(uid: string, projectId: string, slug: string, project: Project): Promise<void> {
-  const productElements = project.elements.filter((el): el is ProductElement => el.type === 'product');
+  const allElements = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
+  const productElements = allElements.filter((el): el is ProductElement => el.type === 'product');
   if (productElements.length === 0) return;
 
   const refs = productElements.map((el) => db.collection('storeInventory').doc(slug).collection('products').doc(el.productId));
@@ -783,11 +800,24 @@ export const servePublishedSite = onRequest(async (req, res) => {
   const isBareProductDomain = hostname === PRODUCT_DOMAIN || hostname === `www.${PRODUCT_DOMAIN}`;
 
   let slug: string | null = null;
+  // The sub-path *within* a resolved site (e.g. "/about") -- distinct from the slug
+  // resolution above, since the legacy /s/{slug} form has the page path nested after the
+  // slug segment rather than being the whole request path. Used below to pick which of a
+  // multi-page website's rendered pages to serve (see Project.pages / publishProject).
+  let pagePath = req.path;
 
   if (hostname.endsWith(`.${PRODUCT_DOMAIN}`) && !isBareProductDomain) {
     slug = hostname.slice(0, hostname.length - PRODUCT_DOMAIN.length - 1);
   } else if (isDefaultHostingDomain && req.path.startsWith('/s/')) {
-    slug = req.path.replace(/^\/s\//, '').replace(/\/$/, '') || null;
+    const rest = req.path.replace(/^\/s\//, '');
+    const slashIndex = rest.indexOf('/');
+    if (slashIndex === -1) {
+      slug = rest.replace(/\/$/, '') || null;
+      pagePath = '/';
+    } else {
+      slug = rest.slice(0, slashIndex) || null;
+      pagePath = rest.slice(slashIndex);
+    }
   } else if (!isDefaultHostingDomain && !isBareProductDomain) {
     const mapping = await db.collection('domainMappings').doc(hostname).get();
     slug = (mapping.data()?.slug as string | undefined) ?? null;
@@ -825,7 +855,20 @@ export const servePublishedSite = onRequest(async (req, res) => {
     res.status(200).send(renderSuspendedSiteHtml());
     return;
   }
+
   res.set('Cache-Control', 'public, max-age=60');
+  if (site.pages) {
+    // A manually-built multi-page website -- pick the requested page by its slug segment
+    // ('' for Home), matching how publishProject keyed the `pages` map.
+    const pageSlug = pagePath.replace(/^\/|\/$/g, '');
+    const pageHtml = site.pages[pageSlug];
+    if (!pageHtml) {
+      res.status(404).send('Page not found.');
+      return;
+    }
+    res.status(200).send(pageHtml);
+    return;
+  }
   res.status(200).send(site.html);
 });
 

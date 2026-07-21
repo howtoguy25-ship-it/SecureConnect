@@ -10,14 +10,13 @@ export interface PublishResult {
   url: string;
 }
 
-// Local media (device file:// URIs from the picker) can't be read by Cloud Functions --
-// only the client has access to them -- so this uploads any that haven't made it to
-// Storage yet before asking the server to render/publish the page.
-async function uploadLocalProjectMedia(uid: string, project: Project): Promise<Project> {
+// Shared per-page-of-elements uploader -- used directly for single-page projects, and once
+// per page for a manually-built multi-page website (see uploadLocalProjectMedia below).
+async function uploadElementsMedia(elements: CanvasElement[]): Promise<{ elements: CanvasElement[]; changed: boolean }> {
   let changed = false;
 
-  const elements: CanvasElement[] = await Promise.all(
-    project.elements.map(async (el): Promise<CanvasElement> => {
+  const next: CanvasElement[] = await Promise.all(
+    elements.map(async (el): Promise<CanvasElement> => {
       if (el.type === 'image' && el.uri && isLocalUri(el.uri)) {
         const url = await uploadLocalImage(el.uri);
         changed = true;
@@ -45,8 +44,34 @@ async function uploadLocalProjectMedia(uid: string, project: Project): Promise<P
     })
   );
 
+  return { elements: next, changed };
+}
+
+// Local media (device file:// URIs from the picker) can't be read by Cloud Functions --
+// only the client has access to them -- so this uploads any that haven't made it to
+// Storage yet before asking the server to render/publish the page.
+async function uploadLocalProjectMedia(uid: string, project: Project): Promise<Project> {
+  let changed = false;
+  let updated: Project;
+
+  if (project.pages && project.pages.length > 0) {
+    const pages = await Promise.all(
+      project.pages.map(async (page) => {
+        const r = await uploadElementsMedia(page.elements);
+        if (r.changed) changed = true;
+        return { ...page, elements: r.elements };
+      })
+    );
+    // Keep the legacy top-level fields mirrored to Home (pages[0]) -- see Project.pages's
+    // comment in src/types/index.ts for why other code still reads those directly.
+    updated = { ...project, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor };
+  } else {
+    const r = await uploadElementsMedia(project.elements);
+    changed = r.changed;
+    updated = { ...project, elements: r.elements };
+  }
+
   if (!changed) return project;
-  const updated: Project = { ...project, elements };
   await projectsStore.save(uid, updated);
   return updated;
 }

@@ -20,6 +20,13 @@ export function createProject(name: string, pageType: PageType, themeId: string,
     canvasSize,
     backgroundColor: theme.background,
     elements,
+    // Only manually-built websites get a real multi-page structure -- Social/Logo/Video
+    // stay single-page/fixed-card. `elements`/`backgroundColor` above double as "page 1"
+    // (Home) for any older code that still reads them directly.
+    pages:
+      pageType === 'website'
+        ? [{ id: generateId('page'), name: 'Home', slug: '', elements, backgroundColor: theme.background }]
+        : undefined,
     announcements: {
       enabled: false,
       autoSlide: true,

@@ -174,6 +174,19 @@ export interface CanvasSize {
   label: string;
 }
 
+// One page of a multi-page website (Home, About, Contact, ...). Only ever used when
+// pageType === 'website' -- Social/Logo/Video stay single-page/fixed-card, they're not
+// meant to have connected sub-pages. `slug` is the URL segment other pages link to it by
+// ('' for Home); kept distinct from `name` (the editable display label) so renaming a page
+// doesn't silently break links other pages already point at it with.
+export interface SitePage {
+  id: string;
+  name: string;
+  slug: string;
+  elements: CanvasElement[];
+  backgroundColor: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -182,6 +195,14 @@ export interface Project {
   canvasSize: CanvasSize;
   backgroundColor: string;
   elements: CanvasElement[];
+  // Present only for a manually-built multi-page website (see BuildMethodScreen -> Manual
+  // Build). When set, `pages` is the source of truth for content -- the top-level
+  // `elements`/`backgroundColor` above are kept mirrored to `pages[0]` (Home) purely so
+  // older code that still reads those directly (e.g. ProjectsScreen's thumbnail swatch)
+  // keeps working without every call site needing to know about multi-page projects.
+  // Every other project (Social/Logo/Video, AI-generated sites, and any site built before
+  // this feature existed) has no `pages` and works exactly as before.
+  pages?: SitePage[];
   announcements: AnnouncementSettings;
   createdAt: number;
   updatedAt: number;

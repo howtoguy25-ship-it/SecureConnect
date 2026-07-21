@@ -142,6 +142,16 @@ export interface AnnouncementSettings {
   popups: PopupAnnouncementConfig[];
 }
 
+// Mirrors src/types/index.ts's SitePage -- see that file's comment for why this is
+// duplicated instead of shared (separate Node project, can't import from the client).
+export interface SitePage {
+  id: string;
+  name: string;
+  slug: string;
+  elements: CanvasElement[];
+  backgroundColor: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -150,6 +160,7 @@ export interface Project {
   canvasSize: CanvasSize;
   backgroundColor: string;
   elements: CanvasElement[];
+  pages?: SitePage[];
   announcements: AnnouncementSettings;
   createdAt: number;
   updatedAt: number;
@@ -164,7 +175,12 @@ export interface Project {
 export interface PublishedSite {
   uid: string;
   projectId: string;
+  // Legacy/single-page projects (Social, Logo, Video, AI-generated sites, and any Website
+  // built before multi-page existed) store their one rendered page here.
   html: string;
+  // Multi-page manually-built websites store every page here instead, keyed by that page's
+  // `slug` ('' for Home) -- see publishProject/servePublishedSite in index.ts.
+  pages?: Record<string, string>;
   updatedAt: number;
   // Set by enforceBillingSuspensions when the owning account's subscription payment has
   // failed and the grace period has elapsed -- servePublishedSite shows a suspended-site

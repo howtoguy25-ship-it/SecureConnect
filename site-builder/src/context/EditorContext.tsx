@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { CanvasElement, Project } from '@/types';
+import { CanvasElement, Project, SitePage } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import { generateId } from '@/utils/id';
 
@@ -23,6 +23,33 @@ interface EditorContextValue {
   reorderElement: (id: string, direction: 'up' | 'down') => void;
   updateProject: (patch: Partial<Project>) => void;
   selectedElement: CanvasElement | null;
+  // Multi-page (manually-built websites only -- see Project.pages's comment). `pages` is
+  // null for every other project, which is the signal every consumer uses to know whether
+  // to show page-switching UI at all.
+  pages: SitePage[] | null;
+  activePageId: string | null;
+  currentPage: SitePage | null;
+  switchPage: (id: string) => void;
+  addPage: (name: string) => void;
+  renamePage: (id: string, name: string) => void;
+  removePage: (id: string) => void;
+  setPageBackgroundColor: (id: string, color: string) => void;
+}
+
+// Builds a URL-safe slug from a page name, falling back to a short random suffix if it's
+// empty after stripping (e.g. a name that's only emoji/punctuation) and de-duplicating
+// against every other page's slug so two pages never collide on the same published path.
+function slugifyPageName(name: string, existingSlugs: string[]): string {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const root = base || `page-${generateId('page').slice(-6)}`;
+  if (!existingSlugs.includes(root)) return root;
+  let i = 2;
+  while (existingSlugs.includes(`${root}-${i}`)) i++;
+  return `${root}-${i}`;
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null);
@@ -38,6 +65,7 @@ export function EditorProvider({
 }) {
   const [project, setProject] = useState<Project | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -48,6 +76,20 @@ export function EditorProvider({
     const unsubscribe = projectsStore.subscribe(uid, projectId, (p) => setProject(p));
     return unsubscribe;
   }, [uid, projectId]);
+
+  // Keeps activePageId pointed at a real page: picks Home the first time a multi-page
+  // project loads, and re-settles onto pages[0] if the previously-active page ever
+  // disappears out from under it (e.g. removePage on another device/tab).
+  useEffect(() => {
+    if (!project?.pages || project.pages.length === 0) {
+      if (activePageId !== null) setActivePageId(null);
+      return;
+    }
+    if (!activePageId || !project.pages.some((p) => p.id === activePageId)) {
+      setActivePageId(project.pages[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.pages]);
 
   const scheduleSave = useCallback(
     (next: Project) => {
@@ -71,45 +113,60 @@ export function EditorProvider({
     [scheduleSave]
   );
 
+  // Central point every element mutator below goes through: applies `updater` to whichever
+  // page is currently active (or the flat top-level elements, for every project that isn't
+  // a multi-page website) and keeps the legacy top-level `elements`/`backgroundColor`
+  // mirrored to Home (pages[0]) either way -- see Project.pages's comment for why.
+  const applyElementsUpdate = useCallback(
+    (prev: Project, updater: (elements: CanvasElement[]) => CanvasElement[]): Project => {
+      if (prev.pages && prev.pages.length > 0) {
+        const targetId = prev.pages.some((p) => p.id === activePageId) ? activePageId : prev.pages[0].id;
+        const pages = prev.pages.map((p) => (p.id === targetId ? { ...p, elements: updater(p.elements) } : p));
+        return { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor };
+      }
+      return { ...prev, elements: updater(prev.elements) };
+    },
+    [activePageId]
+  );
+
   const addElement = useCallback(
     (el: CanvasElement) => {
       setProject((prev) => {
         if (!prev) return prev;
-        const next = { ...prev, elements: [...prev.elements, el] };
+        const next = applyElementsUpdate(prev, (elements) => [...elements, el]);
         scheduleSave(next);
         return next;
       });
       setSelectedId(el.id);
     },
-    [scheduleSave]
+    [scheduleSave, applyElementsUpdate]
   );
 
   const updateElement = useCallback(
     (id: string, patch: Partial<CanvasElement>) => {
       setProject((prev) => {
         if (!prev) return prev;
-        const next = {
-          ...prev,
-          elements: prev.elements.map((el) => (el.id === id ? ({ ...el, ...patch } as CanvasElement) : el)),
-        };
+        const next = applyElementsUpdate(prev, (elements) =>
+          elements.map((el) => (el.id === id ? ({ ...el, ...patch } as CanvasElement) : el))
+        );
         scheduleSave(next);
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, applyElementsUpdate]
   );
 
   const removeElement = useCallback(
     (id: string) => {
       setProject((prev) => {
         if (!prev) return prev;
-        const next = { ...prev, elements: prev.elements.filter((el) => el.id !== id) };
+        const next = applyElementsUpdate(prev, (elements) => elements.filter((el) => el.id !== id));
         scheduleSave(next);
         return next;
       });
       setSelectedId((prev) => (prev === id ? null : prev));
     },
-    [scheduleSave]
+    [scheduleSave, applyElementsUpdate]
   );
 
   const duplicateElement = useCallback(
@@ -117,18 +174,20 @@ export function EditorProvider({
       let newId: string | null = null;
       setProject((prev) => {
         if (!prev) return prev;
-        const source = prev.elements.find((el) => el.id === id);
-        if (!source) return prev;
-        const maxZ = Math.max(0, ...prev.elements.map((e) => e.zIndex));
-        newId = generateId('el');
-        const clone = { ...source, id: newId, x: source.x + 16, y: source.y + 16, zIndex: maxZ + 1 } as CanvasElement;
-        const next = { ...prev, elements: [...prev.elements, clone] };
+        const next = applyElementsUpdate(prev, (elements) => {
+          const source = elements.find((el) => el.id === id);
+          if (!source) return elements;
+          const maxZ = Math.max(0, ...elements.map((e) => e.zIndex));
+          newId = generateId('el');
+          const clone = { ...source, id: newId, x: source.x + 16, y: source.y + 16, zIndex: maxZ + 1 } as CanvasElement;
+          return [...elements, clone];
+        });
         scheduleSave(next);
         return next;
       });
       if (newId) setSelectedId(newId);
     },
-    [scheduleSave]
+    [scheduleSave, applyElementsUpdate]
   );
 
   // Swaps z-index with the neighboring element in stacking order -- 'up' moves this
@@ -139,37 +198,77 @@ export function EditorProvider({
     (id: string, direction: 'up' | 'down') => {
       setProject((prev) => {
         if (!prev) return prev;
-        const sorted = [...prev.elements].sort((a, b) => a.zIndex - b.zIndex);
-        const index = sorted.findIndex((el) => el.id === id);
-        if (index === -1) return prev;
-        const swapIndex = direction === 'up' ? index + 1 : index - 1;
-        if (swapIndex < 0 || swapIndex >= sorted.length) return prev;
-        const a = sorted[index];
-        const b = sorted[swapIndex];
-        const next = {
-          ...prev,
-          elements: prev.elements.map((el) => {
+        const next = applyElementsUpdate(prev, (elements) => {
+          const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+          const index = sorted.findIndex((el) => el.id === id);
+          if (index === -1) return elements;
+          const swapIndex = direction === 'up' ? index + 1 : index - 1;
+          if (swapIndex < 0 || swapIndex >= sorted.length) return elements;
+          const a = sorted[index];
+          const b = sorted[swapIndex];
+          return elements.map((el) => {
             if (el.id === a.id) return { ...el, zIndex: b.zIndex };
             if (el.id === b.id) return { ...el, zIndex: a.zIndex };
             return el;
-          }),
-        };
+          });
+        });
         scheduleSave(next);
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, applyElementsUpdate]
   );
 
   const bringToFront = useCallback(
     (id: string) => {
       setProject((prev) => {
         if (!prev) return prev;
-        const maxZ = Math.max(0, ...prev.elements.map((e) => e.zIndex));
-        const next = {
-          ...prev,
-          elements: prev.elements.map((el) => (el.id === id ? { ...el, zIndex: maxZ + 1 } : el)),
+        const next = applyElementsUpdate(prev, (elements) => {
+          const maxZ = Math.max(0, ...elements.map((e) => e.zIndex));
+          return elements.map((el) => (el.id === id ? { ...el, zIndex: maxZ + 1 } : el));
+        });
+        scheduleSave(next);
+        return next;
+      });
+    },
+    [scheduleSave, applyElementsUpdate]
+  );
+
+  const switchPage = useCallback((id: string) => {
+    setActivePageId(id);
+    setSelectedId(null);
+  }, []);
+
+  const addPage = useCallback(
+    (name: string) => {
+      setProject((prev) => {
+        if (!prev || !prev.pages) return prev;
+        const slug = slugifyPageName(name, prev.pages.map((p) => p.slug));
+        const newPage: SitePage = {
+          id: generateId('page'),
+          name: name.trim() || 'Untitled',
+          slug,
+          elements: [],
+          backgroundColor: prev.pages[0]?.backgroundColor ?? prev.backgroundColor,
         };
+        const next = { ...prev, pages: [...prev.pages, newPage] };
+        scheduleSave(next);
+        setActivePageId(newPage.id);
+        setSelectedId(null);
+        return next;
+      });
+    },
+    [scheduleSave]
+  );
+
+  const renamePage = useCallback(
+    (id: string, name: string) => {
+      setProject((prev) => {
+        if (!prev || !prev.pages) return prev;
+        const trimmed = name.trim();
+        if (!trimmed) return prev;
+        const pages = prev.pages.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
+        const next = { ...prev, pages };
         scheduleSave(next);
         return next;
       });
@@ -177,13 +276,53 @@ export function EditorProvider({
     [scheduleSave]
   );
 
+  const removePage = useCallback(
+    (id: string) => {
+      setProject((prev) => {
+        if (!prev || !prev.pages || prev.pages.length <= 1) return prev;
+        const pages = prev.pages.filter((p) => p.id !== id);
+        const next = { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor };
+        scheduleSave(next);
+        setActivePageId((current) => (current === id ? pages[0].id : current));
+        return next;
+      });
+    },
+    [scheduleSave]
+  );
+
+  const setPageBackgroundColor = useCallback(
+    (id: string, color: string) => {
+      setProject((prev) => {
+        if (!prev || !prev.pages) return prev;
+        const pages = prev.pages.map((p) => (p.id === id ? { ...p, backgroundColor: color } : p));
+        const next = { ...prev, pages, backgroundColor: pages[0].backgroundColor };
+        scheduleSave(next);
+        return next;
+      });
+    },
+    [scheduleSave]
+  );
+
+  const currentPage = useMemo(
+    () => (project?.pages && project.pages.length > 0 ? project.pages.find((p) => p.id === activePageId) ?? project.pages[0] : null),
+    [project, activePageId]
+  );
+
   const selectedElement = useMemo(
-    () => project?.elements.find((e) => e.id === selectedId) ?? null,
-    [project, selectedId]
+    () => (project ? (currentPage ? currentPage.elements : project.elements).find((e) => e.id === selectedId) ?? null : null),
+    [project, currentPage, selectedId]
   );
 
   const value: EditorContextValue = {
     project,
+    pages: project?.pages ?? null,
+    activePageId,
+    currentPage,
+    switchPage,
+    addPage,
+    renamePage,
+    removePage,
+    setPageBackgroundColor,
     selectedId,
     select: setSelectedId,
     addElement,

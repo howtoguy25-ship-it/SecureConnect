@@ -11,6 +11,7 @@ import ElementsPanel from '@/components/elements/ElementsPanel';
 import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
 import LayersPanel from '@/components/elements/LayersPanel';
+import PageTabsBar from '@/components/editor/PageTabsBar';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement } from '@/types';
@@ -24,6 +25,14 @@ type PanelTab = 'elements' | 'text' | 'image' | 'slideshow' | 'bar' | null;
 function EditorInner({ navigation }: Props) {
   const {
     project,
+    pages,
+    activePageId,
+    currentPage,
+    switchPage,
+    addPage,
+    renamePage,
+    removePage,
+    setPageBackgroundColor,
     selectedId,
     select,
     addElement,
@@ -56,6 +65,12 @@ function EditorInner({ navigation }: Props) {
   // Without this guard that gap renders as a blank white canvas; showing the same
   // "building" animation through that gap keeps it reading as "still working," not broken.
   const isGenerating = project.name === 'Generating...' && project.elements.length === 0;
+
+  // The canvas/layers/inspector all render whatever page is currently active for a multi-
+  // page website (see PageTabsBar); every other project has no `pages` and this is just
+  // `project` unchanged, so nothing below needs to know multi-page projects exist at all.
+  const displayProject = currentPage ? { ...project, elements: currentPage.elements, backgroundColor: currentPage.backgroundColor } : project;
+  const activeElements = displayProject.elements;
 
   const canvasCenterX = project.canvasSize.width / 2;
   const canvasCenterY = project.canvasSize.height / 2;
@@ -183,7 +198,7 @@ function EditorInner({ navigation }: Props) {
   };
 
   const toggleLock = (id: string) => {
-    const target = project.elements.find((el) => el.id === id);
+    const target = activeElements.find((el) => el.id === id);
     if (!target) return;
     updateElement(id, { locked: !target.locked });
   };
@@ -213,6 +228,28 @@ function EditorInner({ navigation }: Props) {
         </View>
       </View>
 
+      {pages && !isGenerating && (
+        <PageTabsBar
+          pages={pages}
+          activePageId={activePageId}
+          onSwitch={switchPage}
+          onAdd={addPage}
+          onRename={renamePage}
+          onRemove={removePage}
+          onSetColor={setPageBackgroundColor}
+        />
+      )}
+
+      {pages && pages.length > 1 && !isGenerating && (
+        <View style={styles.navPreview}>
+          {pages.map((page) => (
+            <Pressable key={page.id} onPress={() => switchPage(page.id)} style={styles.navPreviewItem}>
+              <Text style={[styles.navPreviewText, page.id === activePageId && styles.navPreviewTextActive]}>{page.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
       {showLayers && !isGenerating && (
         <View style={styles.layersOverlay}>
           <View style={styles.layersOverlayHeader}>
@@ -222,7 +259,7 @@ function EditorInner({ navigation }: Props) {
             </Pressable>
           </View>
           <LayersPanel
-            elements={project.elements}
+            elements={activeElements}
             selectedId={selectedId}
             onSelect={select}
             onReorder={reorderElement}
@@ -253,7 +290,7 @@ function EditorInner({ navigation }: Props) {
           pinchGestureEnabled
         >
           <Canvas
-            project={project}
+            project={displayProject}
             selectedId={selectedId}
             onSelect={select}
             onChange={(id, patch) => updateElement(id, patch as Partial<CanvasElement>)}
@@ -384,6 +421,18 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F1F5F9',
   },
   layersOverlayTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  navPreview: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#0F172A',
+  },
+  navPreviewItem: { paddingHorizontal: 10, paddingVertical: 4 },
+  navPreviewText: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
+  navPreviewTextActive: { color: '#FFFFFF' },
   canvasArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   canvasScroll: { alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
   generatingFrame: {
