@@ -10,6 +10,7 @@ import { userAccountStore } from '@/storage/userAccountStore';
 import { UserAccount } from '@/types';
 import { getPlan } from '@/data/pricing';
 import { restorePurchases } from '@/services/iap';
+import { sendTestPushNotification } from '@/services/pushNotifications';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Account'>;
 
@@ -18,6 +19,7 @@ export default function AccountScreen({ navigation }: Props) {
   const [account, setAccount] = useState<UserAccount | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sendingTestPush, setSendingTestPush] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -55,6 +57,21 @@ export default function AccountScreen({ navigation }: Props) {
       showAlert('Could not restore purchases', err?.message ?? 'Try again in a moment.');
     } finally {
       setRestoring(false);
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    setSendingTestPush(true);
+    try {
+      const tokenCount = await sendTestPushNotification();
+      showAlert(
+        'Test notification sent',
+        `Sent to ${tokenCount} registered device${tokenCount === 1 ? '' : 's'} -- it should arrive within a few seconds. If nothing shows up, check that notifications are allowed for this app in your device Settings.`
+      );
+    } catch (err: any) {
+      showAlert('Could not send test notification', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setSendingTestPush(false);
     }
   };
 
@@ -147,6 +164,11 @@ export default function AccountScreen({ navigation }: Props) {
           <Ionicons name="refresh-outline" size={20} color="#334155" />
           <Text style={styles.rowText}>Restore Purchases</Text>
           {restoring ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />}
+        </Pressable>
+        <Pressable style={styles.row} onPress={handleSendTestPush} disabled={sendingTestPush}>
+          <Ionicons name="notifications-outline" size={20} color="#334155" />
+          <Text style={styles.rowText}>Send Test Notification</Text>
+          {sendingTestPush ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />}
         </Pressable>
       </View>
 

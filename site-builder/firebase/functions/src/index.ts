@@ -977,6 +977,25 @@ export const createWebBillingCheckout = onCall({ secrets: [stripeSecretKey] }, a
 // subscriptions" for the Stripe billing path, so SiteSpark doesn't need to build its own
 // cancel/update-card UI. Only ever has something to open if this account has actually paid
 // for a web subscription at least once (see handleWebSubscriptionStarted's stripeCustomerId).
+// Lets a signed-in user verify their own push notification setup end-to-end (permission
+// grant -> token registration -> Expo's relay -> a real device) without waiting for a real
+// order, booking, or billing event to naturally trigger one.
+export const sendTestPushNotification = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const tokensSnap = await db.collection('users').doc(uid).collection('pushTokens').get();
+  if (tokensSnap.empty) {
+    throw new HttpsError(
+      'failed-precondition',
+      "No push token is registered for this device yet -- make sure you allowed notifications when asked (Settings > SiteSpark > Notifications on iOS), then sign out and back in and try again."
+    );
+  }
+
+  await sendPushNotification(uid, 'Test notification', 'If you see this, push notifications are working!', { test: true });
+  return { tokenCount: tokensSnap.size };
+});
+
 export const createStripeBillingPortalSession = onCall({ secrets: [stripeSecretKey] }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');

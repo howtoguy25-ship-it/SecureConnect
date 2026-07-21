@@ -3,8 +3,10 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '@/services/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/services/firebase';
 import { requireDb } from '@/services/requireDb';
+import { requireFunctions } from '@/services/requireFunctions';
 
 // Real OS push notifications via Expo's push service -- Expo/EAS manages the actual APNs
 // credentials for this project (set up automatically the first time a build requests a
@@ -66,4 +68,13 @@ export async function unregisterCurrentDeviceToken(uid: string): Promise<void> {
   } catch {
     // Best-effort -- not worth blocking sign-out over.
   }
+}
+
+// Verifies the whole real pipeline (permission grant -> registered token -> Expo's relay ->
+// this device) without waiting for a real order/booking/billing event to trigger one --
+// see AccountScreen's "Send test notification" row.
+export async function sendTestPushNotification(): Promise<number> {
+  const call = httpsCallable<Record<string, never>, { tokenCount: number }>(requireFunctions(functions), 'sendTestPushNotification');
+  const { data } = await call({});
+  return data.tokenCount;
 }
