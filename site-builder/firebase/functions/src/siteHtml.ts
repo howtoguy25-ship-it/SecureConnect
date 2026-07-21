@@ -172,8 +172,8 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
       // lightbox is the "with slide options" view for the rest.
       const lightbox = hasMultiplePhotos
         ? `<div id="lightbox-${el.id}" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000E6;align-items:center;justify-content:center;flex-direction:column;">
-  <button aria-label="Close" onclick="${lightboxVar}.close()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;">&times;</button>
-  <div style="position:relative;width:100%;max-width:520px;">
+  <button aria-label="Close" onclick="${lightboxVar}.close()" style="position:absolute;top:16px;right:16px;z-index:2;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;">&times;</button>
+  <div style="position:relative;width:100%;max-width:520px;z-index:1;">
     <div id="lightbox-track-${el.id}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">
       ${el.images
         .map(
