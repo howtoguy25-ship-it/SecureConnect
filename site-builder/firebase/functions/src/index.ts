@@ -23,7 +23,7 @@ import {
   BookingDetails,
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
-import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, generateClarifyingQuestions, SitePlanSection } from './openai';
+import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import {
@@ -318,6 +318,10 @@ export const startGeneration = onCall(
         pauseRequested: false,
         resumeRequested: false,
         injectedMessage: null,
+        // Known immediately (unlike resultProjectId, which only means "the build finished")
+        // so the client can subscribe to the project doc from the very start and show a real
+        // live preview of the elements as they're written, not just once the build finishes.
+        previewProjectId: projectRef.id,
         resultProjectId: null,
         errorMessage: null,
         createdAt: Date.now(),
@@ -346,9 +350,25 @@ export const startGeneration = onCall(
     const client = createOpenAIClient(openaiApiKey.value());
     const model = MODEL_FOR_PLAN[((await userRef.get()).data() as UserAccount).plan];
 
+    // Writes the site plan assembled so far to the project doc the client is already
+    // subscribed to (via previewProjectId) -- called after the plan lands and again after
+    // every generated image, so the AI build progress screen's live preview panel shows
+    // real text and images appearing incrementally instead of a blank canvas until the end.
+    const pushPreview = async (currentPlan: SitePlan, images: SectionImage[]) => {
+      const previewElements = layoutSitePlan(currentPlan, images);
+      await projectRef.update({
+        name: currentPlan.siteName,
+        backgroundColor: currentPlan.backgroundColor,
+        elements: previewElements,
+        canvasSize: { width: 390, height: estimatedCanvasHeight(previewElements), label: 'AI-generated' },
+        updatedAt: Date.now(),
+      });
+    };
+
     try {
       await sessionRef.update({ status: 'generating', statusMessage: 'Writing your site\'s content...', updatedAt: Date.now() });
       let plan = await generateSitePlan(client, model, prompt, complexity, undefined, referenceImages);
+      await pushPreview(plan, []);
 
       let pausesUsed = 0;
       const injected1 = await checkForPause(sessionRef, pausesUsed);
@@ -356,6 +376,7 @@ export const startGeneration = onCall(
         pausesUsed += 1;
         await sessionRef.update({ statusMessage: 'Reworking your content with your changes...', updatedAt: Date.now() });
         plan = await generateSitePlan(client, model, prompt, complexity, injected1, referenceImages);
+        await pushPreview(plan, []);
       }
 
       await sessionRef.update({ statusMessage: 'Creating original artwork for your site...', updatedAt: Date.now() });
@@ -370,6 +391,7 @@ export const startGeneration = onCall(
         await file.save(buffer, { contentType: 'image/png' });
         const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
         sectionImages.push({ section, url });
+        await pushPreview(plan, sectionImages);
       }
 
       const injected2 = await checkForPause(sessionRef, pausesUsed);
@@ -378,19 +400,11 @@ export const startGeneration = onCall(
         // Second pause only adjusts copy at this point (images are already generated) --
         // keeps the second pause fast rather than re-running image generation too.
         plan = await generateSitePlan(client, model, prompt, complexity, injected2);
+        await pushPreview(plan, sectionImages);
       }
 
       await sessionRef.update({ statusMessage: 'Assembling your site...', updatedAt: Date.now() });
-      const elements = layoutSitePlan(plan, sectionImages);
-      const canvasHeight = estimatedCanvasHeight(elements);
-
-      await projectRef.update({
-        name: plan.siteName,
-        backgroundColor: plan.backgroundColor,
-        elements,
-        canvasSize: { width: 390, height: canvasHeight, label: 'AI-generated' },
-        updatedAt: Date.now(),
-      });
+      await pushPreview(plan, sectionImages);
 
       const minutesElapsed = Math.round(((Date.now() - startedAt) / 60000) * 10) / 10;
       await sessionRef.update({

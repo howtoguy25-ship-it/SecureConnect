@@ -5,6 +5,7 @@ import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-ico
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useAudioPlayer } from 'expo-audio';
 import { CanvasElement, VideoElement, ProductElement } from '@/types';
+import { useGoogleFont } from '@/utils/useGoogleFont';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -244,6 +245,9 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
 
 export default function ElementRenderer({ element }: { element: CanvasElement }) {
   const { width, height } = element;
+  // Called unconditionally (rules-of-hooks) regardless of element.type -- resolves to
+  // undefined for anything but a text element with a custom font picked.
+  const textFontFamily = useGoogleFont(element.type === 'text' ? element.fontFamily : undefined);
 
   switch (element.type) {
     case 'text':
@@ -256,6 +260,7 @@ export default function ElementRenderer({ element }: { element: CanvasElement })
             color: element.color,
             fontWeight: element.fontWeight,
             textAlign: element.align,
+            ...(textFontFamily ? { fontFamily: textFontFamily } : null),
           }}
         >
           {element.text}

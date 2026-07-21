@@ -6,12 +6,30 @@ import { CanvasElement } from '@/types';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import SliderRow from '@/components/inspector/SliderRow';
 import { labelForElement } from '@/utils/elementLabel';
+import { FONT_OPTIONS, FontOption } from '@/data/fonts';
+import { useGoogleFont } from '@/utils/useGoogleFont';
 
 interface Props {
   element: CanvasElement;
   onChange: (patch: Partial<CanvasElement>) => void;
   onDelete: () => void;
   onBringToFront: () => void;
+}
+
+// Each chip renders its own label in its own real typeface (once downloaded) rather than a
+// plain font-name list, so picking a "crazy good" font is a real preview, not a guess.
+function FontChip({ option, selected, onPress }: { option: FontOption; selected: boolean; onPress: () => void }) {
+  const family = useGoogleFont(option.id);
+  return (
+    <Pressable style={[styles.fontChip, selected && styles.fontChipActive]} onPress={onPress}>
+      <Text
+        style={[styles.fontChipText, selected && styles.fontChipTextActive, family ? { fontFamily: family } : null]}
+        numberOfLines={1}
+      >
+        {option.label}
+      </Text>
+    </Pressable>
+  );
 }
 
 async function pickImage(): Promise<string | null> {
@@ -63,6 +81,17 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               onChangeText={(text) => onChange({ text } as any)}
               multiline
             />
+            <Text style={styles.fieldLabel}>Font</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fontRow}>
+              {FONT_OPTIONS.map((option) => (
+                <FontChip
+                  key={option.id}
+                  option={option}
+                  selected={(element.fontFamily ?? 'system') === option.id}
+                  onPress={() => onChange({ fontFamily: option.id } as any)}
+                />
+              ))}
+            </ScrollView>
             <SliderRow
               label="Font Size"
               value={element.fontSize}
@@ -441,4 +470,17 @@ const styles = StyleSheet.create({
   uploadBtnText: { color: '#FFFFFF', fontWeight: '600' },
   removeChip: { backgroundColor: '#FEE2E2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   removeChipText: { fontSize: 11, color: '#B91C1C', fontWeight: '600' },
+  fontRow: { gap: 8, paddingBottom: 10, paddingRight: 4 },
+  fontChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    minWidth: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fontChipActive: { backgroundColor: '#DBEAFE' },
+  fontChipText: { fontSize: 14, color: '#0F172A' },
+  fontChipTextActive: { color: '#2563EB', fontWeight: '700' },
 });

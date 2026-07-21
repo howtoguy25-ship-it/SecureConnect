@@ -37,7 +37,7 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
   }
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
+    <ScrollView style={styles.scrollFill} showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
       {topmostFirst.map((el, index) => {
         const isSelected = el.id === selectedId;
         return (
@@ -79,6 +79,7 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
 const styles = StyleSheet.create({
   emptyState: { padding: 24, alignItems: 'center', justifyContent: 'center', gap: 8 },
   emptyText: { fontSize: 13, color: '#94A3B8', textAlign: 'center', paddingHorizontal: 20 },
+  scrollFill: { flex: 1 },
   list: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
   row: {
     flexDirection: 'row',

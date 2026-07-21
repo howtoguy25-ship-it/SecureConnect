@@ -1,4 +1,5 @@
 import { CanvasElement, Project } from './types';
+import { getFontOption } from './fonts';
 
 // Renders a Project's absolutely-positioned canvas into a real, self-contained static
 // HTML page. The editor's data model is an absolute-position canvas (not semantic
@@ -76,10 +77,13 @@ function renderShape(el: Extract<CanvasElement, { type: 'shape' }>): string {
 function renderElement(el: CanvasElement): string {
   const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
   switch (el.type) {
-    case 'text':
+    case 'text': {
+      const font = getFontOption(el.fontFamily);
+      const fontFamilyCss = font.id !== 'system' ? `font-family:'${font.family}',sans-serif;` : '';
       return `<div style="${base}color:${escapeAttr(el.color)};font-size:${el.fontSize}px;font-weight:${
         el.fontWeight === 'bold' ? '700' : '400'
-      };text-align:${el.align};white-space:pre-wrap;">${escapeHtml(el.text)}</div>`;
+      };text-align:${el.align};white-space:pre-wrap;${fontFamilyCss}">${escapeHtml(el.text)}</div>`;
+    }
     case 'image':
       return el.uri
         ? `<img src="${escapeAttr(el.uri)}" style="${base}object-fit:cover;" />`
@@ -456,6 +460,21 @@ export function renderProjectHtml(project: Project, slug: string, storeCheckoutU
       : '',
   ].join('\n  ');
 
+  const usedFontIds = new Set(
+    project.elements
+      .filter((el): el is Extract<CanvasElement, { type: 'text' }> => el.type === 'text' && !!el.fontFamily && el.fontFamily !== 'system')
+      .map((el) => el.fontFamily as string)
+  );
+  const fontQueries = [...usedFontIds]
+    .map((id) => getFontOption(id).googleFontsQuery)
+    .filter((q): q is string => !!q);
+  const fontLink =
+    fontQueries.length > 0
+      ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${fontQueries
+          .map((q) => `family=${q}`)
+          .join('&')}&display=swap">`
+      : '';
+
   const elementsHtml = project.elements
     .slice()
     .sort((a, b) => a.zIndex - b.zIndex)
@@ -471,6 +490,7 @@ export function renderProjectHtml(project: Project, slug: string, storeCheckoutU
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(project.name)}</title>
   ${iconLinks}
+  ${fontLink}
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: ${escapeAttr(project.backgroundColor)}; }

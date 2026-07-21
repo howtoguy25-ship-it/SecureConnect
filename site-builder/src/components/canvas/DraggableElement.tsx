@@ -3,6 +3,7 @@ import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextIn
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
+import { useGoogleFont } from '@/utils/useGoogleFont';
 
 interface Props {
   element: CanvasElement;
@@ -56,6 +57,7 @@ export default function DraggableElement({
 }: Props) {
   const locked = !!element.locked;
   const editable = element.type === 'text' || element.type === 'button';
+  const textFontFamily = useGoogleFont(element.type === 'text' ? element.fontFamily : undefined);
   const [box, setBox] = useState<Box>({ x: element.x, y: element.y, width: element.width, height: element.height });
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -211,7 +213,13 @@ export default function DraggableElement({
           style={[
             styles.inlineInput,
             element.type === 'text'
-              ? { fontSize: element.fontSize, color: element.color, textAlign: element.align, fontWeight: element.fontWeight }
+              ? {
+                  fontSize: element.fontSize,
+                  color: element.color,
+                  textAlign: element.align,
+                  fontWeight: element.fontWeight,
+                  ...(textFontFamily ? { fontFamily: textFontFamily } : null),
+                }
               : { fontSize: 15, color: element.type === 'button' ? element.textColor : '#0F172A', textAlign: 'center', fontWeight: '600' },
           ]}
         />

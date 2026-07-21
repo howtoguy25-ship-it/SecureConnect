@@ -19,7 +19,7 @@ import GeneratingOverlay from '@/components/GeneratingOverlay';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
-type PanelTab = 'elements' | 'text' | 'image' | 'slideshow' | 'bar' | 'layers' | null;
+type PanelTab = 'elements' | 'text' | 'image' | 'slideshow' | 'bar' | null;
 
 function EditorInner({ navigation }: Props) {
   const {
@@ -36,6 +36,11 @@ function EditorInner({ navigation }: Props) {
     selectedElement,
   } = useEditor();
   const [panel, setPanel] = useState<PanelTab>(null);
+  // Independent of `panel`/selection so it stays reachable even while an element is
+  // selected (which replaces the tab bar with the inspector sheet) -- otherwise adding a
+  // new element (which auto-selects it) makes the layer list disappear right when a user
+  // most wants to see it land in the stack.
+  const [showLayers, setShowLayers] = useState(false);
 
   if (!project) {
     return (
@@ -192,14 +197,39 @@ function EditorInner({ navigation }: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {project.name}
         </Text>
-        {isGenerating ? (
-          <View style={{ width: 24 }} />
-        ) : (
-          <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
-            <Ionicons name="cloud-upload-outline" size={24} color="#0F172A" />
-          </Pressable>
-        )}
+        <View style={styles.headerActions}>
+          {!isGenerating && (
+            <Pressable onPress={() => setShowLayers((v) => !v)} hitSlop={8}>
+              <Ionicons name="layers-outline" size={22} color={showLayers ? '#2563EB' : '#0F172A'} />
+            </Pressable>
+          )}
+          {isGenerating ? (
+            <View style={{ width: 24 }} />
+          ) : (
+            <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
+              <Ionicons name="cloud-upload-outline" size={24} color="#0F172A" />
+            </Pressable>
+          )}
+        </View>
       </View>
+
+      {showLayers && !isGenerating && (
+        <View style={styles.layersOverlay}>
+          <View style={styles.layersOverlayHeader}>
+            <Text style={styles.layersOverlayTitle}>Layers</Text>
+            <Pressable hitSlop={8} onPress={() => setShowLayers(false)}>
+              <Ionicons name="close" size={18} color="#64748B" />
+            </Pressable>
+          </View>
+          <LayersPanel
+            elements={project.elements}
+            selectedId={selectedId}
+            onSelect={select}
+            onReorder={reorderElement}
+            onToggleLock={toggleLock}
+          />
+        </View>
+      )}
 
       {isGenerating ? (
         <View style={styles.canvasArea}>
@@ -259,15 +289,6 @@ function EditorInner({ navigation }: Props) {
                   onChange={(patch) => updateProject({ announcements: { ...project.announcements, ...patch } })}
                 />
               )}
-              {panel === 'layers' && (
-                <LayersPanel
-                  elements={project.elements}
-                  selectedId={selectedId}
-                  onSelect={select}
-                  onReorder={reorderElement}
-                  onToggleLock={toggleLock}
-                />
-              )}
             </View>
           )}
           <View style={styles.tabBar}>
@@ -278,7 +299,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
-            <TabButton icon="layers-outline" label="Layers" active={panel === 'layers'} onPress={() => setPanel(panel === 'layers' ? null : 'layers')} />
+            <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
           </View>
         </>
       )}
@@ -329,6 +350,34 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   title: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1, textAlign: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  layersOverlay: {
+    position: 'absolute',
+    top: 56,
+    right: 12,
+    width: 260,
+    height: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    zIndex: 50,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    overflow: 'hidden',
+  },
+  layersOverlayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F1F5F9',
+  },
+  layersOverlayTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
   canvasArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   canvasScroll: { alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
   generatingFrame: {

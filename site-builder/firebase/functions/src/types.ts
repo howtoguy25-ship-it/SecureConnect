@@ -24,6 +24,7 @@ export interface TextElement extends BaseElement {
   color: string;
   fontWeight: 'normal' | 'bold';
   align: 'left' | 'center' | 'right';
+  fontFamily?: string; // FontOption id from the app's src/data/fonts.ts -- undefined/'system' = platform default
 }
 
 export interface ImageElement extends BaseElement {
@@ -242,6 +243,10 @@ export interface GenerationSession {
   pauseRequested: boolean;
   resumeRequested: boolean;
   injectedMessage: string | null;
+  // Known from the moment the build starts (unlike resultProjectId, which only means "the
+  // build finished") -- lets the client subscribe to the project doc immediately and render
+  // a real live preview of elements as the backend writes them incrementally.
+  previewProjectId: string;
   resultProjectId: string | null;
   errorMessage: string | null;
   createdAt: number;

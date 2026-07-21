@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +19,7 @@ import { generationSessionStore } from '@/storage/generationSessionStore';
 import { requestPause, resumeGeneration, cancelGeneration } from '@/services/aiBuilder';
 import { GenerationSession } from '@/types';
 import BuildStepTracker from '@/components/BuildStepTracker';
+import LivePreviewCanvas from '@/components/LivePreviewCanvas';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AIBuildProgress'>;
 
@@ -32,6 +34,8 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   const [requestingPause, setRequestingPause] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const navigatedRef = useRef(false);
+  const { width: windowWidth } = useWindowDimensions();
+  const isWide = windowWidth >= 700;
 
   useEffect(() => {
     const unsubscribe = generationSessionStore.subscribe(uid, sessionId, setSession);
@@ -106,70 +110,84 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
         <Text style={styles.title}>Building your site</Text>
       </View>
 
-      <View style={styles.card}>
-        {!isError && (
-          <BuildStepTracker statusMessage={session.statusMessage} completed={session.status === 'completed'} />
-        )}
-        {isError && (
-          <View style={styles.spinnerRow}>
-            <Ionicons name="alert-circle" size={20} color="#DC2626" />
-            <Text style={[styles.statusMessage, { color: '#DC2626' }]}>{session.errorMessage ?? 'Something went wrong.'}</Text>
-          </View>
-        )}
+      <View style={[styles.body, isWide && styles.bodyWide]}>
+        <View style={[styles.previewWrap, isWide && styles.previewWrapWide]}>
+          <LivePreviewCanvas
+            uid={uid}
+            projectId={session.previewProjectId}
+            frameWidth={isWide ? 240 : Math.min(windowWidth - 40, 320)}
+            frameHeight={isWide ? 420 : 220}
+          />
+          <Text style={styles.previewLabel}>Live preview -- updates as it's built</Text>
+        </View>
 
-        <View style={styles.metricsRow}>
-          <View style={styles.metric}>
-            <Text style={styles.metricValue}>{session.minutesElapsed.toFixed(1)}</Text>
-            <Text style={styles.metricLabel}>minutes</Text>
+        <View style={styles.mainColumn}>
+          <View style={styles.card}>
+            {!isError && (
+              <BuildStepTracker statusMessage={session.statusMessage} completed={session.status === 'completed'} />
+            )}
+            {isError && (
+              <View style={styles.spinnerRow}>
+                <Ionicons name="alert-circle" size={20} color="#DC2626" />
+                <Text style={[styles.statusMessage, { color: '#DC2626' }]}>{session.errorMessage ?? 'Something went wrong.'}</Text>
+              </View>
+            )}
+
+            <View style={styles.metricsRow}>
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>{session.minutesElapsed.toFixed(1)}</Text>
+                <Text style={styles.metricLabel}>minutes</Text>
+              </View>
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>{session.creditsUsed}</Text>
+                <Text style={styles.metricLabel}>credits used</Text>
+              </View>
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>{pausesLeft}</Text>
+                <Text style={styles.metricLabel}>pauses left</Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.metric}>
-            <Text style={styles.metricValue}>{session.creditsUsed}</Text>
-            <Text style={styles.metricLabel}>credits used</Text>
-          </View>
-          <View style={styles.metric}>
-            <Text style={styles.metricValue}>{pausesLeft}</Text>
-            <Text style={styles.metricLabel}>pauses left</Text>
-          </View>
+
+          {!isPaused && !isError && session.status !== 'completed' && (
+            <Pressable
+              style={[styles.pauseButton, pausesLeft <= 0 && styles.pauseButtonDisabled]}
+              onPress={handlePause}
+              disabled={pausesLeft <= 0 || requestingPause}
+            >
+              {requestingPause ? (
+                <ActivityIndicator color="#4338CA" />
+              ) : (
+                <>
+                  <Ionicons name="pause-circle-outline" size={18} color={pausesLeft <= 0 ? '#94A3B8' : '#4338CA'} />
+                  <Text style={[styles.pauseButtonText, pausesLeft <= 0 && { color: '#94A3B8' }]}>
+                    Pause to add something ({pausesLeft} left)
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          )}
+
+          {!isPaused && !isError && session.status !== 'completed' && (
+            <Pressable style={styles.cancelButton} onPress={handleCancel} disabled={cancelling}>
+              {cancelling ? (
+                <ActivityIndicator color="#DC2626" />
+              ) : (
+                <>
+                  <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
+                  <Text style={styles.cancelButtonText}>Cancel & refund credits</Text>
+                </>
+              )}
+            </Pressable>
+          )}
+
+          {isError && (
+            <Pressable style={styles.pauseButton} onPress={() => navigation.goBack()}>
+              <Text style={styles.pauseButtonText}>Back</Text>
+            </Pressable>
+          )}
         </View>
       </View>
-
-      {!isPaused && !isError && session.status !== 'completed' && (
-        <Pressable
-          style={[styles.pauseButton, pausesLeft <= 0 && styles.pauseButtonDisabled]}
-          onPress={handlePause}
-          disabled={pausesLeft <= 0 || requestingPause}
-        >
-          {requestingPause ? (
-            <ActivityIndicator color="#4338CA" />
-          ) : (
-            <>
-              <Ionicons name="pause-circle-outline" size={18} color={pausesLeft <= 0 ? '#94A3B8' : '#4338CA'} />
-              <Text style={[styles.pauseButtonText, pausesLeft <= 0 && { color: '#94A3B8' }]}>
-                Pause to add something ({pausesLeft} left)
-              </Text>
-            </>
-          )}
-        </Pressable>
-      )}
-
-      {!isPaused && !isError && session.status !== 'completed' && (
-        <Pressable style={styles.cancelButton} onPress={handleCancel} disabled={cancelling}>
-          {cancelling ? (
-            <ActivityIndicator color="#DC2626" />
-          ) : (
-            <>
-              <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
-              <Text style={styles.cancelButtonText}>Cancel & refund credits</Text>
-            </>
-          )}
-        </Pressable>
-      )}
-
-      {isError && (
-        <Pressable style={styles.pauseButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.pauseButtonText}>Back</Text>
-        </Pressable>
-      )}
 
       <Modal visible={isPaused} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
@@ -203,6 +221,12 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingTop: 20 },
   title: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  body: { flex: 1 },
+  bodyWide: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 20, gap: 20 },
+  previewWrap: { alignItems: 'center', marginTop: 8 },
+  previewWrapWide: { marginTop: 20, flexShrink: 0 },
+  previewLabel: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 8 },
+  mainColumn: { flex: 1 },
   card: {
     margin: 20,
     backgroundColor: '#FFFFFF',
