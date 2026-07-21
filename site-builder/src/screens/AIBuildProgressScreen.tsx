@@ -17,6 +17,7 @@ import { useAuth } from '@/context/AuthContext';
 import { generationSessionStore } from '@/storage/generationSessionStore';
 import { requestPause, resumeGeneration } from '@/services/aiBuilder';
 import { GenerationSession } from '@/types';
+import BuildStepTracker from '@/components/BuildStepTracker';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AIBuildProgress'>;
 
@@ -87,10 +88,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
 
       <View style={styles.card}>
         {!isError && (
-          <View style={styles.spinnerRow}>
-            <ActivityIndicator color="#4338CA" />
-            <Text style={styles.statusMessage}>{session.statusMessage}</Text>
-          </View>
+          <BuildStepTracker statusMessage={session.statusMessage} completed={session.status === 'completed'} />
         )}
         {isError && (
           <View style={styles.spinnerRow}>
