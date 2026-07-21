@@ -133,82 +133,101 @@ exact Firebase Console / Google Cloud Console / Apple Developer steps.
 ## Deploy, build & submit
 
 **This repo root is NOT SiteSpark** — the files directly under the repo root (`App.tsx`,
-`web/`, `deploy.ps1`, etc.) belong to a *different, unrelated app* ("trackline"/FleetTrack)
-that happens to live in the same git repository. SiteSpark only exists inside the
-`site-builder/` subfolder. If your terminal opens at the repo root (the usual case right
-after cloning/pulling), `cd site-builder` first — every command below assumes you're
-standing inside that folder. Running `npm run deploy` from the repo root instead will fail
-with `npm error Missing script: "deploy"`, because that's FleetTrack's `package.json`, which
-has no such script.
+`web/`, etc.) belong to a *different, unrelated app* ("trackline"/FleetTrack) that happens
+to live in the same git repository. SiteSpark only exists inside the `site-builder/`
+subfolder. If your terminal opens at the repo root (the usual case right after
+cloning/pulling), you need to get into `site-builder/` before running anything below —
+running `npm run deploy` from the repo root instead fails with
+`npm error Missing script: "deploy"`, because that's FleetTrack's `package.json`, which has
+no such script.
 
-All commands also assume you're already logged in (`firebase login`, `eas login`) — both
-CLIs persist that login on this machine, so it's a one-time thing per computer, not per
-session.
+All commands assume you're already logged in (`firebase login`, `eas login`) — both CLIs
+persist that login on this machine, so it's a one-time thing per computer, not per session.
+
+**On Windows PowerShell, `&&` does NOT chain commands** the way it does in bash (you'll get
+`The token '&&' is not a valid statement separator in this version.`) — either run each
+command on its own line, or use the ready-made script below, which finds its own folder
+automatically so you never have to `cd` into `site-builder/` yourself.
+
+### Easiest: one script, double-click or run from anywhere
 
 ```
+C:\path\to\SecureConnect\site-builder\deploy.ps1
+```
+
+`site-builder\deploy.ps1` pulls the latest code, installs dependencies, typechecks both the
+app and Cloud Functions, builds the web app, and deploys Cloud Functions + both Hosting
+sites — stopping immediately with a clear red error message if any step fails, instead of
+silently deploying stale or broken code. Double-clicking it in File Explorer works too.
+
+### Manual step-by-step (PowerShell — one command per line, no `&&`)
+
+```powershell
 cd site-builder
-```
-
-**Backend (Cloud Functions + Firestore/Storage rules + both Hosting sites) — one command:**
-```
-cd site-builder && npm run deploy
+npm run deploy
 ```
 This runs `expo export -p web` (rebuilds the web app into `dist/`) then
 `firebase deploy --only functions,hosting`. Use this after any change to
 `firebase/functions/src/**`, `firestore.rules`, `storage.rules`, or any client code (since
 the web app at `app.buildsitespark.com` is a static export of the same code as the iOS app).
 
-If you only changed one side and want a faster/narrower deploy (run from inside
-`site-builder/`, or prefix each with `cd site-builder &&` the same way as above):
-```
-firebase deploy --only functions                 # backend logic only, no rebuild needed
-npx expo export -p web && firebase deploy --only hosting:webapp      # just the web app
-firebase deploy --only hosting:marketing          # just the marketing/published-sites function's Hosting config
-firebase deploy --only firestore:rules            # just firestore.rules
-firebase deploy --only storage:rules              # just storage.rules
-firebase deploy                                    # literally everything (functions + both hosting sites + both rule sets)
+If you only changed one side and want a faster/narrower deploy (run each on its own line,
+from inside `site-builder/`):
+```powershell
+firebase deploy --only functions                  # backend logic only, no rebuild needed
+npx expo export -p web
+firebase deploy --only hosting:webapp              # just the web app (after the export above)
+firebase deploy --only hosting:marketing           # just the marketing/published-sites function's Hosting config
+firebase deploy --only firestore:rules              # just firestore.rules
+firebase deploy --only storage:rules                # just storage.rules
+firebase deploy                                     # literally everything (functions + both hosting sites + both rule sets)
 ```
 
-**iOS build (EAS) — three profiles already configured in `site-builder/eas.json`:**
-```
-cd site-builder && eas build --platform ios --profile development   # dev client, for local `expo start` + a real device
-cd site-builder && eas build --platform ios --profile preview        # internal TestFlight-style build, no store submission
-cd site-builder && eas build --platform ios --profile production     # what actually gets submitted to the App Store
+**iOS build (EAS)** — three profiles already configured in `site-builder/eas.json`. Run
+`cd site-builder` once per terminal session, then any of:
+```powershell
+eas build --platform ios --profile development   # dev client, for local `expo start` + a real device
+eas build --platform ios --profile preview        # internal TestFlight-style build, no store submission
+eas build --platform ios --profile production     # what actually gets submitted to the App Store
 ```
 Each prints a build URL immediately and a real IPA download link once it finishes (usually
-10-20 minutes) — no need to stay attached to the terminal; `eas build:list` (also from
-inside `site-builder/`) shows past/in-progress builds if you lose the link.
+10-20 minutes) — no need to stay attached to the terminal; `eas build:list` shows past/
+in-progress builds if you lose the link.
 
 **App Store submission:**
-```
-cd site-builder && eas submit --platform ios --profile production --latest
+```powershell
+eas submit --platform ios --profile production --latest
 ```
 `--latest` submits whatever the most recent `production` build was, so you don't need to
 hunt down a build ID. First run ever will prompt for your App Store Connect API key or
 Apple ID — after that it's remembered for this project.
 
 **Everything in one go** (build then submit, once you're confident in a release):
-```
-cd site-builder && eas build --platform ios --profile production --auto-submit
+```powershell
+eas build --platform ios --profile production --auto-submit
 ```
 
 There's also a separate top-level `eas.json`/`app.config.js` at the repo root — those belong
-to FleetTrack, not SiteSpark. Always double check you're inside `site-builder/` (run `pwd` or
-`cat package.json | head -3` — SiteSpark's says `"name": "site-builder"`, FleetTrack's says
-`"name": "trackline"`) before running any `eas`/`firebase` command if you're ever unsure.
+to FleetTrack, not SiteSpark. Always double check you're inside `site-builder/` (run
+`cat package.json` on the first few lines — SiteSpark's says `"name": "site-builder"`,
+FleetTrack's says `"name": "trackline"`) before running any `eas`/`firebase` command if
+you're ever unsure.
 
 **One-time web push setup** (only needs running once, ever, unless the VAPID keys are
-rotated — see ROADMAP.md's "Web push notifications" section for the full explanation):
-```
-cd site-builder && npx expo-notifications push:web:upload --vapid-pubkey BOwPw-VSAiYdMqqeSwegRwrMjkP_AUSLbB3mWvnjq9URcS1UHyzq4uOcbsE3fPUYDEqyKQj9JcR5ze2YaXTCa2k --vapid-pvtkey 8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI --vapid-subject mailto:support@buildsitespark.com
+rotated — see ROADMAP.md's "Web push notifications" section for the full explanation). From
+inside `site-builder/`:
+```powershell
+npx expo-notifications push:web:upload --vapid-pubkey BOwPw-VSAiYdMqqeSwegRwrMjkP_AUSLbB3mWvnjq9URcS1UHyzq4uOcbsE3fPUYDEqyKQj9JcR5ze2YaXTCa2k --vapid-pvtkey 8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI --vapid-subject mailto:support@buildsitespark.com
 ```
 
-**Sanity checks before any deploy** (fast, no network/account needed):
-```
-cd site-builder
-npm run typecheck                                          # client
-cd firebase/functions && npx tsc --noEmit && cd ../..       # functions
-npx expo export -p web                                     # confirms the web build itself succeeds
+**Sanity checks before any deploy** (fast, no network/account needed). From inside
+`site-builder/`:
+```powershell
+npm run typecheck                # client
+npx expo export -p web           # confirms the web build itself succeeds
+cd firebase/functions
+npx tsc --noEmit                 # functions
+cd ../..
 ```
 
 ## What works today
