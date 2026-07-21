@@ -175,10 +175,14 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             <SliderRow
               label="Font Size"
               value={element.fontSize}
-              min={10}
-              max={64}
+              min={0}
+              max={100}
               onChange={(v) => onChange({ fontSize: v } as any)}
             />
+            <Pressable style={styles.confirmBtn} onPress={onClose}>
+              <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+              <Text style={styles.confirmBtnText}>Done — Continue Building</Text>
+            </Pressable>
             <View style={styles.rowButtons}>
               <Pressable
                 style={[styles.toggleBtn, element.fontWeight === 'bold' && styles.toggleBtnActive]}
@@ -551,6 +555,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   uploadBtnText: { color: '#FFFFFF', fontWeight: '600' },
+  confirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#16A34A',
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   removeChip: { backgroundColor: '#FEE2E2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   removeChipText: { fontSize: 11, color: '#B91C1C', fontWeight: '600' },
   fontRow: { gap: 8, paddingBottom: 10, paddingRight: 4 },
