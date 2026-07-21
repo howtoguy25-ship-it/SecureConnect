@@ -121,11 +121,24 @@ export interface CanvasSize {
   label: string;
 }
 
+export interface PopupAnnouncementConfig {
+  id: string;
+  text: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  backgroundColor: string;
+  textColor: string;
+  opacity: number;
+  delaySeconds: number;
+  durationSeconds: number;
+}
+
 export interface AnnouncementSettings {
   enabled: boolean;
   autoSlide: boolean;
   intervalMs: number;
   bars: { id: string; text: string; backgroundColor: string; textColor: string }[];
+  popups: PopupAnnouncementConfig[];
 }
 
 export interface Project {

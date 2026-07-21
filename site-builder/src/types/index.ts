@@ -142,11 +142,29 @@ export interface AnnouncementBarConfig {
   textColor: string;
 }
 
+// An on-screen popup card (distinct from the top bar) -- shows itself a set number of
+// seconds after a visitor lands on the published page, optionally with a CTA button, and
+// either stays until dismissed or auto-hides after a set duration. `opacity` only applies to
+// the card's background (rgba), never the text/button, so it can read as "transparent" and
+// still stay legible.
+export interface PopupAnnouncementConfig {
+  id: string;
+  text: string;
+  buttonLabel: string; // '' = no button
+  buttonUrl: string;
+  backgroundColor: string;
+  textColor: string;
+  opacity: number; // 0-1
+  delaySeconds: number; // shows this long after the page loads
+  durationSeconds: number; // 0 = stays until the visitor dismisses it
+}
+
 export interface AnnouncementSettings {
   enabled: boolean;
   autoSlide: boolean;
   intervalMs: number;
   bars: AnnouncementBarConfig[]; // max 2
+  popups: PopupAnnouncementConfig[]; // max 2
 }
 
 export interface CanvasSize {

@@ -19,6 +19,26 @@ function escapeAttr(value: string): string {
   return escapeHtml(value);
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
+  const bigint = parseInt(full, 16);
+  if (Number.isNaN(bigint)) return hex;
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
+}
+
+// Popup buttonUrl is authored by the site owner (not visitor input), but still guard
+// against a stray "javascript:" scheme sneaking into a published page.
+function safeUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '#';
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('#')) return trimmed;
+  return `https://${trimmed}`;
+}
+
 function renderIcon(el: Extract<CanvasElement, { type: 'icon' }>): string {
   const style = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;color:${escapeAttr(
     el.color
@@ -340,23 +360,86 @@ function renderAnnouncementBars(project: Project): string {
   const { announcements } = project;
   if (!announcements.enabled || announcements.bars.length === 0) return '';
 
+  const wrapStyle = 'position:sticky;top:0;z-index:500;width:100%;text-align:center;font-size:13px;font-weight:600;';
+
   if (announcements.bars.length === 1 || !announcements.autoSlide) {
     const bar = announcements.bars[0];
-    return `<div style="width:100%;padding:10px 16px;text-align:center;background:${escapeAttr(
+    return `<div style="${wrapStyle}padding:10px 16px;background:${escapeAttr(
       bar.backgroundColor
-    )};color:${escapeAttr(bar.textColor)};font-size:13px;font-weight:600;">${escapeHtml(bar.text)}</div>`;
+    )};color:${escapeAttr(bar.textColor)};">${escapeHtml(bar.text)}</div>`;
   }
 
   const bars = announcements.bars
     .map(
       (bar, i) =>
-        `<div data-bar style="display:${i === 0 ? 'block' : 'none'};background:${escapeAttr(
-          bar.backgroundColor
-        )};color:${escapeAttr(bar.textColor)};">${escapeHtml(bar.text)}</div>`
+        `<div data-bar style="display:${i === 0 ? 'block' : 'none'};padding:10px 16px;opacity:${
+          i === 0 ? '1' : '0'
+        };transition:opacity 0.35s ease;background:${escapeAttr(bar.backgroundColor)};color:${escapeAttr(
+          bar.textColor
+        )};">${escapeHtml(bar.text)}</div>`
     )
     .join('');
-  return `<div id="announcement-bars" style="width:100%;text-align:center;font-size:13px;font-weight:600;">${bars}</div>
-<script>(function(){var c=document.getElementById('announcement-bars');var bars=c.querySelectorAll('[data-bar]');var i=0;setInterval(function(){bars[i].style.display='none';i=(i+1)%bars.length;bars[i].style.display='block';bars[i].style.padding='10px 16px';},${announcements.intervalMs});bars[0].style.padding='10px 16px';})();</script>`;
+  return `<div id="announcement-bars" style="${wrapStyle}">${bars}</div>
+<script>(function(){
+  var c=document.getElementById('announcement-bars');
+  var bars=c.querySelectorAll('[data-bar]');
+  var i=0;
+  setInterval(function(){
+    var cur=bars[i];
+    cur.style.opacity='0';
+    setTimeout(function(){
+      cur.style.display='none';
+      i=(i+1)%bars.length;
+      var next=bars[i];
+      next.style.display='block';
+      next.style.opacity='0';
+      requestAnimationFrame(function(){ next.style.opacity='1'; });
+    },350);
+  },${announcements.intervalMs});
+})();</script>`;
+}
+
+// Small on-screen cards (distinct from the sticky top bar) that appear a set number of
+// seconds after a visitor lands, optionally with a CTA button, and either auto-hide after
+// a set duration or stay until dismissed. Stacked bottom-right, each one its own IIFE so
+// their show/hide timers never collide.
+function renderPopupAnnouncements(project: Project): string {
+  const popups = project.announcements.popups ?? [];
+  if (!project.announcements.enabled || popups.length === 0) return '';
+
+  return popups
+    .map((popup, idx) => {
+      const bottom = 20 + idx * 90;
+      const hasButton = popup.buttonLabel.trim().length > 0;
+      return `<div id="popup-${escapeAttr(popup.id)}" style="position:fixed;right:20px;bottom:${bottom}px;max-width:320px;z-index:600;background:${hexToRgba(
+        popup.backgroundColor,
+        popup.opacity
+      )};color:${escapeAttr(popup.textColor)};border-radius:14px;padding:14px 40px 14px 18px;box-shadow:0 10px 30px rgba(0,0,0,0.25);opacity:0;transform:translateY(24px);transition:opacity 0.35s ease, transform 0.35s ease;pointer-events:none;">
+  <button aria-label="Dismiss" data-dismiss style="position:absolute;top:8px;right:10px;background:none;border:none;font-size:18px;line-height:1;cursor:pointer;color:${escapeAttr(
+    popup.textColor
+  )};">&times;</button>
+  <div style="font-size:14px;font-weight:600;">${escapeHtml(popup.text)}</div>
+  ${
+    hasButton
+      ? `<a href="${escapeAttr(safeUrl(popup.buttonUrl))}" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;background:${escapeAttr(
+          popup.textColor
+        )};color:${escapeAttr(popup.backgroundColor)};font-weight:700;font-size:12px;padding:8px 14px;border-radius:999px;text-decoration:none;">${escapeHtml(
+          popup.buttonLabel
+        )}</a>`
+      : ''
+  }
+</div>
+<script>(function(){
+  var el=document.getElementById('popup-${popup.id}');
+  var dismissed=false;
+  function show(){ if(dismissed) return; el.style.opacity='1'; el.style.transform='translateY(0)'; el.style.pointerEvents='auto'; }
+  function hide(){ dismissed=true; el.style.opacity='0'; el.style.transform='translateY(24px)'; el.style.pointerEvents='none'; }
+  setTimeout(show, ${Math.max(0, popup.delaySeconds) * 1000});
+  ${popup.durationSeconds > 0 ? `setTimeout(hide, ${(Math.max(0, popup.delaySeconds) + popup.durationSeconds) * 1000});` : ''}
+  el.querySelector('[data-dismiss]').addEventListener('click', hide);
+})();</script>`;
+    })
+    .join('\n');
 }
 
 export function renderProjectHtml(project: Project, slug: string, storeCheckoutUrl: string, reportUrl: string): string {
@@ -416,6 +499,7 @@ export function renderProjectHtml(project: Project, slug: string, storeCheckoutU
   </div>
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
   ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
+  ${renderPopupAnnouncements(project)}
   ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl) : ''}
   <script>
     (function () {

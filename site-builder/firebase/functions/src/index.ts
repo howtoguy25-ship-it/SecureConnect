@@ -333,7 +333,7 @@ export const startGeneration = onCall(
         canvasSize: { width: 390, height: 844, label: 'AI-generated' },
         backgroundColor: '#FFFFFF',
         elements: [],
-        announcements: { enabled: false, autoSlide: true, intervalMs: 4000, bars: [] },
+        announcements: { enabled: false, autoSlide: true, intervalMs: 4000, bars: [], popups: [] },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
