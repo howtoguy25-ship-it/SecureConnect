@@ -23,8 +23,8 @@ import {
   BookingDetails,
   PlanId,
 } from './types';
-import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
-import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
+import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
+import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import {
@@ -595,6 +595,52 @@ export const uploadProjectImage = onCall({ memory: '256MiB' }, async (request) =
   const bucket = getStorage().bucket();
   const file = bucket.file(path);
   await file.save(buffer, { contentType: contentType || 'image/jpeg' });
+  const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+
+  return { url };
+});
+
+// Removes or replaces an image element's background with AI (see editImageBackground in
+// openai.ts) -- reuses the same OpenAI key/model already paying for site imagery, so this
+// needs no new vendor integration. Costs a flat, small credit amount (much less than a full
+// site build) since it's one image-edit call, refunded automatically if the edit fails.
+export const editImageBackground = onCall({ secrets: [openaiApiKey], timeoutSeconds: 120, memory: '512MiB' }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { base64, mode, prompt } = request.data as { base64: string; mode: 'remove' | 'change'; prompt?: string };
+  if (!base64) throw new HttpsError('invalid-argument', 'Missing image data.');
+  if (mode !== 'remove' && mode !== 'change') throw new HttpsError('invalid-argument', 'Invalid mode.');
+  if (mode === 'change' && !prompt?.trim()) throw new HttpsError('invalid-argument', 'Describe the new background.');
+
+  const inputBuffer = Buffer.from(base64, 'base64');
+  if (inputBuffer.byteLength > MAX_UPLOAD_BYTES) {
+    throw new HttpsError('invalid-argument', 'Image is too large (max 8MB).');
+  }
+
+  const userRef = db.collection('users').doc(uid);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const account = snap.data() as UserAccount | undefined;
+    if ((account?.credits ?? 0) < BACKGROUND_EDIT_CREDIT_COST) {
+      throw new HttpsError('resource-exhausted', 'needs-subscription');
+    }
+    tx.update(userRef, { credits: FieldValue.increment(-BACKGROUND_EDIT_CREDIT_COST) });
+  });
+
+  let resultBuffer: Buffer;
+  try {
+    const client = createOpenAIClient(openaiApiKey.value());
+    resultBuffer = await editImageBackgroundWithAI(client, inputBuffer, mode, prompt);
+  } catch (err) {
+    await userRef.update({ credits: FieldValue.increment(BACKGROUND_EDIT_CREDIT_COST) });
+    throw new HttpsError('internal', 'Could not edit the image. Try again.');
+  }
+
+  const path = `users/${uid}/uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-bg.png`;
+  const bucket = getStorage().bucket();
+  const file = bucket.file(path);
+  await file.save(resultBuffer, { contentType: 'image/png' });
   const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
 
   return { url };

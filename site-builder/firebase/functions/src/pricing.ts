@@ -6,6 +6,10 @@ import { PlanId } from './types';
 
 export const FREE_SIGNUP_CREDITS = 30;
 
+// Flat cost for one AI background remove/change edit (editImageBackground in index.ts) --
+// much cheaper than a full site build since it's a single image-edit call, not a whole plan.
+export const BACKGROUND_EDIT_CREDIT_COST = 3;
+
 const BUILD_COST_RANGE: Record<Exclude<PlanId, 'free'>, [number, number]> = {
   beginner: [15, 30],
   middle: [25, 40],

@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 
 export interface SitePlanSection {
   kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery';
@@ -117,6 +117,33 @@ export async function generateImage(client: OpenAI, prompt: string): Promise<Buf
     prompt,
     size: '1024x1024',
     quality: 'medium',
+  });
+  const b64 = result.data?.[0]?.b64_json;
+  if (!b64) throw new Error('The AI did not return image data.');
+  return Buffer.from(b64, 'base64');
+}
+
+// Removes or replaces an image's background via gpt-image-1's edit endpoint -- the same
+// model already used for site imagery, so this needs no new vendor/API key. Quality is
+// "AI regenerates the background around the subject," not pixel-perfect matting, but it's
+// a real edit, not a placeholder.
+export async function editImageBackground(
+  client: OpenAI,
+  imageBuffer: Buffer,
+  mode: 'remove' | 'change',
+  changePrompt?: string
+): Promise<Buffer> {
+  const prompt =
+    mode === 'remove'
+      ? 'Remove the background completely. Keep the main subject exactly as it is, unchanged, in the same position and framing, on a fully transparent background.'
+      : `Replace only the background with: ${changePrompt}. Keep the main subject exactly as it is, unchanged, in the same position, size, and framing.`;
+
+  const file = await toFile(imageBuffer, 'image.png', { type: 'image/png' });
+  const result = await client.images.edit({
+    model: 'gpt-image-1',
+    image: file,
+    prompt,
+    ...(mode === 'remove' ? { background: 'transparent' as const } : {}),
   });
   const b64 = result.data?.[0]?.b64_json;
   if (!b64) throw new Error('The AI did not return image data.');

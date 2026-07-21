@@ -47,3 +47,37 @@ export async function uploadLocalVideo(uri: string): Promise<string> {
 
   return data.readUrl;
 }
+
+// An image element's `uri` might be a local file:// path (just picked) or an already-remote
+// https:// URL (AI-generated, or a previous edit) -- this covers both so callers never have
+// to know which they're holding.
+async function uriToBase64(uri: string): Promise<string> {
+  if (isLocalUri(uri)) {
+    const file = new File(uri);
+    return file.base64();
+  }
+  const blob = await (await fetch(uri)).blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the image.'));
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result.split(',')[1] ?? '');
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Real AI background remove/change for an image element already on the canvas -- see
+// editImageBackground in firebase/functions/src/index.ts (reuses the same OpenAI key
+// already paying for AI site imagery, no new vendor). Returns a new https:// URL; the
+// original image is left untouched so a failed/undesired edit never loses the source photo.
+export async function editImageBackground(uri: string, mode: 'remove' | 'change', prompt?: string): Promise<string> {
+  const base64 = await uriToBase64(uri);
+  const call = httpsCallable<{ base64: string; mode: 'remove' | 'change'; prompt?: string }, { url: string }>(
+    requireFunctions(functions),
+    'editImageBackground'
+  );
+  const result = await call({ base64, mode, prompt });
+  return result.data.url;
+}

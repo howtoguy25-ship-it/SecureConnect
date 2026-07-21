@@ -1,13 +1,16 @@
-import React from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement } from '@/types';
+import { CanvasElement, ImageElement } from '@/types';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import SliderRow from '@/components/inspector/SliderRow';
 import { labelForElement } from '@/utils/elementLabel';
 import { FONT_OPTIONS, FontOption } from '@/data/fonts';
 import { useGoogleFont } from '@/utils/useGoogleFont';
+import { editImageBackground } from '@/services/uploads';
+import { BACKGROUND_EDIT_CREDIT_COST } from '@/data/pricing';
 
 interface Props {
   element: CanvasElement;
@@ -53,6 +56,76 @@ async function pickVideo(): Promise<string | null> {
 }
 
 const MAX_TRIM_MS = 5 * 60 * 1000;
+
+// Real AI background remove/change for an already-placed image (see editImageBackground in
+// src/services/uploads.ts). Keyed by element.id where it's used below so switching to a
+// different image element always starts this with fresh state, never a stale busy/prompt
+// left over from the previous one.
+function ImageBackgroundTools({ element, onChange }: { element: ImageElement; onChange: (patch: Partial<CanvasElement>) => void }) {
+  const [busy, setBusy] = useState<'remove' | 'change' | null>(null);
+  const [showChangeInput, setShowChangeInput] = useState(false);
+  const [changeText, setChangeText] = useState('');
+
+  const run = async (mode: 'remove' | 'change', prompt?: string) => {
+    if (!element.uri) return;
+    setBusy(mode);
+    try {
+      const uri = await editImageBackground(element.uri, mode, prompt);
+      onChange({ uri } as any);
+      setShowChangeInput(false);
+      setChangeText('');
+    } catch (err: any) {
+      showAlert('Could not edit background', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!element.uri) return null;
+
+  return (
+    <>
+      <Text style={styles.fieldLabel}>AI Background ({BACKGROUND_EDIT_CREDIT_COST} credits per edit)</Text>
+      <View style={styles.rowButtons}>
+        <Pressable style={styles.toggleBtn} onPress={() => run('remove')} disabled={busy !== null}>
+          {busy === 'remove' ? <ActivityIndicator size="small" color="#0F172A" /> : <Text style={styles.toggleBtnText}>Remove Background</Text>}
+        </Pressable>
+        <Pressable
+          style={[styles.toggleBtn, showChangeInput && styles.toggleBtnActive]}
+          onPress={() => setShowChangeInput((v) => !v)}
+          disabled={busy !== null}
+        >
+          <Text style={styles.toggleBtnText}>Change Background</Text>
+        </Pressable>
+      </View>
+      {showChangeInput && (
+        <>
+          <TextInput
+            style={styles.textInput}
+            value={changeText}
+            onChangeText={setChangeText}
+            placeholder={'Describe the new background, e.g. "sunny beach"'}
+            multiline
+          />
+          <Pressable
+            style={[styles.uploadBtn, !changeText.trim() && { opacity: 0.5 }]}
+            onPress={() => run('change', changeText.trim())}
+            disabled={busy !== null || !changeText.trim()}
+          >
+            {busy === 'change' ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="color-wand-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.uploadBtnText}>Apply New Background</Text>
+              </>
+            )}
+          </Pressable>
+        </>
+      )}
+    </>
+  );
+}
 
 export default function ElementInspector({ element, onChange, onDelete, onBringToFront, onClose }: Props) {
   return (
@@ -164,16 +237,19 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
         )}
 
         {element.type === 'image' && (
-          <Pressable
-            style={styles.uploadBtn}
-            onPress={async () => {
-              const uri = await pickImage();
-              if (uri) onChange({ uri } as any);
-            }}
-          >
-            <Ionicons name="cloud-upload-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.uploadBtnText}>{element.uri ? 'Replace Image' : 'Choose Image'}</Text>
-          </Pressable>
+          <>
+            <Pressable
+              style={styles.uploadBtn}
+              onPress={async () => {
+                const uri = await pickImage();
+                if (uri) onChange({ uri } as any);
+              }}
+            >
+              <Ionicons name="cloud-upload-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.uploadBtnText}>{element.uri ? 'Replace Image' : 'Choose Image'}</Text>
+            </Pressable>
+            <ImageBackgroundTools key={element.id} element={element} onChange={onChange} />
+          </>
         )}
 
         {element.type === 'slideshow' && (

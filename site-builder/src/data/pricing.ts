@@ -17,6 +17,10 @@ export interface Plan {
 
 export const FREE_SIGNUP_CREDITS = 30;
 
+// Mirrors firebase/functions/src/pricing.ts's BACKGROUND_EDIT_CREDIT_COST -- display only,
+// that copy is authoritative since credits are deducted server-side.
+export const BACKGROUND_EDIT_CREDIT_COST = 3;
+
 // Plan pricing/credit mechanics exactly as specified in the product brief. Kept as one
 // source of truth here for client display; firebase/functions/src/pricing.ts mirrors this
 // (Cloud Functions run in a separate Node project, so it can't import straight from here --
