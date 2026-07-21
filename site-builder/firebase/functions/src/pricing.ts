@@ -45,3 +45,19 @@ export const MODEL_FOR_PLAN: Record<PlanId, string> = {
   middle: 'gpt-4o',
   advanced: 'gpt-4o',
 };
+
+// Mirrors app/src/data/pricing.ts's PLANS/CREDIT_PACKS priceUsd values -- used only by the
+// real-money Stripe web checkout path (createWebBillingCheckout in index.ts). Apple sets its
+// own displayed price for the native IAP path, so this authoritative copy only matters here.
+export const WEB_PLAN_PRICES: Record<Exclude<PlanId, 'free'>, { name: string; priceUsd: number }> = {
+  beginner: { name: 'Beginner', priceUsd: 64.99 },
+  middle: { name: 'Middle Class', priceUsd: 109.99 },
+  advanced: { name: 'Advanced', priceUsd: 149.99 },
+};
+
+export const WEB_CREDIT_PACKS: Record<string, { credits: number; priceUsd: number }> = {
+  'pack-12': { credits: 12, priceUsd: 15.99 },
+  'pack-38': { credits: 38, priceUsd: 35.99 },
+  'pack-70': { credits: 70, priceUsd: 66.99 },
+  'pack-200': { credits: 200, priceUsd: 102.99 },
+};

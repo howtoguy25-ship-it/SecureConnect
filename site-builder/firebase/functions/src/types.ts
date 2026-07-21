@@ -284,6 +284,10 @@ export interface UserAccount {
   billingNotice?: BillingNotice | null;
   lastOrderNotice?: OrderNotice | null;
   lastAdRewardClaimedAt?: number | null;
+  // Set the first time this account pays for a web (Stripe) subscription -- lets
+  // createStripeBillingPortalSession send them to a real self-service "manage/cancel
+  // subscription" page without SiteSpark building one itself.
+  stripeCustomerId?: string | null;
 }
 
 // -- Storefront: selling products from a published site, with real payouts (Phase 10) --

@@ -618,6 +618,43 @@ build requests a push token, EAS provisions the Apple Push Notification service 
 for `com.sitespark.app` automatically (you may be prompted once to confirm this during
 `eas build`).
 
+### Web push notifications — code done, one-time key upload pending
+
+`expo-notifications` also supports real Web Push (the browser's own Push API + a service
+worker), not just native APNs — same `getExpoPushTokenAsync` call in
+`pushNotifications.ts`, same `sendPushNotification` on the backend, no separate code path.
+Three pieces added for this:
+
+- `app.config.js`'s new `notification.vapidPublicKey`/`notification.serviceWorkerPath` —
+  the public half of a real VAPID keypair (generated locally, not a placeholder) plus the
+  path to the service worker below.
+- `public/expo-service-worker.js` — handles the browser's `push` event (shows a real
+  `Notification`) and `notificationclick` (focuses/opens the app tab). Metro's web export
+  copies this verbatim into `dist/expo-service-worker.js`.
+- No client code changes needed beyond what Phase 11 already built — `Device.isDevice` is
+  always `true` on web (there's no "simulator" concept for a browser), so the existing
+  fire-and-forget `registerForPushNotifications` call already runs there too.
+
+**One-time setup needed from you:** Expo's hosted push relay (exp.host) needs the matching
+VAPID *private* key on file so it can actually sign and deliver web push messages on this
+project's behalf — the public key alone (already in `app.config.js`) isn't enough. Run:
+
+```
+npx expo-notifications push:web:upload --vapid-pubkey BOwPw-VSAiYdMqqeSwegRwrMjkP_AUSLbB3mWvnjq9URcS1UHyzq4uOcbsE3fPUYDEqyKQj9JcR5ze2YaXTCa2k --vapid-pvtkey 8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI --vapid-subject mailto:support@buildsitespark.com
+```
+
+logged in as the account that owns this EAS project. If that exact subcommand path has
+moved (`expo-cli`'s push commands were being migrated into `expo-notifications`/`eas` at
+various points), run `npx expo-notifications --help` or check
+https://docs.expo.dev/push-notifications/push-notifications-setup/ for the current
+equivalent — the three inputs (public key, private key, subject) stay the same regardless
+of which command ends up hosting them. Until this is done, browsers will still register a
+push subscription fine, but Expo's relay won't be able to actually deliver anything to it,
+so a signed-in web user's push token gets saved with no message ever received.
+
+Store the private key somewhere safe (a password manager, not committed to git) once
+you've run this — it's not needed again unless the keys are ever rotated.
+
 ## Phase 12 — Real AdMob ads: rewarded credits, banner, and app-open — done
 
 Three real Google AdMob ad formats are wired in, all sharing one real AdMob account

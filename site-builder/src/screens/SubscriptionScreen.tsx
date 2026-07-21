@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,12 +7,32 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { PLANS, CREDIT_PACKS, computeBuildCost } from '@/data/pricing';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS } from '@/data/iapProducts';
-import { buySubscription, buyProduct, attachPurchaseListeners, loadIapCatalog } from '@/services/iap';
+import { buySubscription, buyProduct, attachPurchaseListeners, loadIapCatalog, openBillingPortal } from '@/services/iap';
+import { useAuth } from '@/context/AuthContext';
+import { userAccountStore } from '@/storage/userAccountStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Subscription'>;
 
 export default function SubscriptionScreen({ navigation }: Props) {
+  const { user } = useAuth();
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [hasStripeBilling, setHasStripeBilling] = useState(false);
+  const [openingPortal, setOpeningPortal] = useState(false);
+
+  useEffect(() => {
+    if (!user || Platform.OS !== 'web') return;
+    return userAccountStore.subscribe(user.uid, (account) => setHasStripeBilling(!!account?.stripeCustomerId));
+  }, [user]);
+
+  const handleManageBilling = async () => {
+    setOpeningPortal(true);
+    try {
+      await openBillingPortal();
+    } catch (err: any) {
+      setOpeningPortal(false);
+      showAlert('Could not open billing portal', err?.message ?? 'Try again in a moment.');
+    }
+  };
   // Real, localized prices from Apple, keyed by product id -- e.g. "$64.99" is only ever
   // our own guess (src/data/pricing.ts's priceLabel), which won't match what a given
   // customer is actually charged once regional/currency-base pricing is involved. Falls
@@ -32,6 +52,22 @@ export default function SubscriptionScreen({ navigation }: Props) {
       .catch(() => {
         // Leave livePrices empty -- the hardcoded priceLabel fallback below covers this.
       });
+  }, []);
+
+  // Stripe Checkout (web billing) redirects the whole tab away and back, so there's no
+  // in-page purchase event the way StoreKit has one -- this reads the ?checkout= query
+  // param the redirect leaves behind instead, once the page reloads on return.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    if (!checkout) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    if (checkout === 'success') {
+      showAlert('Payment received', 'Your credits/plan will update within a few seconds.');
+    } else if (checkout === 'cancelled') {
+      showAlert('Checkout cancelled', 'No charge was made.');
+    }
   }, []);
 
   useEffect(() => {
@@ -87,6 +123,19 @@ export default function SubscriptionScreen({ navigation }: Props) {
           Pick a monthly plan for ongoing credits, or buy a one-time pack to finish this build.
         </Text>
 
+        {Platform.OS === 'web' && hasStripeBilling && (
+          <Pressable style={styles.manageBillingBtn} onPress={handleManageBilling} disabled={openingPortal}>
+            {openingPortal ? (
+              <ActivityIndicator color="#4338CA" />
+            ) : (
+              <>
+                <Ionicons name="card-outline" size={16} color="#4338CA" />
+                <Text style={styles.manageBillingText}>Manage billing (update card, view invoices, cancel)</Text>
+              </>
+            )}
+          </Pressable>
+        )}
+
         <Text style={styles.sectionTitle}>Plans</Text>
         {PLANS.map((plan) => (
           <View key={plan.id} style={styles.planCard}>
@@ -138,8 +187,9 @@ export default function SubscriptionScreen({ navigation }: Props) {
         </View>
 
         <Text style={styles.demoNote}>
-          Payments are processed by Apple through In-App Purchase. Manage or cancel a
-          subscription any time from your Apple ID settings.
+          {Platform.OS === 'web'
+            ? 'Payments are processed securely by Stripe. Once you have an active plan, use "Manage billing" above to update your card, view invoices, or cancel any time.'
+            : 'Payments are processed by Apple through In-App Purchase. Manage or cancel a subscription any time from your Apple ID settings.'}
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -152,6 +202,18 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
   intro: { fontSize: 14, color: '#475569', lineHeight: 20, marginBottom: 20 },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginBottom: 10, marginTop: 8 },
+  manageBillingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 10,
+    height: 44,
+    marginBottom: 20,
+  },
+  manageBillingText: { color: '#4338CA', fontWeight: '700', fontSize: 13 },
   planCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,

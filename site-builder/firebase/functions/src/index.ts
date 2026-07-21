@@ -21,8 +21,9 @@ import {
   SellerAccount,
   OrderNotice,
   BookingDetails,
+  PlanId,
 } from './types';
-import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
+import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
@@ -44,7 +45,7 @@ import {
   getTransferStatus,
   RegistrantContact,
 } from './namecheapApi';
-import { createStripeClient, createCheckoutSession } from './stripeApi';
+import { createStripeClient, createCheckoutSession, createSubscriptionCheckoutSession, createOneTimeCheckoutSession } from './stripeApi';
 import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink } from './stripeConnect';
 import { sendOrderNotificationEmail, sendContentReportEmail } from './emailApi';
 import { sendPushNotification } from './pushApi';
@@ -79,6 +80,11 @@ const PLATFORM_FEE_PERCENT = 8;
 // egress through the static-IP Cloud NAT set up for this project (see ROADMAP.md Phase 7
 // for the exact gcloud commands that created `sitespark-connector`).
 const NAMECHEAP_VPC_OPTS = { vpcConnector: 'sitespark-connector', vpcConnectorEgressSettings: 'ALL_TRAFFIC' } as const;
+
+// Where the real web app is hosted (see siteHtml.ts's WEBAPP_URL) -- used as the Stripe
+// Checkout success/cancel redirect target for web-only billing (subscriptions and credit
+// packs bought from a browser instead of Apple IAP, since a browser tab can't use StoreKit).
+const WEBAPP_URL = 'https://app.buildsitespark.com';
 const POPULAR_TLDS = ['com', 'net', 'org', 'io', 'co', 'app', 'dev'];
 // Flat markup over Namecheap's own registration cost -- adjust as a business decision,
 // not a technical one.
@@ -921,6 +927,73 @@ export const createDomainCheckout = onCall(
   }
 );
 
+// Real Stripe billing for the web app -- Apple IAP has no browser-tab equivalent, so
+// buying a subscription or credit pack from app.buildsitespark.com goes through Stripe
+// Checkout instead. Deliberately only reachable from the web app itself (the native iOS
+// app's SubscriptionScreen still only ever calls the Apple IAP path in src/services/iap.ts)
+// so this never becomes an App Store Review Guideline 3.1.1 steering concern -- nothing in
+// the iOS binary links to or mentions this checkout.
+export const createWebBillingCheckout = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { kind, id } = request.data as { kind: 'subscription' | 'creditpack'; id: string };
+
+  const stripe = createStripeClient(stripeSecretKey.value());
+  const successUrl = `${WEBAPP_URL}/?checkout=success`;
+  const cancelUrl = `${WEBAPP_URL}/?checkout=cancelled`;
+
+  if (kind === 'subscription') {
+    const planId = id as Exclude<PlanId, 'free'>;
+    const plan = WEB_PLAN_PRICES[planId];
+    if (!plan) throw new HttpsError('invalid-argument', 'Unknown plan.');
+    const session = await createSubscriptionCheckoutSession(stripe, {
+      planName: plan.name,
+      priceUsd: plan.priceUsd,
+      successUrl,
+      cancelUrl,
+      metadata: { uid, kind: 'web_subscription', planId },
+    });
+    return { url: session.url };
+  }
+
+  if (kind === 'creditpack') {
+    const pack = WEB_CREDIT_PACKS[id];
+    if (!pack) throw new HttpsError('invalid-argument', 'Unknown credit pack.');
+    const session = await createOneTimeCheckoutSession(stripe, {
+      name: `SiteSpark ${pack.credits}-credit pack`,
+      priceUsd: pack.priceUsd,
+      successUrl,
+      cancelUrl,
+      metadata: { uid, kind: 'web_creditpack', packCredits: String(pack.credits) },
+    });
+    return { url: session.url };
+  }
+
+  throw new HttpsError('invalid-argument', 'Unknown kind.');
+});
+
+// A real self-service page (hosted entirely by Stripe) where a web subscriber can update
+// their card, view invoices, or cancel -- the honest equivalent of "manage your Apple ID
+// subscriptions" for the Stripe billing path, so SiteSpark doesn't need to build its own
+// cancel/update-card UI. Only ever has something to open if this account has actually paid
+// for a web subscription at least once (see handleWebSubscriptionStarted's stripeCustomerId).
+export const createStripeBillingPortalSession = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const account = (await db.collection('users').doc(uid).get()).data() as UserAccount | undefined;
+  if (!account?.stripeCustomerId) {
+    throw new HttpsError('failed-precondition', "You don't have a web subscription to manage yet.");
+  }
+
+  const stripe = createStripeClient(stripeSecretKey.value());
+  const portalSession = await stripe.billingPortal.sessions.create({
+    customer: account.stripeCustomerId,
+    return_url: `${WEBAPP_URL}/`,
+  });
+  return { url: portalSession.url };
+});
+
 // Public Stripe webhook -- verifies the signature, then (idempotently, since Stripe
 // retries webhook deliveries) registers the domain for real via Namecheap once payment
 // is confirmed. Registration only ever happens from here, never from the client, so a
@@ -936,6 +1009,15 @@ export const stripeWebhook = onRequest(
       event = stripe.webhooks.constructEvent(req.rawBody, signature as string, stripeWebhookSecret.value());
     } catch (err) {
       res.status(400).send('Webhook signature verification failed.');
+      return;
+    }
+
+    // Stripe redelivers events that don't get a fast 2xx response -- without this guard a
+    // redelivered `checkout.session.completed` would double-grant credits/a subscription,
+    // same reasoning as processedAppleTransactions on the Apple IAP side.
+    const processedRef = db.collection('processedStripeEvents').doc(event.id);
+    if ((await processedRef.get()).exists) {
+      res.status(200).send('ok');
       return;
     }
 
@@ -966,12 +1048,120 @@ export const stripeWebhook = onRequest(
         }
       } else if (session.metadata?.kind === 'store_order') {
         await handleStoreOrderCompleted(session, resendApiKey.value());
+      } else if (session.metadata?.kind === 'web_subscription') {
+        await handleWebSubscriptionStarted(session);
+      } else if (session.metadata?.kind === 'web_creditpack') {
+        await handleWebCreditPackCompleted(session);
       }
+    } else if (event.type === 'invoice.paid') {
+      await handleWebSubscriptionRenewed(event.data.object as Stripe.Invoice);
+    } else if (event.type === 'invoice.payment_failed') {
+      await handleWebSubscriptionPaymentFailed(event.data.object as Stripe.Invoice);
     }
 
+    await processedRef.set({ type: event.type, processedAt: Date.now() });
     res.status(200).send('ok');
   }
 );
+
+// First payment of a new web subscription -- grants this billing period's credits and
+// records a uid mapping for the subscription id (Stripe's own subscription/invoice events
+// only ever carry the subscription id, never our uid, so later renewal/failure webhooks
+// need this to know whose account to touch). Mirrors verifyApplePurchase's subscription
+// branch so the client-side credits/plan display doesn't care which platform paid for it.
+async function handleWebSubscriptionStarted(session: Stripe.Checkout.Session): Promise<void> {
+  const uid = session.metadata?.uid;
+  const planId = session.metadata?.planId as Exclude<PlanId, 'free'> | undefined;
+  const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+  if (!uid || !planId || !subscriptionId) return;
+
+  const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+
+  await db.collection('stripeSubscriptions').doc(subscriptionId).set({ uid, planId, updatedAt: Date.now() });
+  await db
+    .collection('users')
+    .doc(uid)
+    .set(
+      {
+        plan: planId,
+        credits: FieldValue.increment(MONTHLY_CREDITS_FOR_PLAN[planId]),
+        billingStatus: 'active',
+        paymentFailedAt: null,
+        ...(customerId ? { stripeCustomerId: customerId } : {}),
+      },
+      { merge: true }
+    );
+  await unsuspendUserSites(uid);
+}
+
+// One-time credit pack bought from the web app.
+async function handleWebCreditPackCompleted(session: Stripe.Checkout.Session): Promise<void> {
+  const uid = session.metadata?.uid;
+  const credits = Number(session.metadata?.packCredits);
+  if (!uid || !credits) return;
+  await db.collection('users').doc(uid).set({ credits: FieldValue.increment(credits) }, { merge: true });
+}
+
+// A recurring renewal invoice (not the first one -- that's handleWebSubscriptionStarted,
+// triggered by checkout.session.completed instead). `billing_reason` is Stripe's own
+// distinction between the two, same idea as Apple's DID_RENEW vs SUBSCRIBED notification types.
+async function handleWebSubscriptionRenewed(invoice: Stripe.Invoice): Promise<void> {
+  if (invoice.billing_reason !== 'subscription_cycle') return;
+  const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+  if (!subscriptionId) return;
+
+  const mapping = (await db.collection('stripeSubscriptions').doc(subscriptionId).get()).data() as
+    | { uid: string; planId: Exclude<PlanId, 'free'> }
+    | undefined;
+  if (!mapping) return;
+
+  const periodEnd = invoice.lines.data[0]?.period?.end;
+  await db
+    .collection('users')
+    .doc(mapping.uid)
+    .set(
+      {
+        credits: FieldValue.increment(MONTHLY_CREDITS_FOR_PLAN[mapping.planId]),
+        planRenewsAt: periodEnd ? periodEnd * 1000 : null,
+        billingStatus: 'active',
+        paymentFailedAt: null,
+      },
+      { merge: true }
+    );
+}
+
+// Mirrors the Apple 'payment_failed' branch in appStoreServerNotifications below -- same
+// past_due status, grace period, and enforceBillingSuspensions sweep apply regardless of
+// which platform's billing actually failed.
+async function handleWebSubscriptionPaymentFailed(invoice: Stripe.Invoice): Promise<void> {
+  const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+  if (!subscriptionId) return;
+  const mapping = (await db.collection('stripeSubscriptions').doc(subscriptionId).get()).data() as { uid: string } | undefined;
+  if (!mapping) return;
+
+  const userRef = db.collection('users').doc(mapping.uid);
+  const existing = (await userRef.get()).data() as UserAccount | undefined;
+  if (existing?.billingStatus === 'active' || !existing?.billingStatus) {
+    await userRef.set(
+      {
+        billingStatus: 'past_due',
+        paymentFailedAt: Date.now(),
+        billingNotice: {
+          type: 'payment_failed',
+          message:
+            "Payment failed. We couldn't process your subscription renewal — please update your payment method. Your site will be taken offline automatically if this isn't resolved within a few hours.",
+          createdAt: Date.now(),
+        },
+      },
+      { merge: true }
+    );
+    await sendPushNotification(
+      mapping.uid,
+      'Payment failed',
+      "We couldn't process your subscription renewal — your site will go offline in a few hours if this isn't resolved."
+    ).catch((err) => console.error('Push notification failed', err));
+  }
+}
 
 // Idempotent against Stripe's webhook retries -- keyed by the Checkout Session's own id, so
 // a redelivered event never double-counts an order or double-decrements stock. Runs the

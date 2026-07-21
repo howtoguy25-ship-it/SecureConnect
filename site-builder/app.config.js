@@ -30,6 +30,16 @@ module.exports = ({ config }) => ({
   web: {
     bundler: 'metro',
   },
+  // Real Web Push config (expo-notifications supports web via the browser Push API + a
+  // service worker, not just native APNs/FCM) -- vapidPublicKey authenticates this app's
+  // push subscriptions with the browser's push service, matching a private key registered
+  // with Expo's push service (see ROADMAP.md's "Web push notifications" setup section for
+  // the one-time command). serviceWorkerPath points at public/expo-service-worker.js,
+  // which Metro's web export copies verbatim into dist/ at build time.
+  notification: {
+    vapidPublicKey: 'BOwPw-VSAiYdMqqeSwegRwrMjkP_AUSLbB3mWvnjq9URcS1UHyzq4uOcbsE3fPUYDEqyKQj9JcR5ze2YaXTCa2k',
+    serviceWorkerPath: '/expo-service-worker.js',
+  },
   plugins: [
     'expo-font',
     'expo-asset',

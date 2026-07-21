@@ -105,6 +105,21 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Same idea as appleOriginalTransactions, but for the web app's Stripe subscription
+    // billing path -- maps a Stripe subscription id back to the uid that owns it, so the
+    // webhook's renewal/payment-failure events (which only carry Stripe's own subscription
+    // id) know whose account to update. Admin SDK only.
+    match /stripeSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    // Idempotency ledger for the Stripe webhook -- same reasoning as
+    // processedAppleTransactions, guards against Stripe's own webhook retry redeliveries
+    // double-granting credits/a subscription. Admin SDK only.
+    match /processedStripeEvents/{eventId} {
+      allow read, write: if false;
+    }
+
     // Storefront (Phase 10) -- a published site's real inventory, the authoritative
     // source createStoreCheckout validates price/stock against. Same pattern as
     // publishedSites: written only by publishProject, read only by createStoreCheckout,

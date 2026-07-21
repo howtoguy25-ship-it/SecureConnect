@@ -104,3 +104,9 @@ export async function restorePurchases(): Promise<number> {
   }
   return restoredCount;
 }
+
+// Web-only concept (Stripe's self-service billing portal) -- on native, subscriptions are
+// always managed from the device's own Apple ID settings, never from inside this app.
+export async function openBillingPortal(): Promise<void> {
+  throw new Error('Manage your subscription from your Apple ID settings on this device.');
+}

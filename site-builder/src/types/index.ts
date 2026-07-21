@@ -253,6 +253,9 @@ export interface UserAccount {
   billingNotice?: BillingNotice | null;
   lastOrderNotice?: OrderNotice | null;
   lastAdRewardClaimedAt?: number | null;
+  // Set the first time this account pays for a web (Stripe) subscription -- lets the
+  // "Manage billing" button send them to a real self-service Stripe page.
+  stripeCustomerId?: string | null;
 }
 
 // -- Storefront: selling products from a published site, with real payouts (Phase 10) --

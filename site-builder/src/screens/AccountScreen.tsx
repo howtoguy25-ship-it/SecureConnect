@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +35,13 @@ export default function AccountScreen({ navigation }: Props) {
   };
 
   const handleRestore = async () => {
+    if (Platform.OS === 'web') {
+      showAlert(
+        'Nothing to restore',
+        "Your credits and plan are already live on your account the moment you sign in -- there's no separate restore step on web. Use Subscription -> Manage billing to update or cancel a web subscription."
+      );
+      return;
+    }
     setRestoring(true);
     try {
       const count = await restorePurchases();
