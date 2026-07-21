@@ -45,7 +45,7 @@ export default function PhoneAuthScreen({ navigation }: Props) {
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Ionicons name="chevron-back" size={26} color="#0F172A" />
         </Pressable>
-        <Text style={styles.title}>Sign Up with Phone</Text>
+        <Text style={styles.title}>Continue with Phone</Text>
         <View style={{ width: 26 }} />
       </View>
 
@@ -59,7 +59,7 @@ export default function PhoneAuthScreen({ navigation }: Props) {
             value={nationalNumber}
             onChangeText={(t) => setNationalNumber(t.replace(/[^0-9]/g, ''))}
             keyboardType="phone-pad"
-            placeholder="408 680 813"
+            placeholder="Phone number"
           />
         </View>
         {error && <Text style={styles.error}>{error}</Text>}
