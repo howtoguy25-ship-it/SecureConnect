@@ -15,7 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
 import { generationSessionStore } from '@/storage/generationSessionStore';
-import { requestPause, resumeGeneration } from '@/services/aiBuilder';
+import { requestPause, resumeGeneration, cancelGeneration } from '@/services/aiBuilder';
 import { GenerationSession } from '@/types';
 import BuildStepTracker from '@/components/BuildStepTracker';
 
@@ -30,6 +30,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   const [session, setSession] = useState<GenerationSession | null>(null);
   const [pauseMessage, setPauseMessage] = useState('');
   const [requestingPause, setRequestingPause] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const navigatedRef = useRef(false);
 
   useEffect(() => {
@@ -65,6 +66,25 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
     }
   };
 
+  const handleCancel = () => {
+    Alert.alert('Cancel this build?', 'Your credits for this build will be refunded.', [
+      { text: 'Keep building', style: 'cancel' },
+      {
+        text: 'Cancel & refund',
+        style: 'destructive',
+        onPress: async () => {
+          setCancelling(true);
+          try {
+            await cancelGeneration(sessionId);
+          } catch (err: any) {
+            setCancelling(false);
+            Alert.alert('Could not cancel', err?.message ?? 'Try again in a moment.');
+          }
+        },
+      },
+    ]);
+  };
+
   if (!session) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -76,7 +96,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   }
 
   const isPaused = session.status === 'paused';
-  const isError = session.status === 'error';
+  const isError = session.status === 'error' || session.status === 'cancelled';
   const pausesLeft = MAX_PAUSES - session.pausesUsed;
 
   return (
@@ -127,6 +147,19 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
               <Text style={[styles.pauseButtonText, pausesLeft <= 0 && { color: '#94A3B8' }]}>
                 Pause to add something ({pausesLeft} left)
               </Text>
+            </>
+          )}
+        </Pressable>
+      )}
+
+      {!isPaused && !isError && session.status !== 'completed' && (
+        <Pressable style={styles.cancelButton} onPress={handleCancel} disabled={cancelling}>
+          {cancelling ? (
+            <ActivityIndicator color="#DC2626" />
+          ) : (
+            <>
+              <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
+              <Text style={styles.cancelButtonText}>Cancel & refund credits</Text>
             </>
           )}
         </Pressable>
@@ -200,6 +233,16 @@ const styles = StyleSheet.create({
   },
   pauseButtonDisabled: { borderColor: '#E2E8F0' },
   pauseButtonText: { color: '#4338CA', fontWeight: '700', fontSize: 14 },
+  cancelButton: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 44,
+  },
+  cancelButtonText: { color: '#DC2626', fontWeight: '600', fontSize: 13 },
   modalBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20 },
   modalTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A' },

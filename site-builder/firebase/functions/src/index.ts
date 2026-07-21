@@ -242,7 +242,7 @@ async function checkForPause(sessionRef: FirebaseFirestore.DocumentReference, pa
 }
 
 export const startGeneration = onCall(
-  { secrets: [openaiApiKey], timeoutSeconds: 300, memory: '512MiB' },
+  { secrets: [openaiApiKey], timeoutSeconds: 540, memory: '512MiB' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -416,6 +416,62 @@ export const resumeGeneration = onCall(async (request) => {
   const sessionRef = db.collection('users').doc(uid).collection('generationSessions').doc(sessionId);
   await sessionRef.update({ resumeRequested: true, injectedMessage: message?.trim() || null });
   return { ok: true };
+});
+
+// A real way out of a build that's stuck or just no longer wanted -- startGeneration runs
+// the whole pipeline in one long-lived invocation, so if it dies mid-flight (hits its own
+// timeoutSeconds, a container recycle, etc.) that's a hard platform-level kill: the
+// function's own try/catch never runs, and nothing else was ever going to touch this
+// session doc again, so it would otherwise sit at whatever phase it last reached forever.
+// This gives the user an immediate exit (and their credits back) instead of waiting on
+// enforceGenerationTimeouts' periodic sweep below.
+export const cancelGeneration = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { sessionId } = request.data as { sessionId: string };
+  if (!sessionId) throw new HttpsError('invalid-argument', 'Missing sessionId.');
+
+  const sessionRef = db.collection('users').doc(uid).collection('generationSessions').doc(sessionId);
+  const session = (await sessionRef.get()).data() as GenerationSession | undefined;
+  if (!session) throw new HttpsError('not-found', 'Session not found.');
+  if (session.status === 'completed' || session.status === 'error' || session.status === 'cancelled') {
+    return { ok: true, alreadyDone: true };
+  }
+
+  await sessionRef.update({
+    status: 'cancelled',
+    statusMessage: 'Cancelled.',
+    errorMessage: 'Cancelled — your credits have been refunded.',
+    updatedAt: Date.now(),
+  });
+  await db.collection('users').doc(uid).update({ credits: FieldValue.increment(session.creditsUsed) });
+  return { ok: true };
+});
+
+// Backstop for the case above: if the user isn't there to hit Cancel (they closed the app,
+// lost connection, etc.), this catches any session that's been sitting at the same phase for
+// too long and fails it the same way -- checked against updatedAt, not createdAt, so a build
+// that's still genuinely making progress (each phase transition bumps updatedAt) is never
+// mistaken for a stuck one, no matter how long the whole build legitimately takes.
+const STUCK_SESSION_MS = 15 * 60 * 1000;
+export const enforceGenerationTimeouts = onSchedule('every 5 minutes', async () => {
+  const cutoff = Date.now() - STUCK_SESSION_MS;
+  const statuses: GenerationSession['status'][] = ['starting', 'generating', 'paused'];
+
+  for (const status of statuses) {
+    const snap = await db.collectionGroup('generationSessions').where('status', '==', status).get();
+    for (const doc of snap.docs) {
+      const session = doc.data() as GenerationSession;
+      if (session.updatedAt > cutoff) continue;
+
+      await doc.ref.update({
+        status: 'error',
+        errorMessage: 'This build took too long and timed out. Your credits have been refunded.',
+        updatedAt: Date.now(),
+      });
+      await db.collection('users').doc(session.uid).update({ credits: FieldValue.increment(session.creditsUsed) });
+    }
+  }
 });
 
 export const askBuildQuestion = onCall({ secrets: [openaiApiKey] }, async (request) => {

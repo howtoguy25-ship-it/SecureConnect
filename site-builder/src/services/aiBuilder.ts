@@ -33,6 +33,11 @@ export async function resumeGeneration(sessionId: string, message: string): Prom
   await call({ sessionId, message });
 }
 
+export async function cancelGeneration(sessionId: string): Promise<void> {
+  const call = httpsCallable(requireFunctions(functions), 'cancelGeneration');
+  await call({ sessionId });
+}
+
 export async function askBuildQuestion(sessionId: string, question: string): Promise<string> {
   const call = httpsCallable<{ sessionId: string; question: string }, { answer: string }>(
     requireFunctions(functions),
