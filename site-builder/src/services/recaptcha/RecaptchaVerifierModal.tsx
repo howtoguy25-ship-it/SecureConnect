@@ -86,7 +86,13 @@ const RecaptchaVerifierModal = forwardRef<RecaptchaVerifierHandle>((_props, ref)
           )}
           <WebView
             ref={webviewRef}
-            source={{ html }}
+            // Inline HTML with no baseUrl loads with no real origin, which makes Firebase's
+            // reCAPTCHA verification reject the token (it checks the origin against the
+            // project's Authorized Domains) -- surfaces to the user as a generic
+            // "auth/internal-error" with no other clue. Pointing baseUrl at the project's
+            // own default Firebase auth domain (already authorized for every project, no
+            // extra Console setup needed) gives the WebView a real, already-whitelisted origin.
+            source={{ html, baseUrl: `https://${env.firebase.authDomain}` }}
             onMessage={handleMessage}
             style={styles.webview}
             originWhitelist={['*']}
