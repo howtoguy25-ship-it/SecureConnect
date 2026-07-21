@@ -618,42 +618,49 @@ build requests a push token, EAS provisions the Apple Push Notification service 
 for `com.sitespark.app` automatically (you may be prompted once to confirm this during
 `eas build`).
 
-### Web push notifications — code done, one-time key upload pending
+### Web push notifications — done, sent directly (not through Expo's relay)
 
-`expo-notifications` also supports real Web Push (the browser's own Push API + a service
-worker), not just native APNs — same `getExpoPushTokenAsync` call in
-`pushNotifications.ts`, same `sendPushNotification` on the backend, no separate code path.
-Three pieces added for this:
+`expo-notifications` supports subscribing a browser to real Web Push (the browser's own
+Push API + a service worker) via `getDevicePushTokenAsync`, but **Expo's hosted push relay
+no longer accepts developer-uploaded VAPID keys for web** — the `expo push:web:upload`
+CLI command this section used to document doesn't exist in any current Expo/EAS tooling
+(confirmed: neither `npx expo`, `npx eas-cli`, nor `npx expo-cli` have it anymore, and
+Expo's push-notifications docs no longer mention web at all). So web push here does NOT
+go through `expo-server-sdk`/exp.host the way native iOS push does — it's sent with the
+real Web Push protocol directly, via the `web-push` npm package, using a VAPID keypair this
+project owns outright (no third party in the loop to register anything with).
 
-- `app.config.js`'s new `notification.vapidPublicKey`/`notification.serviceWorkerPath` —
-  the public half of a real VAPID keypair (generated locally, not a placeholder) plus the
-  path to the service worker below.
+- `app.config.js`'s `notification.vapidPublicKey`/`notification.serviceWorkerPath` — the
+  public half of a real VAPID keypair, used client-side to subscribe.
 - `public/expo-service-worker.js` — handles the browser's `push` event (shows a real
   `Notification`) and `notificationclick` (focuses/opens the app tab). Metro's web export
   copies this verbatim into `dist/expo-service-worker.js`.
-- No client code changes needed beyond what Phase 11 already built — `Device.isDevice` is
-  always `true` on web (there's no "simulator" concept for a browser), so the existing
-  fire-and-forget `registerForPushNotifications` call already runs there too.
+- `src/services/pushNotifications.ts`: on web, `registerForPushNotifications` calls
+  `getDevicePushTokenAsync()` (the raw subscription: `{endpoint, keys:{p256dh,auth}}`)
+  instead of `getExpoPushTokenAsync`, and stores that subscription object under
+  `users/{uid}/pushTokens/{docId}` (docId derived from the endpoint's tail, since a
+  subscription has no natural short id the way a token string does). Native iOS is
+  unaffected — still `getExpoPushTokenAsync` + Expo's relay, unchanged.
+- `firebase/functions/src/pushApi.ts`'s `sendPushNotification` now branches per token doc:
+  a doc with a `subscription` field sends via `web-push`'s `sendNotification`, signed with
+  the `VAPID_PRIVATE_KEY` secret; a doc with a `token` field sends via `expo-server-sdk`
+  exactly as before. A 404/410 from `web-push` (browser unsubscribed — cleared site data,
+  etc.) deletes the stale subscription doc automatically.
 
-**One-time setup needed from you:** Expo's hosted push relay (exp.host) needs the matching
-VAPID *private* key on file so it can actually sign and deliver web push messages on this
-project's behalf — the public key alone (already in `app.config.js`) isn't enough. Run:
+**One-time setup needed from you:** set the `VAPID_PRIVATE_KEY` secret (the real private key
+generated alongside the public one already in `app.config.js`) so Cloud Functions can sign
+web push deliveries:
 
 ```
-npx expo-notifications push:web:upload --vapid-pubkey BOwPw-VSAiYdMqqeSwegRwrMjkP_AUSLbB3mWvnjq9URcS1UHyzq4uOcbsE3fPUYDEqyKQj9JcR5ze2YaXTCa2k --vapid-pvtkey 8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI --vapid-subject mailto:support@buildsitespark.com
+firebase functions:secrets:set VAPID_PRIVATE_KEY
 ```
 
-logged in as the account that owns this EAS project. If that exact subcommand path has
-moved (`expo-cli`'s push commands were being migrated into `expo-notifications`/`eas` at
-various points), run `npx expo-notifications --help` or check
-https://docs.expo.dev/push-notifications/push-notifications-setup/ for the current
-equivalent — the three inputs (public key, private key, subject) stay the same regardless
-of which command ends up hosting them. Until this is done, browsers will still register a
-push subscription fine, but Expo's relay won't be able to actually deliver anything to it,
-so a signed-in web user's push token gets saved with no message ever received.
-
-Store the private key somewhere safe (a password manager, not committed to git) once
-you've run this — it's not needed again unless the keys are ever rotated.
+paste `8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI` when prompted, then redeploy functions
+(`firebase deploy --only functions`) so the new secret is picked up. Store that private key
+somewhere safe (a password manager, not committed to git) — it's not needed again unless
+the keys are ever rotated, and rotating them would also require updating
+`app.config.js`'s `vapidPublicKey` and `firebase/functions/src/pushApi.ts`'s
+`VAPID_PUBLIC_KEY` constant to match.
 
 ## Phase 12 — Real AdMob ads: rewarded credits, banner, and app-open — done
 

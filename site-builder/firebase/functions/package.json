@@ -23,10 +23,12 @@
     "jsonwebtoken": "^9.0.3",
     "openai": "^6.47.0",
     "resend": "^6.17.2",
-    "stripe": "^17.5.0"
+    "stripe": "^17.5.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/web-push": "^3.6.4",
     "typescript": "^5.9.2"
   }
 }

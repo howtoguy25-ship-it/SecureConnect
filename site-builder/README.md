@@ -214,11 +214,14 @@ FleetTrack's says `"name": "trackline"`) before running any `eas`/`firebase` com
 you're ever unsure.
 
 **One-time web push setup** (only needs running once, ever, unless the VAPID keys are
-rotated — see ROADMAP.md's "Web push notifications" section for the full explanation). From
-inside `site-builder/`:
+rotated — see ROADMAP.md's "Web push notifications" section for the full explanation; web
+push is sent directly via the `web-push` library, not through Expo's relay, since Expo
+retired developer VAPID uploads for web). From inside `site-builder/`:
 ```powershell
-npx expo-notifications push:web:upload --vapid-pubkey BOwPw-VSAiYdMqqeSwegRwrMjkP_AUSLbB3mWvnjq9URcS1UHyzq4uOcbsE3fPUYDEqyKQj9JcR5ze2YaXTCa2k --vapid-pvtkey 8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI --vapid-subject mailto:support@buildsitespark.com
+firebase functions:secrets:set VAPID_PRIVATE_KEY
 ```
+Paste `8wS1PJeJBCCKPX4r_xEphoJTmjZfJ9pW5aSCuHbWpfI` when prompted, then redeploy functions
+(`firebase deploy --only functions`) so it's picked up.
 
 **Sanity checks before any deploy** (fast, no network/account needed). From inside
 `site-builder/`:

@@ -66,6 +66,10 @@ const appleIapKeyId = defineSecret('APPLE_IAP_KEY_ID');
 const appleIapIssuerId = defineSecret('APPLE_IAP_ISSUER_ID');
 const appleIapPrivateKey = defineSecret('APPLE_IAP_PRIVATE_KEY');
 const resendApiKey = defineSecret('RESEND_API_KEY');
+// Private half of the VAPID keypair used to sign real Web Push deliveries (see
+// sendPushNotification in pushApi.ts) -- the public half is safe to hardcode (it's already
+// shipped to every client in app.config.js), but this one must never be committed.
+const vapidPrivateKey = defineSecret('VAPID_PRIVATE_KEY');
 
 // How long a site stays up after the first payment-failure notification before it's
 // automatically suspended -- the user asked for "3-5 hours"; 4 hours is the midpoint.
@@ -980,7 +984,7 @@ export const createWebBillingCheckout = onCall({ secrets: [stripeSecretKey] }, a
 // Lets a signed-in user verify their own push notification setup end-to-end (permission
 // grant -> token registration -> Expo's relay -> a real device) without waiting for a real
 // order, booking, or billing event to naturally trigger one.
-export const sendTestPushNotification = onCall(async (request) => {
+export const sendTestPushNotification = onCall({ secrets: [vapidPrivateKey] }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -992,7 +996,7 @@ export const sendTestPushNotification = onCall(async (request) => {
     );
   }
 
-  await sendPushNotification(uid, 'Test notification', 'If you see this, push notifications are working!', { test: true });
+  await sendPushNotification(uid, 'Test notification', 'If you see this, push notifications are working!', { test: true }, vapidPrivateKey.value());
   return { tokenCount: tokensSnap.size };
 });
 
@@ -1018,7 +1022,7 @@ export const createStripeBillingPortalSession = onCall({ secrets: [stripeSecretK
 // is confirmed. Registration only ever happens from here, never from the client, so a
 // domain can't be registered without payment actually clearing first.
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName, resendApiKey], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName, resendApiKey, vapidPrivateKey], ...NAMECHEAP_VPC_OPTS },
   async (req, res) => {
     const stripe = createStripeClient(stripeSecretKey.value());
     const signature = req.headers['stripe-signature'];
@@ -1177,7 +1181,9 @@ async function handleWebSubscriptionPaymentFailed(invoice: Stripe.Invoice): Prom
     await sendPushNotification(
       mapping.uid,
       'Payment failed',
-      "We couldn't process your subscription renewal — your site will go offline in a few hours if this isn't resolved."
+      "We couldn't process your subscription renewal — your site will go offline in a few hours if this isn't resolved.",
+      undefined,
+      vapidPrivateKey.value()
     ).catch((err) => console.error('Push notification failed', err));
   }
 }
@@ -1245,7 +1251,9 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
   await sendPushNotification(
     sellerUid,
     bookingDetails ? 'New booking' : 'New order',
-    bookingDetails ? `${bookingDetails.preferredDate} at ${bookingDetails.preferredTime} — $${sellerNetUsd.toFixed(2)} after fees.` : `$${sellerNetUsd.toFixed(2)} after fees.`
+    bookingDetails ? `${bookingDetails.preferredDate} at ${bookingDetails.preferredTime} — $${sellerNetUsd.toFixed(2)} after fees.` : `$${sellerNetUsd.toFixed(2)} after fees.`,
+    undefined,
+    vapidPrivateKey.value()
   ).catch((err) => console.error('Push notification failed', err));
 
   try {
@@ -1434,7 +1442,7 @@ async function unsuspendUserSites(uid: string): Promise<void> {
 // ROADMAP.md Phase 9 setup steps). Every payload is verified against Apple's real root CA
 // (see appStoreNotifications.ts) before anything in it is trusted, since this is a public URL
 // anyone could otherwise POST a forged "payment failed"/"payment succeeded" event to.
-export const appStoreServerNotifications = onRequest(async (req, res) => {
+export const appStoreServerNotifications = onRequest({ secrets: [vapidPrivateKey] }, async (req, res) => {
   const signedPayload = (req.body as { signedPayload?: string } | undefined)?.signedPayload;
   if (!signedPayload) {
     res.status(400).send('Missing signedPayload.');
@@ -1485,7 +1493,9 @@ export const appStoreServerNotifications = onRequest(async (req, res) => {
       await sendPushNotification(
         uid,
         'Payment failed',
-        "We couldn't process your subscription renewal — your site will go offline in a few hours if this isn't resolved."
+        "We couldn't process your subscription renewal — your site will go offline in a few hours if this isn't resolved.",
+        undefined,
+        vapidPrivateKey.value()
       ).catch((err) => console.error('Push notification failed', err));
     }
     // Already past_due or suspended -- Apple's own billing retries continue in the
@@ -1504,7 +1514,7 @@ export const appStoreServerNotifications = onRequest(async (req, res) => {
       { merge: true }
     );
     await unsuspendUserSites(uid);
-    await sendPushNotification(uid, 'Payment received', 'Your site is back online.').catch((err) =>
+    await sendPushNotification(uid, 'Payment received', 'Your site is back online.', undefined, vapidPrivateKey.value()).catch((err) =>
       console.error('Push notification failed', err)
     );
   }
@@ -1517,7 +1527,7 @@ export const appStoreServerNotifications = onRequest(async (req, res) => {
 // because the grace period (hours) is independent of whenever Apple happens to deliver
 // notifications, and because this is also what recovers from a GRACE_PERIOD_EXPIRED webhook
 // arriving before this sweep would otherwise have caught it.
-export const enforceBillingSuspensions = onSchedule('every 15 minutes', async () => {
+export const enforceBillingSuspensions = onSchedule({ schedule: 'every 15 minutes', secrets: [vapidPrivateKey] }, async () => {
   const cutoff = Date.now() - BILLING_GRACE_PERIOD_MS;
   const pastDueSnap = await db.collection('users').where('billingStatus', '==', 'past_due').get();
 
@@ -1539,9 +1549,13 @@ export const enforceBillingSuspensions = onSchedule('every 15 minutes', async ()
       { merge: true }
     );
 
-    await sendPushNotification(uid, 'Site suspended', 'Your site has been taken down over a failed payment — renew to bring it back online.').catch(
-      (err) => console.error('Push notification failed', err)
-    );
+    await sendPushNotification(
+      uid,
+      'Site suspended',
+      'Your site has been taken down over a failed payment — renew to bring it back online.',
+      undefined,
+      vapidPrivateKey.value()
+    ).catch((err) => console.error('Push notification failed', err));
 
     const sitesSnap = await db.collection('publishedSites').where('uid', '==', uid).get();
     if (!sitesSnap.empty) {
