@@ -17,6 +17,7 @@ import NewProjectScreen from '@/screens/NewProjectScreen';
 import BuildMethodScreen from '@/screens/BuildMethodScreen';
 import ThemeGalleryScreen from '@/screens/ThemeGalleryScreen';
 import AIPromptScreen from '@/screens/AIPromptScreen';
+import AIClarifyScreen from '@/screens/AIClarifyScreen';
 import AIBuildProgressScreen from '@/screens/AIBuildProgressScreen';
 import SubscriptionScreen from '@/screens/SubscriptionScreen';
 import EditorScreen from '@/screens/EditorScreen';
@@ -39,6 +40,7 @@ function AppStack() {
       <Stack.Screen name="BuildMethod" component={BuildMethodScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="ThemeGallery" component={ThemeGalleryScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="AIPrompt" component={AIPromptScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="AIClarify" component={AIClarifyScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="AIBuildProgress" component={AIBuildProgressScreen} options={{ gestureEnabled: false }} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Editor" component={EditorScreen} />

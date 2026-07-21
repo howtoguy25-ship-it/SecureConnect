@@ -51,3 +51,14 @@ export async function ensureAccount(): Promise<void> {
   const call = httpsCallable(requireFunctions(functions), 'ensureAccount');
   await call({});
 }
+
+// Free, no credit charge -- a quick pass before the real (paid) build to turn a short
+// prompt into a couple of concrete questions specific to what was actually typed.
+export async function suggestClarifyingQuestions(prompt: string, pageType: PageType): Promise<string[]> {
+  const call = httpsCallable<{ prompt: string; pageType: PageType }, { questions: string[] }>(
+    requireFunctions(functions),
+    'suggestClarifyingQuestions'
+  );
+  const result = await call({ prompt, pageType });
+  return result.data.questions;
+}

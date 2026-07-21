@@ -23,7 +23,7 @@ import {
   BookingDetails,
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, MODEL_FOR_PLAN } from './pricing';
-import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, SitePlanSection } from './openai';
+import { createOpenAIClient, generateSitePlan, generateImage, answerBuildQuestion, generateClarifyingQuestions, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import {
@@ -240,6 +240,21 @@ async function checkForPause(sessionRef: FirebaseFirestore.DocumentReference, pa
   await sessionRef.update({ status: 'generating', statusMessage: 'Continuing your build...', updatedAt: Date.now() });
   return null;
 }
+
+// Free (no credit charge) -- a quick pass before the real build to turn a short prompt into
+// a couple of concrete questions instead of the AI silently guessing at missing details.
+// Purely advisory: the client folds any answers into the prompt text it sends to
+// startGeneration, this doesn't touch generationSessions or credits at all.
+export const suggestClarifyingQuestions = onCall({ secrets: [openaiApiKey] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { prompt, pageType } = request.data as { prompt: string; pageType: string };
+  if (!prompt?.trim()) throw new HttpsError('invalid-argument', 'Missing prompt.');
+
+  const client = createOpenAIClient(openaiApiKey.value());
+  const questions = await generateClarifyingQuestions(client, prompt.trim(), pageType || 'website');
+  return { questions };
+});
 
 export const startGeneration = onCall(
   { secrets: [openaiApiKey], timeoutSeconds: 540, memory: '512MiB' },

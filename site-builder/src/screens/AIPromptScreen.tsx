@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -7,10 +7,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
 import { userAccountStore } from '@/storage/userAccountStore';
-import { startGeneration } from '@/services/aiBuilder';
 import { computeBuildCost } from '@/data/pricing';
 import { COMPLEXITY_INFO, BuildComplexity } from '@/data/pricing';
-import { generateId } from '@/utils/id';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { UserAccount } from '@/types';
 
@@ -66,9 +64,7 @@ export default function AIPromptScreen({ navigation, route }: Props) {
   const estimatedCost = account ? computeBuildCost(account.plan, complexity) : null;
   const insufficientCredits = account != null && estimatedCost != null && account.credits < estimatedCost;
 
-  const [starting, setStarting] = useState(false);
-
-  const handleStart = async () => {
+  const handleStart = () => {
     if (!prompt.trim()) {
       Alert.alert('Add a prompt', 'Describe the site you want built first.');
       return;
@@ -82,44 +78,14 @@ export default function AIPromptScreen({ navigation, route }: Props) {
       return;
     }
 
-    setStarting(true);
-    const sessionId = generateId('session');
-    const call = startGeneration({
-      sessionId,
-      prompt: prompt.trim(),
+    // The real (paid) build itself starts from AIClarifyScreen, after a free round of
+    // AI-generated questions specific to this prompt -- see suggestClarifyingQuestions.
+    navigation.navigate('AIClarify', {
       pageType,
+      prompt: prompt.trim(),
       complexity,
       referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
     });
-
-    // The server's credit check throws immediately (before the ~1-2 min generation
-    // work even starts), so racing a short timeout against the call catches that
-    // rejection without making every build wait -- if nothing comes back quickly, the
-    // check passed and generation is under way; the progress screen takes over from
-    // its own Firestore subscription from here, with `call` still running in the
-    // background toward its eventual resolution.
-    const settledCall = call.then(
-      (value) => ({ type: 'resolved' as const, value }),
-      (error) => ({ type: 'rejected' as const, error })
-    );
-    const quickResult = await Promise.race([
-      settledCall,
-      new Promise<{ type: 'pending' }>((resolve) => setTimeout(() => resolve({ type: 'pending' }), 2500)),
-    ]);
-    call.catch(() => {});
-    setStarting(false);
-
-    if (quickResult.type === 'rejected') {
-      const err = quickResult.error;
-      if (err?.code === 'functions/resource-exhausted') {
-        navigation.navigate('Subscription');
-      } else {
-        Alert.alert('Could not start build', err?.message ?? 'Something went wrong.');
-      }
-      return;
-    }
-
-    navigation.navigate('AIBuildProgress', { sessionId, pageType, prompt: prompt.trim(), complexity });
   };
 
   return (
@@ -193,15 +159,9 @@ export default function AIPromptScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        <Pressable style={styles.generateButton} onPress={handleStart} disabled={starting}>
-          {starting ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <>
-              <Ionicons name="sparkles" size={18} color="#FFFFFF" />
-              <Text style={styles.generateButtonText}>Generate My Site</Text>
-            </>
-          )}
+        <Pressable style={styles.generateButton} onPress={handleStart}>
+          <Ionicons name="sparkles" size={18} color="#FFFFFF" />
+          <Text style={styles.generateButtonText}>Continue</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

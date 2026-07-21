@@ -123,6 +123,51 @@ export async function generateImage(client: OpenAI, prompt: string): Promise<Buf
   return Buffer.from(b64, 'base64');
 }
 
+const CLARIFYING_QUESTIONS_SCHEMA = {
+  name: 'clarifying_questions',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 2,
+        maxItems: 4,
+        items: { type: 'string' },
+      },
+    },
+    required: ['questions'],
+  },
+} as const;
+
+// Runs before the real (paid) build starts -- a quick, free pass that turns a short prompt
+// like "build me a basketball site" into a couple of specific questions (team name, colors,
+// whether to sell merch) instead of the AI silently guessing. Always tied to what the user
+// actually typed, never generic filler ("what style do you want?").
+export async function generateClarifyingQuestions(client: OpenAI, prompt: string, pageType: string): Promise<string[]> {
+  const completion = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You help refine a short user request into a better website before it gets built. Given the user\'s prompt for a ' +
+          `${pageType} page, ask 2-4 short, concrete questions that would meaningfully improve the result -- specific to what ` +
+          'they actually described (for a sports team site, ask the team name/colors/league; for a shop, ask what they sell and ' +
+          'how buyers get it; for a portfolio, ask what work to feature). Never ask generic filler ("what style do you want?"). ' +
+          'Keep each question under 15 words. If the prompt is already very detailed, it is fine to ask fewer, more specific questions.',
+      },
+      { role: 'user', content: prompt },
+    ],
+    response_format: { type: 'json_schema', json_schema: CLARIFYING_QUESTIONS_SCHEMA },
+  });
+  const raw = completion.choices[0]?.message?.content;
+  if (!raw) throw new Error('The AI did not return questions.');
+  const parsed = JSON.parse(raw) as { questions: string[] };
+  return parsed.questions;
+}
+
 export async function answerBuildQuestion(client: OpenAI, model: string, sitePlan: SitePlan, question: string): Promise<string> {
   const completion = await client.chat.completions.create({
     model,
