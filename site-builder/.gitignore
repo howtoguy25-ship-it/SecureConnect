@@ -9,3 +9,4 @@ android/
 .env
 .env.local
 firebase/functions/lib/
+firebase/functions/.secret.local
