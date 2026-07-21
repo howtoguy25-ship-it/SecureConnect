@@ -292,7 +292,12 @@ function EditorInner({ navigation }: Props) {
               )}
             </View>
           )}
-          <View style={styles.tabBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.tabBar}
+            contentContainerStyle={styles.tabBarContent}
+          >
             <TabButton icon="shapes-outline" label="Elements" active={panel === 'elements'} onPress={() => setPanel(panel === 'elements' ? null : 'elements')} />
             <TabButton icon="text-outline" label="Text" active={false} onPress={addTextBox} />
             <TabButton icon="image-outline" label="Image" active={false} onPress={addImage} />
@@ -301,7 +306,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
             <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
-          </View>
+          </ScrollView>
         </>
       )}
         </>
@@ -391,19 +396,19 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   tabBar: {
-    flexDirection: 'row',
+    flexGrow: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
     paddingTop: 10,
     paddingBottom: 14,
-    paddingHorizontal: 4,
     shadowColor: '#000',
     shadowOpacity: 0.04,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: -2 },
   },
-  tabButton: { flex: 1, alignItems: 'center', gap: 4, paddingHorizontal: 2 },
+  tabBarContent: { paddingHorizontal: 8, gap: 4 },
+  tabButton: { alignItems: 'center', gap: 4, width: 64, paddingHorizontal: 2 },
   tabButtonLabel: { fontSize: 10, color: '#334155', fontWeight: '600', textAlign: 'center' },
   panel: {
     height: 240,
