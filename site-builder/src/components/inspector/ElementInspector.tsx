@@ -275,6 +275,12 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
                 <Text style={styles.toggleBtnText}>🛍️ Physical product</Text>
               </Pressable>
               <Pressable
+                style={[styles.toggleBtn, element.saleType === 'digital' && styles.toggleBtnActive]}
+                onPress={() => onChange({ saleType: 'digital' } as any)}
+              >
+                <Text style={styles.toggleBtnText}>💾 Digital product</Text>
+              </Pressable>
+              <Pressable
                 style={[styles.toggleBtn, element.saleType === 'service' && styles.toggleBtnActive]}
                 onPress={() => onChange({ saleType: 'service' } as any)}
               >
@@ -284,7 +290,9 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             <Text style={styles.fieldLabel}>
               {element.saleType === 'service'
                 ? 'Buyers pick a date/time and pay once to reserve it — a real one-time booking payment, never a recurring charge.'
-                : 'Buyers add it to their cart and pay once — you choose pickup, delivery, or both below.'}
+                : element.saleType === 'digital'
+                  ? 'Buyers pay once and you deliver the file or link yourself afterward — no shipping, no pickup/delivery choice needed.'
+                  : 'Buyers add it to their cart and pay once — you choose pickup, delivery, or both below.'}
             </Text>
 
             <Text style={styles.fieldLabel}>Name</Text>
@@ -331,7 +339,7 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               ))}
             </View>
 
-            {element.saleType === 'product' ? (
+            {element.saleType === 'product' && (
               <>
                 <Text style={styles.fieldLabel}>How do buyers get it?</Text>
                 <View style={styles.rowButtons}>
@@ -346,7 +354,8 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
                   ))}
                 </View>
               </>
-            ) : (
+            )}
+            {element.saleType === 'service' && (
               <SliderRow
                 label="Service duration (minutes)"
                 value={element.serviceDurationMinutes ?? 30}
@@ -367,12 +376,13 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               }
             >
               <Text style={styles.toggleBtnText}>
-                {element.saleType === 'service' ? 'Limit bookings' : 'Track stock quantity'} {element.trackInventory ? 'On' : 'Off'}
+                {element.saleType === 'service' ? 'Limit bookings' : element.saleType === 'digital' ? 'Limit copies for sale' : 'Track stock quantity'}{' '}
+                {element.trackInventory ? 'On' : 'Off'}
               </Text>
             </Pressable>
             {element.trackInventory && (
               <SliderRow
-                label={element.saleType === 'service' ? 'Bookings available' : 'Starting stock'}
+                label={element.saleType === 'service' ? 'Bookings available' : element.saleType === 'digital' ? 'Copies for sale' : 'Starting stock'}
                 value={element.initialStock ?? 0}
                 min={0}
                 max={1000}
@@ -381,10 +391,10 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             )}
             <Text style={styles.fieldLabel}>
               {element.trackInventory
-                ? `${element.saleType === 'service' ? 'Booking limit' : 'Stock'} only sets on first publish — after that, only real ${element.saleType === 'service' ? 'bookings' : 'orders'} (or editing it here) change it.`
+                ? `${element.saleType === 'service' ? 'Booking limit' : element.saleType === 'digital' ? 'Copies for sale' : 'Stock'} only sets on first publish — after that, only real ${element.saleType === 'service' ? 'bookings' : 'orders'} (or editing it here) change it.`
                 : element.saleType === 'service'
                   ? 'No limit on bookings — buyers can always reserve a slot.'
-                  : 'Unlimited stock — buyers can always check out.'}
+                  : 'Unlimited — buyers can always check out.'}
             </Text>
           </>
         )}

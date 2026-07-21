@@ -9,7 +9,7 @@ import { RootStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'BuildMethod'>;
 
 export default function BuildMethodScreen({ navigation, route }: Props) {
-  const { pageType } = route.params;
+  const { pageType, customSize } = route.params;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -32,7 +32,7 @@ export default function BuildMethodScreen({ navigation, route }: Props) {
           </View>
         </Pressable>
 
-        <Pressable style={styles.manualCard} onPress={() => navigation.navigate('ThemeGallery', { pageType })}>
+        <Pressable style={styles.manualCard} onPress={() => navigation.navigate('ThemeGallery', { pageType, customSize })}>
           <View style={styles.manualIconWrap}>
             <Ionicons name="construct-outline" size={26} color="#111827" />
           </View>

@@ -76,8 +76,10 @@ export interface VideoElement extends BaseElement {
 // gets it. 'service': a real-life, in-person service (a car wash, a haircut, a table) --
 // booked for a specific date/time instead of shipped, and paid for as one real one-time
 // reservation charge (never a recurring/subscription charge) -- see createStoreCheckout's
-// booking handling in index.ts.
-export type ProductSaleType = 'product' | 'service';
+// booking handling in index.ts. 'digital': a downloadable/electronically-delivered good --
+// no shipping and no booking; the seller sends the file/link on manually after the existing
+// order-notification email, so checkout treats it like a 'product' with no fulfillment step.
+export type ProductSaleType = 'product' | 'service' | 'digital';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
 
 // A sellable product block -- part of the canvas like any other element (positioned,

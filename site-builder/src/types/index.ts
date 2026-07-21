@@ -95,8 +95,12 @@ export interface VideoElement extends BaseElement {
 // 'product': a physical (or shippable/holdable) good -- fulfillment says how the buyer
 // gets it. 'service': a real-life, in-person service (a car wash, a haircut, a table) --
 // booked for a specific date/time instead of shipped, and paid for as one real one-time
-// reservation charge (never a recurring/subscription charge).
-export type ProductSaleType = 'product' | 'service';
+// reservation charge (never a recurring/subscription charge). 'digital': a downloadable or
+// electronically-delivered good (an ebook, a preset pack, a license key) -- no shipping and
+// no booking, so it skips both the fulfillment and service-duration fields. Delivery of the
+// actual file/link to the buyer piggybacks on the existing order-notification email (the
+// seller sends it on from there) rather than automated hosting/download-link generation.
+export type ProductSaleType = 'product' | 'service' | 'digital';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
 
 // A sellable product block -- positioned/resized like any other canvas element, and also

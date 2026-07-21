@@ -217,7 +217,9 @@ function EditorInner({ navigation }: Props) {
         <ScrollView
           contentContainerStyle={styles.canvasScroll}
           minimumZoomScale={1}
-          maximumZoomScale={1}
+          maximumZoomScale={3}
+          bouncesZoom
+          pinchGestureEnabled
         >
           <Canvas
             project={project}

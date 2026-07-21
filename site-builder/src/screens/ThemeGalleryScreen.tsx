@@ -36,7 +36,7 @@ const TIER_LABEL: Record<ThemeTier, string> = {
 };
 
 export default function ThemeGalleryScreen({ navigation, route }: Props) {
-  const { pageType } = route.params;
+  const { pageType, customSize } = route.params;
   const { user } = useAuth();
   const uid = user!.uid;
   const [unlocked, setUnlocked] = useState<string[]>([]);
@@ -128,7 +128,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
 
   const createAndOpen = async () => {
     if (!nameModal) return;
-    const project = createProject(nameValue.trim() || nameModal.name, pageType, nameModal.id);
+    const project = createProject(nameValue.trim() || nameModal.name, pageType, nameModal.id, customSize);
     await projectsStore.save(uid, project);
     setNameModal(null);
     navigation.reset({

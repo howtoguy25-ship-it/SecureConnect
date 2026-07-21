@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable } from 'react-native';
+import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
@@ -18,25 +18,24 @@ type Box = { x: number; y: number; width: number; height: number };
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
 
 const MIN_SIZE = 24;
+// A product card crams an image + name + price + stock line into whatever box it's given --
+// below this it starts clipping or crowding those together unreadably, so (unlike every
+// other element type) it gets a real floor instead of the generic 24x24 one.
+const MIN_PRODUCT_WIDTH = 150;
+const MIN_PRODUCT_HEIGHT = 170;
+const TAP_MOVE_THRESHOLD = 6;
 
 type Touch = { pageX: number; pageY: number };
 
-function centroidAndSpread(touches: Touch[]) {
-  const cx = touches.reduce((sum, t) => sum + t.pageX, 0) / touches.length;
-  const cy = touches.reduce((sum, t) => sum + t.pageY, 0) / touches.length;
-  const dist = touches.length >= 2 ? Math.hypot(touches[0].pageX - touches[1].pageX, touches[0].pageY - touches[1].pageY) : 0;
-  return { cx, cy, dist };
-}
-
-function resizeFromCorner(corner: Corner, origin: Box, dx: number, dy: number): Box {
+function resizeFromCorner(corner: Corner, origin: Box, dx: number, dy: number, minWidth = MIN_SIZE, minHeight = MIN_SIZE): Box {
   let width = origin.width;
   let height = origin.height;
   if (corner === 'br' || corner === 'tr') width = origin.width + dx;
   else width = origin.width - dx;
   if (corner === 'bl' || corner === 'br') height = origin.height + dy;
   else height = origin.height - dy;
-  width = Math.max(MIN_SIZE, width);
-  height = Math.max(MIN_SIZE, height);
+  width = Math.max(minWidth, width);
+  height = Math.max(minHeight, height);
 
   let x = origin.x;
   let y = origin.y;
@@ -56,7 +55,10 @@ export default function DraggableElement({
   onToggleLock,
 }: Props) {
   const locked = !!element.locked;
+  const editable = element.type === 'text' || element.type === 'button';
   const [box, setBox] = useState<Box>({ x: element.x, y: element.y, width: element.width, height: element.height });
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
 
   // Refs mirror the latest render's values so the PanResponders (created exactly once
   // below) never read stale closures -- and, just as importantly, never need to be
@@ -73,6 +75,10 @@ export default function DraggableElement({
   onSelectRef.current = onSelect;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const elementRef = useRef(element);
+  elementRef.current = element;
+  const isSelectedRef = useRef(isSelected);
+  isSelectedRef.current = isSelected;
   const interacting = useRef(false);
 
   useEffect(() => {
@@ -81,53 +87,61 @@ export default function DraggableElement({
     }
   }, [element.x, element.y, element.width, element.height]);
 
-  const moveOrigin = useRef({ cx: 0, cy: 0, dist: 0, touchCount: 0, box: box });
+  const moveOrigin = useRef({ x0: 0, y0: 0, box, wasSelected: false, maxMove: 0 });
+
+  const beginEdit = () => {
+    const el = elementRef.current;
+    if (el.type === 'text') setEditValue(el.text);
+    else if (el.type === 'button') setEditValue(el.label);
+    else return;
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    setEditing(false);
+    const el = elementRef.current;
+    if (el.type === 'text') onChangeRef.current({ text: editValue } as any);
+    else if (el.type === 'button') onChangeRef.current({ label: editValue } as any);
+  };
 
   const moveResponder = useRef<PanResponderInstance>(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !lockedRef.current,
-      onMoveShouldSetPanResponder: () => !lockedRef.current,
+      // Only ever claim a single-finger touch -- a second finger landing means the user is
+      // trying to pinch-zoom their *view* of the canvas to look closer, which must never
+      // change the element's real stored size. Rejecting multi-touch here lets that gesture
+      // pass through to the surrounding ScrollView's own (purely visual) zoom instead.
+      onStartShouldSetPanResponder: (evt) => !lockedRef.current && evt.nativeEvent.touches.length === 1,
+      onMoveShouldSetPanResponder: (evt) => !lockedRef.current && evt.nativeEvent.touches.length === 1,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (evt) => {
+        moveOrigin.current.wasSelected = isSelectedRef.current;
+        moveOrigin.current.maxMove = 0;
         onSelectRef.current();
         interacting.current = true;
-        const touches = evt.nativeEvent.touches as Touch[];
-        const { cx, cy, dist } = centroidAndSpread(touches);
-        moveOrigin.current = { cx, cy, dist, touchCount: touches.length, box: boxRef.current };
+        const touch = evt.nativeEvent.touches[0] as Touch;
+        moveOrigin.current.x0 = touch.pageX;
+        moveOrigin.current.y0 = touch.pageY;
+        moveOrigin.current.box = boxRef.current;
       },
       onPanResponderMove: (evt) => {
         const touches = evt.nativeEvent.touches as Touch[];
-        if (touches.length === 0) return;
-        if (touches.length !== moveOrigin.current.touchCount) {
-          // Finger count just changed (e.g. a second finger landed to start a pinch, or one
-          // lifted back to a single-finger drag) -- rebase from the current box instead of
-          // applying a delta against a touch layout that no longer matches, which would
-          // otherwise jump the element.
-          const { cx, cy, dist } = centroidAndSpread(touches);
-          moveOrigin.current = { cx, cy, dist, touchCount: touches.length, box: boxRef.current };
-          return;
-        }
-        const { cx, cy, dist } = centroidAndSpread(touches);
-        const dx = cx - moveOrigin.current.cx;
-        const dy = cy - moveOrigin.current.cy;
+        if (touches.length !== 1) return;
+        const touch = touches[0];
+        const dx = touch.pageX - moveOrigin.current.x0;
+        const dy = touch.pageY - moveOrigin.current.y0;
+        moveOrigin.current.maxMove = Math.max(moveOrigin.current.maxMove, Math.hypot(dx, dy));
         const origin = moveOrigin.current.box;
-        if (touches.length >= 2) {
-          const scale = moveOrigin.current.dist > 0 ? dist / moveOrigin.current.dist : 1;
-          const width = Math.max(MIN_SIZE, origin.width * scale);
-          const height = Math.max(MIN_SIZE, origin.height * scale);
-          setBox({
-            width,
-            height,
-            x: origin.x + dx - (width - origin.width) / 2,
-            y: origin.y + dy - (height - origin.height) / 2,
-          });
-        } else {
-          setBox({ ...origin, x: origin.x + dx, y: origin.y + dy });
-        }
+        setBox({ ...origin, x: origin.x + dx, y: origin.y + dy });
       },
       onPanResponderRelease: () => {
         interacting.current = false;
         onChangeRef.current(boxRef.current);
+        // A tap (negligible movement) on an element that was *already* selected means the
+        // user is trying to edit its text/label directly, not re-select or drag it --
+        // matches how Canva/Figma-style editors distinguish "select" from "edit."
+        if (moveOrigin.current.wasSelected && moveOrigin.current.maxMove < TAP_MOVE_THRESHOLD) {
+          beginEdit();
+        }
       },
       onPanResponderTerminate: () => {
         interacting.current = false;
@@ -153,7 +167,9 @@ export default function DraggableElement({
           if (!touch) return;
           const dx = touch.pageX - originRef.current.x0;
           const dy = touch.pageY - originRef.current.y0;
-          setBox(resizeFromCorner(corner, originRef.current.box, dx, dy));
+          const minWidth = elementRef.current.type === 'product' ? MIN_PRODUCT_WIDTH : MIN_SIZE;
+          const minHeight = elementRef.current.type === 'product' ? MIN_PRODUCT_HEIGHT : MIN_SIZE;
+          setBox(resizeFromCorner(corner, originRef.current.box, dx, dy, minWidth, minHeight));
         },
         onPanResponderRelease: () => {
           interacting.current = false;
@@ -184,7 +200,24 @@ export default function DraggableElement({
       ]}
       {...moveResponder.panHandlers}
     >
-      <ElementRenderer element={liveElement} />
+      {editing && editable ? (
+        <TextInput
+          autoFocus
+          multiline={element.type === 'text'}
+          value={editValue}
+          onChangeText={setEditValue}
+          onBlur={commitEdit}
+          onSubmitEditing={element.type === 'button' ? commitEdit : undefined}
+          style={[
+            styles.inlineInput,
+            element.type === 'text'
+              ? { fontSize: element.fontSize, color: element.color, textAlign: element.align, fontWeight: element.fontWeight }
+              : { fontSize: 15, color: element.type === 'button' ? element.textColor : '#0F172A', textAlign: 'center', fontWeight: '600' },
+          ]}
+        />
+      ) : (
+        <ElementRenderer element={liveElement} />
+      )}
 
       {locked && (
         <View style={styles.lockBadge}>
@@ -192,7 +225,7 @@ export default function DraggableElement({
         </View>
       )}
 
-      {isSelected && !locked && (
+      {isSelected && !locked && !editing && (
         <>
           <View style={[styles.resizeHandle, styles.handleTL]} {...tlResponder.panHandlers}>
             <Ionicons name="resize" size={12} color="#FFFFFF" />
@@ -209,7 +242,7 @@ export default function DraggableElement({
         </>
       )}
 
-      {isSelected && (
+      {isSelected && !editing && (
         <View style={[styles.toolbar, toolbarBelow ? styles.toolbarBelow : styles.toolbarAbove]}>
           <Pressable style={styles.toolbarBtn} onPress={onDuplicate} hitSlop={6}>
             <Ionicons name="copy-outline" size={16} color="#0F172A" />
@@ -235,6 +268,16 @@ const styles = StyleSheet.create({
     borderColor: '#2563EB',
     borderStyle: 'dashed',
     borderRadius: 4,
+  },
+  inlineInput: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    padding: 0,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
   },
   lockBadge: {
     position: 'absolute',

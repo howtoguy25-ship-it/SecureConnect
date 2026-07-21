@@ -122,17 +122,20 @@ function renderElement(el: CanvasElement): string {
     }
     case 'product': {
       const isService = el.saleType === 'service';
+      const isDigital = el.saleType === 'digital';
       const imgTag = el.images[0]
         ? `<img src="${escapeAttr(el.images[0])}" style="width:100%;height:55%;object-fit:cover;display:block;" />`
         : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
       const qtyId = `qty-${el.id}`;
       const badge = isService
         ? `📅 Service booking${el.serviceDurationMinutes ? ` · ${el.serviceDurationMinutes} min` : ''}`
-        : el.fulfillment === 'delivery'
-          ? '📦 Delivery'
-          : el.fulfillment === 'both'
-            ? '📦 Delivery or pickup'
-            : '🏬 Pickup';
+        : isDigital
+          ? '💾 Instant download'
+          : el.fulfillment === 'delivery'
+            ? '📦 Delivery'
+            : el.fulfillment === 'both'
+              ? '📦 Delivery or pickup'
+              : '🏬 Pickup';
       return `<div style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
@@ -148,6 +151,7 @@ function renderElement(el: CanvasElement): string {
       style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
     >${isService ? 'Book Now' : 'Add to Cart'}</button>
     ${isService ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">One-time payment for a real reservation — not a recurring charge.</div>' : ''}
+    ${isDigital ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">Delivered by the seller after purchase — no shipping.</div>' : ''}
   </div>
 </div>`;
     }
@@ -201,7 +205,7 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
     var list = document.getElementById('sitespark-cart-items');
     if (items.length === 0) { list.innerHTML = '<div style="color:#94A3B8;font-size:13px;">Cart is empty</div>'; return; }
     list.innerHTML = items.map(function(i){
-      var badge = i.saleType === 'service' ? '📅 ' : '';
+      var badge = i.saleType === 'service' ? '📅 ' : i.saleType === 'digital' ? '💾 ' : '';
       return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px;">'
         + '<span>'+badge+i.quantity+'&times; '+i.name+'</span>'
         + '<span style="display:flex;align-items:center;gap:6px;"><span>$'+(i.priceUsd*i.quantity).toFixed(2)+'</span>'

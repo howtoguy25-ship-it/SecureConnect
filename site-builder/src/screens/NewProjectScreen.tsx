@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, Modal, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -11,7 +11,31 @@ type Props = NativeStackScreenProps<RootStackParamList, 'NewProject'>;
 
 const ORDER: PageType[] = ['website', 'video', 'social', 'logo'];
 
+// Standard 96px-per-inch convention (same one CSS, Figma, and Canva all use), so a size
+// typed here as "21 x 29.7 cm" (A4) lines up with what those tools call the same size.
+type SizeUnit = 'px' | 'in' | 'cm' | 'mm';
+const UNIT_TO_PX: Record<SizeUnit, number> = { px: 1, in: 96, cm: 96 / 2.54, mm: 96 / 25.4 };
+const UNITS: SizeUnit[] = ['px', 'in', 'cm', 'mm'];
+
 export default function NewProjectScreen({ navigation }: Props) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const [unit, setUnit] = useState<SizeUnit>('px');
+  const [widthText, setWidthText] = useState('390');
+  const [heightText, setHeightText] = useState('844');
+
+  const startCustom = () => {
+    const width = parseFloat(widthText);
+    const height = parseFloat(heightText);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+    const widthPx = Math.round(width * UNIT_TO_PX[unit]);
+    const heightPx = Math.round(height * UNIT_TO_PX[unit]);
+    setCustomOpen(false);
+    navigation.navigate('BuildMethod', {
+      pageType: 'website',
+      customSize: { width: widthPx, height: heightPx, label: `Custom (${width}${unit} × ${height}${unit})` },
+    });
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -43,7 +67,51 @@ export default function NewProjectScreen({ navigation }: Props) {
             </Pressable>
           );
         })}
+
+        <Pressable style={styles.card} onPress={() => setCustomOpen(true)}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="resize-outline" size={28} color="#111827" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Custom Size</Text>
+            <Text style={styles.cardSubtitle}>Type an exact width and height in px, in, cm, or mm — same units Canva and Figma use.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
+        </Pressable>
       </ScrollView>
+
+      <Modal visible={customOpen} transparent animationType="fade" onRequestClose={() => setCustomOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Custom page size</Text>
+            <View style={styles.sizeRow}>
+              <View style={styles.sizeField}>
+                <Text style={styles.fieldLabel}>Width</Text>
+                <TextInput style={styles.sizeInput} value={widthText} onChangeText={setWidthText} keyboardType="numeric" />
+              </View>
+              <Text style={styles.sizeTimes}>&times;</Text>
+              <View style={styles.sizeField}>
+                <Text style={styles.fieldLabel}>Height</Text>
+                <TextInput style={styles.sizeInput} value={heightText} onChangeText={setHeightText} keyboardType="numeric" />
+              </View>
+            </View>
+            <Text style={styles.fieldLabel}>Unit</Text>
+            <View style={styles.unitRow}>
+              {UNITS.map((u) => (
+                <Pressable key={u} style={[styles.unitBtn, unit === u && styles.unitBtnActive]} onPress={() => setUnit(u)}>
+                  <Text style={[styles.unitBtnText, unit === u && styles.unitBtnTextActive]}>{u}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable style={styles.confirmBtn} onPress={startCustom}>
+              <Text style={styles.confirmBtnText}>Continue</Text>
+            </Pressable>
+            <Pressable style={styles.cancelBtn} onPress={() => setCustomOpen(false)}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -83,4 +151,30 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
   cardSubtitle: { fontSize: 13, color: '#64748B', marginTop: 2 },
+  modalBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  modalCard: { width: '100%', maxWidth: 360, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20 },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A', marginBottom: 14 },
+  sizeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  sizeField: { flex: 1 },
+  sizeTimes: { fontSize: 16, color: '#94A3B8', paddingBottom: 10 },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: '#64748B', marginBottom: 6, marginTop: 10 },
+  sizeInput: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  unitRow: { flexDirection: 'row', gap: 8 },
+  unitBtn: { flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: '#F1F5F9', alignItems: 'center' },
+  unitBtnActive: { backgroundColor: '#DBEAFE' },
+  unitBtnText: { fontSize: 13, fontWeight: '700', color: '#334155' },
+  unitBtnTextActive: { color: '#2563EB' },
+  confirmBtn: { marginTop: 20, backgroundColor: '#111827', borderRadius: 10, height: 48, alignItems: 'center', justifyContent: 'center' },
+  confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  cancelBtn: { marginTop: 10, alignItems: 'center' },
+  cancelBtnText: { color: '#94A3B8', fontWeight: '600', fontSize: 13 },
 });

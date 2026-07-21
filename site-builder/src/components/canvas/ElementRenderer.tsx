@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, Animated } from 'react-native';
+import { View, Text, Image, StyleSheet, Animated, Pressable, Modal, ScrollView } from 'react-native';
 import Svg, { Rect, Circle, Polygon, Line, Path } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -155,42 +155,89 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
   );
 }
 
+function productBadge(element: ProductElement): string {
+  if (element.saleType === 'service') {
+    return `Service${element.serviceDurationMinutes ? ` · ${element.serviceDurationMinutes}m` : ''}`;
+  }
+  if (element.saleType === 'digital') return 'Digital download';
+  return element.fulfillment === 'delivery' ? 'Delivery' : element.fulfillment === 'both' ? 'Delivery/Pickup' : 'Pickup';
+}
+
 // Editor-only preview of a sellable product block -- the real published version (with a
 // working "Add to Cart" button and live stock) is rendered separately in
 // firebase/functions/src/siteHtml.ts, since that has to be real static HTML a buyer's
 // browser can actually check out from, not a React Native view.
+//
+// Below a certain size a card physically doesn't have room for an image plus three lines of
+// text without crushing them together -- rather than shrink everything proportionally (which
+// is what made the price/image overlap illegibly), the image is dropped entirely once there's
+// not enough height left for it, and the "i" button always opens a full, uncramped read-only
+// view of everything the user actually set (DraggableElement also enforces a real minimum
+// size for this element type so it can't be dragged smaller than a legible card in the first
+// place).
 function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
+  const [showDetail, setShowDetail] = useState(false);
+  const MIN_TEXT_AREA = 62;
+  const showImage = height - MIN_TEXT_AREA >= 28;
+  const imageHeight = showImage ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
+  const compact = width < 110;
+
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
-      {element.images[0] ? (
-        <Image source={{ uri: element.images[0] }} style={{ width, height: height * 0.55 }} resizeMode="cover" />
-      ) : (
-        <View style={[styles.placeholder, { width, height: height * 0.55, borderRadius: 0 }]}>
-          <Ionicons name="pricetag-outline" size={24} color="#94A3B8" />
-        </View>
-      )}
-      <View style={{ padding: 8 }}>
-        <Text style={{ fontSize: 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
-          {element.saleType === 'service'
-            ? `Service${element.serviceDurationMinutes ? ` · ${element.serviceDurationMinutes}m` : ''}`
-            : element.fulfillment === 'delivery'
-              ? 'Delivery'
-              : element.fulfillment === 'both'
-                ? 'Delivery/Pickup'
-                : 'Pickup'}
+      {showImage &&
+        (element.images[0] ? (
+          <Image source={{ uri: element.images[0] }} style={{ width, height: imageHeight }} resizeMode="cover" />
+        ) : (
+          <View style={[styles.placeholder, { width, height: imageHeight, borderRadius: 0 }]}>
+            <Ionicons name="pricetag-outline" size={compact ? 16 : 24} color="#94A3B8" />
+          </View>
+        ))}
+      <View style={{ padding: compact ? 6 : 8, flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: compact ? 8 : 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
+          {productBadge(element)}
         </Text>
-        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A', marginTop: 1 }}>
+        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: compact ? 11 : 13, color: '#0F172A', marginTop: 1 }}>
           {element.name || 'Untitled product'}
         </Text>
-        <Text style={{ fontSize: 13, color: '#4338CA', fontWeight: '700', marginTop: 2 }}>
-          ${element.priceUsd.toFixed(2)}
-        </Text>
-        {element.trackInventory ? (
-          <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
-            {element.initialStock ?? 0} {element.saleType === 'service' ? 'bookings left' : 'in stock'}
+        <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700', marginTop: 2 }}>${element.priceUsd.toFixed(2)}</Text>
+        {element.trackInventory && !compact ? (
+          <Text numberOfLines={1} style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
+            {element.initialStock ?? 0} {element.saleType === 'service' ? 'bookings left' : 'available'}
           </Text>
         ) : null}
       </View>
+
+      <Pressable style={styles.productInfoBtn} onPress={() => setShowDetail(true)} hitSlop={8}>
+        <Ionicons name="information" size={13} color="#FFFFFF" />
+      </Pressable>
+
+      <Modal visible={showDetail} transparent animationType="fade" onRequestClose={() => setShowDetail(false)}>
+        <View style={styles.detailBackdrop}>
+          <View style={styles.detailCard}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {element.images[0] ? (
+                <Image source={{ uri: element.images[0] }} style={styles.detailImage} resizeMode="cover" />
+              ) : (
+                <View style={[styles.placeholder, styles.detailImage]}>
+                  <Ionicons name="pricetag-outline" size={36} color="#94A3B8" />
+                </View>
+              )}
+              <Text style={styles.detailBadge}>{productBadge(element)}</Text>
+              <Text style={styles.detailName}>{element.name || 'Untitled product'}</Text>
+              <Text style={styles.detailPrice}>${element.priceUsd.toFixed(2)}</Text>
+              {!!element.description && <Text style={styles.detailDescription}>{element.description}</Text>}
+              {element.trackInventory && (
+                <Text style={styles.detailStock}>
+                  {element.initialStock ?? 0} {element.saleType === 'service' ? 'bookings available' : 'available'}
+                </Text>
+              )}
+            </ScrollView>
+            <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>
+              <Text style={styles.detailCloseBtnText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -280,4 +327,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   placeholderText: { fontSize: 11, color: '#94A3B8', marginTop: 4, textAlign: 'center', paddingHorizontal: 4 },
+  productInfoBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  detailCard: { width: '100%', maxWidth: 360, maxHeight: '80%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18 },
+  detailImage: { width: '100%', height: 180, borderRadius: 10, marginBottom: 12 },
+  detailBadge: { fontSize: 11, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' },
+  detailName: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginTop: 4 },
+  detailPrice: { fontSize: 18, fontWeight: '800', color: '#4338CA', marginTop: 4 },
+  detailDescription: { fontSize: 14, color: '#475569', lineHeight: 20, marginTop: 10 },
+  detailStock: { fontSize: 13, color: '#94A3B8', marginTop: 10 },
+  detailCloseBtn: { marginTop: 14, backgroundColor: '#111827', borderRadius: 10, height: 46, alignItems: 'center', justifyContent: 'center' },
+  detailCloseBtnText: { color: '#FFFFFF', fontWeight: '700' },
 });
