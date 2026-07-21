@@ -8,6 +8,7 @@ import { usePhoneVerification } from '@/hooks/usePhoneVerification';
 import { friendlyAuthError } from '@/utils/authErrors';
 import CountryCodePicker from '@/components/CountryCodePicker';
 import { COUNTRY_DIAL_CODES, DEFAULT_COUNTRY_ISO2 } from '@/data/countryCodes';
+import { useAppTheme } from '@/context/AppThemeContext';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'PhoneAuth'>;
 
@@ -16,6 +17,7 @@ const DEFAULT_COUNTRY = COUNTRY_DIAL_CODES.find((c) => c.iso2 === DEFAULT_COUNTR
 
 export default function PhoneAuthScreen({ navigation }: Props) {
   const { recaptchaRef, RecaptchaModal, sendCode } = usePhoneVerification();
+  const { theme } = useAppTheme();
   const [country, setCountry] = useState(DEFAULT_COUNTRY);
   const [nationalNumber, setNationalNumber] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,31 +42,32 @@ export default function PhoneAuthScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Ionicons name="chevron-back" size={26} color="#0F172A" />
+          <Ionicons name="chevron-back" size={26} color={theme.text} />
         </Pressable>
-        <Text style={styles.title}>Continue with Phone</Text>
+        <Text style={[styles.title, { color: theme.text }]}>Continue with Phone</Text>
         <View style={{ width: 26 }} />
       </View>
 
       <View style={styles.form}>
-        <Text style={styles.body}>We'll text you a verification code. Standard message rates may apply.</Text>
-        <Text style={styles.label}>Phone Number</Text>
+        <Text style={[styles.body, { color: theme.textMuted }]}>We'll text you a verification code. Standard message rates may apply.</Text>
+        <Text style={[styles.label, { color: theme.textMuted }]}>Phone Number</Text>
         <View style={styles.phoneRow}>
           <CountryCodePicker value={country} onChange={setCountry} />
           <TextInput
-            style={styles.phoneInput}
+            style={[styles.phoneInput, { borderColor: theme.border, color: theme.text }]}
             value={nationalNumber}
             onChangeText={(t) => setNationalNumber(t.replace(/[^0-9]/g, ''))}
             keyboardType="phone-pad"
             placeholder="Phone number"
+            placeholderTextColor={theme.textMuted}
           />
         </View>
         {error && <Text style={styles.error}>{error}</Text>}
-        <Pressable style={styles.submitButton} onPress={submit} disabled={busy}>
-          {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>Send Code</Text>}
+        <Pressable style={[styles.submitButton, { backgroundColor: theme.accent }]} onPress={submit} disabled={busy}>
+          {busy ? <ActivityIndicator color={theme.accentText} /> : <Text style={[styles.submitButtonText, { color: theme.accentText }]}>Send Code</Text>}
         </Pressable>
       </View>
 

@@ -6,6 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
+import { useAppTheme } from '@/context/AppThemeContext';
+import { APP_THEMES, APP_THEME_ORDER } from '@/theme/appThemes';
 import { userAccountStore } from '@/storage/userAccountStore';
 import { UserAccount } from '@/types';
 import { getPlan } from '@/data/pricing';
@@ -16,6 +18,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Account'>;
 
 export default function AccountScreen({ navigation }: Props) {
   const { user, signOut, deleteAccount } = useAuth();
+  const { theme, themeId, setThemeId } = useAppTheme();
   const [account, setAccount] = useState<UserAccount | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -108,20 +111,20 @@ export default function AccountScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Ionicons name="chevron-back" size={26} color="#0F172A" />
+          <Ionicons name="chevron-back" size={26} color={theme.text} />
         </Pressable>
-        <Text style={styles.title}>Account</Text>
+        <Text style={[styles.title, { color: theme.text }]}>Account</Text>
         <View style={{ width: 26 }} />
       </View>
 
       <View style={styles.profileCard}>
-        <View style={styles.avatar}>
-          <Ionicons name="person" size={28} color="#FFFFFF" />
+        <View style={[styles.avatar, { backgroundColor: theme.accent }]}>
+          <Ionicons name="person" size={28} color={theme.accentText} />
         </View>
-        <Text style={styles.identity}>{identity}</Text>
+        <Text style={[styles.identity, { color: theme.text }]}>{identity}</Text>
       </View>
 
       <View style={styles.creditsCard}>
@@ -134,41 +137,68 @@ export default function AccountScreen({ navigation }: Props) {
         </Pressable>
       </View>
 
-      <View style={styles.section}>
-        <Pressable style={styles.row} onPress={() => navigation.navigate('SellerAccount')}>
-          <Ionicons name="storefront-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>My Store & Payouts</Text>
-          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+      <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Appearance</Text>
+      <View style={[styles.section, { backgroundColor: theme.surface }]}>
+        <View style={styles.themeRow}>
+          {APP_THEME_ORDER.map((id) => {
+            const t = APP_THEMES[id];
+            const active = id === themeId;
+            return (
+              <Pressable key={id} style={styles.themeSwatchWrap} onPress={() => setThemeId(id)}>
+                <View
+                  style={[
+                    styles.themeSwatch,
+                    { backgroundColor: t.background, borderColor: active ? t.accent : theme.border },
+                    active && styles.themeSwatchActive,
+                  ]}
+                >
+                  <Text style={[styles.themeSwatchLetter, { color: t.text }]}>Aa</Text>
+                  {active && <Ionicons name="checkmark-circle" size={16} color={t.accent} style={styles.themeCheck} />}
+                </View>
+                <Text style={[styles.themeSwatchName, { color: theme.textMuted }, active && { color: theme.text, fontWeight: '700' }]}>
+                  {t.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={[styles.section, { backgroundColor: theme.surface, marginTop: 16 }]}>
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('SellerAccount')}>
+          <Ionicons name="storefront-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>My Store & Payouts</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
-        <Pressable style={styles.row} onPress={() => navigation.navigate('Orders')}>
-          <Ionicons name="receipt-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Orders</Text>
-          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('Orders')}>
+          <Ionicons name="receipt-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Orders</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
-        <Pressable style={styles.row} onPress={() => navigation.navigate('Support')}>
-          <Ionicons name="help-circle-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Support</Text>
-          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('Support')}>
+          <Ionicons name="help-circle-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Support</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
-        <Pressable style={styles.row} onPress={() => navigation.navigate('Policy', { policyType: 'privacy' })}>
-          <Ionicons name="shield-checkmark-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Privacy Policy</Text>
-          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('Policy', { policyType: 'privacy' })}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Privacy Policy</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
-        <Pressable style={styles.row} onPress={() => navigation.navigate('Policy', { policyType: 'returns' })}>
-          <Ionicons name="receipt-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Return & Refund Policy</Text>
-          <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('Policy', { policyType: 'returns' })}>
+          <Ionicons name="receipt-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Return & Refund Policy</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
-        <Pressable style={styles.row} onPress={handleRestore} disabled={restoring}>
-          <Ionicons name="refresh-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Restore Purchases</Text>
-          {restoring ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />}
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={handleRestore} disabled={restoring}>
+          <Ionicons name="refresh-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Restore Purchases</Text>
+          {restoring ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
         </Pressable>
-        <Pressable style={styles.row} onPress={handleSendTestPush} disabled={sendingTestPush}>
-          <Ionicons name="notifications-outline" size={20} color="#334155" />
-          <Text style={styles.rowText}>Send Test Notification</Text>
-          {sendingTestPush ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />}
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={handleSendTestPush} disabled={sendingTestPush}>
+          <Ionicons name="notifications-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Send Test Notification</Text>
+          {sendingTestPush ? <ActivityIndicator size="small" /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
         </Pressable>
       </View>
 
@@ -220,7 +250,22 @@ const styles = StyleSheet.create({
   creditsLabel: { fontSize: 12, color: '#6366F1', marginTop: 2, fontWeight: '600' },
   buyMoreButton: { backgroundColor: '#4338CA', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
   buyMoreText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  sectionLabel: { fontSize: 12, fontWeight: '700', marginHorizontal: 20, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   section: { backgroundColor: '#FFFFFF', marginHorizontal: 16, borderRadius: 14, overflow: 'hidden' },
+  themeRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16, paddingHorizontal: 8 },
+  themeSwatchWrap: { alignItems: 'center', gap: 6 },
+  themeSwatch: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeSwatchActive: { borderWidth: 3 },
+  themeSwatchLetter: { fontSize: 15, fontWeight: '700' },
+  themeCheck: { position: 'absolute', bottom: -4, right: -4 },
+  themeSwatchName: { fontSize: 11, fontWeight: '600' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -16,6 +16,7 @@ import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
@@ -44,6 +45,7 @@ function EditorInner({ navigation }: Props) {
     updateProject,
     selectedElement,
   } = useEditor();
+  const { theme } = useAppTheme();
   const [panel, setPanel] = useState<PanelTab>(null);
   // Independent of `panel`/selection so it stays reachable even while an element is
   // selected (which replaces the tab bar with the inspector sheet) -- otherwise adding a
@@ -204,25 +206,25 @@ function EditorInner({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+      <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Ionicons name="chevron-back" size={26} color="#0F172A" />
+          <Ionicons name="chevron-back" size={26} color={theme.text} />
         </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>
           {project.name}
         </Text>
         <View style={styles.headerActions}>
           {!isGenerating && (
             <Pressable onPress={() => setShowLayers((v) => !v)} hitSlop={8}>
-              <Ionicons name="layers-outline" size={22} color={showLayers ? '#2563EB' : '#0F172A'} />
+              <Ionicons name="layers-outline" size={22} color={showLayers ? theme.accent : theme.text} />
             </Pressable>
           )}
           {isGenerating ? (
             <View style={{ width: 24 }} />
           ) : (
             <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
-              <Ionicons name="cloud-upload-outline" size={24} color="#0F172A" />
+              <Ionicons name="cloud-upload-outline" size={24} color={theme.text} />
             </Pressable>
           )}
         </View>
@@ -251,11 +253,11 @@ function EditorInner({ navigation }: Props) {
       )}
 
       {showLayers && !isGenerating && (
-        <View style={styles.layersOverlay}>
-          <View style={styles.layersOverlayHeader}>
-            <Text style={styles.layersOverlayTitle}>Layers</Text>
+        <View style={[styles.layersOverlay, { backgroundColor: theme.surface }]}>
+          <View style={[styles.layersOverlayHeader, { borderBottomColor: theme.border }]}>
+            <Text style={[styles.layersOverlayTitle, { color: theme.text }]}>Layers</Text>
             <Pressable hitSlop={8} onPress={() => setShowLayers(false)}>
-              <Ionicons name="close" size={18} color="#64748B" />
+              <Ionicons name="close" size={18} color={theme.textMuted} />
             </Pressable>
           </View>
           <LayersPanel
@@ -302,7 +304,7 @@ function EditorInner({ navigation }: Props) {
       </View>
 
       {selectedElement ? (
-        <View style={styles.bottomSheet}>
+        <View style={[styles.bottomSheet, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
           <View style={styles.sheetHandle} />
           <ElementInspector
             element={selectedElement}
@@ -315,9 +317,9 @@ function EditorInner({ navigation }: Props) {
       ) : (
         <>
           {panel && (
-            <View style={styles.panel}>
+            <View style={[styles.panel, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
               <Pressable style={styles.panelMinimizeBtn} onPress={() => setPanel(null)} hitSlop={8}>
-                <Ionicons name="chevron-down-circle-outline" size={22} color="#334155" />
+                <Ionicons name="chevron-down-circle-outline" size={22} color={theme.textMuted} />
               </Pressable>
               <View style={styles.sheetHandle} />
               {panel === 'elements' && <ElementsPanel onAdd={handleAddLibraryItem} />}
@@ -332,7 +334,7 @@ function EditorInner({ navigation }: Props) {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={styles.tabBar}
+            style={[styles.tabBar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}
             contentContainerStyle={styles.tabBarContent}
           >
             <TabButton icon="shapes-outline" label="Elements" active={panel === 'elements'} onPress={() => setPanel(panel === 'elements' ? null : 'elements')} />
@@ -363,10 +365,16 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useAppTheme();
   return (
     <Pressable style={styles.tabButton} onPress={onPress}>
-      <Ionicons name={icon as any} size={20} color={active ? '#2563EB' : '#334155'} />
-      <Text style={[styles.tabButtonLabel, active && { color: '#2563EB' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+      <Ionicons name={icon as any} size={20} color={active ? theme.accent : theme.textMuted} />
+      <Text
+        style={[styles.tabButtonLabel, { color: theme.textMuted }, active && { color: theme.accent }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+      >
         {label}
       </Text>
     </Pressable>

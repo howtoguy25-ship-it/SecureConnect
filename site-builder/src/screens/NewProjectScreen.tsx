@@ -23,6 +23,19 @@ export default function NewProjectScreen({ navigation }: Props) {
   const [widthText, setWidthText] = useState('390');
   const [heightText, setHeightText] = useState('844');
 
+  // Live Canva-style size preview -- a small glowing box scaled to the aspect ratio the
+  // user is currently typing, so they can see roughly what shape the page will be before
+  // committing to it, not just read two numbers.
+  const widthNum = parseFloat(widthText);
+  const heightNum = parseFloat(heightText);
+  const validSize = Number.isFinite(widthNum) && Number.isFinite(heightNum) && widthNum > 0 && heightNum > 0;
+  const widthPxPreview = validSize ? widthNum * UNIT_TO_PX[unit] : 0;
+  const heightPxPreview = validSize ? heightNum * UNIT_TO_PX[unit] : 0;
+  const PREVIEW_MAX = 110;
+  const previewScale = validSize ? Math.min(PREVIEW_MAX / widthPxPreview, PREVIEW_MAX / heightPxPreview, 1) : 0;
+  const previewWidth = Math.max(6, widthPxPreview * previewScale);
+  const previewHeight = Math.max(6, heightPxPreview * previewScale);
+
   const startCustom = () => {
     const width = parseFloat(widthText);
     const height = parseFloat(heightText);
@@ -103,6 +116,18 @@ export default function NewProjectScreen({ navigation }: Props) {
                 </Pressable>
               ))}
             </View>
+            {validSize && (
+              <View style={styles.previewSection}>
+                <Text style={styles.fieldLabel}>Preview</Text>
+                <View style={styles.previewOuter}>
+                  <View style={[styles.previewBox, { width: previewWidth, height: previewHeight }]} />
+                </View>
+                <Text style={styles.previewDims}>
+                  {Math.round(widthPxPreview)} × {Math.round(heightPxPreview)} px
+                </Text>
+              </View>
+            )}
+
             <Pressable style={styles.confirmBtn} onPress={startCustom}>
               <Text style={styles.confirmBtnText}>Continue</Text>
             </Pressable>
@@ -173,6 +198,27 @@ const styles = StyleSheet.create({
   unitBtnActive: { backgroundColor: '#DBEAFE' },
   unitBtnText: { fontSize: 13, fontWeight: '700', color: '#334155' },
   unitBtnTextActive: { color: '#2563EB' },
+  previewSection: { marginTop: 16, alignItems: 'center' },
+  previewOuter: {
+    width: '100%',
+    height: 130,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+  },
+  previewBox: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#60A5FA',
+    shadowColor: '#3B82F6',
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  previewDims: { fontSize: 12, fontWeight: '600', color: '#64748B', marginTop: 8 },
   confirmBtn: { marginTop: 20, backgroundColor: '#111827', borderRadius: 10, height: 48, alignItems: 'center', justifyContent: 'center' },
   confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
   cancelBtn: { marginTop: 10, alignItems: 'center' },

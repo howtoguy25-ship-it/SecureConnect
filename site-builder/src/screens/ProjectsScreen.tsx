@@ -18,6 +18,7 @@ import { Project } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { useAuth } from '@/context/AuthContext';
+import { useAppTheme } from '@/context/AppThemeContext';
 import RewardedAdCard from '@/components/RewardedAdCard';
 import AdBanner from '@/components/AdBanner';
 
@@ -25,6 +26,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Projects'>;
 
 export default function ProjectsScreen({ navigation }: Props) {
   const { user } = useAuth();
+  const { theme } = useAppTheme();
   const uid = user!.uid;
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,18 +73,18 @@ export default function ProjectsScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.navigate('Account')} hitSlop={8} style={styles.accountButton}>
-          <Ionicons name="person-circle-outline" size={28} color="#334155" />
+          <Ionicons name="person-circle-outline" size={28} color={theme.textMuted} />
         </Pressable>
-        <Text style={styles.title}>My Projects</Text>
+        <Text style={[styles.title, { color: theme.text }]}>My Projects</Text>
         <Pressable
-          style={styles.createButton}
+          style={[styles.createButton, { backgroundColor: theme.accent }]}
           onPress={() => navigation.navigate('NewProject')}
           hitSlop={8}
         >
-          <Ionicons name="add" size={26} color="#FFFFFF" />
+          <Ionicons name="add" size={26} color={theme.accentText} />
         </Pressable>
       </View>
 
@@ -94,13 +96,13 @@ export default function ProjectsScreen({ navigation }: Props) {
         </View>
       ) : projects.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="albums-outline" size={48} color="#94A3B8" />
-          <Text style={styles.emptyTitle}>No projects yet</Text>
-          <Text style={styles.emptySubtitle}>
+          <Ionicons name="albums-outline" size={48} color={theme.textMuted} />
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>No projects yet</Text>
+          <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
             Tap the + button to start your first site, video page, social page, or logo.
           </Text>
-          <Pressable style={styles.emptyCta} onPress={() => navigation.navigate('NewProject')}>
-            <Text style={styles.emptyCtaText}>Create a project</Text>
+          <Pressable style={[styles.emptyCta, { backgroundColor: theme.accent }]} onPress={() => navigation.navigate('NewProject')}>
+            <Text style={[styles.emptyCtaText, { color: theme.accentText }]}>Create a project</Text>
           </Pressable>
         </View>
       ) : (
@@ -110,11 +112,11 @@ export default function ProjectsScreen({ navigation }: Props) {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <Pressable
-              style={styles.card}
+              style={[styles.card, { backgroundColor: theme.surface }]}
               onPress={() => navigation.navigate('Editor', { projectId: item.id })}
               onLongPress={() => startRename(item)}
             >
-              <View style={[styles.thumb, { backgroundColor: item.backgroundColor }]}>
+              <View style={[styles.thumb, { backgroundColor: item.backgroundColor, borderColor: theme.border }]}>
                 <Ionicons
                   name={(PAGE_TYPE_INFO[item.pageType].icon as any) ?? 'globe-outline'}
                   size={22}
@@ -124,7 +126,7 @@ export default function ProjectsScreen({ navigation }: Props) {
               <View style={styles.cardBody}>
                 {renamingId === item.id ? (
                   <TextInput
-                    style={styles.renameInput}
+                    style={[styles.renameInput, { color: theme.text, borderBottomColor: theme.border }]}
                     value={renameValue}
                     onChangeText={setRenameValue}
                     onSubmitEditing={commitRename}
@@ -132,14 +134,14 @@ export default function ProjectsScreen({ navigation }: Props) {
                     autoFocus
                   />
                 ) : (
-                  <Text style={styles.cardTitle} numberOfLines={1}>
+                  <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
                     {item.name}
                   </Text>
                 )}
-                <Text style={styles.cardSubtitle}>{PAGE_TYPE_INFO[item.pageType].title}</Text>
+                <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>{PAGE_TYPE_INFO[item.pageType].title}</Text>
               </View>
               <Pressable hitSlop={8} onPress={() => confirmDelete(item)}>
-                <Ionicons name="trash-outline" size={20} color="#94A3B8" />
+                <Ionicons name="trash-outline" size={20} color={theme.textMuted} />
               </Pressable>
             </Pressable>
           )}
