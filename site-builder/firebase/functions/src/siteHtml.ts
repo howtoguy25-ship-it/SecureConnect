@@ -489,6 +489,17 @@ function marketingShell(title: string, bodyHtml: string): string {
       color: #0B1220; padding: 9px 18px; border-radius: 999px;
       background: linear-gradient(90deg, #818CF8, #E879F9);
       box-shadow: 0 6px 18px rgba(129,140,248,0.35);
+      white-space: nowrap;
+    }
+    /* Below this width, "Features / Pricing / Support / Sign In / Get Started" all in one
+       flex row runs wider than the screen and pushes "Get Started" off-screen entirely --
+       drop the in-page anchor links (Support still has its own footer link, and the
+       sections are one scroll away) so Sign In + Get Started always stay on-screen. */
+    @media (max-width: 640px) {
+      header.site { padding: 14px 16px; }
+      header.site nav a.navlink { display: none; }
+      header.site nav a.signin { margin-left: 0; margin-right: 12px; font-size: 13px; }
+      header.site nav a.cta { margin-left: 0; padding: 8px 14px; font-size: 12px; }
     }
     footer.site {
       border-top: 1px solid rgba(148,163,184,0.15); padding: 36px 24px; text-align: center;
