@@ -178,6 +178,7 @@ function EditorInner({ navigation }: Props) {
       images: [],
       trackInventory: false,
       initialStock: null,
+      inStock: true,
       saleType: 'product',
       fulfillment: 'pickup',
       serviceDurationMinutes: null,
@@ -312,6 +313,8 @@ function EditorInner({ navigation }: Props) {
             onDelete={() => confirmDeleteId(selectedElement.id)}
             onBringToFront={() => bringToFront(selectedElement.id)}
             onClose={() => select(null)}
+            projectId={project.id}
+            publishSlug={project.publishSlug}
           />
         </View>
       ) : (

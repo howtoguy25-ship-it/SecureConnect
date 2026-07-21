@@ -74,7 +74,7 @@ function renderShape(el: Extract<CanvasElement, { type: 'shape' }>): string {
   }
 }
 
-function renderElement(el: CanvasElement): string {
+function renderElement(el: CanvasElement, slug: string, productStockUrl: string): string {
   const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
   switch (el.type) {
     case 'text': {
@@ -147,10 +147,16 @@ function renderElement(el: CanvasElement): string {
     case 'product': {
       const isService = el.saleType === 'service';
       const isDigital = el.saleType === 'digital';
+      const hasMultiplePhotos = el.images.length > 1;
+      const lightboxVar = `siteSparkLightbox_${el.id}`;
       const imgTag = el.images[0]
-        ? `<img src="${escapeAttr(el.images[0])}" style="width:100%;height:55%;object-fit:cover;display:block;" />`
+        ? `<img src="${escapeAttr(el.images[0])}" style="width:100%;height:55%;object-fit:cover;display:block;${
+            hasMultiplePhotos ? 'cursor:pointer;' : ''
+          }" ${hasMultiplePhotos ? `onclick="${lightboxVar}.open()"` : ''} />`
         : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
       const qtyId = `qty-${el.id}`;
+      const stockId = `stock-${el.id}`;
+      const addBtnId = `addbtn-${el.id}`;
       const badge = isService
         ? `📅 Service booking${el.serviceDurationMinutes ? ` · ${el.serviceDurationMinutes} min` : ''}`
         : isDigital
@@ -160,24 +166,91 @@ function renderElement(el: CanvasElement): string {
             : el.fulfillment === 'both'
               ? '📦 Delivery or pickup'
               : '🏬 Pickup';
+
+      // Photo count is capped to 7 in the editor (see MAX_PRODUCT_IMAGES in
+      // ElementInspector.tsx) -- the main card above only ever shows images[0], this
+      // lightbox is the "with slide options" view for the rest.
+      const lightbox = hasMultiplePhotos
+        ? `<div id="lightbox-${el.id}" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000E6;align-items:center;justify-content:center;flex-direction:column;">
+  <button aria-label="Close" onclick="${lightboxVar}.close()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;">&times;</button>
+  <div style="position:relative;width:100%;max-width:520px;">
+    <div id="lightbox-track-${el.id}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">
+      ${el.images
+        .map(
+          (uri) =>
+            `<img src="${escapeAttr(uri)}" style="flex:0 0 100%;width:100%;max-height:70vh;object-fit:contain;scroll-snap-align:center;" />`
+        )
+        .join('')}
+    </div>
+    <button aria-label="Previous photo" onclick="${lightboxVar}.prev()" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8249;</button>
+    <button aria-label="Next photo" onclick="${lightboxVar}.next()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8250;</button>
+  </div>
+  <div style="display:flex;gap:6px;margin-top:14px;">
+    ${el.images.map((_, i) => `<div data-dot style="width:7px;height:7px;border-radius:4px;background:${i === 0 ? '#fff' : '#6B7280'};"></div>`).join('')}
+  </div>
+</div>
+<script>(function(){
+  var el=document.getElementById('lightbox-${el.id}');
+  var track=document.getElementById('lightbox-track-${el.id}');
+  var dots=el.querySelectorAll('[data-dot]');
+  var count=${el.images.length};
+  var i=0;
+  function paint(){ dots.forEach(function(d,idx){ d.style.background = idx===i ? '#fff' : '#6B7280'; }); }
+  function go(idx){ i=(idx+count)%count; track.scrollTo({ left: track.clientWidth*i, behavior:'smooth' }); paint(); }
+  window[${JSON.stringify(lightboxVar)}] = {
+    open: function(){ el.style.display='flex'; i=0; track.scrollTo({left:0}); paint(); },
+    close: function(){ el.style.display='none'; },
+    prev: function(){ go(i-1); },
+    next: function(){ go(i+1); },
+  };
+})();</script>`
+        : '';
+
+      const script = `<script>(function(){
+  var stockUrl = ${JSON.stringify(productStockUrl)} + '?slug=' + encodeURIComponent(${JSON.stringify(slug)}) + '&productId=' + encodeURIComponent(${JSON.stringify(el.productId)});
+  var stockEl = document.getElementById(${JSON.stringify(stockId)});
+  var qtyEl = document.getElementById(${JSON.stringify(qtyId)});
+  var btnEl = document.getElementById(${JSON.stringify(addBtnId)});
+  fetch(stockUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
+    if (!data || !stockEl) return;
+    if (!data.inStock) {
+      stockEl.textContent = 'Out of stock';
+      stockEl.style.color = '#DC2626';
+      stockEl.style.fontWeight = '700';
+      if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; btnEl.textContent = 'Out of Stock'; }
+    } else if (data.trackInventory) {
+      stockEl.textContent = data.stockQuantity + ' ${isService ? 'bookings left' : 'available'}';
+      if (qtyEl) qtyEl.max = String(Math.max(1, data.stockQuantity));
+      if (data.stockQuantity <= 0 && btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; btnEl.textContent = '${isService ? 'Fully Booked' : 'Sold Out'}'; }
+    } else {
+      stockEl.textContent = '${isService ? 'Available to book' : 'In stock'}';
+      stockEl.style.color = '#16A34A';
+    }
+  }).catch(function(){});
+})();</script>`;
+
       return `<div style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
     <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name)}</div>
     <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
+    <div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
       <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
       <input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />
     </div>
     <button
+      id="${addBtnId}"
       onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value,${JSON.stringify(el.saleType)})"
       style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
     >${isService ? 'Book Now' : 'Add to Cart'}</button>
     ${isService ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">One-time payment for a real reservation — not a recurring charge.</div>' : ''}
     ${isDigital ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">Delivered by the seller after purchase — no shipping.</div>' : ''}
   </div>
-</div>`;
+</div>
+${lightbox}
+${script}`;
     }
     default:
       return '';
@@ -471,6 +544,7 @@ export function renderProjectHtml(
   slug: string,
   storeCheckoutUrl: string,
   reportUrl: string,
+  productStockUrl: string,
   navHtml = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
@@ -504,7 +578,7 @@ export function renderProjectHtml(
   const elementsHtml = project.elements
     .slice()
     .sort((a, b) => a.zIndex - b.zIndex)
-    .map(renderElement)
+    .map((el) => renderElement(el, slug, productStockUrl))
     .join('\n');
 
   const { width, height } = project.canvasSize;

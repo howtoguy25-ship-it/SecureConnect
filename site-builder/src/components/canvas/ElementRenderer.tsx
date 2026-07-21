@@ -176,12 +176,52 @@ function productBadge(element: ProductElement): string {
 // view of everything the user actually set (DraggableElement also enforces a real minimum
 // size for this element type so it can't be dragged smaller than a legible card in the first
 // place).
+// Swipeable photo carousel for the product detail modal -- up to 7 photos, dot pagination.
+function ProductImageCarousel({ images, height }: { images: string[]; height: number }) {
+  const [page, setPage] = useState(0);
+  const [carouselWidth, setCarouselWidth] = useState(0);
+
+  if (images.length <= 1) {
+    return images[0] ? (
+      <Image source={{ uri: images[0] }} style={[styles.detailImage, { height }]} resizeMode="cover" />
+    ) : (
+      <View style={[styles.placeholder, styles.detailImage, { height }]}>
+        <Ionicons name="pricetag-outline" size={36} color="#94A3B8" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ marginBottom: 12 }} onLayout={(e) => setCarouselWidth(e.nativeEvent.layout.width)}>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        style={{ borderRadius: 10, overflow: 'hidden' }}
+        onMomentumScrollEnd={(e) => {
+          if (carouselWidth > 0) setPage(Math.round(e.nativeEvent.contentOffset.x / carouselWidth));
+        }}
+      >
+        {images.map((uri, idx) => (
+          <Image key={uri + idx} source={{ uri }} style={{ width: carouselWidth, height }} resizeMode="cover" />
+        ))}
+      </ScrollView>
+      <View style={styles.carouselDots}>
+        {images.map((_, idx) => (
+          <View key={idx} style={[styles.carouselDot, idx === page && styles.carouselDotActive]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
   const [showDetail, setShowDetail] = useState(false);
   const MIN_TEXT_AREA = 62;
   const showImage = height - MIN_TEXT_AREA >= 28;
   const imageHeight = showImage ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
   const compact = width < 110;
+  const inStock = element.inStock !== false;
 
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
@@ -193,6 +233,11 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
             <Ionicons name="pricetag-outline" size={compact ? 16 : 24} color="#94A3B8" />
           </View>
         ))}
+      {!inStock && (
+        <View style={styles.outOfStockBadge}>
+          <Text style={styles.outOfStockBadgeText}>Out of stock</Text>
+        </View>
+      )}
       <View style={{ padding: compact ? 6 : 8, flex: 1 }}>
         <Text numberOfLines={1} style={{ fontSize: compact ? 8 : 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
           {productBadge(element)}
@@ -202,8 +247,14 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         </Text>
         <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700', marginTop: 2 }}>${element.priceUsd.toFixed(2)}</Text>
         {element.trackInventory && !compact ? (
-          <Text numberOfLines={1} style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
-            {element.initialStock ?? 0} {element.saleType === 'service' ? 'bookings left' : 'available'}
+          <Text numberOfLines={1} style={{ fontSize: 10, color: inStock ? '#94A3B8' : '#DC2626', marginTop: 2, fontWeight: inStock ? '400' : '700' }}>
+            {inStock
+              ? `${element.initialStock ?? 0} ${element.saleType === 'service' ? 'bookings left' : 'available'}`
+              : 'Out of stock'}
+          </Text>
+        ) : !compact ? (
+          <Text numberOfLines={1} style={{ fontSize: 10, color: inStock ? '#16A34A' : '#DC2626', marginTop: 2, fontWeight: '700' }}>
+            {inStock ? 'In stock' : 'Out of stock'}
           </Text>
         ) : null}
       </View>
@@ -216,22 +267,20 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         <View style={styles.detailBackdrop}>
           <View style={styles.detailCard}>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {element.images[0] ? (
-                <Image source={{ uri: element.images[0] }} style={styles.detailImage} resizeMode="cover" />
-              ) : (
-                <View style={[styles.placeholder, styles.detailImage]}>
-                  <Ionicons name="pricetag-outline" size={36} color="#94A3B8" />
-                </View>
-              )}
+              <ProductImageCarousel images={element.images} height={180} />
               <Text style={styles.detailBadge}>{productBadge(element)}</Text>
               <Text style={styles.detailName}>{element.name || 'Untitled product'}</Text>
               <Text style={styles.detailPrice}>${element.priceUsd.toFixed(2)}</Text>
               {!!element.description && <Text style={styles.detailDescription}>{element.description}</Text>}
-              {element.trackInventory && (
-                <Text style={styles.detailStock}>
-                  {element.initialStock ?? 0} {element.saleType === 'service' ? 'bookings available' : 'available'}
-                </Text>
-              )}
+              <Text style={[styles.detailStock, { color: inStock ? '#16A34A' : '#DC2626', fontWeight: '700' }]}>
+                {inStock
+                  ? element.trackInventory
+                    ? `${element.initialStock ?? 0} ${element.saleType === 'service' ? 'bookings available' : 'available'}`
+                    : element.saleType === 'service'
+                      ? 'Available to book'
+                      : 'In stock'
+                  : 'Out of stock'}
+              </Text>
             </ScrollView>
             <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>
               <Text style={styles.detailCloseBtnText}>Close</Text>
@@ -353,4 +402,17 @@ const styles = StyleSheet.create({
   detailStock: { fontSize: 13, color: '#94A3B8', marginTop: 10 },
   detailCloseBtn: { marginTop: 14, backgroundColor: '#111827', borderRadius: 10, height: 46, alignItems: 'center', justifyContent: 'center' },
   detailCloseBtnText: { color: '#FFFFFF', fontWeight: '700' },
+  outOfStockBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: '#DC2626',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  outOfStockBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
+  carouselDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 8 },
+  carouselDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#CBD5E1' },
+  carouselDotActive: { backgroundColor: '#4338CA', width: 8, height: 8, borderRadius: 4 },
 });

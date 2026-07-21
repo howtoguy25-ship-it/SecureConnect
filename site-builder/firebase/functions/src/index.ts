@@ -14,6 +14,7 @@ import {
   DomainPurchase,
   DomainTransfer,
   UserAccount,
+  CanvasElement,
   ProductElement,
   StoreInventoryItem,
   StoreOrder,
@@ -114,6 +115,10 @@ const STORE_CHECKOUT_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cl
 // Same pattern, for reportPublishedSite (defined further down) -- baked into every
 // published page's "Report this site" link (see siteHtml.ts).
 const REPORT_SITE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/reportPublishedSite`;
+// Same pattern, for getProductStock (defined further down) -- baked into every published
+// product card so it can show real live stock/in-stock status instead of a stale number
+// baked in at publish time (see siteHtml.ts).
+const PRODUCT_STOCK_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getProductStock`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -710,12 +715,12 @@ export const publishProject = onCall(async (request) => {
     const pagesHtml: Record<string, string> = {};
     for (const page of project.pages) {
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor };
-      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, renderPageNavHtml(project.pages, page.slug));
+      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, renderPageNavHtml(project.pages, page.slug));
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL);
   }
 
   await db.collection('publishedSites').doc(slug).set(site);
@@ -760,6 +765,7 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
       images: el.images,
       trackInventory: el.trackInventory,
       stockQuantity,
+      inStock: el.inStock,
       saleType: el.saleType,
       fulfillment: el.fulfillment,
       serviceDurationMinutes: el.serviceDurationMinutes,
@@ -782,6 +788,76 @@ export const unpublishProject = onCall(async (request) => {
   await db.collection('publishedSites').doc(project.publishSlug).delete();
   await projectRef.update({ publishSlug: null, publishedAt: null, updatedAt: Date.now() });
   return { ok: true };
+});
+
+// Real, immediate stock/availability update for a product element -- separate from just
+// editing it in the inspector (which only ever changes the *draft*, applied on next
+// republish). This writes the draft element AND, if the site is already published, the live
+// storeInventory doc buyers are actually checking out against, so a seller flipping
+// "in stock" off or correcting a quantity takes effect right away without a full republish.
+export const updateProductStock = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { projectId, elementId, inStock, stockQuantity } = request.data as {
+    projectId: string;
+    elementId: string;
+    inStock: boolean;
+    stockQuantity: number | null;
+  };
+  if (!projectId || !elementId) throw new HttpsError('invalid-argument', 'Missing projectId or elementId.');
+
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const snap = await projectRef.get();
+  const project = snap.data() as Project | undefined;
+  if (!project) throw new HttpsError('not-found', 'Project not found.');
+
+  const applyToElements = (elements: CanvasElement[]) =>
+    elements.map((el) => (el.id === elementId && el.type === 'product' ? { ...el, inStock, initialStock: stockQuantity } : el));
+
+  let productId: string | null = null;
+  if (project.pages && project.pages.length > 0) {
+    const found = project.pages.flatMap((p) => p.elements).find((el): el is ProductElement => el.id === elementId && el.type === 'product');
+    productId = found?.productId ?? null;
+    const pages = project.pages.map((p) => ({ ...p, elements: applyToElements(p.elements) }));
+    await projectRef.update({ pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor, updatedAt: Date.now() });
+  } else {
+    const found = project.elements.find((el): el is ProductElement => el.id === elementId && el.type === 'product');
+    productId = found?.productId ?? null;
+    await projectRef.update({ elements: applyToElements(project.elements), updatedAt: Date.now() });
+  }
+
+  if (!productId) throw new HttpsError('not-found', 'Product element not found.');
+
+  if (project.publishSlug) {
+    const invRef = db.collection('storeInventory').doc(project.publishSlug).collection('products').doc(productId);
+    const invDoc = await invRef.get();
+    if (invDoc.exists) {
+      await invRef.set({ inStock, stockQuantity, updatedAt: Date.now() }, { merge: true });
+    }
+  }
+
+  return { ok: true };
+});
+
+// Public, unauthenticated, read-only -- lets a published page show the buyer real live
+// stock/availability instead of whatever number was baked in at publish time (which goes
+// stale the moment an order comes in). Called client-side by a small script in the
+// product's rendered HTML (see renderElement's 'product' case in siteHtml.ts).
+export const getProductStock = onRequest({ cors: true }, async (req, res) => {
+  const slug = (req.query.slug as string) ?? '';
+  const productId = (req.query.productId as string) ?? '';
+  if (!slug || !productId) {
+    res.status(400).json({ error: 'Missing slug or productId.' });
+    return;
+  }
+  const doc = await db.collection('storeInventory').doc(slug).collection('products').doc(productId).get();
+  if (!doc.exists) {
+    res.status(404).json({ error: 'Not found.' });
+    return;
+  }
+  const item = doc.data() as StoreInventoryItem;
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({ trackInventory: item.trackInventory, stockQuantity: item.stockQuantity, inStock: item.inStock !== false });
 });
 
 // Public, unauthenticated -- every request to this Hosting site (any of its attached
@@ -1785,6 +1861,12 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         return;
       }
       sellerUid = product.sellerUid;
+      if (product.inStock === false) {
+        res.status(400).json({
+          error: product.saleType === 'service' ? `${product.name} isn't taking bookings right now.` : `${product.name} is currently out of stock.`,
+        });
+        return;
+      }
       if (product.trackInventory && (product.stockQuantity ?? 0) < quantity) {
         res.status(400).json({
           error: product.saleType === 'service' ? `No more bookings available for ${product.name}.` : `Not enough stock left for ${product.name}.`,

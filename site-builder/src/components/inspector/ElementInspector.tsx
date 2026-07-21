@@ -11,6 +11,9 @@ import { FONT_OPTIONS, FontOption } from '@/data/fonts';
 import { useGoogleFont } from '@/utils/useGoogleFont';
 import { editImageBackground } from '@/services/uploads';
 import { BACKGROUND_EDIT_CREDIT_COST } from '@/data/pricing';
+import { updateProductStock } from '@/services/productStock';
+
+const MAX_PRODUCT_IMAGES = 7;
 
 interface Props {
   element: CanvasElement;
@@ -18,6 +21,59 @@ interface Props {
   onDelete: () => void;
   onBringToFront: () => void;
   onClose: () => void;
+  // Only needed for the product element's "Save to Live Store" action -- every other
+  // element type ignores these.
+  projectId?: string;
+  publishSlug?: string | null;
+}
+
+// Pushes a product's in-stock switch + current quantity straight to the live storeInventory
+// doc (if the site's already published), so a seller's change takes effect immediately
+// instead of waiting for a full republish. Local to this file since nothing else needs it.
+function ProductLiveStockSave({
+  projectId,
+  elementId,
+  inStock,
+  stockQuantity,
+  published,
+}: {
+  projectId: string;
+  elementId: string;
+  inStock: boolean;
+  stockQuantity: number | null;
+  published: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await updateProductStock(projectId, elementId, inStock, stockQuantity);
+      showAlert(
+        published ? 'Saved to live store' : 'Saved',
+        published
+          ? 'Buyers on your published site will see this update right away.'
+          : "Saved -- this will go live the first time you publish this site."
+      );
+    } catch (err: any) {
+      showAlert('Could not save', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Pressable style={styles.saveStockBtn} onPress={save} disabled={saving}>
+      {saving ? (
+        <ActivityIndicator color="#FFFFFF" />
+      ) : (
+        <>
+          <Ionicons name="save-outline" size={16} color="#FFFFFF" />
+          <Text style={styles.saveStockBtnText}>{published ? 'Save to Live Store' : 'Save'}</Text>
+        </>
+      )}
+    </Pressable>
+  );
 }
 
 // Each chip renders its own label in its own real typeface (once downloaded) rather than a
@@ -127,7 +183,7 @@ function ImageBackgroundTools({ element, onChange }: { element: ImageElement; on
   );
 }
 
-export default function ElementInspector({ element, onChange, onDelete, onBringToFront, onClose }: Props) {
+export default function ElementInspector({ element, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -433,16 +489,24 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               }}
             />
 
-            <Pressable
-              style={styles.uploadBtn}
-              onPress={async () => {
-                const uri = await pickImage();
-                if (uri) onChange({ images: [...element.images, uri] } as any);
-              }}
-            >
-              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.uploadBtnText}>Add Product Photo</Text>
-            </Pressable>
+            {element.images.length < MAX_PRODUCT_IMAGES ? (
+              <Pressable
+                style={styles.uploadBtn}
+                onPress={async () => {
+                  const uri = await pickImage();
+                  if (uri) onChange({ images: [...element.images, uri] } as any);
+                }}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.uploadBtnText}>Add Product Photo ({element.images.length}/{MAX_PRODUCT_IMAGES})</Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.fieldLabel}>Photo limit reached ({MAX_PRODUCT_IMAGES}/{MAX_PRODUCT_IMAGES}) — remove one to add another.</Text>
+            )}
+            <Text style={styles.fieldLabel}>
+              The first photo is what shows on the main page card. All {element.images.length > 1 ? `${element.images.length} photos` : 'photos'}{' '}
+              are swipeable when a visitor taps to see more.
+            </Text>
             <View style={styles.rowButtons}>
               {element.images.map((uri, idx) => (
                 <Pressable
@@ -450,7 +514,7 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
                   style={styles.removeChip}
                   onPress={() => onChange({ images: element.images.filter((_, i) => i !== idx) } as any)}
                 >
-                  <Text style={styles.removeChipText}>Photo {idx + 1} ✕</Text>
+                  <Text style={styles.removeChipText}>Photo {idx + 1}{idx === 0 ? ' (main)' : ''} ✕</Text>
                 </Pressable>
               ))}
             </View>
@@ -512,6 +576,37 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
                   ? 'No limit on bookings — buyers can always reserve a slot.'
                   : 'Unlimited — buyers can always check out.'}
             </Text>
+
+            <Pressable
+              style={[
+                styles.toggleBtn,
+                element.inStock !== false && styles.toggleBtnActive,
+                { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+              ]}
+              onPress={() => onChange({ inStock: element.inStock === false } as any)}
+            >
+              <Ionicons
+                name={element.inStock !== false ? 'checkmark-circle' : 'close-circle'}
+                size={16}
+                color={element.inStock !== false ? '#16A34A' : '#DC2626'}
+              />
+              <Text style={styles.toggleBtnText}>In Stock {element.inStock !== false ? 'On' : 'Off'}</Text>
+            </Pressable>
+            <Text style={styles.fieldLabel}>
+              {element.inStock !== false
+                ? 'Buyers can check out normally.'
+                : "Turned off — buyers will see it's out of stock and can't check out, no matter the quantity."}
+            </Text>
+
+            {projectId ? (
+              <ProductLiveStockSave
+                projectId={projectId}
+                elementId={element.id}
+                inStock={element.inStock !== false}
+                stockQuantity={element.trackInventory ? element.initialStock ?? 0 : null}
+                published={!!publishSlug}
+              />
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -544,6 +639,17 @@ const styles = StyleSheet.create({
   },
   toggleBtnActive: { backgroundColor: '#DBEAFE' },
   toggleBtnText: { fontSize: 12, fontWeight: '600', color: '#0F172A' },
+  saveStockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#2563EB',
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  saveStockBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',

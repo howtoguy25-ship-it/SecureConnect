@@ -101,6 +101,8 @@ export interface ProductElement extends BaseElement {
   // For a 'service', this doubles as a cap on how many bookings will be accepted (no real
   // calendar/time-slot conflict checking is built -- see ROADMAP.md Phase 10b scoping note).
   initialStock: number | null;
+  // Manual "pause selling" switch -- see StoreInventoryItem.inStock's comment. Defaults true.
+  inStock: boolean;
   saleType: ProductSaleType;
   fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
   serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
@@ -341,6 +343,11 @@ export interface StoreInventoryItem {
   images: string[];
   trackInventory: boolean;
   stockQuantity: number | null; // null = not tracked / unlimited
+  // Manual "pause selling" switch, independent of stockQuantity -- lets a seller instantly
+  // hide/disable buying (e.g. temporarily out of raw materials) without resetting or losing
+  // their tracked count. Always defaults true; only ever false if a seller explicitly flips
+  // it via updateProductStock.
+  inStock: boolean;
   saleType: ProductSaleType;
   fulfillment: ProductFulfillment;
   serviceDurationMinutes: number | null;

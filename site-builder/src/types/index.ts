@@ -121,6 +121,9 @@ export interface ProductElement extends BaseElement {
   // For a 'service', this doubles as a cap on how many bookings will be accepted (no real
   // calendar/time-slot conflict checking is built).
   initialStock: number | null;
+  // Manual "pause selling" switch, independent of stock count -- lets a seller instantly
+  // hide/disable buying without resetting their tracked quantity. Defaults true.
+  inStock: boolean;
   saleType: ProductSaleType;
   fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
   serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
