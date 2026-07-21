@@ -9,8 +9,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
@@ -98,7 +98,7 @@ export default function AssistantChatScreen({ onClose }: Props) {
       assistantMessagesStore.add(uid, assistantMessage).catch(() => {});
       actions.forEach((action) => runAction(action, onClose));
     } catch (err: any) {
-      Alert.alert('Spark couldn’t reply', err?.message ?? 'Something went wrong. Try again.');
+      showAlert('Spark couldn’t reply', err?.message ?? 'Something went wrong. Try again.');
     } finally {
       setSending(false);
     }

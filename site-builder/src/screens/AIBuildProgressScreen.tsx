@@ -6,9 +6,9 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Modal,
 } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -51,7 +51,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
     try {
       await requestPause(sessionId);
     } catch (err: any) {
-      Alert.alert('Could not pause', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not pause', err?.message ?? 'Try again in a moment.');
     } finally {
       setRequestingPause(false);
     }
@@ -62,12 +62,12 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
       await resumeGeneration(sessionId, pauseMessage);
       setPauseMessage('');
     } catch (err: any) {
-      Alert.alert('Could not continue', err?.message ?? 'Try again.');
+      showAlert('Could not continue', err?.message ?? 'Try again.');
     }
   };
 
   const handleCancel = () => {
-    Alert.alert('Cancel this build?', 'Your credits for this build will be refunded.', [
+    showAlert('Cancel this build?', 'Your credits for this build will be refunded.', [
       { text: 'Keep building', style: 'cancel' },
       {
         text: 'Cancel & refund',
@@ -78,7 +78,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
             await cancelGeneration(sessionId);
           } catch (err: any) {
             setCancelling(false);
-            Alert.alert('Could not cancel', err?.message ?? 'Try again in a moment.');
+            showAlert('Could not cancel', err?.message ?? 'Try again in a moment.');
           }
         },
       },

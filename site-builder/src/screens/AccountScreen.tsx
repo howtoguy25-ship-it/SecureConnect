@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -27,7 +28,7 @@ export default function AccountScreen({ navigation }: Props) {
   const planName = account ? (getPlan(account.plan)?.name ?? 'Free') : null;
 
   const confirmSignOut = () => {
-    Alert.alert('Sign out?', undefined, [
+    showAlert('Sign out?', undefined, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
     ]);
@@ -37,21 +38,21 @@ export default function AccountScreen({ navigation }: Props) {
     setRestoring(true);
     try {
       const count = await restorePurchases();
-      Alert.alert(
+      showAlert(
         count > 0 ? 'Purchases restored' : 'Nothing to restore',
         count > 0
           ? `${count} purchase${count === 1 ? '' : 's'} restored to this account.`
           : 'No previous purchases were found for this Apple ID.'
       );
     } catch (err: any) {
-      Alert.alert('Could not restore purchases', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not restore purchases', err?.message ?? 'Try again in a moment.');
     } finally {
       setRestoring(false);
     }
   };
 
   const confirmDeleteAccount = () => {
-    Alert.alert(
+    showAlert(
       'Delete account?',
       'This permanently deletes your account, projects, published sites, and order history. This cannot be undone.',
       [
@@ -60,7 +61,7 @@ export default function AccountScreen({ navigation }: Props) {
           text: 'Delete Account',
           style: 'destructive',
           onPress: () => {
-            Alert.alert('Are you sure?', 'Type nothing, just confirm one more time — this is permanent.', [
+            showAlert('Are you sure?', 'Type nothing, just confirm one more time — this is permanent.', [
               { text: 'Cancel', style: 'cancel' },
               {
                 text: 'Yes, Delete Everything',
@@ -71,7 +72,7 @@ export default function AccountScreen({ navigation }: Props) {
                     await deleteAccount();
                   } catch (err: any) {
                     setDeleting(false);
-                    Alert.alert('Could not delete account', err?.message ?? 'Try again in a moment.');
+                    showAlert('Could not delete account', err?.message ?? 'Try again in a moment.');
                   }
                 },
               },

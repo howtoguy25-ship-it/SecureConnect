@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -69,7 +70,7 @@ export default function AIClarifyScreen({ navigation, route }: Props) {
       if (err?.code === 'functions/resource-exhausted') {
         navigation.navigate('Subscription');
       } else {
-        Alert.alert('Could not start build', err?.message ?? 'Something went wrong.');
+        showAlert('Could not start build', err?.message ?? 'Something went wrong.');
       }
       return;
     }

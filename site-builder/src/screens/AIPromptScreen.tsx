@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Alert, Image } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, Image } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -66,11 +67,11 @@ export default function AIPromptScreen({ navigation, route }: Props) {
 
   const handleStart = () => {
     if (!prompt.trim()) {
-      Alert.alert('Add a prompt', 'Describe the site you want built first.');
+      showAlert('Add a prompt', 'Describe the site you want built first.');
       return;
     }
     if (overLimit) {
-      Alert.alert('Prompt too long', `Keep it under ${MAX_WORDS} words.`);
+      showAlert('Prompt too long', `Keep it under ${MAX_WORDS} words.`);
       return;
     }
     if (insufficientCredits) {

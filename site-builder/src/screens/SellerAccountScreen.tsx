@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
@@ -38,7 +39,7 @@ export default function SellerAccountScreen({ navigation }: Props) {
       await WebBrowser.openBrowserAsync(url);
       await refreshSellerAccountStatus();
     } catch (err: any) {
-      Alert.alert('Could not start setup', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not start setup', err?.message ?? 'Try again in a moment.');
     } finally {
       setBusy(false);
     }
@@ -50,7 +51,7 @@ export default function SellerAccountScreen({ navigation }: Props) {
       const url = await createSellerDashboardLink();
       await WebBrowser.openBrowserAsync(url);
     } catch (err: any) {
-      Alert.alert('Could not open dashboard', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not open dashboard', err?.message ?? 'Try again in a moment.');
     } finally {
       setBusy(false);
     }

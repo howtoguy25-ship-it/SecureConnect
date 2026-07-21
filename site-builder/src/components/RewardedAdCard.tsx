@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
 import { userAccountStore } from '@/storage/userAccountStore';
@@ -38,13 +39,13 @@ export default function RewardedAdCard() {
     try {
       const earned = await showRewardedAd();
       if (!earned) {
-        Alert.alert('No reward this time', 'The ad needs to be watched all the way through to earn credits.');
+        showAlert('No reward this time', 'The ad needs to be watched all the way through to earn credits.');
         return;
       }
       const result = await claimAdReward();
-      Alert.alert('Credits added', `+${result.creditsAwarded} credits added to your account.`);
+      showAlert('Credits added', `+${result.creditsAwarded} credits added to your account.`);
     } catch (err: any) {
-      Alert.alert('Could not show ad', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not show ad', err?.message ?? 'Try again in a moment.');
     } finally {
       setBusy(false);
     }

@@ -7,9 +7,9 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Share,
 } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -68,14 +68,14 @@ export default function PublishScreen({ navigation, route }: Props) {
       const refreshed = await projectsStore.get(uid, projectId);
       setProject(refreshed);
     } catch (err: any) {
-      Alert.alert('Could not publish', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not publish', err?.message ?? 'Try again in a moment.');
     } finally {
       setPublishing(false);
     }
   };
 
   const handleUnpublish = () => {
-    Alert.alert('Unpublish site?', 'Your live link will stop working immediately.', [
+    showAlert('Unpublish site?', 'Your live link will stop working immediately.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Unpublish',
@@ -94,7 +94,7 @@ export default function PublishScreen({ navigation, route }: Props) {
     const domain = domainInput.trim().toLowerCase();
     if (!domain) return;
     if (!project?.publishSlug) {
-      Alert.alert('Publish first', 'Publish your site before connecting a domain.');
+      showAlert('Publish first', 'Publish your site before connecting a domain.');
       return;
     }
     setConnecting(true);
@@ -104,7 +104,7 @@ export default function PublishScreen({ navigation, route }: Props) {
       const refreshed = await projectsStore.get(uid, projectId);
       setProject(refreshed);
     } catch (err: any) {
-      Alert.alert('Could not connect domain', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not connect domain', err?.message ?? 'Try again in a moment.');
     } finally {
       setConnecting(false);
     }
@@ -118,14 +118,14 @@ export default function PublishScreen({ navigation, route }: Props) {
       const refreshed = await projectsStore.get(uid, projectId);
       setProject(refreshed);
     } catch (err: any) {
-      Alert.alert('Could not check status', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not check status', err?.message ?? 'Try again in a moment.');
     } finally {
       setCheckingStatus(false);
     }
   };
 
   const handleDisconnectDomain = () => {
-    Alert.alert('Disconnect domain?', undefined, [
+    showAlert('Disconnect domain?', undefined, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Disconnect',

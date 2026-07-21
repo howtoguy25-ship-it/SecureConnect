@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -49,7 +50,7 @@ export default function TransferDomainScreen({ navigation }: Props) {
       const result = await startDomainTransfer(domain.trim().toLowerCase(), eppCode.trim(), contact);
       setTransfer(result);
     } catch (err: any) {
-      Alert.alert('Could not start transfer', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not start transfer', err?.message ?? 'Try again in a moment.');
     } finally {
       setSubmitting(false);
     }
@@ -62,7 +63,7 @@ export default function TransferDomainScreen({ navigation }: Props) {
       const result = await getDomainTransferStatus(transfer.id);
       setTransfer(result);
     } catch (err: any) {
-      Alert.alert('Could not check status', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not check status', err?.message ?? 'Try again in a moment.');
     } finally {
       setChecking(false);
     }

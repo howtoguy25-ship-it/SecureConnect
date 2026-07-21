@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -37,13 +38,13 @@ export default function SubscriptionScreen({ navigation }: Props) {
     const detach = attachPurchaseListeners(
       () => {
         setPurchasingId(null);
-        Alert.alert('Purchase complete', 'Your credits/plan have been updated.', [
+        showAlert('Purchase complete', 'Your credits/plan have been updated.', [
           { text: 'OK', onPress: () => navigation.goBack() },
         ]);
       },
       (message) => {
         setPurchasingId(null);
-        Alert.alert('Purchase failed', message);
+        showAlert('Purchase failed', message);
       }
     );
     return detach;
@@ -55,7 +56,7 @@ export default function SubscriptionScreen({ navigation }: Props) {
       await buySubscription(SUBSCRIPTION_PRODUCT_IDS[planId]);
     } catch (err: any) {
       setPurchasingId(null);
-      Alert.alert('Could not start purchase', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not start purchase', err?.message ?? 'Try again in a moment.');
     }
   };
 
@@ -67,7 +68,7 @@ export default function SubscriptionScreen({ navigation }: Props) {
       await buyProduct(productId);
     } catch (err: any) {
       setPurchasingId(null);
-      Alert.alert('Could not start purchase', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not start purchase', err?.message ?? 'Try again in a moment.');
     }
   };
 

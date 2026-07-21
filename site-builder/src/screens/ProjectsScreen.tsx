@@ -5,10 +5,10 @@ import {
   StyleSheet,
   FlatList,
   Pressable,
-  Alert,
   TextInput,
   ActivityIndicator,
 } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -44,7 +44,7 @@ export default function ProjectsScreen({ navigation }: Props) {
   );
 
   const confirmDelete = (project: Project) => {
-    Alert.alert('Delete project?', `"${project.name}" will be permanently deleted.`, [
+    showAlert('Delete project?', `"${project.name}" will be permanently deleted.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',

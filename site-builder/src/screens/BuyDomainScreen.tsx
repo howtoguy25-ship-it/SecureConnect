@@ -8,8 +8,8 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
@@ -60,7 +60,7 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
       const found = await searchDomains(query.trim());
       setResults(found);
     } catch (err: any) {
-      Alert.alert('Search failed', err?.message ?? 'Try again in a moment.');
+      showAlert('Search failed', err?.message ?? 'Try again in a moment.');
     } finally {
       setSearching(false);
     }
@@ -96,7 +96,7 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
       unsubscribeRef.current = domainPurchaseStore.subscribe(uid, purchaseId, setPurchase);
       await WebBrowser.openBrowserAsync(checkoutUrl);
     } catch (err: any) {
-      Alert.alert('Could not start checkout', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not start checkout', err?.message ?? 'Try again in a moment.');
       setStep('contact');
     } finally {
       setSubmitting(false);

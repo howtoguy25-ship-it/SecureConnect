@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Platform, Alert, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform, ActivityIndicator, Image } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,10 +42,10 @@ export default function WelcomeScreen({ navigation }: Props) {
     if (response?.type === 'success' && response.params.id_token) {
       setBusy(true);
       signInWithGoogleIdToken(response.params.id_token)
-        .catch((err) => Alert.alert('Sign-in failed', friendlyAuthError(err)))
+        .catch((err) => showAlert('Sign-in failed', friendlyAuthError(err)))
         .finally(() => setBusy(false));
     } else if (response?.type === 'error') {
-      Alert.alert('Sign-in failed', response.error?.message ?? 'Google sign-in was cancelled.');
+      showAlert('Sign-in failed', response.error?.message ?? 'Google sign-in was cancelled.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response]);
@@ -65,7 +66,7 @@ export default function WelcomeScreen({ navigation }: Props) {
       await signInWithAppleToken(credential.identityToken, rawNonce);
     } catch (err: any) {
       if (err?.code !== 'ERR_REQUEST_CANCELED') {
-        Alert.alert('Sign-in failed', friendlyAuthError(err));
+        showAlert('Sign-in failed', friendlyAuthError(err));
       }
     } finally {
       setBusy(false);
@@ -79,7 +80,7 @@ export default function WelcomeScreen({ navigation }: Props) {
     } catch (err: any) {
       // Firebase throws this if the user just closes the popup — not a real failure.
       if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
-        Alert.alert('Sign-in failed', friendlyAuthError(err));
+        showAlert('Sign-in failed', friendlyAuthError(err));
       }
     } finally {
       setBusy(false);
@@ -92,7 +93,7 @@ export default function WelcomeScreen({ navigation }: Props) {
       await signInWithApplePopup();
     } catch (err: any) {
       if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
-        Alert.alert('Sign-in failed', friendlyAuthError(err));
+        showAlert('Sign-in failed', friendlyAuthError(err));
       }
     } finally {
       setBusy(false);

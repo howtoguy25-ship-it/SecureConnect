@@ -5,11 +5,11 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  Alert,
   Modal,
   TextInput,
   ActivityIndicator,
 } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -93,7 +93,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
       },
       (message) => {
         setPurchasing(false);
-        Alert.alert('Purchase failed', message);
+        showAlert('Purchase failed', message);
       }
     );
     return detach;
@@ -122,7 +122,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
       await buyProduct(productId);
     } catch (err: any) {
       setPurchasing(false);
-      Alert.alert('Could not start purchase', err?.message ?? 'Try again in a moment.');
+      showAlert('Could not start purchase', err?.message ?? 'Try again in a moment.');
     }
   };
 
