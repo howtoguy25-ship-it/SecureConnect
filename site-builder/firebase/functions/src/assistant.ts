@@ -48,11 +48,22 @@ const ASSISTANT_SCHEMA = {
   },
 } as const;
 
+export interface ActiveBuildInfo {
+  pageType: string;
+  status: string;
+  statusMessage: string;
+  minutesElapsed: number;
+}
+
 interface AssistantContext {
   screen: string;
   credits: number;
   plan: string;
   projectCount: number;
+  // Real, live generationSessions data (not guessed) -- lets Spark answer "is my build
+  // still running?" truthfully instead of assuming, since the assistant has no other way
+  // to see backend state on its own.
+  activeBuilds: ActiveBuildInfo[];
 }
 
 function buildSystemPrompt(context: AssistantContext): string {
@@ -69,6 +80,11 @@ function buildSystemPrompt(context: AssistantContext): string {
     '- openSubscription / openAccount: shortcuts to those screens.',
     "Only include an action when the user's message actually calls for one — most replies should have an empty actions array. Set unused fields on an action to null.",
     `Current screen: ${context.screen}. Credits remaining: ${context.credits}. Plan: ${context.plan}. Existing projects: ${context.projectCount}.`,
+    context.activeBuilds.length > 0
+      ? `Real, live build status (this is ground truth, not a guess): the user has ${context.activeBuilds.length} AI build(s) currently in progress: ${context.activeBuilds
+          .map((b) => `a ${b.pageType} build (${b.status}: "${b.statusMessage}", ${b.minutesElapsed.toFixed(1)} min elapsed so far)`)
+          .join('; ')}. If asked whether a build is running, still going, or done, answer from this real data -- it keeps running on the server even if they've navigated away from the progress screen, so tell them that if relevant.`
+      : "Real, live build status (this is ground truth, not a guess): the user has no AI builds currently in progress. If asked whether a build is running, tell them plainly that none are active right now.",
     'Keep replies short and conversational (1-4 sentences unless walking through a few build ideas). Only help with things related to SiteSpark and its features — if asked something unrelated, politely redirect.',
   ].join(' ');
 }

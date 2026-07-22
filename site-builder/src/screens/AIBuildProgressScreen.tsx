@@ -89,9 +89,31 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
     ]);
   };
 
+  const handleBack = () => {
+    if (session && session.status !== 'completed' && session.status !== 'error' && session.status !== 'cancelled') {
+      showAlert(
+        'Leave this screen?',
+        'Your build keeps going in the background -- you can check back on it anytime from Projects.',
+        [
+          { text: 'Keep watching', style: 'cancel' },
+          { text: 'Leave', onPress: () => navigation.goBack() },
+        ]
+      );
+      return;
+    }
+    navigation.goBack();
+  };
+
   if (!session) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+            <Ionicons name="chevron-back" size={24} color="#0F172A" />
+          </Pressable>
+          <Ionicons name="sparkles" size={22} color="#4338CA" />
+          <Text style={styles.title}>Building your site</Text>
+        </View>
         <View style={styles.centered}>
           <ActivityIndicator color="#4338CA" />
         </View>
@@ -106,8 +128,12 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
+        <Pressable onPress={handleBack} hitSlop={8}>
+          <Ionicons name="chevron-back" size={24} color="#0F172A" />
+        </Pressable>
         <Ionicons name="sparkles" size={22} color="#4338CA" />
         <Text style={styles.title}>Building your site</Text>
+        <View style={{ width: 24 }} />
       </View>
 
       <View style={[styles.body, isWide && styles.bodyWide]}>

@@ -28,12 +28,16 @@ import { Project } from '@/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Publish'>;
 
+// Mirrors PRODUCT_DOMAIN in firebase/functions/src/index.ts -- every published project
+// gets this free subdomain by default. Needed here so a project that's already published
+// still shows its real live link + Share button on screen load, not just right after the
+// in-session Publish/Republish action (which is the only other place publishedUrl gets set).
+const PRODUCT_DOMAIN = 'buildsitespark.com';
+
 function liveUrl(project: Project): string | null {
   if (!project.publishSlug) return null;
   if (project.customDomain && project.domainStatus === 'active') return `https://${project.customDomain}`;
-  // Cloud Functions computes the exact hosting domain server-side; this is just for
-  // display before the first publish response comes back.
-  return null;
+  return `https://${project.publishSlug}.${PRODUCT_DOMAIN}`;
 }
 
 export default function PublishScreen({ navigation, route }: Props) {

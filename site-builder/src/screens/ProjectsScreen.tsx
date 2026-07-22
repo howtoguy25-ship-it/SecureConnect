@@ -14,8 +14,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
-import { Project } from '@/types';
+import { Project, GenerationSession } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
+import { generationSessionStore } from '@/storage/generationSessionStore';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
@@ -32,10 +33,15 @@ export default function ProjectsScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  // Keyed by previewProjectId -- lets a "Generating..." card show real live status and
+  // route back to the AI build progress screen instead of opening an empty Editor, since
+  // the build itself keeps running server-side even after leaving that screen.
+  const [activeSessionsByProjectId, setActiveSessionsByProjectId] = useState<Record<string, GenerationSession>>({});
 
   const load = useCallback(async () => {
-    const list = await projectsStore.list(uid);
+    const [list, activeSessions] = await Promise.all([projectsStore.list(uid), generationSessionStore.listActive(uid)]);
     setProjects(list);
+    setActiveSessionsByProjectId(Object.fromEntries(activeSessions.map((s) => [s.previewProjectId, s])));
     setLoading(false);
   }, [uid]);
 
@@ -110,41 +116,59 @@ export default function ProjectsScreen({ navigation }: Props) {
           data={projects}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <Pressable
-              style={[styles.card, { backgroundColor: theme.surface }]}
-              onPress={() => navigation.navigate('Editor', { projectId: item.id })}
-              onLongPress={() => startRename(item)}
-            >
-              <View style={[styles.thumb, { backgroundColor: item.backgroundColor, borderColor: theme.border }]}>
-                <Ionicons
-                  name={(PAGE_TYPE_INFO[item.pageType].icon as any) ?? 'globe-outline'}
-                  size={22}
-                  color="#00000080"
-                />
-              </View>
-              <View style={styles.cardBody}>
-                {renamingId === item.id ? (
-                  <TextInput
-                    style={[styles.renameInput, { color: theme.text, borderBottomColor: theme.border }]}
-                    value={renameValue}
-                    onChangeText={setRenameValue}
-                    onSubmitEditing={commitRename}
-                    onBlur={commitRename}
-                    autoFocus
-                  />
-                ) : (
-                  <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
-                    {item.name}
+          renderItem={({ item }) => {
+            const activeSession = activeSessionsByProjectId[item.id];
+            return (
+              <Pressable
+                style={[styles.card, { backgroundColor: theme.surface }]}
+                onPress={() =>
+                  activeSession
+                    ? navigation.navigate('AIBuildProgress', {
+                        sessionId: activeSession.id,
+                        pageType: activeSession.pageType,
+                        prompt: activeSession.prompt,
+                        complexity: activeSession.complexity,
+                      })
+                    : navigation.navigate('Editor', { projectId: item.id })
+                }
+                onLongPress={() => startRename(item)}
+              >
+                <View style={[styles.thumb, { backgroundColor: item.backgroundColor, borderColor: theme.border }]}>
+                  {activeSession ? (
+                    <ActivityIndicator size="small" color="#4338CA" />
+                  ) : (
+                    <Ionicons
+                      name={(PAGE_TYPE_INFO[item.pageType].icon as any) ?? 'globe-outline'}
+                      size={22}
+                      color="#00000080"
+                    />
+                  )}
+                </View>
+                <View style={styles.cardBody}>
+                  {renamingId === item.id ? (
+                    <TextInput
+                      style={[styles.renameInput, { color: theme.text, borderBottomColor: theme.border }]}
+                      value={renameValue}
+                      onChangeText={setRenameValue}
+                      onSubmitEditing={commitRename}
+                      onBlur={commitRename}
+                      autoFocus
+                    />
+                  ) : (
+                    <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                  )}
+                  <Text style={[styles.cardSubtitle, { color: activeSession ? '#4338CA' : theme.textMuted }]} numberOfLines={1}>
+                    {activeSession ? `Building... ${activeSession.statusMessage}` : PAGE_TYPE_INFO[item.pageType].title}
                   </Text>
-                )}
-                <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>{PAGE_TYPE_INFO[item.pageType].title}</Text>
-              </View>
-              <Pressable hitSlop={8} onPress={() => confirmDelete(item)}>
-                <Ionicons name="trash-outline" size={20} color={theme.textMuted} />
+                </View>
+                <Pressable hitSlop={8} onPress={() => confirmDelete(item)}>
+                  <Ionicons name="trash-outline" size={20} color={theme.textMuted} />
+                </Pressable>
               </Pressable>
-            </Pressable>
-          )}
+            );
+          }}
         />
       )}
 
