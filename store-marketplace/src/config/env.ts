@@ -13,7 +13,6 @@ function required(name: string, value: string | undefined): string {
 }
 
 export const env = {
-  googlePlacesApiKey: extra.googlePlacesApiKey ?? "",
   abrLookupGuid: extra.abrLookupGuid ?? "",
   firebase: {
     apiKey: required("firebaseApiKey", extra.firebaseApiKey),

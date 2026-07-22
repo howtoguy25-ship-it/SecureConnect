@@ -30,11 +30,6 @@ module.exports = {
       },
       package: "com.stockly.app",
       permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA", "READ_MEDIA_IMAGES"],
-      config: {
-        googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
-        },
-      },
     },
     plugins: [
       "expo-font",
@@ -73,7 +68,6 @@ module.exports = {
       ],
     ],
     extra: {
-      googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY,
       firebaseApiKey: process.env.FIREBASE_API_KEY,
       firebaseAuthDomain: process.env.FIREBASE_AUTH_DOMAIN,
       firebaseProjectId: process.env.FIREBASE_PROJECT_ID,
