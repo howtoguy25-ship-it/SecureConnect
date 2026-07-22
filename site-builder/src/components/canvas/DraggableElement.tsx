@@ -13,10 +13,24 @@ interface Props {
   onDuplicate: () => void;
   onDelete: () => void;
   onToggleLock: () => void;
+  // The page's real frame -- 9:16 social, square logo, website, or any custom size. Every
+  // drag/resize gesture below clamps against this so an element can never be moved or
+  // stretched out past the edges of the page it's actually on.
+  canvasSize: { width: number; height: number };
 }
 
 type Box = { x: number; y: number; width: number; height: number };
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
+
+// Keeps a box fully inside the canvas frame: shrinks it to fit if it's larger than the
+// frame itself, then pins x/y so no edge can sit outside [0, canvasSize].
+function clampBoxToCanvas(box: Box, canvasSize: { width: number; height: number }): Box {
+  const width = Math.min(box.width, canvasSize.width);
+  const height = Math.min(box.height, canvasSize.height);
+  const x = Math.max(0, Math.min(box.x, canvasSize.width - width));
+  const y = Math.max(0, Math.min(box.y, canvasSize.height - height));
+  return { x, y, width, height };
+}
 
 const MIN_SIZE = 24;
 // A product card crams an image + name + price + stock line into whatever box it's given --
@@ -54,11 +68,14 @@ export default function DraggableElement({
   onDuplicate,
   onDelete,
   onToggleLock,
+  canvasSize,
 }: Props) {
   const locked = !!element.locked;
   const editable = element.type === 'text' || element.type === 'button';
   const textFontFamily = useGoogleFont(element.type === 'text' ? element.fontFamily : undefined);
-  const [box, setBox] = useState<Box>({ x: element.x, y: element.y, width: element.width, height: element.height });
+  const [box, setBox] = useState<Box>(() =>
+    clampBoxToCanvas({ x: element.x, y: element.y, width: element.width, height: element.height }, canvasSize)
+  );
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
 
@@ -81,13 +98,15 @@ export default function DraggableElement({
   elementRef.current = element;
   const isSelectedRef = useRef(isSelected);
   isSelectedRef.current = isSelected;
+  const canvasSizeRef = useRef(canvasSize);
+  canvasSizeRef.current = canvasSize;
   const interacting = useRef(false);
 
   useEffect(() => {
     if (!interacting.current) {
-      setBox({ x: element.x, y: element.y, width: element.width, height: element.height });
+      setBox(clampBoxToCanvas({ x: element.x, y: element.y, width: element.width, height: element.height }, canvasSizeRef.current));
     }
-  }, [element.x, element.y, element.width, element.height]);
+  }, [element.x, element.y, element.width, element.height, canvasSize.width, canvasSize.height]);
 
   const moveOrigin = useRef({ x0: 0, y0: 0, box, wasSelected: false, maxMove: 0 });
 
@@ -133,7 +152,7 @@ export default function DraggableElement({
         const dy = touch.pageY - moveOrigin.current.y0;
         moveOrigin.current.maxMove = Math.max(moveOrigin.current.maxMove, Math.hypot(dx, dy));
         const origin = moveOrigin.current.box;
-        setBox({ ...origin, x: origin.x + dx, y: origin.y + dy });
+        setBox(clampBoxToCanvas({ ...origin, x: origin.x + dx, y: origin.y + dy }, canvasSizeRef.current));
       },
       onPanResponderRelease: () => {
         interacting.current = false;
@@ -171,7 +190,8 @@ export default function DraggableElement({
           const dy = touch.pageY - originRef.current.y0;
           const minWidth = elementRef.current.type === 'product' ? MIN_PRODUCT_WIDTH : MIN_SIZE;
           const minHeight = elementRef.current.type === 'product' ? MIN_PRODUCT_HEIGHT : MIN_SIZE;
-          setBox(resizeFromCorner(corner, originRef.current.box, dx, dy, minWidth, minHeight));
+          const resized = resizeFromCorner(corner, originRef.current.box, dx, dy, minWidth, minHeight);
+          setBox(clampBoxToCanvas(resized, canvasSizeRef.current));
         },
         onPanResponderRelease: () => {
           interacting.current = false;

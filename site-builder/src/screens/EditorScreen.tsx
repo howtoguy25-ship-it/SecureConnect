@@ -18,6 +18,7 @@ import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElemen
 import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
+import { labelForElement } from '@/utils/elementLabel';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
@@ -52,6 +53,16 @@ function EditorInner({ navigation }: Props) {
   // new element (which auto-selects it) makes the layer list disappear right when a user
   // most wants to see it land in the stack.
   const [showLayers, setShowLayers] = useState(false);
+  // Lets the inspector sheet collapse down to a thin strip (keeping the element selected)
+  // instead of forcing users to fully deselect just to see the canvas underneath while
+  // repositioning something. Reset whenever the selection changes so picking a new element
+  // always opens straight to its full controls.
+  const [sheetMinimized, setSheetMinimized] = useState(false);
+  const prevSelectedIdRef = React.useRef<string | null>(null);
+  if (prevSelectedIdRef.current !== selectedId) {
+    prevSelectedIdRef.current = selectedId;
+    if (sheetMinimized) setSheetMinimized(false);
+  }
 
   if (!project) {
     return (
@@ -305,17 +316,41 @@ function EditorInner({ navigation }: Props) {
       </View>
 
       {selectedElement ? (
-        <View style={[styles.bottomSheet, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
-          <View style={styles.sheetHandle} />
-          <ElementInspector
-            element={selectedElement}
-            onChange={(patch) => updateElement(selectedElement.id, patch)}
-            onDelete={() => confirmDeleteId(selectedElement.id)}
-            onBringToFront={() => bringToFront(selectedElement.id)}
-            onClose={() => select(null)}
-            projectId={project.id}
-            publishSlug={project.publishSlug}
-          />
+        <View
+          style={[
+            styles.bottomSheet,
+            sheetMinimized && styles.bottomSheetMinimized,
+            { backgroundColor: theme.surface, borderTopColor: theme.border },
+          ]}
+        >
+          <Pressable
+            onPress={() => setSheetMinimized((v) => !v)}
+            hitSlop={10}
+            style={styles.sheetHandleTouch}
+          >
+            <View style={styles.sheetHandle} />
+            <Ionicons name={sheetMinimized ? 'chevron-up' : 'chevron-down'} size={16} color={theme.textMuted} />
+          </Pressable>
+          {sheetMinimized ? (
+            <Pressable style={styles.minimizedRow} onPress={() => setSheetMinimized(false)}>
+              <Text style={[styles.minimizedLabel, { color: theme.text }]} numberOfLines={1}>
+                {labelForElement(selectedElement)} selected — tap to edit
+              </Text>
+              <Pressable onPress={() => select(null)} hitSlop={8}>
+                <Ionicons name="close-circle" size={20} color={theme.textMuted} />
+              </Pressable>
+            </Pressable>
+          ) : (
+            <ElementInspector
+              element={selectedElement}
+              onChange={(patch) => updateElement(selectedElement.id, patch)}
+              onDelete={() => confirmDeleteId(selectedElement.id)}
+              onBringToFront={() => bringToFront(selectedElement.id)}
+              onClose={() => setSheetMinimized(true)}
+              projectId={project.id}
+              publishSlug={project.publishSlug}
+            />
+          )}
         </View>
       ) : (
         <>
@@ -485,12 +520,28 @@ const styles = StyleSheet.create({
     borderTopColor: '#E2E8F0',
     paddingTop: 8,
   },
+  bottomSheetMinimized: {
+    maxHeight: undefined,
+  },
+  sheetHandleTouch: {
+    alignItems: 'center',
+    paddingVertical: 4,
+    gap: 2,
+  },
   sheetHandle: {
     width: 40,
     height: 4,
     borderRadius: 2,
     backgroundColor: '#E2E8F0',
     alignSelf: 'center',
-    marginBottom: 4,
   },
+  minimizedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 10,
+  },
+  minimizedLabel: { fontSize: 13, fontWeight: '600', flex: 1 },
 });

@@ -156,8 +156,8 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
           <LivePreviewCanvas
             uid={uid}
             projectId={session.previewProjectId}
-            frameWidth={isWide ? 240 : Math.min(windowWidth - 40, 320)}
-            frameHeight={isWide ? 420 : 220}
+            maxWidth={isWide ? 240 : Math.min(windowWidth - 40, 320)}
+            maxHeight={420}
           />
           <Text style={styles.previewLabel}>Live preview -- updates as it's built</Text>
         </View>

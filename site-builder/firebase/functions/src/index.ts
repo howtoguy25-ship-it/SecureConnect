@@ -430,12 +430,20 @@ export const startGeneration = onCall(
       // screen keeps revealing images incrementally rather than all at once at the end.
       await Promise.all(
         sectionsNeedingImages.map(async (section: SitePlanSection) => {
-          const buffer = await generateImage(client, section.imagePrompt);
-          const path = `users/${uid}/generated/${sessionId}/${section.kind}-${Date.now()}.png`;
-          const file = bucket.file(path);
-          await file.save(buffer, { contentType: 'image/png' });
-          const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
-          sectionImages.push({ section, url });
+          try {
+            const buffer = await generateImage(client, section.imagePrompt);
+            const path = `users/${uid}/generated/${sessionId}/${section.kind}-${Date.now()}.png`;
+            const file = bucket.file(path);
+            await file.save(buffer, { contentType: 'image/png' });
+            const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+            sectionImages.push({ section, url });
+          } catch (err) {
+            // A single section's artwork failing (OpenAI hiccup, a transient Storage error)
+            // must never sink the entire build -- the site still finishes, just with that
+            // one section falling back to no image instead of throwing away every other
+            // section that already generated successfully.
+            console.error(`Image generation failed for section "${section.kind}"`, err);
+          }
           await pushPreview(plan, sectionImages);
         })
       );
@@ -746,6 +754,21 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
   );
   if (hasLocalMedia) {
     throw new HttpsError('failed-precondition', 'Some media is still uploading — try publishing again in a moment.');
+  }
+
+  // A site with product elements can't go live until the seller can actually get paid --
+  // buyers would otherwise hit a real checkout that has nowhere to send the money. Building
+  // and editing products is always allowed; only *publishing* them is blocked here, and only
+  // for projects that actually contain a product element.
+  const hasProducts = allElementsAcrossPages.some((el) => el.type === 'product');
+  if (hasProducts) {
+    const seller = (await sellerAccountRef(uid).get()).data() as SellerAccount | undefined;
+    if (!seller?.chargesEnabled) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Set up payouts before publishing — this site has products for sale, so Stripe payouts must be connected first. Go to Seller Account to connect Stripe.'
+      );
+    }
   }
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));

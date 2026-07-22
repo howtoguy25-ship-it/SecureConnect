@@ -36,6 +36,7 @@ export default function Canvas({ project, selectedId, onSelect, onChange, onDupl
           onDuplicate={() => onDuplicate(el.id)}
           onDelete={() => onDelete(el.id)}
           onToggleLock={() => onToggleLock(el.id)}
+          canvasSize={project.canvasSize}
         />
       ))}
     </View>

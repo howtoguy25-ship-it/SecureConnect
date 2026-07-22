@@ -7,8 +7,12 @@ import ElementRenderer from '@/components/canvas/ElementRenderer';
 interface Props {
   uid: string;
   projectId: string;
-  frameWidth: number;
-  frameHeight: number;
+  // The available box to fit the preview into -- the actual rendered frame is derived from
+  // the real project's canvasSize (square logo, 9:16 social, tall website, or any custom
+  // size) scaled down to fit inside this box, so the preview always matches the true page
+  // shape instead of being squashed into one fixed rectangle regardless of page type.
+  maxWidth: number;
+  maxHeight: number;
 }
 
 // Scales every positional/size field by the same factor so the miniature preview is a real
@@ -28,7 +32,7 @@ function scaleElement(el: CanvasElement, scale: number): CanvasElement {
 // incrementally (see previewProjectId on GenerationSession) -- reuses the same
 // ElementRenderer the real editor uses, so what shows here is a real preview of what's
 // actually been generated so far, not a mocked-up animation standing in for progress.
-export default function LivePreviewCanvas({ uid, projectId, frameWidth, frameHeight }: Props) {
+export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight }: Props) {
   const [project, setProject] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -37,7 +41,12 @@ export default function LivePreviewCanvas({ uid, projectId, frameWidth, frameHei
   }, [uid, projectId]);
 
   const hasContent = !!project && project.elements.length > 0;
-  const scale = project ? Math.min(frameWidth / project.canvasSize.width, frameHeight / project.canvasSize.height) : 1;
+  // Default to a portrait 9:16-ish shape before the project doc (and its real canvasSize)
+  // has loaded, so the frame doesn't flash as a stretched-out landscape box for a beat.
+  const canvasSize = project?.canvasSize ?? { width: 390, height: 693 };
+  const scale = Math.min(maxWidth / canvasSize.width, maxHeight / canvasSize.height, 1);
+  const frameWidth = Math.round(canvasSize.width * scale);
+  const frameHeight = Math.round(canvasSize.height * scale);
 
   return (
     <View
@@ -55,7 +64,14 @@ export default function LivePreviewCanvas({ uid, projectId, frameWidth, frameHei
             return (
               <View
                 key={el.id}
-                style={{ position: 'absolute', left: scaledEl.x, top: scaledEl.y, width: scaledEl.width, height: scaledEl.height }}
+                style={{
+                  position: 'absolute',
+                  left: scaledEl.x,
+                  top: scaledEl.y,
+                  width: scaledEl.width,
+                  height: scaledEl.height,
+                  overflow: 'hidden',
+                }}
               >
                 <ElementRenderer element={scaledEl} />
               </View>
@@ -72,6 +88,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   placeholderDot: {
     width: 8,
