@@ -8,6 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Share,
+  Linking,
 } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +25,8 @@ import {
   disconnectDomain,
   DomainResult,
 } from '@/services/publish';
+import { getDomainLockStatus, setDomainLockStatus } from '@/services/domains';
+import { env } from '@/config/env';
 import { Project } from '@/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Publish'>;
@@ -55,6 +58,14 @@ export default function PublishScreen({ navigation, route }: Props) {
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [domainResult, setDomainResult] = useState<DomainResult | null>(null);
 
+  // Registrar lock only applies to a domain SiteSpark actually registered (via the in-app
+  // "Buy a new domain" flow) -- a domain merely connected from elsewhere isn't ours to
+  // lock/unlock, so getDomainLockStatus failing (permission-denied) just means this
+  // section stays hidden rather than showing an error for a perfectly normal case.
+  const [lockStatus, setLockStatus] = useState<{ locked: boolean } | null>(null);
+  const [lockSectionVisible, setLockSectionVisible] = useState(false);
+  const [lockBusy, setLockBusy] = useState(false);
+
   useEffect(() => {
     projectsStore.get(uid, projectId).then((p) => {
       setProject(p);
@@ -62,6 +73,36 @@ export default function PublishScreen({ navigation, route }: Props) {
       if (p) setPublishedUrl(liveUrl(p));
     });
   }, [uid, projectId]);
+
+  useEffect(() => {
+    if (!project?.customDomain) {
+      setLockSectionVisible(false);
+      setLockStatus(null);
+      return;
+    }
+    getDomainLockStatus(project.customDomain)
+      .then((status) => {
+        setLockStatus(status);
+        setLockSectionVisible(true);
+      })
+      .catch(() => {
+        setLockSectionVisible(false);
+        setLockStatus(null);
+      });
+  }, [project?.customDomain]);
+
+  const handleToggleLock = async () => {
+    if (!project?.customDomain || !lockStatus) return;
+    setLockBusy(true);
+    try {
+      const next = await setDomainLockStatus(project.customDomain, !lockStatus.locked);
+      setLockStatus(next);
+    } catch (err: any) {
+      showAlert('Could not change lock status', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setLockBusy(false);
+    }
+  };
 
   const handlePublish = async () => {
     if (!project) return;
@@ -264,6 +305,32 @@ export default function PublishScreen({ navigation, route }: Props) {
             </>
           )}
         </View>
+
+        {lockSectionVisible && lockStatus && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Ionicons name={lockStatus.locked ? 'lock-closed-outline' : 'lock-open-outline'} size={20} color="#4338CA" />
+              <Text style={styles.cardTitle}>Domain lock</Text>
+            </View>
+            <Text style={styles.cardBody}>
+              {lockStatus.locked
+                ? 'This domain is locked — the safe default that blocks unauthorized transfers. Unlock it if you want to move it to a different registrar.'
+                : "This domain is unlocked and ready to move. To finish an outbound transfer you'll need its EPP/Auth code — Namecheap doesn't offer a way for us to fetch that automatically, so contact support and we'll get it sent to you."}
+            </Text>
+            {!lockStatus.locked && (
+              <Pressable style={styles.secondaryButton} onPress={() => Linking.openURL(`mailto:${env.supportEmail}`)}>
+                <Text style={styles.secondaryButtonText}>Contact support for your EPP code</Text>
+              </Pressable>
+            )}
+            <Pressable style={styles.primaryButton} onPress={handleToggleLock} disabled={lockBusy}>
+              {lockBusy ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>{lockStatus.locked ? 'Unlock for transfer' : 'Lock again'}</Text>
+              )}
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

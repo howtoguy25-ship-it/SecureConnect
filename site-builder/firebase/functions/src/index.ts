@@ -45,6 +45,8 @@ import {
   registerDomain,
   createTransfer,
   getTransferStatus,
+  getRegistrarLock,
+  setRegistrarLock,
   RegistrantContact,
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession, createSubscriptionCheckoutSession, createOneTimeCheckoutSession } from './stripeApi';
@@ -1550,6 +1552,60 @@ export const getDomainTransferStatus = onCall(
       updatedAt: Date.now(),
     });
     return { ...transfer, status: status.status, statusDescription: status.statusDescription };
+  })
+);
+
+// Confirms this uid actually owns a domain that was registered THROUGH SiteSpark's own
+// Namecheap account before letting them touch its registrar lock -- a domain merely
+// "connected" (owned at a different registrar entirely) isn't ours to lock/unlock, and
+// Namecheap's lock API would just fail or act on the wrong account otherwise.
+async function requireOwnedRegisteredDomain(uid: string, domain: string): Promise<void> {
+  const snap = await db
+    .collection('users')
+    .doc(uid)
+    .collection('domainPurchases')
+    .where('domain', '==', domain)
+    .where('status', '==', 'registered')
+    .limit(1)
+    .get();
+  if (snap.empty) {
+    throw new HttpsError('permission-denied', 'This domain was not registered through SiteSpark, so its lock cannot be managed here.');
+  }
+}
+
+// Real registrar-lock status for a domain SiteSpark registered on the user's behalf --
+// the first, genuinely working half of moving it to a different registrar later. Getting
+// the actual EPP/auth code has no documented self-serve Namecheap API (see namecheapApi.ts)
+// -- the client shows honest instructions to contact support for that step instead of a
+// fake button.
+export const getDomainLockStatus = onCall(
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
+  withCallableErrors('getDomainLockStatus', async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { domain } = request.data as { domain: string };
+    if (!domain?.trim()) throw new HttpsError('invalid-argument', 'Missing domain.');
+
+    await requireOwnedRegisteredDomain(uid, domain.trim().toLowerCase());
+    const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+    const locked = await getRegistrarLock(creds, domain.trim().toLowerCase());
+    return { locked };
+  })
+);
+
+export const setDomainLockStatus = onCall(
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
+  withCallableErrors('setDomainLockStatus', async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+    const { domain, locked } = request.data as { domain: string; locked: boolean };
+    if (!domain?.trim() || typeof locked !== 'boolean') throw new HttpsError('invalid-argument', 'Missing domain or locked flag.');
+
+    await requireOwnedRegisteredDomain(uid, domain.trim().toLowerCase());
+    const creds = { apiUser: namecheapApiUser.value(), apiKey: namecheapApiKey.value(), userName: namecheapUserName.value() };
+    const success = await setRegistrarLock(creds, domain.trim().toLowerCase(), locked);
+    if (!success) throw new HttpsError('internal', 'Namecheap did not confirm the lock change — try again in a moment.');
+    return { locked };
   })
 );
 

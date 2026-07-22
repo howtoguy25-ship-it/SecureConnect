@@ -229,3 +229,27 @@ export async function getTransferStatus(creds: NamecheapCredentials, transferId:
     statusDescription: result?.StatusDescription ?? 'Status unavailable',
   };
 }
+
+// Real, documented Namecheap API methods for the registrar-lock step of an OUTBOUND
+// transfer (moving a domain registered here to a different registrar). Namecheap does not
+// expose a documented API method to retrieve the EPP/auth code itself -- that still has to
+// go out through a support request, emailed to the registrant contact -- so these two only
+// cover the lock/unlock half of the process; see getDomainLockStatus/setDomainLockStatus
+// in index.ts for how the rest is handled honestly on the client.
+// NOTE: like createTransfer/getTransferStatus above, this has not been exercised against a
+// live account from here -- treat the first real call as something to debug together from
+// a screenshot if the response shape differs from what's coded below.
+export async function getRegistrarLock(creds: NamecheapCredentials, domain: string): Promise<boolean> {
+  const commandResponse = await callNamecheap(creds, 'namecheap.domains.getRegistrarLock', { DomainName: domain });
+  const result = commandResponse?.DomainGetRegistrarLockResult;
+  return result?.RegistrarLockStatus === 'true' || result?.RegistrarLockStatus === true;
+}
+
+export async function setRegistrarLock(creds: NamecheapCredentials, domain: string, locked: boolean): Promise<boolean> {
+  const commandResponse = await callNamecheap(creds, 'namecheap.domains.setRegistrarLock', {
+    DomainName: domain,
+    LockAction: locked ? 'LOCK' : 'UNLOCK',
+  });
+  const result = commandResponse?.DomainSetRegistrarLockResult;
+  return result?.IsSuccess === 'true' || result?.IsSuccess === true;
+}

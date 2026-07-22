@@ -57,3 +57,22 @@ export async function getDomainTransferStatus(transferDocId: string): Promise<Do
   const result = await call({ transferDocId });
   return result.data;
 }
+
+// Registrar-lock status/control for a domain SiteSpark registered for the user -- the
+// real, working half of moving it to a different registrar later (getting the actual
+// EPP/auth code has no self-serve Namecheap API, so that step is a support request instead
+// of a button here).
+export async function getDomainLockStatus(domain: string): Promise<{ locked: boolean }> {
+  const call = httpsCallable<{ domain: string }, { locked: boolean }>(requireFunctions(functions), 'getDomainLockStatus');
+  const result = await call({ domain });
+  return result.data;
+}
+
+export async function setDomainLockStatus(domain: string, locked: boolean): Promise<{ locked: boolean }> {
+  const call = httpsCallable<{ domain: string; locked: boolean }, { locked: boolean }>(
+    requireFunctions(functions),
+    'setDomainLockStatus'
+  );
+  const result = await call({ domain, locked });
+  return result.data;
+}
