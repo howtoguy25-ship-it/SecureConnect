@@ -1830,11 +1830,12 @@ export const createSellerOnboardingLink = onCall({ secrets: [stripeSecretKey], i
     await ref.set(seller);
   }
 
-  // Custom URL scheme, same pattern as createDomainCheckout's success/cancel URLs -- the
-  // in-app browser closes and control returns to the app (registered scheme, see
-  // app.config.js) whether Stripe redirects here or the user just backs out manually; the
-  // app re-checks real status via getSellerAccountStatus rather than trusting this redirect.
-  const url = await createOnboardingLink(stripe, accountId, 'sitespark://seller-onboarding-refresh', 'sitespark://seller-onboarding-complete');
+  // Unlike Checkout Sessions (which accept a custom app scheme for success/cancel),
+  // Stripe's Account Links API requires real http(s) URLs and rejects anything else with
+  // "Not a valid URL" -- so this always has to land on the real web app, on both platforms,
+  // whether Stripe redirects here or the user just backs out manually. The app re-checks
+  // real status via getSellerAccountStatus rather than trusting this redirect either way.
+  const url = await createOnboardingLink(stripe, accountId, `${WEBAPP_URL}/?onboarding=refresh`, `${WEBAPP_URL}/?onboarding=complete`);
   return { url };
 }));
 
