@@ -36,11 +36,24 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   const navigatedRef = useRef(false);
   const { width: windowWidth } = useWindowDimensions();
   const isWide = windowWidth >= 700;
+  // The server only writes a final minutesElapsed once, at completion/error -- ticking a
+  // real clock client-side (from the session's own createdAt) is what makes the "minutes"
+  // metric actually count up live while a build is running, instead of sitting at 0.0 the
+  // whole time.
+  const [nowTick, setNowTick] = useState(Date.now());
 
   useEffect(() => {
     const unsubscribe = generationSessionStore.subscribe(uid, sessionId, setSession);
     return unsubscribe;
   }, [uid, sessionId]);
+
+  useEffect(() => {
+    if (!session) return;
+    const isRunning = session.status === 'starting' || session.status === 'generating' || session.status === 'paused';
+    if (!isRunning) return;
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [session?.status]);
 
   useEffect(() => {
     if (!session || navigatedRef.current) return;
@@ -124,6 +137,8 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   const isPaused = session.status === 'paused';
   const isError = session.status === 'error' || session.status === 'cancelled';
   const pausesLeft = MAX_PAUSES - session.pausesUsed;
+  const isRunning = session.status === 'starting' || session.status === 'generating' || session.status === 'paused';
+  const displayMinutes = isRunning ? (nowTick - session.createdAt) / 60000 : session.minutesElapsed;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -161,7 +176,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
 
             <View style={styles.metricsRow}>
               <View style={styles.metric}>
-                <Text style={styles.metricValue}>{session.minutesElapsed.toFixed(1)}</Text>
+                <Text style={styles.metricValue}>{displayMinutes.toFixed(1)}</Text>
                 <Text style={styles.metricLabel}>minutes</Text>
               </View>
               <View style={styles.metric}>
