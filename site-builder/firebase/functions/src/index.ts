@@ -400,15 +400,23 @@ export const startGeneration = onCall(
       const sectionImages: SectionImage[] = [];
       const bucket = getStorage().bucket();
 
-      for (const section of sectionsNeedingImages) {
-        const buffer = await generateImage(client, section.imagePrompt);
-        const path = `users/${uid}/generated/${sessionId}/${section.kind}-${Date.now()}.png`;
-        const file = bucket.file(path);
-        await file.save(buffer, { contentType: 'image/png' });
-        const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
-        sectionImages.push({ section, url });
-        await pushPreview(plan, sectionImages);
-      }
+      // Each image is its own slow OpenAI call (often 10-30s) -- generating them one at a
+      // time in sequence was the single biggest reason a build could take minutes. Firing
+      // them all off together cuts total image time down to roughly the slowest single
+      // image instead of the sum of all of them. Each one still pushes its own live-preview
+      // update the moment it lands (not waiting for the whole batch), so the progress
+      // screen keeps revealing images incrementally rather than all at once at the end.
+      await Promise.all(
+        sectionsNeedingImages.map(async (section: SitePlanSection) => {
+          const buffer = await generateImage(client, section.imagePrompt);
+          const path = `users/${uid}/generated/${sessionId}/${section.kind}-${Date.now()}.png`;
+          const file = bucket.file(path);
+          await file.save(buffer, { contentType: 'image/png' });
+          const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+          sectionImages.push({ section, url });
+          await pushPreview(plan, sectionImages);
+        })
+      );
 
       const injected2 = await checkForPause(sessionRef, pausesUsed);
       if (injected2) {
