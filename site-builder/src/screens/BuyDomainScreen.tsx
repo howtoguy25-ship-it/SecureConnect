@@ -17,6 +17,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
 import { searchDomains, createDomainCheckout, DomainSearchResult } from '@/services/domains';
+import { connectDomain, DomainResult } from '@/services/publish';
 import { domainPurchaseStore } from '@/storage/domainPurchaseStore';
 import { DomainPurchase, RegistrantContact } from '@/types';
 
@@ -51,7 +52,27 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
   const [purchase, setPurchase] = useState<DomainPurchase | null>(null);
   const unsubscribeRef = useRef<(() => void) | undefined>(undefined);
 
+  // Real DNS setup for the domain the user just bought, shown immediately once
+  // registration completes -- instead of sending them to go re-type the same domain into
+  // a separate "Connect a domain" field, this connects it automatically and surfaces the
+  // real DNS records right here.
+  const [connectingDomain, setConnectingDomain] = useState(false);
+  const [dnsResult, setDnsResult] = useState<DomainResult | null>(null);
+  const [dnsError, setDnsError] = useState<string | null>(null);
+  const autoConnectedRef = useRef<string | null>(null);
+
   useEffect(() => () => unsubscribeRef.current?.(), []);
+
+  useEffect(() => {
+    if (purchase?.status !== 'registered') return;
+    if (autoConnectedRef.current === purchase.domain) return;
+    autoConnectedRef.current = purchase.domain;
+    setConnectingDomain(true);
+    connectDomain(projectId, purchase.domain)
+      .then(setDnsResult)
+      .catch((err: any) => setDnsError(err?.message ?? 'Could not set up DNS automatically.'))
+      .finally(() => setConnectingDomain(false));
+  }, [purchase?.status, purchase?.domain, projectId]);
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -216,7 +237,38 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
             {purchase?.status === 'registered' && (
               <>
                 <Ionicons name="checkmark-circle" size={28} color="#16A34A" />
-                <Text style={styles.statusText}>{purchase.domain} is yours! Go back to Publish to connect it to your site.</Text>
+                <Text style={styles.statusText}>{purchase.domain} is yours!</Text>
+
+                {connectingDomain && (
+                  <>
+                    <ActivityIndicator color="#4338CA" />
+                    <Text style={styles.statusText}>Setting up DNS to point it at your published site...</Text>
+                  </>
+                )}
+
+                {!connectingDomain && dnsResult && (
+                  <View style={{ width: '100%' }}>
+                    <Text style={[styles.statusText, { textAlign: 'left', fontWeight: '700' }]}>
+                      Your site is connecting to {purchase.domain} — status: {dnsResult.domainStatus ?? 'pending'}
+                    </Text>
+                    <Text style={[styles.helper, { marginTop: 6, marginBottom: 6 }]}>
+                      DNS changes can take a few minutes to a few hours to fully propagate.
+                    </Text>
+                    {dnsResult.dnsRecords.map((record, i) => (
+                      <View key={i} style={styles.dnsRow}>
+                        <Text style={styles.dnsType}>{record.type}</Text>
+                        <Text style={styles.dnsValue} selectable>
+                          {record.domainName} → {record.requiredValue}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {!connectingDomain && dnsError && (
+                  <Text style={[styles.statusText, { color: '#DC2626' }]}>{dnsError}</Text>
+                )}
+
                 <Pressable style={styles.primaryButton} onPress={() => navigation.goBack()}>
                   <Text style={styles.primaryButtonText}>Done</Text>
                 </Pressable>
@@ -302,4 +354,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   statusText: { fontSize: 14, color: '#334155', textAlign: 'center', lineHeight: 20 },
+  dnsRow: { marginTop: 10, backgroundColor: '#F8FAFC', borderRadius: 8, padding: 10 },
+  dnsType: { fontSize: 11, fontWeight: '700', color: '#94A3B8' },
+  dnsValue: { fontSize: 12, color: '#0F172A', marginTop: 2 },
 });

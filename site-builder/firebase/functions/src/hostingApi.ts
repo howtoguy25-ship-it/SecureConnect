@@ -58,10 +58,15 @@ function parseDomainResponse(data: any): HostingDomainStatus {
 
 export async function createHostingDomain(domainName: string): Promise<HostingDomainStatus> {
   const token = await getAccessToken();
+  // The Domain resource requires BOTH `domainName` and `site` in the request body --
+  // `site` isn't inferred from the `parent` path parameter alone. Omitting it defaults to
+  // an empty string server-side, which the API rejects with "Mismatched sites in request:
+  // `parent` has `<site>`, `domain` has ``" since the two then disagree about which site
+  // this domain belongs to.
   const res = await fetch(`${HOSTING_API_BASE}/sites/${siteId()}/domains`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domainName }),
+    body: JSON.stringify({ domainName, site: `sites/${siteId()}` }),
   });
   const data = (await res.json()) as any;
   if (!res.ok) throw new Error(data?.error?.message ?? `Hosting API error (${res.status}) creating domain.`);
