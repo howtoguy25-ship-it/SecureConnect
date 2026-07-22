@@ -154,6 +154,12 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
     case 'product': {
       const isService = el.saleType === 'service';
       const isDigital = el.saleType === 'digital';
+      // A buyer must never land on a real checkout for a half-finished listing -- only
+      // show a working buy button once the seller has actually filled in a name, a real
+      // price, and at least one photo. Anything short of that renders the card (so the
+      // seller can see it taking shape) but with the buy action disabled, and it updates
+      // live the moment the missing pieces are filled in and republished.
+      const isReady = !!el.name?.trim() && el.priceUsd > 0 && el.images.length > 0;
       const hasMultiplePhotos = el.images.length > 1;
       const lightboxVar = `siteSparkLightbox_${el.id}`;
       const imgTag = el.images[0]
@@ -213,7 +219,8 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
 })();</script>`
         : '';
 
-      const script = `<script>(function(){
+      const script = isReady
+        ? `<script>(function(){
   var stockUrl = ${JSON.stringify(productStockUrl)} + '?slug=' + encodeURIComponent(${JSON.stringify(slug)}) + '&productId=' + encodeURIComponent(${JSON.stringify(el.productId)});
   var stockEl = document.getElementById(${JSON.stringify(stockId)});
   var qtyEl = document.getElementById(${JSON.stringify(qtyId)});
@@ -234,7 +241,16 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
       stockEl.style.color = '#16A34A';
     }
   }).catch(function(){});
-})();</script>`;
+})();</script>`
+        : '';
+
+      const buyButton = isReady
+        ? `<button
+      id="${addBtnId}"
+      onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value,${JSON.stringify(el.saleType)})"
+      style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
+    >${isService ? 'Book Now' : 'Add to Cart'}</button>`
+        : `<button disabled style="margin-top:8px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:not-allowed;">Coming Soon</button>`;
 
       return `<div style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
@@ -242,16 +258,12 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
     <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name)}</div>
     <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
-    <div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>
+    ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
       <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
-      <input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />
+      ${isReady ? `<input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />` : ''}
     </div>
-    <button
-      id="${addBtnId}"
-      onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value,${JSON.stringify(el.saleType)})"
-      style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
-    >${isService ? 'Book Now' : 'Add to Cart'}</button>
+    ${buyButton}
     ${isService ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">One-time payment for a real reservation — not a recurring charge.</div>' : ''}
     ${isDigital ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">Delivered by the seller after purchase — no shipping.</div>' : ''}
   </div>

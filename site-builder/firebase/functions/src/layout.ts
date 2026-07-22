@@ -54,13 +54,28 @@ function imageEl(partial: Partial<ImageElement> & Pick<ImageElement, 'y' | 'heig
   };
 }
 
-// Roughly estimates how tall a text block needs to be for the canvas's fixed width,
-// based on character count -- good enough for stacking sections without overlap; the
-// editor's own resize handles let the user fine-tune afterward if it's ever off.
+// Estimates how tall a text block needs to be for the canvas's fixed width, so the next
+// section stacked below it never starts inside space this one's real wrapped text still
+// needs -- undercounting here is exactly what causes headline/body/button text to visibly
+// overlap on both the live preview and the real published page, since elements are
+// absolutely positioned with a fixed height and nothing clips overflow.
+//
+// Two things the old estimate got wrong: (1) it divided the *whole* string's length by an
+// optimistic chars-per-line, ignoring any real "\n" line breaks the AI's content already
+// contains (bulleted feature lists are almost all explicit newlines, so that alone could
+// undercount a 4-line list as one line); (2) word-wrapping breaks at spaces, not mid-word,
+// so real lines almost always hold noticeably fewer characters than a flat width/charWidth
+// division suggests. Both are fixed here, plus a per-block safety margin.
 function estimateTextHeight(text: string, fontSize: number): number {
-  const charsPerLine = Math.floor(CONTENT_WIDTH / (fontSize * 0.55));
-  const lines = Math.max(1, Math.ceil(text.length / Math.max(charsPerLine, 1)));
-  return lines * (fontSize * 1.4) + 8;
+  // ~0.62 (rather than 0.55) accounts for word-wrap leaving a ragged right edge unused,
+  // and bold/mixed-width system fonts running wider than a flat monospace-style estimate.
+  const charsPerLine = Math.max(1, Math.floor(CONTENT_WIDTH / (fontSize * 0.62)));
+  const totalLines = text
+    .split('\n')
+    .reduce((sum, paragraph) => sum + Math.max(1, Math.ceil(paragraph.length / charsPerLine)), 0);
+  // +25% line-height buffer (instead of a flat +8px) so the margin scales with how much
+  // text there actually is, not just a fixed nudge that a 10-line paragraph blows past.
+  return Math.ceil(totalLines * (fontSize * 1.4) * 1.25) + 12;
 }
 
 export interface SectionImage {

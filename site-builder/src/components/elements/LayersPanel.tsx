@@ -41,15 +41,19 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
       {topmostFirst.map((el, index) => {
         const isSelected = el.id === selectedId;
         return (
-          <Pressable
-            key={el.id}
-            style={[styles.row, isSelected && styles.rowSelected]}
-            onPress={() => onSelect(el.id)}
-          >
-            <Ionicons name={iconForElement(el)} size={18} color={isSelected ? '#2563EB' : '#334155'} />
-            <Text style={[styles.rowLabel, isSelected && styles.rowLabelSelected]} numberOfLines={1}>
-              {labelForElement(el)}
-            </Text>
+          // A Pressable nested inside another Pressable is unreliable on iOS -- touches on
+          // the lock/reorder icons could get swallowed by the row's own onPress instead of
+          // firing their own, which is exactly what made tapping a layer (or its reorder
+          // arrows) feel like it "doesn't work." Using a plain View for the row and keeping
+          // every tappable icon as an independent sibling Pressable (not a child of another
+          // Pressable) removes that ambiguity entirely.
+          <View key={el.id} style={[styles.row, isSelected && styles.rowSelected]}>
+            <Pressable style={styles.rowMain} onPress={() => onSelect(el.id)} hitSlop={4}>
+              <Ionicons name={iconForElement(el)} size={18} color={isSelected ? '#2563EB' : '#334155'} />
+              <Text style={[styles.rowLabel, isSelected && styles.rowLabelSelected]} numberOfLines={1}>
+                {labelForElement(el)}
+              </Text>
+            </Pressable>
             <Pressable hitSlop={8} style={styles.rowIconBtn} onPress={() => onToggleLock(el.id)}>
               <Ionicons name={el.locked ? 'lock-closed' : 'lock-open-outline'} size={16} color="#64748B" />
             </Pressable>
@@ -69,7 +73,7 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
             >
               <Ionicons name="chevron-down" size={18} color={index === topmostFirst.length - 1 ? '#E2E8F0' : '#334155'} />
             </Pressable>
-          </Pressable>
+          </View>
         );
       })}
     </ScrollView>
@@ -91,6 +95,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   rowSelected: { backgroundColor: '#EEF2FF' },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowLabel: { flex: 1, fontSize: 13, fontWeight: '600', color: '#334155' },
   rowLabelSelected: { color: '#2563EB' },
   rowIconBtn: { paddingHorizontal: 4, paddingVertical: 2 },
