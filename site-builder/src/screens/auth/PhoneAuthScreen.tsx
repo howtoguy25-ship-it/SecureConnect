@@ -57,12 +57,12 @@ export default function PhoneAuthScreen({ navigation }: Props) {
         <View style={styles.phoneRow}>
           <CountryCodePicker value={country} onChange={setCountry} />
           <TextInput
-            style={[styles.phoneInput, { borderColor: theme.border, color: theme.text }]}
+            style={[styles.phoneInput, { borderColor: theme.border, color: theme.id === 'light' ? theme.text : '#FFFFFF' }]}
             value={nationalNumber}
             onChangeText={(t) => setNationalNumber(t.replace(/[^0-9]/g, ''))}
             keyboardType="phone-pad"
             placeholder="Phone number"
-            placeholderTextColor={theme.textMuted}
+            placeholderTextColor={theme.id === 'light' ? theme.textMuted : '#FFFFFF'}
           />
         </View>
         {error && <Text style={styles.error}>{error}</Text>}
