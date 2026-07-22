@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, PanResponder, useWindowDimensions } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,16 +53,51 @@ function EditorInner({ navigation }: Props) {
   // new element (which auto-selects it) makes the layer list disappear right when a user
   // most wants to see it land in the stack.
   const [showLayers, setShowLayers] = useState(false);
-  // Lets the inspector sheet collapse down to a thin strip (keeping the element selected)
-  // instead of forcing users to fully deselect just to see the canvas underneath while
-  // repositioning something. Reset whenever the selection changes so picking a new element
-  // always opens straight to its full controls.
-  const [sheetMinimized, setSheetMinimized] = useState(false);
-  const prevSelectedIdRef = React.useRef<string | null>(null);
-  if (prevSelectedIdRef.current !== selectedId) {
-    prevSelectedIdRef.current = selectedId;
-    if (sheetMinimized) setSheetMinimized(false);
-  }
+  // The inspector sheet's height is a real drag, not a binary open/closed toggle -- users
+  // can pull it down slowly to whatever height they want (down to a thin strip that keeps
+  // the element selected without covering the canvas), or tap the handle for a quick
+  // default-height/collapsed toggle. Deliberately does NOT reset when `selectedId` changes:
+  // a stray touch-down on a different element while trying to scroll/pan the canvas
+  // shouldn't be able to yank a collapsed sheet back open on its own -- only a real drag or
+  // tap on the handle itself should ever change its height.
+  const DEFAULT_SHEET_HEIGHT = 380;
+  const MIN_SHEET_HEIGHT = 56;
+  const COMPACT_THRESHOLD = 110;
+  const { height: windowHeight } = useWindowDimensions();
+  const maxSheetHeight = Math.max(DEFAULT_SHEET_HEIGHT, Math.round(windowHeight * 0.75));
+  const [sheetHeight, setSheetHeight] = useState(DEFAULT_SHEET_HEIGHT);
+  const sheetHeightRef = useRef(sheetHeight);
+  sheetHeightRef.current = sheetHeight;
+  const maxSheetHeightRef = useRef(maxSheetHeight);
+  maxSheetHeightRef.current = maxSheetHeight;
+  const sheetDrag = useRef({ height0: DEFAULT_SHEET_HEIGHT, moved: 0 });
+  const sheetPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_evt, gestureState) => Math.abs(gestureState.dy) > 2,
+      onPanResponderGrant: () => {
+        sheetDrag.current = { height0: sheetHeightRef.current, moved: 0 };
+      },
+      onPanResponderMove: (_evt, gestureState) => {
+        sheetDrag.current.moved = Math.max(sheetDrag.current.moved, Math.abs(gestureState.dy));
+        // Dragging the handle down shrinks the sheet, up grows it -- clamped between a
+        // thin strip and a healthy majority of the screen so it can never fully swallow
+        // the header or push past the top of the screen.
+        const next = Math.min(
+          maxSheetHeightRef.current,
+          Math.max(MIN_SHEET_HEIGHT, sheetDrag.current.height0 - gestureState.dy)
+        );
+        setSheetHeight(next);
+      },
+      onPanResponderRelease: () => {
+        // Negligible movement means this was a tap, not a drag -- keep the familiar
+        // quick-toggle behavior for that case.
+        if (sheetDrag.current.moved < 6) {
+          setSheetHeight((h) => (h <= COMPACT_THRESHOLD ? DEFAULT_SHEET_HEIGHT : MIN_SHEET_HEIGHT));
+        }
+      },
+    })
+  ).current;
 
   if (!project) {
     return (
@@ -319,20 +354,15 @@ function EditorInner({ navigation }: Props) {
         <View
           style={[
             styles.bottomSheet,
-            sheetMinimized && styles.bottomSheetMinimized,
-            { backgroundColor: theme.surface, borderTopColor: theme.border },
+            { height: sheetHeight, backgroundColor: theme.surface, borderTopColor: theme.border },
           ]}
         >
-          <Pressable
-            onPress={() => setSheetMinimized((v) => !v)}
-            hitSlop={10}
-            style={styles.sheetHandleTouch}
-          >
+          <View {...sheetPanResponder.panHandlers} style={styles.sheetHandleTouch}>
             <View style={styles.sheetHandle} />
-            <Ionicons name={sheetMinimized ? 'chevron-up' : 'chevron-down'} size={16} color={theme.textMuted} />
-          </Pressable>
-          {sheetMinimized ? (
-            <Pressable style={styles.minimizedRow} onPress={() => setSheetMinimized(false)}>
+            <Ionicons name={sheetHeight <= COMPACT_THRESHOLD ? 'chevron-up' : 'chevron-down'} size={16} color={theme.textMuted} />
+          </View>
+          {sheetHeight <= COMPACT_THRESHOLD ? (
+            <Pressable style={styles.minimizedRow} onPress={() => setSheetHeight(DEFAULT_SHEET_HEIGHT)}>
               <Text style={[styles.minimizedLabel, { color: theme.text }]} numberOfLines={1}>
                 {labelForElement(selectedElement)} selected — tap to edit
               </Text>
@@ -346,7 +376,7 @@ function EditorInner({ navigation }: Props) {
               onChange={(patch) => updateElement(selectedElement.id, patch)}
               onDelete={() => confirmDeleteId(selectedElement.id)}
               onBringToFront={() => bringToFront(selectedElement.id)}
-              onClose={() => setSheetMinimized(true)}
+              onClose={() => setSheetHeight(MIN_SHEET_HEIGHT)}
               projectId={project.id}
               publishSlug={project.publishSlug}
             />
@@ -514,18 +544,15 @@ const styles = StyleSheet.create({
   },
   panelMinimizeBtn: { position: 'absolute', top: 6, right: 12, zIndex: 5, padding: 4 },
   bottomSheet: {
-    maxHeight: 380,
     backgroundColor: '#FFFFFF',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
     paddingTop: 8,
-  },
-  bottomSheetMinimized: {
-    maxHeight: undefined,
+    overflow: 'hidden',
   },
   sheetHandleTouch: {
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 10,
     gap: 2,
   },
   sheetHandle: {
