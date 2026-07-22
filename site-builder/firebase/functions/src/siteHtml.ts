@@ -90,12 +90,19 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
         : '';
     case 'shape':
       return renderShape(el);
-    case 'button':
-      return `<div style="${base}background:${escapeAttr(el.backgroundColor)};color:${escapeAttr(
+    case 'button': {
+      const buttonStyle = `${base}background:${escapeAttr(el.backgroundColor)};color:${escapeAttr(
         el.textColor
       )};border-radius:${el.borderRadius}px;${
         el.borderWidth ? `border:${el.borderWidth}px solid ${escapeAttr(el.borderColor ?? '#000000')};` : ''
-      }display:flex;align-items:center;justify-content:center;font-weight:700;">${escapeHtml(el.label)}</div>`;
+      }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;`;
+      // Only a real, non-empty link renders as a clickable <a> -- a button with nothing
+      // set stays a plain div, exactly as before this field existed, instead of a dead
+      // link that goes nowhere or reloads the page.
+      return el.link?.trim()
+        ? `<a href="${escapeAttr(safeUrl(el.link))}" style="${buttonStyle}">${escapeHtml(el.label)}</a>`
+        : `<div style="${buttonStyle}">${escapeHtml(el.label)}</div>`;
+    }
     case 'icon':
       return renderIcon(el);
     case 'slideshow': {

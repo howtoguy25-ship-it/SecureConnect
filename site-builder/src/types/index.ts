@@ -66,6 +66,10 @@ export interface ButtonElement extends BaseElement {
   borderRadius: number;
   borderWidth?: number;
   borderColor?: string;
+  // Where a tap on the published site actually goes -- a full URL (https://...), a
+  // mailto:/tel: link, or a same-site page slug (e.g. "/about"). Null/empty means the
+  // button renders but does nothing when clicked, same as before this field existed.
+  link?: string | null;
 }
 
 export interface IconElement extends BaseElement {

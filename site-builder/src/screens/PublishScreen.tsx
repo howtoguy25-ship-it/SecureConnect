@@ -185,6 +185,18 @@ export default function PublishScreen({ navigation, route }: Props) {
             </Text>
           )}
 
+          {isPublished && (
+            <Text style={styles.cardBody}>
+              Something wrong, or want to change it? Edit it below, then tap "Republish latest changes" to push your
+              edits live -- your published link stays the same the whole time.
+            </Text>
+          )}
+
+          <Pressable style={styles.editButton} onPress={() => navigation.navigate('Editor', { projectId })}>
+            <Ionicons name="create-outline" size={18} color="#4338CA" />
+            <Text style={styles.editButtonText}>Edit Site</Text>
+          </Pressable>
+
           <Pressable style={styles.primaryButton} onPress={handlePublish} disabled={publishing}>
             {publishing ? (
               <ActivityIndicator color="#FFFFFF" />
@@ -295,6 +307,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  editButton: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    backgroundColor: '#EEF2FF',
+  },
+  editButtonText: { color: '#4338CA', fontWeight: '700', fontSize: 14 },
   secondaryButton: { marginTop: 10, alignItems: 'center', justifyContent: 'center', height: 40 },
   secondaryButtonText: { color: '#4338CA', fontWeight: '700', fontSize: 13 },
   dnsRow: { marginTop: 10, backgroundColor: '#F8FAFC', borderRadius: 8, padding: 10 },

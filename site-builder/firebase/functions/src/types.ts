@@ -46,6 +46,7 @@ export interface ButtonElement extends BaseElement {
   borderRadius: number;
   borderWidth?: number;
   borderColor?: string;
+  link?: string | null;
 }
 
 export interface IconElement extends BaseElement {

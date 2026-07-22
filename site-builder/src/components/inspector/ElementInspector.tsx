@@ -272,6 +272,21 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               value={element.label}
               onChangeText={(label) => onChange({ label } as any)}
             />
+            <Text style={styles.fieldLabel}>Link (where it goes when clicked)</Text>
+            <TextInput
+              style={styles.textInput}
+              value={element.link ?? ''}
+              onChangeText={(link) => onChange({ link: link.trim() ? link : null } as any)}
+              placeholder="https://example.com, mailto:you@site.com, or /page-slug"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <Text style={[styles.fieldLabel, { marginTop: -6 }]}>
+              {element.link
+                ? 'Visitors on your published site will be taken here when they tap this button.'
+                : "Empty — this button won't do anything when tapped on your published site."}
+            </Text>
             <SliderRow
               label="Corner Radius"
               value={element.borderRadius}
