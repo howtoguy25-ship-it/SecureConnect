@@ -106,45 +106,49 @@ export default function AssistantChatScreen({ onClose }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <Ionicons name="sparkles" size={18} color="#4338CA" />
-          <Text style={styles.title}>Spark Assistant</Text>
+      <KeyboardAvoidingView
+        style={styles.flexOne}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerTitleRow}>
+            <Ionicons name="sparkles" size={18} color="#4338CA" />
+            <Text style={styles.title}>Spark Assistant</Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Ionicons name="close" size={24} color="#0F172A" />
+          </Pressable>
         </View>
-        <Pressable onPress={onClose} hitSlop={8}>
-          <Ionicons name="close" size={24} color="#0F172A" />
-        </Pressable>
-      </View>
 
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color="#4338CA" />
-        </View>
-      ) : (
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          contentContainerStyle={styles.list}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-          ListEmptyComponent={
-            <Text style={styles.empty}>
-              Ask me to build you a site, jump to your projects, check plans — anything about SiteSpark.
-            </Text>
-          }
-          renderItem={({ item }) => (
-            <View style={[styles.bubbleRow, item.role === 'user' ? styles.bubbleRowUser : styles.bubbleRowAssistant]}>
-              <View style={[styles.bubble, item.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
-                <Text style={item.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
-                  {item.content}
-                </Text>
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color="#4338CA" />
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            style={styles.flexOne}
+            data={messages}
+            keyExtractor={(m) => m.id}
+            contentContainerStyle={styles.list}
+            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+            ListEmptyComponent={
+              <Text style={styles.empty}>
+                Ask me to build you a site, jump to your projects, check plans — anything about SiteSpark.
+              </Text>
+            }
+            renderItem={({ item }) => (
+              <View style={[styles.bubbleRow, item.role === 'user' ? styles.bubbleRowUser : styles.bubbleRowAssistant]}>
+                <View style={[styles.bubble, item.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
+                  <Text style={item.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
+                    {item.content}
+                  </Text>
+                </View>
               </View>
-            </View>
-          )}
-        />
-      )}
+            )}
+          />
+        )}
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -169,6 +173,7 @@ export default function AssistantChatScreen({ onClose }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
+  flexOne: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -44,6 +44,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const [purchasing, setPurchasing] = useState(false);
   const [nameModal, setNameModal] = useState<Theme | null>(null);
   const [nameValue, setNameValue] = useState('');
+  const [creating, setCreating] = useState(false);
   // Real, localized prices from Apple, keyed by product id -- see the same fix on
   // SubscriptionScreen for why theme.price (a hardcoded number) isn't trustworthy to show
   // directly. Falls back to `$${theme.price}` below if the catalog hasn't loaded yet.
@@ -127,14 +128,21 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   };
 
   const createAndOpen = async () => {
-    if (!nameModal) return;
-    const project = createProject(nameValue.trim() || nameModal.name, pageType, nameModal.id, customSize);
-    await projectsStore.save(uid, project);
-    setNameModal(null);
-    navigation.reset({
-      index: 1,
-      routes: [{ name: 'Projects' }, { name: 'Editor', params: { projectId: project.id } }],
-    });
+    if (!nameModal || creating) return;
+    setCreating(true);
+    try {
+      const project = createProject(nameValue.trim() || nameModal.name, pageType, nameModal.id, customSize);
+      await projectsStore.save(uid, project);
+      setNameModal(null);
+      navigation.reset({
+        index: 1,
+        routes: [{ name: 'Projects' }, { name: 'Editor', params: { projectId: project.id } }],
+      });
+    } catch (err: any) {
+      showAlert('Could not create project', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setCreating(false);
+    }
   };
 
   const renderGroup = (tier: ThemeTier) => {
@@ -228,13 +236,14 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
               onChangeText={setNameValue}
               autoFocus
               placeholder="Project name"
+              editable={!creating}
             />
             <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancel} onPress={() => setNameModal(null)}>
+              <Pressable style={styles.modalCancel} onPress={() => setNameModal(null)} disabled={creating}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.modalConfirm} onPress={createAndOpen}>
-                <Text style={styles.modalConfirmText}>Create</Text>
+              <Pressable style={styles.modalConfirm} onPress={createAndOpen} disabled={creating}>
+                {creating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modalConfirmText}>Create</Text>}
               </Pressable>
             </View>
           </View>

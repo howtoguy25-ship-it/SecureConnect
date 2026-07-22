@@ -145,7 +145,7 @@ export const onUserCreated = functionsV1.auth.user().onCreate(async (user) => {
 // Called once right after sign-in so the credit balance UI has something to show even
 // for accounts created before onUserCreated existed, or in the rare race where a client
 // reads the account doc before that trigger has finished running.
-export const ensureAccount = onCall(async (request) => {
+export const ensureAccount = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const userRef = db.collection('users').doc(uid);
@@ -171,7 +171,7 @@ export const ensureAccount = onCall(async (request) => {
 const AD_REWARD_CREDITS = 15;
 const AD_REWARD_COOLDOWN_MS = 2 * 24 * 60 * 60 * 1000;
 
-export const claimAdReward = onCall(async (request) => {
+export const claimAdReward = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const userRef = db.collection('users').doc(uid);
@@ -198,7 +198,7 @@ export const claimAdReward = onCall(async (request) => {
 // survives the account), recursively deletes every Firestore doc under this user, deletes
 // their uploaded files from Storage, and finally deletes the real Firebase Auth user record
 // -- after this call the uid can never sign back in to find an empty shell of an account.
-export const deleteAccount = onCall(async (request) => {
+export const deleteAccount = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -261,7 +261,7 @@ async function checkForPause(sessionRef: FirebaseFirestore.DocumentReference, pa
 // a couple of concrete questions instead of the AI silently guessing at missing details.
 // Purely advisory: the client folds any answers into the prompt text it sends to
 // startGeneration, this doesn't touch generationSessions or credits at all.
-export const suggestClarifyingQuestions = onCall({ secrets: [openaiApiKey] }, async (request) => {
+export const suggestClarifyingQuestions = onCall({ secrets: [openaiApiKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { prompt, pageType } = request.data as { prompt: string; pageType: string };
@@ -273,7 +273,7 @@ export const suggestClarifyingQuestions = onCall({ secrets: [openaiApiKey] }, as
 });
 
 export const startGeneration = onCall(
-  { secrets: [openaiApiKey], timeoutSeconds: 540, memory: '512MiB' },
+  { secrets: [openaiApiKey], timeoutSeconds: 540, memory: '512MiB', invoker: 'public' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -442,7 +442,7 @@ export const startGeneration = onCall(
   }
 );
 
-export const requestPause = onCall(async (request) => {
+export const requestPause = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { sessionId } = request.data as { sessionId: string };
@@ -454,7 +454,7 @@ export const requestPause = onCall(async (request) => {
   return { ok: true };
 });
 
-export const resumeGeneration = onCall(async (request) => {
+export const resumeGeneration = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { sessionId, message } = request.data as { sessionId: string; message: string };
@@ -470,7 +470,7 @@ export const resumeGeneration = onCall(async (request) => {
 // session doc again, so it would otherwise sit at whatever phase it last reached forever.
 // This gives the user an immediate exit (and their credits back) instead of waiting on
 // enforceGenerationTimeouts' periodic sweep below.
-export const cancelGeneration = onCall(async (request) => {
+export const cancelGeneration = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { sessionId } = request.data as { sessionId: string };
@@ -519,7 +519,7 @@ export const enforceGenerationTimeouts = onSchedule('every 5 minutes', async () 
   }
 });
 
-export const askBuildQuestion = onCall({ secrets: [openaiApiKey] }, async (request) => {
+export const askBuildQuestion = onCall({ secrets: [openaiApiKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { sessionId, question } = request.data as { sessionId: string; question: string };
@@ -545,7 +545,7 @@ export const askBuildQuestion = onCall({ secrets: [openaiApiKey] }, async (reque
 // navigation/build actions for the user (see assistant.ts). Chat history itself lives in
 // Firestore under the client's control (users/{uid}/assistantMessages); this function is
 // stateless per call and only needs the recent turns the client sends up as `history`.
-export const assistantChat = onCall({ secrets: [openaiApiKey] }, async (request) => {
+export const assistantChat = onCall({ secrets: [openaiApiKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -584,7 +584,7 @@ export const assistantChat = onCall({ secrets: [openaiApiKey] }, async (request)
 // client reads the file itself (Admin SDK can't reach a device's local filesystem) and
 // sends the bytes up as base64 -- mirrors the same signed-URL pattern already used for
 // AI-generated images in startGeneration above.
-export const uploadProjectImage = onCall({ memory: '256MiB' }, async (request) => {
+export const uploadProjectImage = onCall({ memory: '256MiB', invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -610,7 +610,7 @@ export const uploadProjectImage = onCall({ memory: '256MiB' }, async (request) =
 // openai.ts) -- reuses the same OpenAI key/model already paying for site imagery, so this
 // needs no new vendor integration. Costs a flat, small credit amount (much less than a full
 // site build) since it's one image-edit call, refunded automatically if the edit fails.
-export const editImageBackground = onCall({ secrets: [openaiApiKey], timeoutSeconds: 120, memory: '512MiB' }, async (request) => {
+export const editImageBackground = onCall({ secrets: [openaiApiKey], timeoutSeconds: 120, memory: '512MiB', invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -657,7 +657,7 @@ export const editImageBackground = onCall({ secrets: [openaiApiKey], timeoutSeco
 // short clip needs) -- instead this hands the client a short-lived signed PUT URL and lets
 // it upload the bytes straight to Storage, then returns a long-lived signed GET URL for
 // later reference (rendering in the canvas, publishing, etc.).
-export const createUploadUrl = onCall(async (request) => {
+export const createUploadUrl = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -681,7 +681,7 @@ export const createUploadUrl = onCall(async (request) => {
 // Publishes a project as a real, publicly-reachable static page -- servePublishedSite
 // below answers for it at https://{slug}.buildsitespark.com by default (and at any
 // custom domain connected via connectDomain).
-export const publishProject = onCall(async (request) => {
+export const publishProject = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -776,7 +776,7 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
   await batch.commit();
 }
 
-export const unpublishProject = onCall(async (request) => {
+export const unpublishProject = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { projectId } = request.data as { projectId: string };
@@ -795,7 +795,7 @@ export const unpublishProject = onCall(async (request) => {
 // republish). This writes the draft element AND, if the site is already published, the live
 // storeInventory doc buyers are actually checking out against, so a seller flipping
 // "in stock" off or correcting a quantity takes effect right away without a full republish.
-export const updateProductStock = onCall(async (request) => {
+export const updateProductStock = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { projectId, elementId, inStock, stockQuantity } = request.data as {
@@ -843,7 +843,7 @@ export const updateProductStock = onCall(async (request) => {
 // stock/availability instead of whatever number was baked in at publish time (which goes
 // stale the moment an order comes in). Called client-side by a small script in the
 // product's rendered HTML (see renderElement's 'product' case in siteHtml.ts).
-export const getProductStock = onRequest({ cors: true }, async (req, res) => {
+export const getProductStock = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
   const slug = (req.query.slug as string) ?? '';
   const productId = (req.query.productId as string) ?? '';
   if (!slug || !productId) {
@@ -870,7 +870,7 @@ export const getProductStock = onRequest({ cors: true }, async (req, res) => {
 //   - *.web.app or *.firebaseapp.com with a /s/{slug} path -> legacy URLs from before
 //     buildsitespark.com existed, kept working rather than broken
 //   - anything else -> a user's own connected custom domain, looked up via domainMappings
-export const servePublishedSite = onRequest(async (req, res) => {
+export const servePublishedSite = onRequest({ invoker: 'public' }, async (req, res) => {
   const hostname = (req.hostname || '').toLowerCase();
   const isDefaultHostingDomain = hostname === HOSTING_DOMAIN || hostname.endsWith('.web.app') || hostname.endsWith('.firebaseapp.com');
   const isBareProductDomain = hostname === PRODUCT_DOMAIN || hostname === `www.${PRODUCT_DOMAIN}`;
@@ -952,7 +952,7 @@ export const servePublishedSite = onRequest(async (req, res) => {
 // Firebase Hosting Domains API (see hostingApi.ts) -- requires the project to already be
 // published, and requires the Cloud Functions service account to have the "Firebase
 // Hosting Admin" IAM role (see ROADMAP.md).
-export const connectDomain = onCall(async (request) => {
+export const connectDomain = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { projectId, domain } = request.data as { projectId: string; domain: string };
@@ -975,7 +975,7 @@ export const connectDomain = onCall(async (request) => {
   return result;
 });
 
-export const getDomainStatus = onCall(async (request) => {
+export const getDomainStatus = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { projectId } = request.data as { projectId: string };
@@ -994,7 +994,7 @@ export const getDomainStatus = onCall(async (request) => {
   return { ...result, domainStatus };
 });
 
-export const disconnectDomain = onCall(async (request) => {
+export const disconnectDomain = onCall({ invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { projectId } = request.data as { projectId: string };
@@ -1012,7 +1012,7 @@ export const disconnectDomain = onCall(async (request) => {
 // query already includes one) and prices each available result via Namecheap's real
 // pricing API, marked up by DOMAIN_MARKUP_USD.
 export const checkDomainAvailability = onCall(
-  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1041,7 +1041,7 @@ export const checkDomainAvailability = onCall(
 // Stripe's own hosted page (opened in an in-app browser client-side), not native IAP,
 // since a registered domain is a real-world service/good, not digital app content.
 export const createDomainCheckout = onCall(
-  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName, stripeSecretKey], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName, stripeSecretKey], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1102,7 +1102,7 @@ export const createDomainCheckout = onCall(
 // app's SubscriptionScreen still only ever calls the Apple IAP path in src/services/iap.ts)
 // so this never becomes an App Store Review Guideline 3.1.1 steering concern -- nothing in
 // the iOS binary links to or mentions this checkout.
-export const createWebBillingCheckout = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const createWebBillingCheckout = onCall({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const { kind, id } = request.data as { kind: 'subscription' | 'creditpack'; id: string };
@@ -1149,7 +1149,7 @@ export const createWebBillingCheckout = onCall({ secrets: [stripeSecretKey] }, a
 // Lets a signed-in user verify their own push notification setup end-to-end (permission
 // grant -> token registration -> Expo's relay -> a real device) without waiting for a real
 // order, booking, or billing event to naturally trigger one.
-export const sendTestPushNotification = onCall({ secrets: [vapidPrivateKey] }, async (request) => {
+export const sendTestPushNotification = onCall({ secrets: [vapidPrivateKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -1165,7 +1165,7 @@ export const sendTestPushNotification = onCall({ secrets: [vapidPrivateKey] }, a
   return { tokenCount: tokensSnap.size };
 });
 
-export const createStripeBillingPortalSession = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const createStripeBillingPortalSession = onCall({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -1187,7 +1187,7 @@ export const createStripeBillingPortalSession = onCall({ secrets: [stripeSecretK
 // is confirmed. Registration only ever happens from here, never from the client, so a
 // domain can't be registered without payment actually clearing first.
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName, resendApiKey, vapidPrivateKey], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, namecheapApiUser, namecheapApiKey, namecheapUserName, resendApiKey, vapidPrivateKey], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
   async (req, res) => {
     const stripe = createStripeClient(stripeSecretKey.value());
     const signature = req.headers['stripe-signature'];
@@ -1440,7 +1440,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
 // Stripe (see ROADMAP.md Phase 7c) -- the cost is absorbed on the product's own Namecheap
 // balance for now.
 export const startDomainTransfer = onCall(
-  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1470,7 +1470,7 @@ export const startDomainTransfer = onCall(
 );
 
 export const getDomainTransferStatus = onCall(
-  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS },
+  { secrets: [namecheapApiUser, namecheapApiKey, namecheapUserName], ...NAMECHEAP_VPC_OPTS, invoker: 'public' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1496,7 +1496,7 @@ export const getDomainTransferStatus = onCall(
 // relaunch, retry) via processedAppleTransactions; a subscription renewal is a distinct
 // transactionId each period, so each renewal still tops up credits exactly once.
 export const verifyApplePurchase = onCall(
-  { secrets: [appleIapKeyId, appleIapIssuerId, appleIapPrivateKey] },
+  { secrets: [appleIapKeyId, appleIapIssuerId, appleIapPrivateKey], invoker: 'public' },
   async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1607,7 +1607,7 @@ async function unsuspendUserSites(uid: string): Promise<void> {
 // ROADMAP.md Phase 9 setup steps). Every payload is verified against Apple's real root CA
 // (see appStoreNotifications.ts) before anything in it is trusted, since this is a public URL
 // anyone could otherwise POST a forged "payment failed"/"payment succeeded" event to.
-export const appStoreServerNotifications = onRequest({ secrets: [vapidPrivateKey] }, async (req, res) => {
+export const appStoreServerNotifications = onRequest({ secrets: [vapidPrivateKey], invoker: 'public' }, async (req, res) => {
   const signedPayload = (req.body as { signedPayload?: string } | undefined)?.signedPayload;
   if (!signedPayload) {
     res.status(400).send('Missing signedPayload.');
@@ -1744,7 +1744,7 @@ const sellerAccountRef = (uid: string) => db.collection('users').doc(uid).collec
 // Creates (or reuses) a real Stripe Express connected account for this seller and returns
 // a one-time hosted onboarding link (identity, bank details, tax info -- all handled by
 // Stripe directly, never touching SiteSpark's own servers).
-export const createSellerOnboardingLink = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const createSellerOnboardingLink = onCall({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -1779,7 +1779,7 @@ export const createSellerOnboardingLink = onCall({ secrets: [stripeSecretKey] },
 // client calls this after returning from onboarding (or pull-to-refresh) rather than
 // trusting the redirect URL, since Stripe's own account state is the only source of truth
 // for whether this account can actually accept a charge yet.
-export const getSellerAccountStatus = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const getSellerAccountStatus = onCall({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -1804,7 +1804,7 @@ export const getSellerAccountStatus = onCall({ secrets: [stripeSecretKey] }, asy
 // A real link into the seller's own Stripe Express dashboard -- their actual balance,
 // payout schedule, and payment history, hosted entirely by Stripe. SiteSpark doesn't need
 // to build its own payout ledger UI on top of this.
-export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey], invoker: 'public' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
@@ -1822,7 +1822,7 @@ export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey] }, 
 // against storeInventory (never trusting whatever price/stock the static page happened to
 // have baked in), and creates a real Stripe Checkout Session with the commission split
 // baked into the PaymentIntent itself.
-export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors: true }, async (req, res) => {
+export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors: true, invoker: 'public' }, async (req, res) => {
   try {
     const { slug, items, booking } = req.body as {
       slug: string;
@@ -1956,7 +1956,7 @@ const CONTENT_REPORT_REASONS = [
 // App Store Review Guideline 1.2 for apps that let users publish content publicly. Stores
 // the report and emails the team directly rather than just writing to a collection nobody
 // watches -- see sendContentReportEmail.
-export const reportPublishedSite = onRequest({ secrets: [resendApiKey], cors: true }, async (req, res) => {
+export const reportPublishedSite = onRequest({ secrets: [resendApiKey], cors: true, invoker: 'public' }, async (req, res) => {
   try {
     const { slug, reason, message, pageUrl } = req.body as {
       slug?: string;
