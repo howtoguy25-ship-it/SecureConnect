@@ -4,7 +4,7 @@ import { PlanId } from './types';
 // rather than shared. This copy is the one that's actually authoritative for credit
 // deduction, since it runs server-side.
 
-export const FREE_SIGNUP_CREDITS = 30;
+export const FREE_SIGNUP_CREDITS = 38;
 
 // Flat cost for one AI background remove/change edit (editImageBackground in index.ts) --
 // much cheaper than a full site build since it's a single image-edit call, not a whole plan.

@@ -932,7 +932,7 @@ const FAQ_ITEMS: { question: string; answer: string }[] = [
   {
     question: 'How do free credits work?',
     answer:
-      'Every new account gets 30 free credits to try the AI Site Builder. Building a site costs credits based on ' +
+      'Every new account gets 38 free credits to try the AI Site Builder. Building a site costs credits based on ' +
       'how detailed you ask it to be.',
   },
   {

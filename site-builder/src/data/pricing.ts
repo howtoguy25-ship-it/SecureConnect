@@ -15,7 +15,7 @@ export interface Plan {
   minimumUsageNote?: string;
 }
 
-export const FREE_SIGNUP_CREDITS = 30;
+export const FREE_SIGNUP_CREDITS = 38;
 
 // Mirrors firebase/functions/src/pricing.ts's BACKGROUND_EDIT_CREDIT_COST -- display only,
 // that copy is authoritative since credits are deducted server-side.

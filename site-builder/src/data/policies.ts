@@ -99,7 +99,7 @@ export interface FaqItem {
 export const FAQ_ITEMS: FaqItem[] = [
   {
     question: 'How do free credits work?',
-    answer: 'Every new account gets 30 free credits to try the AI Site Builder. Building a site costs credits based on how detailed you ask it to be — see the Subscription screen for exact pricing.',
+    answer: 'Every new account gets 38 free credits to try the AI Site Builder. Building a site costs credits based on how detailed you ask it to be — see the Subscription screen for exact pricing.',
   },
   {
     question: 'Can I edit an AI-generated site afterward?',
