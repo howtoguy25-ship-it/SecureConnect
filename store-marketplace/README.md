@@ -3,8 +3,8 @@
 A separate app from TrackLine (this repo's other project) -- a marketplace where customers
 discover local stores, follow their favorites, and get real notifications about restocks, new
 items, and promotions; store owners get a dashboard to publish live stock/flavors/prices,
-post announcements, verify their business, and manage a team with granular permissions and
-moderation (mute/kick/block).
+post announcements, verify their business, manage a team with granular permissions and
+moderation (mute/kick/block), and optionally turn on a live group chat for their store.
 
 ## Stack
 
@@ -37,6 +37,7 @@ src/
     verification.ts                 ABN/ACN checksum validation + calls verifyBusiness function
     aiOnboarding.ts                 Calls the AI store-research Cloud Function
     storage.ts                      Image upload to Firebase Storage
+    chat.ts                         Real-time per-store group chat (send/watch/delete)
   context/                         Auth, Location React contexts
   navigation/RootNavigator.tsx      Auth stack <-> main tabs <-> owner/detail screens
   screens/
@@ -44,6 +45,8 @@ src/
     customer/                       Discover, StoreDetail, FollowedStores, Notifications, Profile
     owner/                          Onboarding (+ AI assist), Verification, Dashboard,
                                      StockEditor, AnnouncementComposer, TeamManagement
+    StoreChatScreen.tsx              Shared chat screen, opened from both StoreDetail (customer)
+                                      and the owner Dashboard once a store turns chat on
   components/                      BusinessListItem, StockItemCard, AnnouncementCard,
                                     CategoryFieldForm
   utils/geo.ts                     Geohash encode + nearby-query bounds + haversine distance
@@ -115,6 +118,11 @@ See `src/types/index.ts` for the full shape. Key access rules enforced in `fires
 - A business can block a customer (`blockedUsers/{uid}`), which removes their read access to
   that business and its stock/announcements and excludes them from notifications, independent
   of team-member moderation (mute/kick), which governs staff who post on the business's behalf.
+- **Group chat** (`chatMessages/{id}` per business) is off by default; a member with
+  `canManageTeam` (owner or manager) switches it on from the Dashboard. While on, any active
+  team member or real follower (checked against their own `users/{uid}/follows/{businessId}`
+  doc) can read and post in real time; blocked users can't reach it at all (they can't view the
+  business); a `canManageTeam` member can delete any message, anyone can delete their own.
 
 ## Known gaps for a production build
 

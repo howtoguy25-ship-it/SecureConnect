@@ -27,6 +27,7 @@ function docToBusiness(id: string, data: Record<string, unknown>): Business {
   return {
     ...(data as Omit<Business, "id">),
     id,
+    chatEnabled: data.chatEnabled === true,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
     publishedAt: data.publishedAt ? toMillis(data.publishedAt) : undefined,
@@ -65,6 +66,7 @@ export async function createBusiness(input: CreateBusinessInput): Promise<string
     isPublished: false,
     verificationStatus: "unverified",
     followerCount: 0,
+    chatEnabled: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   } as Omit<Business, "id">;
@@ -134,6 +136,14 @@ export async function unpublishBusiness(businessId: string): Promise<void> {
   await updateDoc(doc(db, "businesses", businessId), {
     visibility: "private",
     isPublished: false,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Owner/manager-only switch (enforced in firestore.rules) for the store's group chat. */
+export async function setChatEnabled(businessId: string, enabled: boolean): Promise<void> {
+  await updateDoc(doc(db, "businesses", businessId), {
+    chatEnabled: enabled,
     updatedAt: serverTimestamp(),
   });
 }

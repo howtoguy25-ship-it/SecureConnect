@@ -85,8 +85,10 @@ service cloud.firestore {
 
       allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
 
+      // Owner always, or any active member with canManageTeam (e.g. a manager toggling
+      // visibility/chat) -- ownerId itself can never change via this path.
       allow update: if isSignedIn()
-        && resource.data.ownerId == request.auth.uid
+        && (resource.data.ownerId == request.auth.uid || hasPermission(businessId, 'canManageTeam'))
         && request.resource.data.ownerId == resource.data.ownerId;
 
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
@@ -117,6 +119,28 @@ service cloud.firestore {
         allow create: if hasPermission(businessId, 'canPostAnnouncements')
           && request.resource.data.authorId == request.auth.uid;
         allow delete: if hasPermission(businessId, 'canPostAnnouncements') || hasPermission(businessId, 'canManageTeam');
+        allow update: if false;
+      }
+
+      match /chatMessages/{messageId} {
+        allow get, list: if canViewBusiness(businessId);
+
+        // Posting requires the store's chat to be turned on, the sender not to be blocked,
+        // and the sender to actually be part of this store -- an active team member, or a
+        // real follower (checked against their own users/{uid}/follows/{businessId} doc).
+        // Only ever writable as yourself -- no posting as someone else.
+        allow create: if isSignedIn()
+          && !isBlocked(businessId)
+          && business(businessId).chatEnabled == true
+          && request.resource.data.senderId == request.auth.uid
+          && (isActiveMember(businessId)
+            || exists(/databases/$(database)/documents/users/$(request.auth.uid)/follows/$(businessId)));
+
+        // A team member with canManageTeam can remove any message (moderation); anyone can
+        // remove their own.
+        allow delete: if hasPermission(businessId, 'canManageTeam')
+          || (isSignedIn() && resource.data.senderId == request.auth.uid);
+
         allow update: if false;
       }
 

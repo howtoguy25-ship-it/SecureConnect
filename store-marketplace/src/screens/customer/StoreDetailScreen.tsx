@@ -89,18 +89,28 @@ export function StoreDetailScreen({ route, navigation }: Props) {
             </View>
           )}
         </View>
-        {isTeamMember ? (
-          <TouchableOpacity
-            style={styles.manageButton}
-            onPress={() => navigation.navigate("BusinessDashboard", { businessId })}
-          >
-            <Text style={styles.manageButtonText}>Manage</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={[styles.followButton, follow && styles.followingButton]} onPress={toggleFollow}>
-            <Text style={styles.followButtonText}>{follow ? "Following" : "Follow"}</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.headerActions}>
+          {business.chatEnabled && (isTeamMember || !!follow) && (
+            <TouchableOpacity
+              style={styles.chatButton}
+              onPress={() => navigation.navigate("StoreChat", { businessId })}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color="#818CF8" />
+            </TouchableOpacity>
+          )}
+          {isTeamMember ? (
+            <TouchableOpacity
+              style={styles.manageButton}
+              onPress={() => navigation.navigate("BusinessDashboard", { businessId })}
+            >
+              <Text style={styles.manageButtonText}>Manage</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={[styles.followButton, follow && styles.followingButton]} onPress={toggleFollow}>
+              <Text style={styles.followButtonText}>{follow ? "Following" : "Follow"}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {business.description ? <Text style={styles.description}>{business.description}</Text> : null}
@@ -167,6 +177,15 @@ const styles = StyleSheet.create({
   verifiedRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   verifiedText: { color: "#34D399", fontSize: 12 },
   description: { color: "#D1D5DB", fontSize: 13, paddingHorizontal: 16, marginBottom: 12 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  chatButton: {
+    backgroundColor: "#1F2937",
+    borderRadius: 18,
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   followButton: { backgroundColor: "#4F46E5", borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
   followingButton: { backgroundColor: "#374151" },
   followButtonText: { color: "#fff", fontWeight: "600", fontSize: 13 },

@@ -79,6 +79,9 @@ export interface Business {
   publishedAt?: Timestamp;
   verificationStatus: VerificationStatus;
   followerCount: number;
+  /** Owner/manager-controlled switch for the store's group chat (see chatMessages below).
+   * Off by default -- announcements/notifications work independently of this. */
+  chatEnabled: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -156,6 +159,21 @@ export interface VerificationRequest {
   rejectionReason?: string;
   submittedAt: Timestamp;
   reviewedAt?: Timestamp;
+}
+
+/** businesses/{businessId}/chatMessages/{messageId} -- a real-time group chat scoped to one
+ * store. Readable/postable only while the business's chatEnabled is on, by active followers
+ * and active team members (not blocked/muted) -- enforced in firestore.rules, not just here. */
+export interface ChatMessage {
+  id: string;
+  businessId: string;
+  senderId: string;
+  senderName: string;
+  /** True when the sender posted as part of the store's team (owner/manager/staff), so the UI
+   * can badge their messages distinctly from a regular follower's. */
+  isStaff: boolean;
+  text: string;
+  createdAt: Timestamp;
 }
 
 /** businesses/{businessId}/blockedUsers/{uid} */

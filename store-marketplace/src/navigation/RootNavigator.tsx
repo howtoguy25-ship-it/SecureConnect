@@ -19,6 +19,7 @@ import { BusinessDashboardScreen } from "@/screens/owner/BusinessDashboardScreen
 import { StockEditorScreen } from "@/screens/owner/StockEditorScreen";
 import { AnnouncementComposerScreen } from "@/screens/owner/AnnouncementComposerScreen";
 import { TeamManagementScreen } from "@/screens/owner/TeamManagementScreen";
+import { StoreChatScreen } from "@/screens/StoreChatScreen";
 
 export type AuthStackParamList = {
   SignIn: undefined;
@@ -41,6 +42,7 @@ export type RootStackParamList = {
   StockEditor: { businessId: string; itemId?: string };
   AnnouncementComposer: { businessId: string };
   TeamManagement: { businessId: string };
+  StoreChat: { businessId: string };
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -120,6 +122,11 @@ function AppNavigator() {
         name="TeamManagement"
         component={TeamManagementScreen}
         options={{ headerShown: true, title: "Team & moderation" }}
+      />
+      <RootStack.Screen
+        name="StoreChat"
+        component={StoreChatScreen}
+        options={{ headerShown: true, title: "Chat" }}
       />
     </RootStack.Navigator>
   );

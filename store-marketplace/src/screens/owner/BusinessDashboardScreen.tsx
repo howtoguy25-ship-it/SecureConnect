@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, FlatList, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { useAuth } from "@/context/AuthContext";
-import { watchBusiness, publishBusiness, unpublishBusiness } from "@/services/businesses";
+import { watchBusiness, publishBusiness, unpublishBusiness, setChatEnabled } from "@/services/businesses";
 import { watchStock, deleteStockItem } from "@/services/stock";
 import { watchAnnouncements, deleteAnnouncement } from "@/services/announcements";
 import { getMembership } from "@/services/membership";
@@ -60,6 +60,14 @@ export function BusinessDashboardScreen({ route, navigation }: Props) {
     }
   }
 
+  async function handleChatToggle(enabled: boolean) {
+    try {
+      await setChatEnabled(businessId, enabled);
+    } catch (err) {
+      Alert.alert("Couldn't update chat setting", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.headerBlock}>
@@ -69,11 +77,18 @@ export function BusinessDashboardScreen({ route, navigation }: Props) {
             {category.label} · {business.followerCount} follower{business.followerCount === 1 ? "" : "s"}
           </Text>
         </View>
-        {canManageTeam && (
-          <TouchableOpacity onPress={() => navigation.navigate("TeamManagement", { businessId })}>
-            <Ionicons name="people-outline" size={22} color="#818CF8" />
-          </TouchableOpacity>
-        )}
+        <View style={styles.headerIcons}>
+          {business.chatEnabled && (
+            <TouchableOpacity onPress={() => navigation.navigate("StoreChat", { businessId })}>
+              <Ionicons name="chatbubble-ellipses-outline" size={22} color="#818CF8" />
+            </TouchableOpacity>
+          )}
+          {canManageTeam && (
+            <TouchableOpacity onPress={() => navigation.navigate("TeamManagement", { businessId })}>
+              <Ionicons name="people-outline" size={22} color="#818CF8" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {business.verificationStatus !== "verified" && (
@@ -101,6 +116,18 @@ export function BusinessDashboardScreen({ route, navigation }: Props) {
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {canManageTeam && (
+        <View style={styles.chatToggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.chatToggleLabel}>Group chat</Text>
+            <Text style={styles.chatToggleHint}>
+              Let followers and your team message each other in a live chat for this store.
+            </Text>
+          </View>
+          <Switch value={business.chatEnabled} onValueChange={handleChatToggle} />
         </View>
       )}
 
@@ -175,6 +202,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0B1220" },
   loading: { color: "#9CA3AF", textAlign: "center", marginTop: 40 },
   headerBlock: { flexDirection: "row", alignItems: "center", padding: 16 },
+  headerIcons: { flexDirection: "row", alignItems: "center", gap: 16 },
   name: { color: "#fff", fontSize: 20, fontWeight: "700" },
   meta: { color: "#9CA3AF", fontSize: 13, marginTop: 2 },
   verifyBanner: {
@@ -193,6 +221,18 @@ const styles = StyleSheet.create({
   visibilityChipActive: { backgroundColor: "#4F46E5" },
   visibilityChipText: { color: "#9CA3AF", fontSize: 12, fontWeight: "600" },
   visibilityChipTextActive: { color: "#fff" },
+  chatToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: "#1F2937",
+    borderRadius: 10,
+    padding: 12,
+    gap: 12,
+  },
+  chatToggleLabel: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  chatToggleHint: { color: "#9CA3AF", fontSize: 12, marginTop: 2 },
   tabRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, marginBottom: 8, gap: 8 },
   tab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: "#1F2937" },
   tabActive: { backgroundColor: "#4F46E5" },
