@@ -22,11 +22,13 @@ export function createProject(name: string, pageType: PageType, themeId: string,
     elements,
     // Only manually-built websites get a real multi-page structure -- Social/Logo/Video
     // stay single-page/fixed-card. `elements`/`backgroundColor` above double as "page 1"
-    // (Home) for any older code that still reads them directly.
-    pages:
-      pageType === 'website'
-        ? [{ id: generateId('page'), name: 'Home', slug: '', elements, backgroundColor: theme.background }]
-        : undefined,
+    // (Home) for any older code that still reads them directly. The `pages` key must be
+    // entirely absent (not present-with-value-undefined) for every other page type --
+    // Firestore's setDoc() throws "Unsupported field value: undefined" otherwise, which is
+    // exactly what broke creating a Logo/Video/Social project.
+    ...(pageType === 'website'
+      ? { pages: [{ id: generateId('page'), name: 'Home', slug: '', elements, backgroundColor: theme.background }] }
+      : {}),
     announcements: {
       enabled: false,
       autoSlide: true,
