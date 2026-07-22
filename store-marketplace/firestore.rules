@@ -1,0 +1,136 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function business(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)).data;
+    }
+
+    function businessExists(businessId) {
+      return exists(/databases/$(database)/documents/businesses/$(businessId));
+    }
+
+    function isBusinessOwner(businessId) {
+      return isSignedIn() && businessExists(businessId) && business(businessId).ownerId == request.auth.uid;
+    }
+
+    function membershipDoc(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/team/$(request.auth.uid)).data;
+    }
+
+    function isActiveMember(businessId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/businesses/$(businessId)/team/$(request.auth.uid))
+        && membershipDoc(businessId).status == 'active';
+    }
+
+    function hasPermission(businessId, perm) {
+      return isActiveMember(businessId) && membershipDoc(businessId).permissions[perm] == true;
+    }
+
+    function isBlocked(businessId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/businesses/$(businessId)/blockedUsers/$(request.auth.uid));
+    }
+
+    function isPubliclyVisible(businessId) {
+      return businessExists(businessId) && business(businessId).visibility == 'public' && business(businessId).isPublished == true;
+    }
+
+    // A business (and its stock/announcements) is readable by anyone if published+public,
+    // by any active team member regardless of visibility, or by the owner.
+    function canViewBusiness(businessId) {
+      return !isBlocked(businessId)
+        && (isPubliclyVisible(businessId) || isActiveMember(businessId) || isBusinessOwner(businessId));
+    }
+
+    match /users/{uid} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create, update: if isSignedIn() && request.auth.uid == uid;
+      allow delete: if false;
+
+      match /follows/{businessId} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /devices/{token} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /notifications/{notificationId} {
+        // Written only by Cloud Functions (Admin SDK, bypasses rules); the client can read its
+        // own feed and mark items read, but never fabricate a notification for itself.
+        allow read: if isSignedIn() && request.auth.uid == uid;
+        allow update: if isSignedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+        allow create, delete: if false;
+      }
+    }
+
+    match /businesses/{businessId} {
+      allow get: if canViewBusiness(businessId);
+      // Firestore evaluates `list` per candidate document against `resource.data` -- so this
+      // only ever lets a query resolve documents that are actually public+published, or where
+      // the requester is a team member/owner of that specific document, regardless of what
+      // filters the client's query happens to apply.
+      allow list: if resource.data.visibility == 'public' && resource.data.isPublished == true
+        || isActiveMember(businessId)
+        || isBusinessOwner(businessId);
+
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /team/{memberUid} {
+        allow read: if isSignedIn() && (isActiveMember(businessId) || isBusinessOwner(businessId));
+
+        // Bootstrap case: the business owner creating their own "owner" membership doc as
+        // part of createBusiness(), before any team doc exists to check permissions against.
+        allow create: if isBusinessOwner(businessId) && memberUid == request.auth.uid && request.resource.data.role == 'owner'
+          || hasPermission(businessId, 'canManageTeam');
+
+        // Nobody (including managers) can edit their own role/permissions/status --
+        // prevents a staff member from self-promoting or un-muting themselves.
+        allow update: if hasPermission(businessId, 'canManageTeam') && memberUid != request.auth.uid;
+
+        allow delete: if (hasPermission(businessId, 'canManageTeam') && memberUid != request.auth.uid)
+          || (isSignedIn() && memberUid == request.auth.uid); // leaving voluntarily
+      }
+
+      match /stockItems/{itemId} {
+        allow get, list: if canViewBusiness(businessId);
+        allow create, update, delete: if hasPermission(businessId, 'canEditStock');
+      }
+
+      match /announcements/{announcementId} {
+        allow get, list: if canViewBusiness(businessId);
+        allow create: if hasPermission(businessId, 'canPostAnnouncements')
+          && request.resource.data.authorId == request.auth.uid;
+        allow delete: if hasPermission(businessId, 'canPostAnnouncements') || hasPermission(businessId, 'canManageTeam');
+        allow update: if false;
+      }
+
+      match /blockedUsers/{targetUid} {
+        allow read, write: if hasPermission(businessId, 'canManageTeam');
+      }
+
+      match /verificationRequests/{requestId} {
+        allow get, list: if isBusinessOwner(businessId);
+        allow create: if isBusinessOwner(businessId) && request.resource.data.submittedBy == request.auth.uid;
+        // Reviewed status is only ever written by the verifyBusiness Cloud Function via the
+        // Admin SDK, which bypasses these rules entirely -- no client update path needed.
+        allow update, delete: if false;
+      }
+    }
+  }
+}

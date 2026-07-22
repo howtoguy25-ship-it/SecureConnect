@@ -1,0 +1,48 @@
+{
+  "name": "storefront-live",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "prebuild": "expo prebuild",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.tsx",
+    "functions:deploy": "firebase deploy --only firestore:rules,firestore:indexes,functions,storage --config firebase.json",
+    "functions:build": "cd functions && npm run build"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@firebase/auth": "1.13.3",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-navigation/bottom-tabs": "^6.6.1",
+    "@react-navigation/native": "^6.1.17",
+    "@react-navigation/native-stack": "^6.9.26",
+    "babel-preset-expo": "~57.0.0",
+    "expo": "~57.0.6",
+    "expo-constants": "~57.0.5",
+    "expo-font": "~57.0.1",
+    "expo-image-picker": "~17.0.4",
+    "expo-linking": "~57.0.3",
+    "expo-location": "~57.0.4",
+    "expo-notifications": "~0.32.5",
+    "expo-splash-screen": "~57.0.4",
+    "expo-status-bar": "~57.0.1",
+    "firebase": "^12.16.0",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "4.25.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/react": "~19.2.4",
+    "babel-plugin-module-resolver": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "typescript": "~6.0.3"
+  }
+}

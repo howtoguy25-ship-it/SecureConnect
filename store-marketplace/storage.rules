@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isActiveMember(businessId) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/businesses/$(businessId)/team/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/businesses/$(businessId)/team/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function isBusinessOwner(businessId) {
+      return isSignedIn()
+        && firestore.get(/databases/(default)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
+
+    // Anyone can view business images (they're shown on public store pages); only an active
+    // team member (or the owner) can upload/replace/delete them for that business.
+    match /businesses/{businessId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isActiveMember(businessId) || isBusinessOwner(businessId);
+    }
+  }
+}
