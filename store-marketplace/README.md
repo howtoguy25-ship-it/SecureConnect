@@ -12,6 +12,8 @@ moderation (mute/kick/block), and optionally turn on a live group chat for their
 - Firebase: Auth (email/password), Firestore (all app data), Storage (photos), Cloud Functions
   (verification, AI onboarding assist, push notifications), Cloud Messaging (real push)
 - `expo-notifications` for native device push tokens, `expo-image-picker` for stock/menu photos
+- `react-native-maps` for the Discover map view (Apple Maps on iOS, free/keyless; Android needs
+  `GOOGLE_MAPS_ANDROID_API_KEY`)
 
 ## Project layout
 
@@ -124,12 +126,28 @@ See `src/types/index.ts` for the full shape. Key access rules enforced in `fires
   doc) can read and post in real time; blocked users can't reach it at all (they can't view the
   business); a `canManageTeam` member can delete any message, anyone can delete their own.
 
+## Building for a device / the App Store (EAS)
+
+`eas.json` is already set up with `development` (dev-client, for testing push/native features),
+`preview` (internal distribution), and `production` (App Store) profiles.
+
+1. `npm install -g eas-cli && eas login`
+2. `eas init` in this directory -- fills in the blank `eas.projectId` in `app.config.js` (the
+   EAS CLI can't write to a dynamic `app.config.js` itself, hence the placeholder).
+3. `eas build --profile development --platform ios` for a dev-client build (needed for real
+   push notifications -- Expo Go can't do remote push on current SDKs).
+4. `eas build --profile production --platform ios && eas submit --profile production` when
+   ready to ship. You'll need an active Apple Developer Program membership for both real device
+   builds and App Store submission.
+5. Real icon/screenshots: `assets/icon.png` and `assets/adaptive-icon.png` are currently solid
+   navy placeholders (`#101828`), not final artwork -- swap them for real designs before
+   submitting.
+
 ## Known gaps for a production build
 
-- "Add team member" and "block a customer" take a raw Firebase Auth UID rather than looking
-  someone up by email/username -- a real invite flow needs a Cloud Function that maps an email
-  to a UID (the client can't query Firebase Auth by email directly). Noted inline in
-  `TeamManagementScreen`.
+- "Block a customer" still takes a raw Firebase Auth UID (team invites moved to a real
+  email-based lookup -- see `functions/inviteTeamMemberByEmail.js`). The same
+  `getUserByEmail`-backed pattern could be reused for blocking by email if you want that next.
 - Name search is a Firestore prefix ("starts with") match, not fuzzy full-text search --
   Firestore has no native full-text index; a production build would likely add Algolia or
   Typesense for that.
