@@ -13,14 +13,10 @@ import {
   where,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "./firebase";
 import { toMillis } from "@/utils/firestoreTime";
-import {
-  ROLE_DEFAULT_PERMISSIONS,
-  type Membership,
-  type MembershipRole,
-  type MembershipStatus,
-} from "@/types";
+import { ROLE_DEFAULT_PERMISSIONS, type Membership, type MembershipRole, type MembershipStatus } from "@/types";
 
 function teamCol(businessId: string) {
   return collection(db, "businesses", businessId, "team");
@@ -52,29 +48,38 @@ export async function listMyMemberships(uid: string): Promise<Membership[]> {
   return snap.docs.map((d) => docToMembership(d.data()));
 }
 
-/** Invites (or re-adds) a team member by uid. Only callers with canManageTeam should reach this --
- * enforced for real in firestore.rules, this is the client-side entry point. */
-export async function addTeamMember(
-  businessId: string,
-  uid: string,
-  displayName: string,
-  role: MembershipRole
-): Promise<void> {
-  const membership: Omit<Membership, "joinedAt"> = {
-    uid,
-    businessId,
-    role,
-    permissions: ROLE_DEFAULT_PERMISSIONS[role],
-    status: "active",
-    displayName,
-  };
-  await setDoc(doc(db, "businesses", businessId, "team", uid), {
-    ...membership,
-    joinedAt: serverTimestamp(),
-  });
+export interface InviteResult {
+  uid: string;
+  displayName: string;
+  role: MembershipRole;
 }
 
-export async function changeRole(businessId: string, uid: string, role: MembershipRole): Promise<void> {
+/**
+ * Invites a team member by their account email. The client can't resolve an email to a uid
+ * itself (Firebase Auth's lookup-by-email is Admin SDK-only), so this calls the
+ * inviteTeamMemberByEmail Cloud Function, which does that lookup and writes the team doc --
+ * it also re-checks the caller's canManageTeam permission server-side, not just via rules.
+ */
+export async function inviteTeamMemberByEmail(
+  businessId: string,
+  email: string,
+  role: MembershipRole
+): Promise<InviteResult> {
+  const invite = httpsCallable<{ businessId: string; email: string; role: MembershipRole }, InviteResult>(
+    functions,
+    "inviteTeamMemberByEmail"
+  );
+  const result = await invite({ businessId, email, role });
+  return result.data;
+}
+
+/** "owner" is deliberately excluded from the accepted type -- see firestore.rules, which
+ * rejects it here server-side too. */
+export async function changeRole(
+  businessId: string,
+  uid: string,
+  role: Exclude<MembershipRole, "owner">
+): Promise<void> {
   await updateDoc(doc(db, "businesses", businessId, "team", uid), {
     role,
     permissions: ROLE_DEFAULT_PERMISSIONS[role],

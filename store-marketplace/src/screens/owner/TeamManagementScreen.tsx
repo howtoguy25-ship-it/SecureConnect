@@ -5,7 +5,7 @@ import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { useAuth } from "@/context/AuthContext";
 import {
   watchTeam,
-  addTeamMember,
+  inviteTeamMemberByEmail,
   changeRole,
   setMemberStatus,
   removeTeamMember,
@@ -15,30 +15,37 @@ import type { Membership, MembershipRole } from "@/types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TeamManagement">;
 
-const ROLES: MembershipRole[] = ["owner", "manager", "staff"];
+// "owner" is deliberately excluded -- it's fixed to whoever created the business (businesses/
+// {id}.ownerId) and isn't reassignable through team management. Inviting/changing someone to
+// role "owner" here would give them owner-level permissions without them actually being the
+// recorded owner, which is confusing and not a real ownership transfer.
+const ASSIGNABLE_ROLES: Array<Exclude<MembershipRole, "owner">> = ["manager", "staff"];
 
 export function TeamManagementScreen({ route }: Props) {
   const { businessId } = route.params;
   const { user } = useAuth();
   const [team, setTeam] = useState<Membership[]>([]);
-  const [inviteUid, setInviteUid] = useState("");
-  const [inviteName, setInviteName] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MembershipRole>("staff");
+  const [inviting, setInviting] = useState(false);
   const [blockUid, setBlockUid] = useState("");
 
   useEffect(() => watchTeam(businessId, setTeam), [businessId]);
 
   async function handleInvite() {
-    if (!inviteUid.trim() || !inviteName.trim()) {
-      Alert.alert("UID and name required", "You'll need the person's account UID -- ask them to share it from their Profile screen (a real email/username directory lookup is a good next step beyond this MVP).");
+    if (!inviteEmail.trim()) {
+      Alert.alert("Email required");
       return;
     }
+    setInviting(true);
     try {
-      await addTeamMember(businessId, inviteUid.trim(), inviteName.trim(), inviteRole);
-      setInviteUid("");
-      setInviteName("");
+      const result = await inviteTeamMemberByEmail(businessId, inviteEmail.trim(), inviteRole);
+      setInviteEmail("");
+      Alert.alert("Added to team", `${result.displayName} is now a ${result.role}.`);
     } catch (err) {
       Alert.alert("Couldn't add team member", err instanceof Error ? err.message : String(err));
+    } finally {
+      setInviting(false);
     }
   }
 
@@ -66,7 +73,7 @@ export function TeamManagementScreen({ route }: Props) {
           </View>
           {member.uid !== user?.uid && (
             <View style={styles.actions}>
-              {ROLES.filter((r) => r !== member.role).map((r) => (
+              {ASSIGNABLE_ROLES.filter((r) => r !== member.role).map((r) => (
                 <TouchableOpacity key={r} style={styles.actionChip} onPress={() => changeRole(businessId, member.uid, r)}>
                   <Text style={styles.actionChipText}>Make {r}</Text>
                 </TouchableOpacity>
@@ -94,18 +101,28 @@ export function TeamManagementScreen({ route }: Props) {
       ))}
 
       <Text style={styles.sectionTitle}>Add team member</Text>
-      <Text style={styles.hint}>Muted/staff-by-default: pick their starting role. They can post/edit stock per that role's permissions.</Text>
-      <TextInput style={styles.input} value={inviteUid} onChangeText={setInviteUid} placeholder="Their account UID" placeholderTextColor="#6B7280" />
-      <TextInput style={styles.input} value={inviteName} onChangeText={setInviteName} placeholder="Display name" placeholderTextColor="#6B7280" />
+      <Text style={styles.hint}>
+        They need a Stockly account already (any email/password sign-up). Pick their starting role -- they get
+        that role's stock/announcement/team permissions immediately.
+      </Text>
+      <TextInput
+        style={styles.input}
+        value={inviteEmail}
+        onChangeText={setInviteEmail}
+        placeholder="Their account email"
+        placeholderTextColor="#6B7280"
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
       <View style={styles.typeRow}>
-        {ROLES.map((r) => (
+        {ASSIGNABLE_ROLES.map((r) => (
           <TouchableOpacity key={r} style={[styles.actionChip, inviteRole === r && styles.actionChipActive]} onPress={() => setInviteRole(r)}>
             <Text style={[styles.actionChipText, inviteRole === r && styles.actionChipTextActive]}>{r}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <TouchableOpacity style={styles.primaryButton} onPress={handleInvite}>
-        <Text style={styles.primaryButtonText}>Add to team</Text>
+      <TouchableOpacity style={styles.primaryButton} onPress={handleInvite} disabled={inviting}>
+        <Text style={styles.primaryButtonText}>{inviting ? "Adding..." : "Add to team"}</Text>
       </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>Block a customer</Text>

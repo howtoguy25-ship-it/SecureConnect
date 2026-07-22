@@ -98,12 +98,17 @@ service cloud.firestore {
 
         // Bootstrap case: the business owner creating their own "owner" membership doc as
         // part of createBusiness(), before any team doc exists to check permissions against.
+        // Any other create (a manager adding someone) can never grant role "owner" -- that's
+        // fixed to businesses/{id}.ownerId, not reassignable through team management.
         allow create: if isBusinessOwner(businessId) && memberUid == request.auth.uid && request.resource.data.role == 'owner'
-          || hasPermission(businessId, 'canManageTeam');
+          || (hasPermission(businessId, 'canManageTeam') && request.resource.data.role != 'owner');
 
         // Nobody (including managers) can edit their own role/permissions/status --
-        // prevents a staff member from self-promoting or un-muting themselves.
-        allow update: if hasPermission(businessId, 'canManageTeam') && memberUid != request.auth.uid;
+        // prevents a staff member from self-promoting or un-muting themselves -- and nobody
+        // can promote anyone (including themselves) to "owner" via an update either.
+        allow update: if hasPermission(businessId, 'canManageTeam')
+          && memberUid != request.auth.uid
+          && request.resource.data.role != 'owner';
 
         allow delete: if (hasPermission(businessId, 'canManageTeam') && memberUid != request.auth.uid)
           || (isSignedIn() && memberUid == request.auth.uid); // leaving voluntarily
