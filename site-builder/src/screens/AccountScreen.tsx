@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, ScrollView } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -120,6 +120,7 @@ export default function AccountScreen({ navigation }: Props) {
         <View style={{ width: 26 }} />
       </View>
 
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <View style={styles.profileCard}>
         <View style={[styles.avatar, { backgroundColor: theme.accent }]}>
           <Ionicons name="person" size={28} color={theme.accentText} />
@@ -217,6 +218,7 @@ export default function AccountScreen({ navigation }: Props) {
           </>
         )}
       </Pressable>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -224,6 +226,7 @@ export default function AccountScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8 },
+  scrollContent: { paddingBottom: 40 },
   title: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
   profileCard: { alignItems: 'center', paddingVertical: 30 },
   avatar: {
