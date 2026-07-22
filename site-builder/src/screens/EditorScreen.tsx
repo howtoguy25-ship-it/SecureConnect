@@ -53,6 +53,11 @@ function EditorInner({ navigation }: Props) {
   // new element (which auto-selects it) makes the layer list disappear right when a user
   // most wants to see it land in the stack.
   const [showLayers, setShowLayers] = useState(false);
+  // Disables the canvas ScrollView's own scrolling while an element is being dragged or
+  // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
+  // same touch underneath an active element drag, which is what made moving or resizing a
+  // selected element also drag the whole page along with it.
+  const [canvasInteracting, setCanvasInteracting] = useState(false);
   // The inspector sheet's height is a real drag, not a binary open/closed toggle -- users
   // can pull it down slowly to whatever height they want (down to a thin strip that keeps
   // the element selected without covering the canvas), or tap the handle for a quick
@@ -337,6 +342,7 @@ function EditorInner({ navigation }: Props) {
           maximumZoomScale={3}
           bouncesZoom
           pinchGestureEnabled
+          scrollEnabled={!canvasInteracting}
         >
           <Canvas
             project={displayProject}
@@ -346,6 +352,7 @@ function EditorInner({ navigation }: Props) {
             onDuplicate={duplicateElement}
             onDelete={confirmDeleteId}
             onToggleLock={toggleLock}
+            onInteractionChange={setCanvasInteracting}
           />
         </ScrollView>
       </View>

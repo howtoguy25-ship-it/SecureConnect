@@ -17,7 +17,16 @@ interface Props {
   // drag/resize gesture below clamps against this so an element can never be moved or
   // stretched out past the edges of the page it's actually on.
   canvasSize: { width: number; height: number };
+  // Tells the surrounding canvas ScrollView to disable its own scrolling while a
+  // drag/resize is in progress. On web, a ScrollView's native scroll can still kick in
+  // underneath an active PanResponder gesture (RN's responder-termination guarantees don't
+  // fully carry over to react-native-web's DOM-based scrolling) -- which is exactly what
+  // made moving/resizing a selected element also drag the whole page along with it.
+  onInteractionChange?: (interacting: boolean) => void;
 }
+
+const MIN_TEXT_FONT_SIZE = 6;
+const MAX_TEXT_FONT_SIZE = 200;
 
 type Box = { x: number; y: number; width: number; height: number };
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
@@ -69,6 +78,7 @@ export default function DraggableElement({
   onDelete,
   onToggleLock,
   canvasSize,
+  onInteractionChange,
 }: Props) {
   const locked = !!element.locked;
   const editable = element.type === 'text' || element.type === 'button';
@@ -78,6 +88,10 @@ export default function DraggableElement({
   );
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+  // Non-null only while actively resizing a text element from a corner handle -- a live,
+  // Canva-style preview of the font scaling with the box, committed to the real element on
+  // release.
+  const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
 
   // Refs mirror the latest render's values so the PanResponders (created exactly once
   // below) never read stale closures -- and, just as importantly, never need to be
@@ -100,6 +114,10 @@ export default function DraggableElement({
   isSelectedRef.current = isSelected;
   const canvasSizeRef = useRef(canvasSize);
   canvasSizeRef.current = canvasSize;
+  const onInteractionChangeRef = useRef(onInteractionChange);
+  onInteractionChangeRef.current = onInteractionChange;
+  const liveFontSizeRef = useRef(liveFontSize);
+  liveFontSizeRef.current = liveFontSize;
   const interacting = useRef(false);
 
   useEffect(() => {
@@ -139,6 +157,7 @@ export default function DraggableElement({
         moveOrigin.current.maxMove = 0;
         onSelectRef.current();
         interacting.current = true;
+        onInteractionChangeRef.current?.(true);
         const touch = evt.nativeEvent.touches[0] as Touch;
         moveOrigin.current.x0 = touch.pageX;
         moveOrigin.current.y0 = touch.pageY;
@@ -156,6 +175,7 @@ export default function DraggableElement({
       },
       onPanResponderRelease: () => {
         interacting.current = false;
+        onInteractionChangeRef.current?.(false);
         onChangeRef.current(boxRef.current);
         // A tap (negligible movement) on an element that was *already* selected means the
         // user is trying to edit its text/label directly, not re-select or drag it --
@@ -166,13 +186,14 @@ export default function DraggableElement({
       },
       onPanResponderTerminate: () => {
         interacting.current = false;
+        onInteractionChangeRef.current?.(false);
         onChangeRef.current(boxRef.current);
       },
     })
   ).current;
 
   function useCornerResponder(corner: Corner) {
-    const originRef = useRef({ x0: 0, y0: 0, box: box });
+    const originRef = useRef({ x0: 0, y0: 0, box: box, fontSize: 0 });
     return useRef<PanResponderInstance>(
       PanResponder.create({
         onStartShouldSetPanResponder: () => !lockedRef.current,
@@ -180,8 +201,15 @@ export default function DraggableElement({
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (evt) => {
           interacting.current = true;
+          onInteractionChangeRef.current?.(true);
           const touch = evt.nativeEvent.touches[0] as Touch;
-          originRef.current = { x0: touch.pageX, y0: touch.pageY, box: boxRef.current };
+          const el = elementRef.current;
+          originRef.current = {
+            x0: touch.pageX,
+            y0: touch.pageY,
+            box: boxRef.current,
+            fontSize: el.type === 'text' ? el.fontSize : 0,
+          };
         },
         onPanResponderMove: (evt) => {
           const touch = evt.nativeEvent.touches[0] as Touch;
@@ -190,15 +218,39 @@ export default function DraggableElement({
           const dy = touch.pageY - originRef.current.y0;
           const minWidth = elementRef.current.type === 'product' ? MIN_PRODUCT_WIDTH : MIN_SIZE;
           const minHeight = elementRef.current.type === 'product' ? MIN_PRODUCT_HEIGHT : MIN_SIZE;
-          const resized = resizeFromCorner(corner, originRef.current.box, dx, dy, minWidth, minHeight);
+          const origin = originRef.current.box;
+          const resized = resizeFromCorner(corner, origin, dx, dy, minWidth, minHeight);
           setBox(clampBoxToCanvas(resized, canvasSizeRef.current));
+
+          // Canva-style: dragging any corner in shrinks the text along with the box,
+          // dragging out grows it -- instead of the old behavior where only the box
+          // changed and the same-size text just crowded together or clipped inside it.
+          // Scaled by the geometric mean of both axes so a stretch on just one side
+          // doesn't distort the font size as dramatically as the box itself.
+          if (elementRef.current.type === 'text' && originRef.current.fontSize > 0) {
+            const widthRatio = resized.width / origin.width;
+            const heightRatio = resized.height / origin.height;
+            const scale = Math.sqrt(widthRatio * heightRatio);
+            const nextFontSize = Math.round(
+              Math.min(MAX_TEXT_FONT_SIZE, Math.max(MIN_TEXT_FONT_SIZE, originRef.current.fontSize * scale))
+            );
+            setLiveFontSize(nextFontSize);
+          }
         },
         onPanResponderRelease: () => {
           interacting.current = false;
-          onChangeRef.current(boxRef.current);
+          onInteractionChangeRef.current?.(false);
+          if (elementRef.current.type === 'text' && liveFontSizeRef.current != null) {
+            onChangeRef.current({ ...boxRef.current, fontSize: liveFontSizeRef.current } as any);
+          } else {
+            onChangeRef.current(boxRef.current);
+          }
+          setLiveFontSize(null);
         },
         onPanResponderTerminate: () => {
           interacting.current = false;
+          onInteractionChangeRef.current?.(false);
+          setLiveFontSize(null);
           onChangeRef.current(boxRef.current);
         },
       })
@@ -210,7 +262,12 @@ export default function DraggableElement({
   const blResponder = useCornerResponder('bl');
   const brResponder = useCornerResponder('br');
 
-  const liveElement = { ...element, width: box.width, height: box.height } as CanvasElement;
+  const liveElement = {
+    ...element,
+    width: box.width,
+    height: box.height,
+    ...(element.type === 'text' && liveFontSize != null ? { fontSize: liveFontSize } : null),
+  } as CanvasElement;
   const toolbarBelow = box.y < 56;
 
   return (

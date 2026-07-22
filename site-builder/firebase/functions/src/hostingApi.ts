@@ -58,15 +58,16 @@ function parseDomainResponse(data: any): HostingDomainStatus {
 
 export async function createHostingDomain(domainName: string): Promise<HostingDomainStatus> {
   const token = await getAccessToken();
-  // The Domain resource requires BOTH `domainName` and `site` in the request body --
-  // `site` isn't inferred from the `parent` path parameter alone. Omitting it defaults to
-  // an empty string server-side, which the API rejects with "Mismatched sites in request:
-  // `parent` has `<site>`, `domain` has ``" since the two then disagree about which site
-  // this domain belongs to.
+  // The Domain resource requires BOTH `domainName` and `site` in the request body -- `site`
+  // isn't inferred from the `parent` path parameter alone. The API compares it against
+  // `parent`'s site segment as a BARE id, not the `sites/<id>` resource path -- confirmed
+  // live: sending the prefixed form produced "Mismatched sites in request: `parent` has
+  // `sitespark-a5817`, `domain` has `sites/sitespark-a5817`", i.e. the two must match
+  // exactly as plain ids.
   const res = await fetch(`${HOSTING_API_BASE}/sites/${siteId()}/domains`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domainName, site: `sites/${siteId()}` }),
+    body: JSON.stringify({ domainName, site: siteId() }),
   });
   const data = (await res.json()) as any;
   if (!res.ok) throw new Error(data?.error?.message ?? `Hosting API error (${res.status}) creating domain.`);

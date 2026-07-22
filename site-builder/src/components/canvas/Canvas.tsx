@@ -12,9 +12,19 @@ interface Props {
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onToggleLock: (id: string) => void;
+  onInteractionChange?: (interacting: boolean) => void;
 }
 
-export default function Canvas({ project, selectedId, onSelect, onChange, onDuplicate, onDelete, onToggleLock }: Props) {
+export default function Canvas({
+  project,
+  selectedId,
+  onSelect,
+  onChange,
+  onDuplicate,
+  onDelete,
+  onToggleLock,
+  onInteractionChange,
+}: Props) {
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
 
   return (
@@ -37,6 +47,7 @@ export default function Canvas({ project, selectedId, onSelect, onChange, onDupl
           onDelete={() => onDelete(el.id)}
           onToggleLock={() => onToggleLock(el.id)}
           canvasSize={project.canvasSize}
+          onInteractionChange={onInteractionChange}
         />
       ))}
     </View>
