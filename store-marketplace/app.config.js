@@ -30,6 +30,15 @@ module.exports = {
       },
       package: "com.stockly.app",
       permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA", "READ_MEDIA_IMAGES"],
+      config: {
+        // Android's Google Maps SDK has no built-in "default" provider the way iOS has Apple
+        // Maps -- it renders a blank grey grid with no key at all. iOS needs nothing here: the
+        // Discover map view uses react-native-maps' default (Apple Maps) provider, which is
+        // free and keyless. Leave this blank until you're ready to test on Android.
+        googleMaps: {
+          apiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
+        },
+      },
     },
     plugins: [
       "expo-font",
@@ -64,6 +73,14 @@ module.exports = {
         {
           icon: "./assets/icon.png",
           color: "#101828",
+        },
+      ],
+      [
+        "react-native-maps",
+        {
+          // Only wires up the Android Google Maps SDK; iOS uses Apple Maps (the library's
+          // default provider) and needs no key or plugin config at all.
+          androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
         },
       ],
     ],
