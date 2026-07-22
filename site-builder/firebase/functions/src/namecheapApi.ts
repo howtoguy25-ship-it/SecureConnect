@@ -41,7 +41,17 @@ async function callNamecheap(creds: NamecheapCredentials, command: string, param
   if (apiResponse.Status !== 'OK') {
     const errors = apiResponse.Errors?.Error;
     const list = Array.isArray(errors) ? errors : errors ? [errors] : [];
-    const message = list.map((e: any) => (typeof e === 'string' ? e : e['#text'])).join('; ');
+    // Namecheap's error text alone (e.g. "API Key is invalid or API access has not been
+    // enabled") covers several distinct root causes with the same wording -- the numeric
+    // `Number` attribute on each <Error> node is what actually disambiguates which one,
+    // per Namecheap's own error code reference, so surface it instead of guessing blind.
+    const message = list
+      .map((e: any) => {
+        const text = typeof e === 'string' ? e : e['#text'];
+        const code = typeof e === 'object' ? e.Number : undefined;
+        return code ? `${text} (code ${code})` : text;
+      })
+      .join('; ');
     throw new Error(message || 'Namecheap API request failed.');
   }
 
