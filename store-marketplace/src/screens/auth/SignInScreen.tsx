@@ -35,7 +35,7 @@ export function SignInScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <Text style={styles.title}>StorefrontLive</Text>
+      <Text style={styles.title}>Stockly</Text>
       <Text style={styles.subtitle}>Find your favorite stores. Never miss a restock.</Text>
 
       <TextInput

@@ -3,8 +3,8 @@ require("dotenv/config");
 /** @type {import('@expo/config-types').ExpoConfig} */
 module.exports = {
   expo: {
-    name: "StorefrontLive",
-    slug: "storefront-live",
+    name: "Stockly",
+    slug: "stockly",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -12,14 +12,14 @@ module.exports = {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.storefrontlive.app",
+      bundleIdentifier: "com.stockly.app",
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          "StorefrontLive uses your location to find stores near you and show accurate distances.",
+          "Stockly uses your location to find stores near you and show accurate distances.",
         NSCameraUsageDescription:
-          "StorefrontLive uses your camera so store owners can photograph stock, flavors, and menu items to publish.",
+          "Stockly uses your camera so store owners can photograph stock, flavors, and menu items to publish.",
         NSPhotoLibraryUsageDescription:
-          "StorefrontLive lets store owners pick photos from their library to publish stock, flavors, and menu items.",
+          "Stockly lets store owners pick photos from their library to publish stock, flavors, and menu items.",
         ITSAppUsesNonExemptEncryption: false,
       },
     },
@@ -28,7 +28,7 @@ module.exports = {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#101828",
       },
-      package: "com.storefrontlive.app",
+      package: "com.stockly.app",
       permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA", "READ_MEDIA_IMAGES"],
       config: {
         googleMaps: {
@@ -52,16 +52,16 @@ module.exports = {
         "expo-location",
         {
           locationWhenInUsePermission:
-            "StorefrontLive uses your location to find stores near you and show accurate distances.",
+            "Stockly uses your location to find stores near you and show accurate distances.",
         },
       ],
       [
         "expo-image-picker",
         {
           photosPermission:
-            "StorefrontLive lets store owners pick photos to publish stock, flavors, and menu items.",
+            "Stockly lets store owners pick photos to publish stock, flavors, and menu items.",
           cameraPermission:
-            "StorefrontLive uses your camera so store owners can photograph stock, flavors, and menu items.",
+            "Stockly uses your camera so store owners can photograph stock, flavors, and menu items.",
         },
       ],
       [

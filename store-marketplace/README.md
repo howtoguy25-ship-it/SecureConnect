@@ -1,4 +1,4 @@
-# StorefrontLive — Live Store Stock, Flavors & Announcements Marketplace
+# Stockly — Live Store Stock, Flavors & Announcements Marketplace
 
 A separate app from TrackLine (this repo's other project) -- a marketplace where customers
 discover local stores, follow their favorites, and get real notifications about restocks, new
