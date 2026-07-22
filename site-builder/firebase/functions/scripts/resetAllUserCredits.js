@@ -11,7 +11,8 @@
 //
 // Safe to re-run -- it's idempotent (just sets the same field to the same value again).
 
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
 const targetCredits = Number(process.argv[2]);
 if (!Number.isFinite(targetCredits) || targetCredits < 0) {
@@ -19,8 +20,8 @@ if (!Number.isFinite(targetCredits) || targetCredits < 0) {
   process.exit(1);
 }
 
-admin.initializeApp();
-const db = admin.firestore();
+initializeApp();
+const db = getFirestore();
 
 async function main() {
   const usersSnap = await db.collection('users').get();
