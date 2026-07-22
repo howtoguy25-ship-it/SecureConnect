@@ -23,6 +23,10 @@ interface EditorContextValue {
   reorderElement: (id: string, direction: 'up' | 'down') => void;
   updateProject: (patch: Partial<Project>) => void;
   selectedElement: CanvasElement | null;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   // Multi-page (manually-built websites only -- see Project.pages's comment). `pages` is
   // null for every other project, which is the signal every consumer uses to know whether
   // to show page-switching UI at all.
@@ -68,6 +72,21 @@ export function EditorProvider({
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Real undo/redo -- every mutator below pushes the project's state from just before its
+  // change onto `historyRef`, and clears `futureRef` (a fresh edit invalidates whatever redo
+  // history existed). `historyVersion` exists purely to force a re-render after a ref
+  // mutation, since canUndo/canRedo need to reflect the latest ref contents on every render.
+  const historyRef = useRef<Project[]>([]);
+  const futureRef = useRef<Project[]>([]);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const MAX_HISTORY = 50;
+
+  const pushHistory = useCallback((prev: Project) => {
+    historyRef.current = [...historyRef.current, prev].slice(-MAX_HISTORY);
+    futureRef.current = [];
+    setHistoryVersion((v) => v + 1);
+  }, []);
+
   useEffect(() => {
     // A live subscription, not a one-time get(): an AI build can still be writing the
     // finished project (real name + elements) to this doc after this screen has already
@@ -105,12 +124,13 @@ export function EditorProvider({
     (patch: Partial<Project>) => {
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = { ...prev, ...patch };
         scheduleSave(next);
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, pushHistory]
   );
 
   // Central point every element mutator below goes through: applies `updater` to whichever
@@ -133,19 +153,21 @@ export function EditorProvider({
     (el: CanvasElement) => {
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) => [...elements, el]);
         scheduleSave(next);
         return next;
       });
       setSelectedId(el.id);
     },
-    [scheduleSave, applyElementsUpdate]
+    [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
   const updateElement = useCallback(
     (id: string, patch: Partial<CanvasElement>) => {
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) =>
           elements.map((el) => (el.id === id ? ({ ...el, ...patch } as CanvasElement) : el))
         );
@@ -153,20 +175,21 @@ export function EditorProvider({
         return next;
       });
     },
-    [scheduleSave, applyElementsUpdate]
+    [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
   const removeElement = useCallback(
     (id: string) => {
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) => elements.filter((el) => el.id !== id));
         scheduleSave(next);
         return next;
       });
       setSelectedId((prev) => (prev === id ? null : prev));
     },
-    [scheduleSave, applyElementsUpdate]
+    [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
   const duplicateElement = useCallback(
@@ -174,6 +197,7 @@ export function EditorProvider({
       let newId: string | null = null;
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) => {
           const source = elements.find((el) => el.id === id);
           if (!source) return elements;
@@ -187,7 +211,7 @@ export function EditorProvider({
       });
       if (newId) setSelectedId(newId);
     },
-    [scheduleSave, applyElementsUpdate]
+    [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
   // Swaps z-index with the neighboring element in stacking order -- 'up' moves this
@@ -198,6 +222,7 @@ export function EditorProvider({
     (id: string, direction: 'up' | 'down') => {
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) => {
           const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
           const index = sorted.findIndex((el) => el.id === id);
@@ -216,13 +241,14 @@ export function EditorProvider({
         return next;
       });
     },
-    [scheduleSave, applyElementsUpdate]
+    [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
   const bringToFront = useCallback(
     (id: string) => {
       setProject((prev) => {
         if (!prev) return prev;
+        pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) => {
           const maxZ = Math.max(0, ...elements.map((e) => e.zIndex));
           return elements.map((el) => (el.id === id ? { ...el, zIndex: maxZ + 1 } : el));
@@ -231,7 +257,7 @@ export function EditorProvider({
         return next;
       });
     },
-    [scheduleSave, applyElementsUpdate]
+    [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
   const switchPage = useCallback((id: string) => {
@@ -243,6 +269,7 @@ export function EditorProvider({
     (name: string) => {
       setProject((prev) => {
         if (!prev || !prev.pages) return prev;
+        pushHistory(prev);
         const slug = slugifyPageName(name, prev.pages.map((p) => p.slug));
         const newPage: SitePage = {
           id: generateId('page'),
@@ -258,7 +285,7 @@ export function EditorProvider({
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, pushHistory]
   );
 
   const renamePage = useCallback(
@@ -267,19 +294,21 @@ export function EditorProvider({
         if (!prev || !prev.pages) return prev;
         const trimmed = name.trim();
         if (!trimmed) return prev;
+        pushHistory(prev);
         const pages = prev.pages.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
         const next = { ...prev, pages };
         scheduleSave(next);
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, pushHistory]
   );
 
   const removePage = useCallback(
     (id: string) => {
       setProject((prev) => {
         if (!prev || !prev.pages || prev.pages.length <= 1) return prev;
+        pushHistory(prev);
         const pages = prev.pages.filter((p) => p.id !== id);
         const next = { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor };
         scheduleSave(next);
@@ -287,21 +316,54 @@ export function EditorProvider({
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, pushHistory]
   );
 
   const setPageBackgroundColor = useCallback(
     (id: string, color: string) => {
       setProject((prev) => {
         if (!prev || !prev.pages) return prev;
+        pushHistory(prev);
         const pages = prev.pages.map((p) => (p.id === id ? { ...p, backgroundColor: color } : p));
         const next = { ...prev, pages, backgroundColor: pages[0].backgroundColor };
         scheduleSave(next);
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, pushHistory]
   );
+
+  // Undo pops the most recent snapshot off history, stashes the current state onto `future`
+  // so redo can restore it, and jumps straight there -- no scheduleSave debounce, since an
+  // undo/redo should feel instant and is exactly as save-worthy as any other edit.
+  const undo = useCallback(() => {
+    setProject((prev) => {
+      if (!prev || historyRef.current.length === 0) return prev;
+      const previousSnapshot = historyRef.current[historyRef.current.length - 1];
+      historyRef.current = historyRef.current.slice(0, -1);
+      futureRef.current = [...futureRef.current, prev];
+      setHistoryVersion((v) => v + 1);
+      projectsStore.save(uid, previousSnapshot);
+      return previousSnapshot;
+    });
+  }, [uid]);
+
+  const redo = useCallback(() => {
+    setProject((prev) => {
+      if (!prev || futureRef.current.length === 0) return prev;
+      const nextSnapshot = futureRef.current[futureRef.current.length - 1];
+      futureRef.current = futureRef.current.slice(0, -1);
+      historyRef.current = [...historyRef.current, prev];
+      setHistoryVersion((v) => v + 1);
+      projectsStore.save(uid, nextSnapshot);
+      return nextSnapshot;
+    });
+  }, [uid]);
+
+  // historyVersion's only job is to force these to recompute on every ref mutation above --
+  // the refs themselves aren't otherwise part of React's render dependency tracking.
+  const canUndo = useMemo(() => historyRef.current.length > 0, [historyVersion]);
+  const canRedo = useMemo(() => futureRef.current.length > 0, [historyVersion]);
 
   const currentPage = useMemo(
     () => (project?.pages && project.pages.length > 0 ? project.pages.find((p) => p.id === activePageId) ?? project.pages[0] : null),
@@ -333,6 +395,10 @@ export function EditorProvider({
     reorderElement,
     updateProject,
     selectedElement,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   };
 
   return <EditorContext.Provider value={value}>{children}</EditorContext.Provider>;

@@ -45,9 +45,17 @@ function EditorInner({ navigation }: Props) {
     reorderElement,
     updateProject,
     selectedElement,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useEditor();
   const { theme } = useAppTheme();
   const [panel, setPanel] = useState<PanelTab>(null);
+  // View-only lock for the whole page -- lets a user look at a finished page without a
+  // stray touch dragging a word or button out of place. Purely a local UI toggle (doesn't
+  // persist), separate from per-element `locked` which is a real saved property.
+  const [pageLocked, setPageLocked] = useState(false);
   // Independent of `panel`/selection so it stays reachable even while an element is
   // selected (which replaces the tab bar with the inspector sheet) -- otherwise adding a
   // new element (which auto-selects it) makes the layer list disappear right when a user
@@ -268,9 +276,20 @@ function EditorInner({ navigation }: Props) {
         </Text>
         <View style={styles.headerActions}>
           {!isGenerating && (
-            <Pressable onPress={() => setShowLayers((v) => !v)} hitSlop={8}>
-              <Ionicons name="layers-outline" size={22} color={showLayers ? theme.accent : theme.text} />
-            </Pressable>
+            <>
+              <Pressable onPress={undo} disabled={!canUndo} hitSlop={8}>
+                <Ionicons name="arrow-undo-outline" size={22} color={canUndo ? theme.text : theme.border} />
+              </Pressable>
+              <Pressable onPress={redo} disabled={!canRedo} hitSlop={8}>
+                <Ionicons name="arrow-redo-outline" size={22} color={canRedo ? theme.text : theme.border} />
+              </Pressable>
+              <Pressable onPress={() => setPageLocked((v) => !v)} hitSlop={8}>
+                <Ionicons name={pageLocked ? 'lock-closed' : 'lock-open-outline'} size={22} color={pageLocked ? theme.accent : theme.text} />
+              </Pressable>
+              <Pressable onPress={() => setShowLayers((v) => !v)} hitSlop={8}>
+                <Ionicons name="layers-outline" size={22} color={showLayers ? theme.accent : theme.text} />
+              </Pressable>
+            </>
           )}
           {isGenerating ? (
             <View style={{ width: 24 }} />
@@ -353,6 +372,7 @@ function EditorInner({ navigation }: Props) {
             onDelete={confirmDeleteId}
             onToggleLock={toggleLock}
             onInteractionChange={setCanvasInteracting}
+            forceLocked={pageLocked}
           />
         </ScrollView>
       </View>
@@ -476,7 +496,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   title: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1, textAlign: 'center' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   layersOverlay: {
     position: 'absolute',
     top: 56,

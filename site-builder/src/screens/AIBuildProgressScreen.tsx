@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Modal,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
 import { showAlert } from '@/utils/alert';
@@ -34,8 +35,14 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   const [requestingPause, setRequestingPause] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const navigatedRef = useRef(false);
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isWide = windowWidth >= 700;
+  // Much bigger than the old fixed 320x420 cap -- the live preview is the main thing to
+  // look at while a build runs, so it should read as the dominant element on screen (most
+  // of the available width in portrait, a large fixed pane alongside the status card on
+  // wide/tablet layouts) instead of a small thumbnail off to the side.
+  const previewMaxWidth = isWide ? 380 : windowWidth - 32;
+  const previewMaxHeight = isWide ? 640 : Math.round(windowHeight * 0.56);
   // The server only writes a final minutesElapsed once, at completion/error -- ticking a
   // real clock client-side (from the session's own createdAt) is what makes the "minutes"
   // metric actually count up live while a build is running, instead of sitting at 0.0 the
@@ -151,13 +158,16 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
         <View style={{ width: 24 }} />
       </View>
 
-      <View style={[styles.body, isWide && styles.bodyWide]}>
+      <ScrollView
+        contentContainerStyle={[styles.body, isWide && styles.bodyWide]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={[styles.previewWrap, isWide && styles.previewWrapWide]}>
           <LivePreviewCanvas
             uid={uid}
             projectId={session.previewProjectId}
-            maxWidth={isWide ? 240 : Math.min(windowWidth - 40, 320)}
-            maxHeight={420}
+            maxWidth={previewMaxWidth}
+            maxHeight={previewMaxHeight}
           />
           <Text style={styles.previewLabel}>Live preview -- updates as it's built</Text>
         </View>
@@ -228,7 +238,7 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
             </Pressable>
           )}
         </View>
-      </View>
+      </ScrollView>
 
       <Modal visible={isPaused} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
@@ -262,7 +272,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingTop: 20 },
   title: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
-  body: { flex: 1 },
+  body: { flexGrow: 1 },
   bodyWide: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 20, gap: 20 },
   previewWrap: { alignItems: 'center', marginTop: 8 },
   previewWrapWide: { marginTop: 20, flexShrink: 0 },

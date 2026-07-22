@@ -23,6 +23,11 @@ interface Props {
   // fully carry over to react-native-web's DOM-based scrolling) -- which is exactly what
   // made moving/resizing a selected element also drag the whole page along with it.
   onInteractionChange?: (interacting: boolean) => void;
+  // Page-level "view lock" -- when true, every element on the page behaves as if it were
+  // individually locked (no drag/resize/select), regardless of its own `element.locked`.
+  // Unlike a real per-element lock, this doesn't show the little lock badge on every
+  // element or persist anywhere -- it's a purely local, toggle-off-anytime viewing mode.
+  forceLocked?: boolean;
 }
 
 const MIN_TEXT_FONT_SIZE = 6;
@@ -79,8 +84,10 @@ export default function DraggableElement({
   onToggleLock,
   canvasSize,
   onInteractionChange,
+  forceLocked,
 }: Props) {
-  const locked = !!element.locked;
+  const elementLocked = !!element.locked;
+  const locked = elementLocked || !!forceLocked;
   const editable = element.type === 'text' || element.type === 'button';
   const textFontFamily = useGoogleFont(element.type === 'text' ? element.fontFamily : undefined);
   const [box, setBox] = useState<Box>(() =>
@@ -304,7 +311,7 @@ export default function DraggableElement({
         <ElementRenderer element={liveElement} />
       )}
 
-      {locked && (
+      {elementLocked && (
         <View style={styles.lockBadge}>
           <Ionicons name="lock-closed" size={11} color="#FFFFFF" />
         </View>

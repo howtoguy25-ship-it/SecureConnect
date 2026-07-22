@@ -13,6 +13,8 @@ interface Props {
   onDelete: (id: string) => void;
   onToggleLock: (id: string) => void;
   onInteractionChange?: (interacting: boolean) => void;
+  // Page-level view lock -- see DraggableElement's forceLocked comment.
+  forceLocked?: boolean;
 }
 
 export default function Canvas({
@@ -24,6 +26,7 @@ export default function Canvas({
   onDelete,
   onToggleLock,
   onInteractionChange,
+  forceLocked,
 }: Props) {
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
 
@@ -48,6 +51,7 @@ export default function Canvas({
           onToggleLock={() => onToggleLock(el.id)}
           canvasSize={project.canvasSize}
           onInteractionChange={onInteractionChange}
+          forceLocked={forceLocked}
         />
       ))}
     </View>

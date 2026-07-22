@@ -28,9 +28,14 @@ interface RowProps {
   onReorder: (id: string, direction: 'up' | 'down') => void;
   onToggleLock: (id: string) => void;
   rowHeightRef: React.MutableRefObject<number>;
+  // Lets the drag handle tell the surrounding ScrollView to stop scrolling for the
+  // duration of the gesture -- on web, the ScrollView's own scroll can still respond to
+  // the same touch underneath an active PanResponder drag, which is what made a hold-drag
+  // here feel like it randomly stopped responding or scrolled the list instead of reordering.
+  onDragStateChange: (dragging: boolean) => void;
 }
 
-function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleLock, rowHeightRef }: RowProps) {
+function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleLock, rowHeightRef, onDragStateChange }: RowProps) {
   // Refs mirror the latest props so the drag handle's PanResponder (created exactly once
   // below) always acts on up-to-date data -- reorder calls made mid-drag re-render this row
   // with a new `index` on every swap, and a stale closure here would either swap the wrong
@@ -43,6 +48,8 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
   onReorderRef.current = onReorder;
   const elIdRef = useRef(el.id);
   elIdRef.current = el.id;
+  const onDragStateChangeRef = useRef(onDragStateChange);
+  onDragStateChangeRef.current = onDragStateChange;
   const dragState = useRef({ startIndex: index, appliedSteps: 0 });
   const [dragging, setDragging] = React.useState(false);
 
@@ -54,6 +61,7 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
       onPanResponderGrant: () => {
         dragState.current = { startIndex: indexRef.current, appliedSteps: 0 };
         setDragging(true);
+        onDragStateChangeRef.current(true);
       },
       onPanResponderMove: (_evt, gestureState) => {
         const step = rowHeightRef.current + ROW_GAP;
@@ -74,8 +82,14 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
           dragState.current.appliedSteps -= 1;
         }
       },
-      onPanResponderRelease: () => setDragging(false),
-      onPanResponderTerminate: () => setDragging(false),
+      onPanResponderRelease: () => {
+        setDragging(false);
+        onDragStateChangeRef.current(false);
+      },
+      onPanResponderTerminate: () => {
+        setDragging(false);
+        onDragStateChangeRef.current(false);
+      },
     })
   ).current;
 
@@ -107,9 +121,16 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
         <Ionicons name="chevron-down" size={18} color={index === count - 1 ? '#E2E8F0' : '#334155'} />
       </Pressable>
       {/* Hold and drag up/down to reorder directly -- swaps happen immediately as each row
-          boundary is crossed, rather than only one step per tap on the chevrons above. */}
-      <View {...dragResponder.panHandlers} style={styles.dragHandle} hitSlop={8}>
-        <Ionicons name="reorder-three-outline" size={20} color={dragging ? '#2563EB' : '#94A3B8'} />
+          boundary is crossed, rather than only one step per tap on the chevrons above.
+          Sized well above the ~44px minimum touch target (rather than just the icon's own
+          bounds) since a small miss here was the main complaint about this gesture not
+          reliably grabbing hold. */}
+      <View
+        {...dragResponder.panHandlers}
+        style={[styles.dragHandle, dragging && styles.dragHandleActive]}
+        hitSlop={10}
+      >
+        <Ionicons name="reorder-three-outline" size={26} color={dragging ? '#2563EB' : '#64748B'} />
       </View>
     </View>
   );
@@ -121,6 +142,7 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
 export default function LayersPanel({ elements, selectedId, onSelect, onReorder, onToggleLock }: Props) {
   const topmostFirst = [...elements].sort((a, b) => b.zIndex - a.zIndex);
   const rowHeightRef = useRef(DEFAULT_ROW_HEIGHT);
+  const [rowDragging, setRowDragging] = React.useState(false);
 
   if (elements.length === 0) {
     return (
@@ -141,7 +163,12 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
   }
 
   return (
-    <ScrollView style={styles.scrollFill} showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
+    <ScrollView
+      style={styles.scrollFill}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.list}
+      scrollEnabled={!rowDragging}
+    >
       {topmostFirst.map((el, index) => (
         <LayerRow
           key={el.id}
@@ -153,6 +180,7 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
           onReorder={onReorder}
           onToggleLock={onToggleLock}
           rowHeightRef={rowHeightRef}
+          onDragStateChange={setRowDragging}
         />
       ))}
     </ScrollView>
@@ -179,5 +207,14 @@ const styles = StyleSheet.create({
   rowLabel: { flex: 1, fontSize: 13, fontWeight: '600', color: '#334155' },
   rowLabelSelected: { color: '#2563EB' },
   rowIconBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  dragHandle: { paddingHorizontal: 4, paddingVertical: 2 },
+  dragHandle: {
+    width: 44,
+    height: 44,
+    marginVertical: -6,
+    marginRight: -4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  dragHandleActive: { backgroundColor: '#DBEAFE' },
 });
