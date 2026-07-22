@@ -9,26 +9,42 @@ export const CANVAS_SIZES: Record<PageType, CanvasSize> = {
 
 export const PAGE_TYPE_INFO: Record<
   PageType,
-  { title: string; subtitle: string; icon: string }
+  { title: string; subtitle: string; icon: string; emoji: string; accent: string; accentSoft: string; gradient: [string, string] }
 > = {
   website: {
     title: 'Web Page',
     subtitle: 'A full site page you can fill with text, images, buttons and blocks.',
     icon: 'globe-outline',
+    emoji: '🌐',
+    accent: '#4F46E5',
+    accentSoft: '#EEF2FF',
+    gradient: ['#6366F1', '#4338CA'],
   },
   video: {
     title: 'Video Page',
     subtitle: 'Built for editing & arranging video: cuts, splits, and sound overlay.',
     icon: 'videocam-outline',
+    emoji: '🎬',
+    accent: '#DB2777',
+    accentSoft: '#FCE7F3',
+    gradient: ['#F472B6', '#BE185D'],
   },
   social: {
     title: 'Social (9:16) Page',
     subtitle: 'Facebook/TikTok-style vertical size, perfect for social-first sites.',
     icon: 'phone-portrait-outline',
+    emoji: '📱',
+    accent: '#0891B2',
+    accentSoft: '#ECFEFF',
+    gradient: ['#22D3EE', '#0E7490'],
   },
   logo: {
     title: 'Logo Page',
     subtitle: 'A square canvas for designing a logo or brand mark.',
     icon: 'sparkles-outline',
+    emoji: '✨',
+    accent: '#D97706',
+    accentSoft: '#FFFBEB',
+    gradient: ['#FBBF24', '#B45309'],
   },
 };
