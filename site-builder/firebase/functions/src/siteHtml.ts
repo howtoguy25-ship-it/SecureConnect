@@ -1564,10 +1564,10 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   <button onclick="siteSparkCart.checkout()" style="margin-top:10px;width:100%;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">Checkout</button>
 </div>
 <div id="sitespark-order-banner" style="display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;padding:12px 20px;border-radius:10px;font-family:-apple-system,sans-serif;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);"></div>
-<div id="sitespark-track-fab" style="position:fixed;bottom:20px;left:20px;z-index:9998;background:#111827;color:#fff;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;font-family:-apple-system,sans-serif;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.toggleTrackPanel()">
+<div id="sitespark-track-fab" style="position:fixed;bottom:46px;left:20px;z-index:9998;background:#111827;color:#fff;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;font-family:-apple-system,sans-serif;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.toggleTrackPanel()">
   📦 Track Order
 </div>
-<div id="sitespark-track-panel" style="display:none;position:fixed;bottom:70px;left:20px;z-index:9998;width:260px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
+<div id="sitespark-track-panel" style="display:none;position:fixed;bottom:96px;left:20px;z-index:9998;width:260px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
   <div style="font-weight:700;margin-bottom:8px;color:#0F172A;">Track your order</div>
   <label style="font-size:11px;color:#64748B;">Order number</label>
   <input id="sitespark-track-orderid" type="text" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
@@ -1647,13 +1647,20 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   function remove(productId, variantKey){
     save(load().filter(function(i){ return !(i.productId === productId && (i.variantKey||null) === (variantKey||null)); }));
   }
+  // The cart panel (bottom-right) and track-order panel (bottom-left) are wide enough on a
+  // real phone-width screen to overlap each other in the middle if both were ever open at
+  // once -- mutually exclusive, so opening one always closes the other first.
   function togglePanel(){
     var panel = document.getElementById('sitespark-cart-panel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    var opening = panel.style.display === 'none';
+    document.getElementById('sitespark-track-panel').style.display = 'none';
+    panel.style.display = opening ? 'block' : 'none';
   }
   function toggleTrackPanel(){
     var panel = document.getElementById('sitespark-track-panel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    var opening = panel.style.display === 'none';
+    document.getElementById('sitespark-cart-panel').style.display = 'none';
+    panel.style.display = opening ? 'block' : 'none';
   }
   // No buyer account exists in this app -- an order number (their own Stripe Checkout
   // session id, shown once on the success banner and remembered on this device) plus the
