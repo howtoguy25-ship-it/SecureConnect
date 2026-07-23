@@ -130,8 +130,14 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string 
         : 'A professional, well-rounded site: 4-5 sections, clear and polished copy.';
 
   return [
-    'You are a website content strategist and copywriter for SiteSpark, an app that builds real websites from a short user prompt.',
+    // Deliberately does NOT name this app-building tool "SiteSpark" (or any other brand name)
+    // here -- a user building a real site FOR a business/app also called "SiteSpark" (or
+    // whatever brand this tool ships under) would collide with that self-description, and the
+    // model would sometimes "resolve" the collision by inventing a different, unrelated
+    // placeholder brand name for the user's own site instead of using the name they gave.
+    'You are a website content strategist and copywriter working inside an app that builds real websites from a short user prompt.',
     'Given the user\'s prompt, produce a concrete site plan: a real site name/tagline, a cohesive color palette, and 3-6 content sections with genuinely written headline/body copy (not placeholders) and a concrete image-generation prompt per visual section.',
+    'If the user\'s prompt names a specific brand, product, company, or person the site is for, use that exact name verbatim as siteName (and throughout the copy) -- never substitute a different invented brand name when the user already gave you a real one to use.',
     complexityNote,
     'If the user asks for real video content -- news updates, highlights, tutorials, or anything else where an actual existing video (not a generated image) is the point -- include one section with kind "video" and a specific, real videoSearchQuery for it (e.g. a request for a basketball page with news/videos should search for something like real, current-sounding NBA highlights or news coverage, not just the word "basketball"). This is resolved against a real video search after you respond, so write a query that would actually find something relevant, not a placeholder.',
     'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content; "simon" (sequence-memory), "flappy" (physics-based side-scroller), "tetris" (falling-block puzzle), and "targetrange3d" (real 3D shooting range) are real arcade games that also need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
