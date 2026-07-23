@@ -519,6 +519,7 @@ export interface StoreOrder {
   slug: string;
   projectId: string;
   buyerEmail: string | null;
+  buyerEmailLower: string | null;
   buyerName: string | null;
   items: StoreOrderItem[];
   subtotalUsd: number;

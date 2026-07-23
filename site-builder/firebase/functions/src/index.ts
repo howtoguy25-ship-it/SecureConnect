@@ -135,10 +135,10 @@ const PRODUCT_STOCK_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.clo
 // published page's cart panel so a buyer gets real feedback ("10% off applied") as soon as
 // they type a code, before committing to checkout (see siteHtml.ts).
 const DISCOUNT_VALIDATE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/validateDiscountCode`;
-// Same pattern, for getOrderStatus (defined further down) -- baked into every published
-// page's "Track your order" widget so a buyer with no account can still check
-// fulfillment/tracking status using just their order id and email (see siteHtml.ts).
-const ORDER_STATUS_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getOrderStatus`;
+// Same pattern, for getOrdersByEmail (defined further down) -- baked into every published
+// page's "Track your order" widget so a buyer with no account and no order id can list every
+// order they've placed at this site using only the email they paid with (see siteHtml.ts).
+const ORDERS_BY_EMAIL_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getOrdersByEmail`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -838,12 +838,12 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
     const pagesHtml: Record<string, string> = { ...extraPagesHtml };
     for (const page of project.pages) {
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
-      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDER_STATUS_URL, renderPageNavHtml(project.pages, page.slug));
+      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, renderPageNavHtml(project.pages, page.slug));
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDER_STATUS_URL);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
@@ -1583,6 +1583,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
     slug,
     projectId,
     buyerEmail: session.customer_details?.email ?? null,
+    buyerEmailLower: session.customer_details?.email?.trim().toLowerCase() ?? null,
     buyerName: session.customer_details?.name ?? null,
     items,
     subtotalUsd,
@@ -2200,6 +2201,45 @@ export const getOrderStatus = onRequest({ cors: true, invoker: 'public' }, async
     createdAt: order.createdAt,
     items: order.items.map((item) => ({ name: item.name, quantity: item.quantity, variantLabel: item.variantLabel })),
   });
+});
+
+// Public, unauthenticated -- lets a buyer with no account and no order id list every order
+// they've placed at this site using only the email they paid with, resolving sellerUid from
+// the slug's publishedSites doc the same way getOrderStatus does. Filters on buyerEmailLower
+// alone (a single-field query needs no composite index) and narrows to this site's own slug
+// and sorts newest-first in memory, since a buyer's own order count is always small.
+export const getOrdersByEmail = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
+  const slug = (req.query.slug as string) ?? '';
+  const email = ((req.query.email as string) ?? '').trim().toLowerCase();
+  if (!slug || !email) {
+    res.status(400).json({ error: 'Missing slug or email.' });
+    return;
+  }
+
+  const siteDoc = await db.collection('publishedSites').doc(slug).get();
+  const sellerUid = (siteDoc.data() as { uid?: string } | undefined)?.uid;
+  if (!sellerUid) {
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json({ orders: [] });
+    return;
+  }
+
+  const snap = await db.collection('users').doc(sellerUid).collection('orders').where('buyerEmailLower', '==', email).get();
+  const orders = snap.docs
+    .map((doc) => doc.data() as StoreOrder)
+    .filter((order) => order.slug === slug)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((order) => ({
+      orderId: order.id,
+      createdAt: order.createdAt,
+      fulfillmentStatus: order.fulfillmentStatus,
+      trackingCarrier: order.trackingCarrier,
+      trackingNumber: order.trackingNumber,
+      itemsSummary: order.items.map((item) => `${item.quantity}× ${item.name}${item.variantLabel ? ' (' + item.variantLabel + ')' : ''}`).join(', '),
+    }));
+
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({ orders });
 });
 
 const discountCodeRef = (uid: string, code: string) => db.collection('users').doc(uid).collection('discountCodes').doc(code.trim().toUpperCase());

@@ -1529,7 +1529,7 @@ ${script}`;
 // Stock/price are re-validated server-side in createStoreCheckout regardless of what's
 // baked into this page, so a stale published page can never let someone buy at an old
 // price or oversell what's actually left.
-function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string, orderStatusUrl: string): string {
+function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string, ordersByEmailUrl: string): string {
   return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
   🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
 </div>
@@ -1569,18 +1569,16 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
 </div>
 <div id="sitespark-track-panel" style="display:none;position:fixed;bottom:96px;left:20px;z-index:9998;width:260px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
   <div style="font-weight:700;margin-bottom:8px;color:#0F172A;">Track your order</div>
-  <label style="font-size:11px;color:#64748B;">Order number</label>
-  <input id="sitespark-track-orderid" type="text" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
   <label style="font-size:11px;color:#64748B;">Email used at checkout</label>
   <input id="sitespark-track-email" type="email" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
   <button onclick="siteSparkCart.checkOrderStatus()" style="width:100%;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;">Check Status</button>
-  <div id="sitespark-track-result" style="font-size:12px;margin-top:8px;color:#64748B;"></div>
+  <div id="sitespark-track-result" style="font-size:12px;margin-top:8px;color:#64748B;max-height:220px;overflow-y:auto;"></div>
 </div>
 <script>(function(){
   var SLUG=${JSON.stringify(slug)};
   var CHECKOUT_URL=${JSON.stringify(checkoutUrl)};
   var DISCOUNT_URL=${JSON.stringify(discountValidateUrl)};
-  var ORDER_STATUS_URL=${JSON.stringify(orderStatusUrl)};
+  var ORDERS_BY_EMAIL_URL=${JSON.stringify(ordersByEmailUrl)};
   var STORAGE_KEY='sitespark_cart_'+SLUG;
   var DISCOUNT_KEY='sitespark_discount_'+SLUG;
   var LAST_ORDER_KEY='sitespark_last_order_'+SLUG;
@@ -1662,29 +1660,31 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     document.getElementById('sitespark-cart-panel').style.display = 'none';
     panel.style.display = opening ? 'block' : 'none';
   }
-  // No buyer account exists in this app -- an order number (their own Stripe Checkout
-  // session id, shown once on the success banner and remembered on this device) plus the
-  // email they paid with is the only "login" a buyer has to check on their own order later.
+  // No buyer account exists in this app -- the email they paid with is the only "login" a
+  // buyer has to check on their orders later, so a lookup returns every order they've ever
+  // placed at this site rather than requiring them to keep track of an order number.
   function checkOrderStatus(){
-    var orderId = document.getElementById('sitespark-track-orderid').value.trim();
     var email = document.getElementById('sitespark-track-email').value.trim();
     var result = document.getElementById('sitespark-track-result');
-    if (!orderId || !email) { result.style.color = '#DC2626'; result.textContent = 'Enter both your order number and email.'; return; }
+    if (!email) { result.style.color = '#DC2626'; result.textContent = 'Enter the email you used at checkout.'; return; }
     result.style.color = '#94A3B8';
     result.textContent = 'Checking…';
-    fetch(ORDER_STATUS_URL + '?slug=' + encodeURIComponent(SLUG) + '&orderId=' + encodeURIComponent(orderId) + '&email=' + encodeURIComponent(email))
+    fetch(ORDERS_BY_EMAIL_URL + '?slug=' + encodeURIComponent(SLUG) + '&email=' + encodeURIComponent(email))
       .then(function(r){ return r.json(); })
       .then(function(data){
         if (data.error) { result.style.color = '#DC2626'; result.textContent = data.error; return; }
-        var statusLabel = { unfulfilled: 'Preparing your order', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' }[data.fulfillmentStatus] || data.fulfillmentStatus;
-        var html = '<strong>' + statusLabel + '</strong>';
-        if (data.trackingCarrier || data.trackingNumber) {
-          html += '<br>' + (data.trackingCarrier || 'Carrier') + (data.trackingNumber ? ': ' + data.trackingNumber : '');
-        }
+        var orders = data.orders || [];
+        if (orders.length === 0) { result.style.color = '#64748B'; result.textContent = 'No orders found for that email.'; return; }
+        var statusLabels = { unfulfilled: 'Preparing your order', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' };
         result.style.color = '#0F172A';
-        result.innerHTML = html;
+        result.innerHTML = orders.map(function(o){
+          var statusLabel = statusLabels[o.fulfillmentStatus] || o.fulfillmentStatus;
+          var tracking = (o.trackingCarrier || o.trackingNumber) ? '<br>' + (o.trackingCarrier || 'Carrier') + (o.trackingNumber ? ': ' + o.trackingNumber : '') : '';
+          var items = o.itemsSummary ? '<br><span style="color:#64748B;">' + o.itemsSummary + '</span>' : '';
+          return '<div style="border-top:1px solid #F1F5F9;padding-top:6px;margin-top:6px;"><strong>Order #' + String(o.orderId).slice(-8).toUpperCase() + '</strong> — ' + statusLabel + tracking + items + '</div>';
+        }).join('');
       })
-      .catch(function(){ result.style.color = '#DC2626'; result.textContent = 'Could not check that order.'; });
+      .catch(function(){ result.style.color = '#DC2626'; result.textContent = 'Could not check that email.'; });
   }
   // A live preview only (validateDiscountCode is read-only, never redeems anything) --
   // createStoreCheckout re-validates for real at the moment of payment, since a code could
@@ -1747,14 +1747,13 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   };
   render();
 
-  // Pre-fills the track-order widget with this device's most recent order, so a buyer who
-  // just checked out doesn't have to hunt down their own order number again -- only stored
-  // locally, never sent anywhere until they actually press Check Status.
+  // Pre-fills the track-order widget's email with whatever this device last checked out
+  // with, so a buyer who just ordered doesn't have to retype it -- only stored locally,
+  // never sent anywhere until they actually press Check Status.
   var lastOrder = null;
   try { lastOrder = JSON.parse(localStorage.getItem(LAST_ORDER_KEY)); } catch (e) {}
-  if (lastOrder && lastOrder.orderId) {
-    document.getElementById('sitespark-track-orderid').value = lastOrder.orderId;
-    if (lastOrder.email) document.getElementById('sitespark-track-email').value = lastOrder.email;
+  if (lastOrder && lastOrder.email) {
+    document.getElementById('sitespark-track-email').value = lastOrder.email;
   }
 
   var params = new URLSearchParams(window.location.search);
@@ -1766,7 +1765,6 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     localStorage.removeItem(DISCOUNT_KEY);
     if (order === 'success' && sessionId) {
       localStorage.setItem(LAST_ORDER_KEY, JSON.stringify({ orderId: sessionId, email: (lastOrder && lastOrder.email) || '' }));
-      document.getElementById('sitespark-track-orderid').value = sessionId;
     }
     var banner = document.getElementById('sitespark-order-banner');
     var orderNumberSuffix = order === 'success' && sessionId ? ' Order #' + sessionId.slice(-8).toUpperCase() + '.' : '';
@@ -1989,13 +1987,21 @@ export function renderRichTextParagraphsHtml(paragraphs: RichTextRun[][]): strin
 // The real three-line menu button shown at the top of every published page (multi-page or
 // not) -- a plain CSS/JS slide-out panel, no framework needed for something this small.
 // `menu.enabled === false` (an explicit site-owner choice, distinct from never having set one
-// up) is the only thing that hides it entirely.
-function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefined): string {
-  if (!menu || !menu.enabled || menu.items.length === 0) return '';
-  const links = menu.items
+// up) hides the site owner's own custom links, but the button/panel itself still renders
+// whenever `trackOrderEnabled` (this page has products, i.e. the cart/track-order widget
+// exists on it) so "Track Your Order" always has somewhere to live even on a site whose
+// owner never built a custom menu.
+function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefined, trackOrderEnabled: boolean): string {
+  const customItems = menu && menu.enabled ? menu.items : [];
+  if (customItems.length === 0 && !trackOrderEnabled) return '';
+  const linkStyle = 'display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;';
+  const trackLink = trackOrderEnabled
+    ? `<a href="#" onclick="document.getElementById('sitespark-menu-panel').style.display='none';siteSparkCart.toggleTrackPanel();return false;" style="${linkStyle}">📦 Track Your Order</a>`
+    : '';
+  const customLinks = customItems
     .map(
       (item) =>
-        `<a href="${escapeAttr(resolveMenuTargetHref(item.target, pages))}" style="display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;">${escapeHtml(item.label)}</a>`
+        `<a href="${escapeAttr(resolveMenuTargetHref(item.target, pages))}" style="${linkStyle}">${escapeHtml(item.label)}</a>`
     )
     .join('');
   return `<button aria-label="Menu" onclick="document.getElementById('sitespark-menu-panel').style.display='block'" style="position:fixed;top:14px;left:14px;z-index:9996;width:42px;height:42px;border-radius:10px;border:none;background:#0F172A;color:#fff;font-size:18px;cursor:pointer;">&#9776;</button>
@@ -2005,7 +2011,7 @@ function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefine
       <span style="font-weight:800;font-size:15px;color:#0F172A;">Menu</span>
       <button aria-label="Close" onclick="document.getElementById('sitespark-menu-panel').style.display='none';" style="background:none;border:none;font-size:22px;color:#94A3B8;cursor:pointer;">&times;</button>
     </div>
-    ${links}
+    ${trackLink}${customLinks}
   </div>
 </div>`;
 }
@@ -2048,7 +2054,7 @@ export function renderPolicyPageHtml(
   </style>
 </head>
 <body>
-  ${renderMenuHtml(menu, pages)}
+  ${renderMenuHtml(menu, pages, false)}
   <div class="wrap">
     <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
     <h1 style="font-size:26px;margin:16px 0 20px;">${escapeHtml(policy.title)}</h1>
@@ -2087,7 +2093,7 @@ export function renderPoliciesIndexHtml(
   </style>
 </head>
 <body>
-  ${renderMenuHtml(menu, pages)}
+  ${renderMenuHtml(menu, pages, false)}
   <div class="wrap">
     <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
     <h1 style="font-size:26px;margin:16px 0 20px;">Policies</h1>
@@ -2104,7 +2110,7 @@ export function renderProjectHtml(
   reportUrl: string,
   productStockUrl: string,
   discountValidateUrl: string,
-  orderStatusUrl: string,
+  ordersByEmailUrl: string,
   navHtml = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
@@ -2179,7 +2185,7 @@ export function renderProjectHtml(
 <body>
   ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
   ${hasTargetRange3D ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
-  ${renderMenuHtml(project.menu, project.pages)}
+  ${renderMenuHtml(project.menu, project.pages, hasProducts)}
   ${navHtml}
   ${renderAnnouncementBars(project)}
   <div id="site-wrapper">
@@ -2191,7 +2197,7 @@ export function renderProjectHtml(
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
   ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
   ${renderPopupAnnouncements(project)}
-  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl, orderStatusUrl) : ''}
+  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl, ordersByEmailUrl) : ''}
   <script>
     (function () {
       var canvas = document.getElementById('canvas');

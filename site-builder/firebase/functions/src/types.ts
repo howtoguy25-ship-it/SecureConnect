@@ -548,6 +548,10 @@ export interface StoreOrder {
   slug: string;
   projectId: string;
   buyerEmail: string | null;
+  // Lowercased/trimmed copy of buyerEmail, kept in sync at write time -- lets
+  // getOrdersByEmail match on a single indexed field regardless of how the buyer typed
+  // their email at checkout vs. when looking their order up later.
+  buyerEmailLower: string | null;
   buyerName: string | null;
   items: StoreOrderItem[];
   subtotalUsd: number;
