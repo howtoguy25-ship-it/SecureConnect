@@ -65,14 +65,25 @@ export default function AIClarifyScreen({ navigation, route }: Props) {
     call.catch(() => {});
     setStarting(false);
 
+    // Only a real, deterministic "you can't start this build" rejection (out of credits,
+    // or the request itself was invalid/unauthenticated) should keep the user on this
+    // screen -- those always throw before any real work starts. Any other error surfacing
+    // in this window (a network blip, a slow cold start, a transient timeout) does NOT mean
+    // the build didn't start: the request already reached the server, which keeps running
+    // regardless of what the client concluded. Treating those as a dead end left the app
+    // stuck showing this screen while a real build kept going (and finishing) unseen --
+    // navigating to the progress screen instead lets its own live Firestore subscription
+    // show the real outcome either way, including a real error state if it truly failed.
     if (quickResult.type === 'rejected') {
       const err = quickResult.error;
       if (err?.code === 'functions/resource-exhausted') {
         navigation.navigate('Subscription');
-      } else {
-        showAlert('Could not start build', err?.message ?? 'Something went wrong.');
+        return;
       }
-      return;
+      if (err?.code === 'functions/invalid-argument' || err?.code === 'functions/unauthenticated') {
+        showAlert('Could not start build', err?.message ?? 'Something went wrong.');
+        return;
+      }
     }
 
     navigation.navigate('AIBuildProgress', { sessionId, pageType, prompt: finalPrompt, complexity });
