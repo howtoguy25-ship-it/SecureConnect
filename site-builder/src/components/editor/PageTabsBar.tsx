@@ -1,35 +1,42 @@
-import React, { useEffect, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Modal, TextInput } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import { GradientFill, SitePage } from '@/types';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 
+export interface PageTabsBarHandle {
+  // Lets the editor's own header palette icon open this same edit-page modal (name +
+  // background + delete) for whichever page is currently active, instead of duplicating a
+  // second background-editor UI just for multi-page projects.
+  openBackgroundEditor: (pageId: string) => void;
+}
+
 // Lets a manually-built website have real, connected multiple pages (Home, About,
 // Contact, ...) -- see EditorContext's page CRUD functions. Only ever rendered when
 // project.pages exists (Social/Logo/Video projects, and every project built before this
 // feature existed, never show this bar at all).
-export default function PageTabsBar({
-  pages,
-  activePageId,
-  onSwitch,
-  onAdd,
-  onRename,
-  onRemove,
-  onSetBackground,
-}: {
+export default forwardRef<PageTabsBarHandle, {
   pages: SitePage[];
   activePageId: string | null;
   onSwitch: (id: string) => void;
   onAdd: (name: string) => void;
   onRename: (id: string, name: string) => void;
   onRemove: (id: string) => void;
+  onDuplicate: (id: string) => void;
   onSetBackground: (id: string, patch: { backgroundColor?: string; backgroundGradient?: GradientFill | null }) => void;
-}) {
+}>(function PageTabsBar({ pages, activePageId, onSwitch, onAdd, onRename, onRemove, onDuplicate, onSetBackground }, ref) {
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState('');
   const [editing, setEditing] = useState<SitePage | null>(null);
   const [editName, setEditName] = useState('');
+
+  useImperativeHandle(ref, () => ({
+    openBackgroundEditor: (pageId: string) => {
+      const page = pages.find((p) => p.id === pageId);
+      if (page) openEdit(page);
+    },
+  }));
 
   // Keeps the modal's snapshot live while it's open -- e.g. `onSetBackground` writes into
   // `pages` (the real source of truth) rather than `editing`, so without this the
@@ -133,11 +140,24 @@ export default function PageTabsBar({
                 onGradientChange={(backgroundGradient) => onSetBackground(editing.id, { backgroundGradient })}
               />
             )}
-            <View style={styles.modalActions}>
+            <View style={[styles.modalActions, { marginBottom: 8 }]}>
               <Pressable style={styles.modalCancel} onPress={confirmDelete} disabled={pages.length <= 1}>
                 <Ionicons name="trash-outline" size={16} color={pages.length <= 1 ? '#CBD5E1' : '#DC2626'} />
                 <Text style={[styles.modalCancelText, { color: pages.length <= 1 ? '#CBD5E1' : '#DC2626' }]}>Delete</Text>
               </Pressable>
+              <Pressable
+                style={styles.modalCancel}
+                onPress={() => {
+                  if (!editing) return;
+                  onDuplicate(editing.id);
+                  setEditing(null);
+                }}
+              >
+                <Ionicons name="copy-outline" size={16} color="#334155" />
+                <Text style={styles.modalCancelText}>Duplicate</Text>
+              </Pressable>
+            </View>
+            <View style={styles.modalActions}>
               <Pressable style={styles.modalConfirm} onPress={confirmRename}>
                 <Text style={styles.modalConfirmText}>Save</Text>
               </Pressable>
@@ -150,7 +170,7 @@ export default function PageTabsBar({
       </Modal>
     </>
   );
-}
+});
 
 const styles = StyleSheet.create({
   bar: { flexGrow: 0, backgroundColor: '#F8FAFC', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E2E8F0' },

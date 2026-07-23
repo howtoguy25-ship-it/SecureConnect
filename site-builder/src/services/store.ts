@@ -53,6 +53,14 @@ export async function setShippingFee(shippingFeeUsd: number | null): Promise<voi
   await call({ shippingFeeUsd });
 }
 
+// Sets the real ISO 4217 currency (e.g. "usd", "gbp", "eur") that this seller's Stripe
+// checkout sessions charge in and that every price on their published sites displays with --
+// see setCurrency in Cloud Functions and currencySymbol/CURRENCY_OPTIONS in @/utils/currency.
+export async function setCurrency(currency: string): Promise<void> {
+  const call = httpsCallable<{ currency: string }, { ok: boolean }>(requireFunctions(functions), 'setCurrency');
+  await call({ currency });
+}
+
 export const sellerAccountStore = {
   subscribe(uid: string, onChange: (account: SellerAccount | null) => void): () => void {
     return onSnapshot(doc(requireDb(db), 'users', uid, 'meta', 'sellerAccount'), (snap) => {

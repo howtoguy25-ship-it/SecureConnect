@@ -6,8 +6,9 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
-import { discountCodesStore, createDiscountCode, setDiscountCodeActive, setDiscountCodeAnnouncement, deleteDiscountCode } from '@/services/store';
+import { discountCodesStore, createDiscountCode, setDiscountCodeActive, setDiscountCodeAnnouncement, deleteDiscountCode, sellerAccountStore } from '@/services/store';
 import { DiscountCode, DiscountKind, DiscountType } from '@/types';
+import { currencySymbol } from '@/utils/currency';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiscountCodes'>;
 
@@ -30,10 +31,10 @@ const DURATION_PRESETS: { label: string; ms: number }[] = [
   { label: '1 month', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
-function summaryFor(code: DiscountCode): string {
+function summaryFor(code: DiscountCode, sym: string): string {
   const kind = code.kind ?? 'order';
   if (kind === 'bogo') return `Buy ${code.bogoBuyQuantity} ${code.targetProductName}, get ${code.bogoGetQuantity} free`;
-  const amountText = code.type === 'percent' ? `${code.amount}% off` : `$${code.amount.toFixed(2)} off`;
+  const amountText = code.type === 'percent' ? `${code.amount}% off` : `${sym}${code.amount.toFixed(2)} off`;
   if (kind === 'item') return `${amountText} ${code.targetProductName}`;
   if (kind === 'shipping') return `${amountText} shipping`;
   return amountText;
@@ -41,12 +42,14 @@ function summaryFor(code: DiscountCode): string {
 
 function CodeRow({
   code,
+  currencySym,
   onToggle,
   onDelete,
   onAnnounce,
   busy,
 }: {
   code: DiscountCode;
+  currencySym: string;
   onToggle: () => void;
   onDelete: () => void;
   onAnnounce: (durationMs: number | null) => void;
@@ -62,7 +65,7 @@ function CodeRow({
       <View style={styles.rowTop}>
         <View style={{ flex: 1 }}>
           <Text style={styles.codeText}>{code.code}</Text>
-          <Text style={styles.summaryText}>{summaryFor(code)}</Text>
+          <Text style={styles.summaryText}>{summaryFor(code, currencySym)}</Text>
           <Text style={styles.metaText}>
             {code.redemptionCount} used{code.maxRedemptions != null ? ` / ${code.maxRedemptions}` : ''}
             {code.startsAt != null ? ` · starts ${new Date(code.startsAt).toLocaleDateString()}` : ''}
@@ -122,6 +125,8 @@ export default function DiscountCodesScreen({ navigation }: Props) {
   const [codes, setCodes] = useState<DiscountCode[]>([]);
   const [busyCode, setBusyCode] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [sellerCurrency, setSellerCurrency] = useState<string | undefined>(undefined);
+  const sym = currencySymbol(sellerCurrency);
 
   const [codeInput, setCodeInput] = useState('');
   const [kind, setKind] = useState<DiscountKind>('order');
@@ -140,6 +145,11 @@ export default function DiscountCodesScreen({ navigation }: Props) {
   useEffect(() => {
     if (!user) return;
     return discountCodesStore.subscribe(user.uid, setCodes);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    return sellerAccountStore.subscribe(user.uid, (account) => setSellerCurrency(account?.currency));
   }, [user]);
 
   const resetForm = () => {
@@ -339,7 +349,7 @@ export default function DiscountCodesScreen({ navigation }: Props) {
                     <Text style={[styles.toggleBtnText, type === 'percent' && styles.toggleBtnTextActive]}>% Percent off</Text>
                   </Pressable>
                   <Pressable style={[styles.toggleBtn, type === 'fixed' && styles.toggleBtnActive]} onPress={() => setType('fixed')}>
-                    <Text style={[styles.toggleBtnText, type === 'fixed' && styles.toggleBtnTextActive]}>$ Fixed amount off</Text>
+                    <Text style={[styles.toggleBtnText, type === 'fixed' && styles.toggleBtnTextActive]}>{sym} Fixed amount off</Text>
                   </Pressable>
                 </View>
                 <TextInput
@@ -442,6 +452,7 @@ export default function DiscountCodesScreen({ navigation }: Props) {
         renderItem={({ item }) => (
           <CodeRow
             code={item}
+            currencySym={sym}
             onToggle={() => handleToggle(item)}
             onDelete={() => handleDelete(item)}
             onAnnounce={(durationMs) => handleAnnounce(item, durationMs)}

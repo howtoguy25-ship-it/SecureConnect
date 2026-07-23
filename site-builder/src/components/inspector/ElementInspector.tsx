@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,9 @@ import { useGoogleFont } from '@/utils/useGoogleFont';
 import { editImageBackground } from '@/services/uploads';
 import { BACKGROUND_EDIT_CREDIT_COST } from '@/data/pricing';
 import { updateProductStock } from '@/services/productStock';
+import { useAuth } from '@/context/AuthContext';
+import { sellerAccountStore } from '@/services/store';
+import { currencySymbol } from '@/utils/currency';
 
 const MAX_PRODUCT_IMAGES = 7;
 
@@ -189,6 +192,14 @@ function ImageBackgroundTools({ element, onChange }: { element: ImageElement; on
 }
 
 export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug }: Props) {
+  const { user } = useAuth();
+  const [sellerCurrency, setSellerCurrency] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!user) return;
+    return sellerAccountStore.subscribe(user.uid, (account) => setSellerCurrency(account?.currency));
+  }, [user]);
+  const sym = currencySymbol(sellerCurrency);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -549,7 +560,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               multiline
             />
 
-            <Text style={styles.fieldLabel}>Price (USD)</Text>
+            <Text style={styles.fieldLabel}>Price ({sym.trim()})</Text>
             <TextInput
               style={styles.textInput}
               value={String(element.priceUsd)}
@@ -600,7 +611,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             <Text style={styles.helperText}>
               For your own margin tracking only — buyers and visitors never see this, it never appears anywhere on your published site.
               {element.costUsd != null && element.priceUsd > element.costUsd
-                ? ` Profit: $${(element.priceUsd - element.costUsd).toFixed(2)} per sale.`
+                ? ` Profit: ${sym}${(element.priceUsd - element.costUsd).toFixed(2)} per sale.`
                 : ''}
             </Text>
 
@@ -638,7 +649,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               options={element.variantOptions}
               variants={element.variants}
               trackInventory={element.trackInventory}
-              baseFallbackPriceLabel={`Same as $${element.priceUsd.toFixed(2)}`}
+              baseFallbackPriceLabel={`Same as ${sym}${element.priceUsd.toFixed(2)}`}
               onChange={(patch) => onChange(patch as any)}
             />
 
@@ -748,27 +759,36 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               if (availableProducts.length === 0) {
                 return <Text style={styles.helperText}>Add a Product to this page first, then come back here to group it into a collection.</Text>;
               }
-              return availableProducts.map((p) => {
-                const selected = element.productIds.includes(p.id);
-                return (
+              const allSelected = availableProducts.every((p) => element.productIds.includes(p.id));
+              return (
+                <>
                   <Pressable
-                    key={p.id}
-                    style={[
-                      styles.toggleBtn,
-                      selected && styles.toggleBtnActive,
-                      { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, justifyContent: 'flex-start' },
-                    ]}
-                    onPress={() =>
-                      onChange({
-                        productIds: selected ? element.productIds.filter((id) => id !== p.id) : [...element.productIds, p.id],
-                      } as any)
-                    }
+                    style={styles.collectionSelectAllBtn}
+                    onPress={() => onChange({ productIds: allSelected ? [] : availableProducts.map((p) => p.id) } as any)}
                   >
-                    <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={selected ? '#2563EB' : '#94A3B8'} />
-                    <Text style={styles.toggleBtnText}>{p.name || 'Untitled product'}</Text>
+                    <Text style={styles.collectionSelectAllText}>{allSelected ? 'Clear all' : 'Select all'}</Text>
                   </Pressable>
-                );
-              });
+                  {availableProducts.map((p) => {
+                    const selected = element.productIds.includes(p.id);
+                    return (
+                      <Pressable
+                        key={p.id}
+                        style={[styles.collectionProductRow, selected && styles.collectionProductRowActive]}
+                        onPress={() =>
+                          onChange({
+                            productIds: selected ? element.productIds.filter((id) => id !== p.id) : [...element.productIds, p.id],
+                          } as any)
+                        }
+                      >
+                        <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={26} color={selected ? '#2563EB' : '#94A3B8'} />
+                        <Text style={styles.collectionProductRowText} numberOfLines={1}>
+                          {p.name || 'Untitled product'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </>
+              );
             })()}
             <Text style={styles.helperText}>
               Pick 2 or more products built on this page to group them into one browsable collection card on your published site.
@@ -1165,6 +1185,23 @@ const styles = StyleSheet.create({
   },
   toggleBtnActive: { backgroundColor: '#DBEAFE' },
   toggleBtnText: { fontSize: 12, fontWeight: '600', color: '#0F172A' },
+  collectionSelectAllBtn: { alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginBottom: 4 },
+  collectionSelectAllText: { fontSize: 13, fontWeight: '700', color: '#2563EB' },
+  collectionProductRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+  },
+  collectionProductRowActive: { backgroundColor: '#EFF6FF', borderColor: '#2563EB' },
+  collectionProductRowText: { fontSize: 15, fontWeight: '700', color: '#0F172A', flexShrink: 1 },
   saveStockBtn: {
     flexDirection: 'row',
     alignItems: 'center',

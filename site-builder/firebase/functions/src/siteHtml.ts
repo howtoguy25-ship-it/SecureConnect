@@ -1,5 +1,6 @@
 import { CanvasElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage } from './types';
 import { getFontOption } from './fonts';
+import { currencySymbol } from './currency';
 
 // Renders a Project's absolutely-positioned canvas into a real, self-contained static
 // HTML page. The editor's data model is an absolute-position canvas (not semantic
@@ -1166,7 +1167,8 @@ function renderGameHtml(el: GameElement, base: string, slug: string): string {
 ${gameScript}`;
 }
 
-function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[]): string {
+function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], currency = 'usd'): string {
+  const sym = currencySymbol(currency);
   const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
   switch (el.type) {
     case 'text': {
@@ -1389,7 +1391,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   function refresh(){
     var variant = currentVariant();
     var effectivePrice = (variant && variant.priceUsd != null) ? variant.priceUsd : basePriceUsd;
-    if (priceEl) priceEl.textContent = '$' + effectivePrice.toFixed(2);
+    if (priceEl) priceEl.textContent = ${JSON.stringify(sym)} + effectivePrice.toFixed(2);
     if (!liveTop) return;
     if (!liveTop.inStock) { setState('Out of stock', '#DC2626', true, '${isService ? 'Not Available' : 'Out of Stock'}'); return; }
     if (variant === undefined) { setState('Select ${escapeHtml(el.variantOptions.map((o) => o.name).join(' & '))} to continue', '#94A3B8', true, 'Select Options'); return; }
@@ -1451,10 +1453,10 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
       <div style="display:flex;align-items:baseline;gap:6px;">
-        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
+        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:14px;">${sym}${el.priceUsd.toFixed(2)}</div>
         ${
           el.compareAtPriceUsd != null && el.compareAtPriceUsd > el.priceUsd
-            ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">$${el.compareAtPriceUsd.toFixed(2)}</div>`
+            ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">${sym}${el.compareAtPriceUsd.toFixed(2)}</div>`
             : ''
         }
       </div>
@@ -1492,7 +1494,7 @@ ${script}`;
   }
   <div style="flex:1;min-width:0;">
     <div style="font-weight:700;font-size:13px;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name || 'Untitled product')}</div>
-    <div style="font-size:12px;color:#4338CA;font-weight:700;">$${p.priceUsd.toFixed(2)}</div>
+    <div style="font-size:12px;color:#4338CA;font-weight:700;">${sym}${p.priceUsd.toFixed(2)}</div>
   </div>
 </a>`
             )
@@ -1529,7 +1531,8 @@ ${script}`;
 // Stock/price are re-validated server-side in createStoreCheckout regardless of what's
 // baked into this page, so a stale published page can never let someone buy at an old
 // price or oversell what's actually left.
-function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string, ordersByEmailUrl: string): string {
+function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string, ordersByEmailUrl: string, currency = 'usd'): string {
+  const sym = currencySymbol(currency);
   return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
   🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
 </div>
@@ -1579,6 +1582,7 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   var CHECKOUT_URL=${JSON.stringify(checkoutUrl)};
   var DISCOUNT_URL=${JSON.stringify(discountValidateUrl)};
   var ORDERS_BY_EMAIL_URL=${JSON.stringify(ordersByEmailUrl)};
+  var CURRENCY_SYMBOL=${JSON.stringify(sym)};
   var STORAGE_KEY='sitespark_cart_'+SLUG;
   var DISCOUNT_KEY='sitespark_discount_'+SLUG;
   var LAST_ORDER_KEY='sitespark_last_order_'+SLUG;
@@ -1622,20 +1626,20 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     var discountAmount = discountAmountFor(discount, subtotal, items);
     var total = subtotal - discountAmount;
     document.getElementById('sitespark-cart-count').textContent = String(count);
-    document.getElementById('sitespark-cart-total').textContent = '$'+total.toFixed(2);
+    document.getElementById('sitespark-cart-total').textContent = CURRENCY_SYMBOL+total.toFixed(2);
     document.getElementById('sitespark-booking-fields').style.display = hasService(items) ? 'block' : 'none';
 
     var subtotalRow = document.getElementById('sitespark-cart-subtotal-row');
     var discountRow = document.getElementById('sitespark-cart-discount-row');
     if (discount) {
       subtotalRow.style.display = 'flex';
-      document.getElementById('sitespark-cart-subtotal').textContent = '$'+subtotal.toFixed(2);
+      document.getElementById('sitespark-cart-subtotal').textContent = CURRENCY_SYMBOL+subtotal.toFixed(2);
       discountRow.style.display = 'flex';
       document.getElementById('sitespark-cart-discount-label').textContent = discount.code + ' applied';
       // A 'shipping' discount has nothing to show here (there's no shipping fee line in this
       // subtotal-only breakdown) -- it's still real, just reflected once the buyer reaches
       // the actual Stripe checkout page where the shipping fee itself appears.
-      document.getElementById('sitespark-cart-discount-amount').textContent = discount.kind === 'shipping' ? 'at checkout' : '-$'+discountAmount.toFixed(2);
+      document.getElementById('sitespark-cart-discount-amount').textContent = discount.kind === 'shipping' ? 'at checkout' : '-'+CURRENCY_SYMBOL+discountAmount.toFixed(2);
     } else {
       subtotalRow.style.display = 'none';
       discountRow.style.display = 'none';
@@ -1648,7 +1652,7 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
       var label = i.variantLabel ? ' (' + i.variantLabel + ')' : '';
       return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px;">'
         + '<span>'+badge+i.quantity+'&times; '+i.name+label+'</span>'
-        + '<span style="display:flex;align-items:center;gap:6px;"><span>$'+(i.priceUsd*i.quantity).toFixed(2)+'</span>'
+        + '<span style="display:flex;align-items:center;gap:6px;"><span>'+CURRENCY_SYMBOL+(i.priceUsd*i.quantity).toFixed(2)+'</span>'
         + '<a href="#" onclick="siteSparkCart.remove('+JSON.stringify(i.productId)+','+JSON.stringify(i.variantKey||null)+');return false;" style="color:#DC2626;">&times;</a></span>'
         + '</div>';
     }).join('');
@@ -1734,8 +1738,8 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
           var summary = data.kind === 'bogo'
             ? 'Buy ' + data.bogoBuyQuantity + ' ' + data.targetProductName + ', get ' + data.bogoGetQuantity + ' free'
             : data.kind === 'shipping'
-              ? (data.type === 'percent' && data.amount >= 100 ? 'Free shipping' : (data.type === 'percent' ? data.amount + '% off shipping' : '$' + data.amount.toFixed(2) + ' off shipping'))
-              : (data.type === 'percent' ? data.amount + '% off' : '$' + data.amount.toFixed(2) + ' off') + (data.kind === 'item' ? ' ' + data.targetProductName : '');
+              ? (data.type === 'percent' && data.amount >= 100 ? 'Free shipping' : (data.type === 'percent' ? data.amount + '% off shipping' : CURRENCY_SYMBOL + data.amount.toFixed(2) + ' off shipping'))
+              : (data.type === 'percent' ? data.amount + '% off' : CURRENCY_SYMBOL + data.amount.toFixed(2) + ' off') + (data.kind === 'item' ? ' ' + data.targetProductName : '');
           feedback.textContent = summary + ' applied!';
         } else {
           saveDiscount(null);
@@ -2020,24 +2024,56 @@ export function renderRichTextParagraphsHtml(paragraphs: RichTextRun[][]): strin
 
 // The real three-line menu button shown at the top of every published page (multi-page or
 // not) -- a plain CSS/JS slide-out panel, no framework needed for something this small.
-// `menu.enabled === false` (an explicit site-owner choice, distinct from never having set one
-// up) hides the site owner's own custom links, but the button/panel itself still renders
-// whenever `trackOrderEnabled` (this page has products, i.e. the cart/track-order widget
-// exists on it) so "Track Your Order" always has somewhere to live even on a site whose
-// owner never built a custom menu.
-function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefined, trackOrderEnabled: boolean): string {
+// Every site's menu automatically offers Home (the site's first page), Catalog (whichever
+// page actually has product elements on it -- built straight off that page's own content,
+// not something a seller has to separately configure), and Policies (the seller's written
+// policies) whenever there's somewhere real for each to point. `menu.enabled === false`
+// (an explicit site-owner choice, distinct from never having set one up) only ever hides the
+// seller's own custom links, never these three baseline ones or Track/Stay Updated -- the
+// button/panel itself renders whenever there's anything at all to show.
+function renderMenuHtml(
+  menu: SiteMenu | undefined,
+  pages: SitePage[] | undefined,
+  trackOrderEnabled: boolean,
+  policies: PolicyDoc[] | undefined
+): string {
   const customItems = menu && menu.enabled ? menu.items : [];
-  if (customItems.length === 0 && !trackOrderEnabled) return '';
   const linkStyle = 'display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;';
-  const trackLink = trackOrderEnabled
-    ? `<a href="#" onclick="document.getElementById('sitespark-menu-panel').style.display='none';siteSparkCart.toggleTrackPanel();return false;" style="${linkStyle}">📦 Stay Updated</a>`
-    : '';
+
+  const homePage = pages && pages.length > 0 ? pages[0] : null;
+  const homeHref = homePage ? (homePage.slug ? `/${homePage.slug}` : '/') : null;
+  const catalogPage = pages?.find((p) => p.elements.some((el) => el.type === 'product')) ?? null;
+  const catalogHref = catalogPage ? (catalogPage.slug ? `/${catalogPage.slug}` : '/') : null;
+  const isPageTargeted = (pageId: string) => customItems.some((item) => item.target.type === 'page' && item.target.pageId === pageId);
+
+  const homeLink = homePage && !isPageTargeted(homePage.id) ? `<a href="${escapeAttr(homeHref!)}" style="${linkStyle}">Home</a>` : '';
+  const catalogLink =
+    catalogPage && catalogHref !== homeHref && !isPageTargeted(catalogPage.id)
+      ? `<a href="${escapeAttr(catalogHref!)}" style="${linkStyle}">🛍️ Catalog</a>`
+      : '';
+
+  const activePolicies = policies ?? [];
+  const policiesLink =
+    activePolicies.length === 1
+      ? `<a href="${escapeAttr(policyHref(activePolicies[0].id))}" style="${linkStyle}">${escapeHtml(activePolicies[0].title)}</a>`
+      : activePolicies.length > 1
+        ? `<a href="${escapeAttr(POLICIES_INDEX_HREF)}" style="${linkStyle}">Policies</a>`
+        : '';
+
   const customLinks = customItems
     .map(
       (item) =>
         `<a href="${escapeAttr(resolveMenuTargetHref(item.target, pages))}" style="${linkStyle}">${escapeHtml(item.label)}</a>`
     )
     .join('');
+
+  const trackLink = trackOrderEnabled
+    ? `<a href="#" onclick="document.getElementById('sitespark-menu-panel').style.display='none';siteSparkCart.toggleTrackPanel();return false;" style="${linkStyle}">📦 Stay Updated</a>`
+    : '';
+
+  const links = homeLink + catalogLink + customLinks + policiesLink + trackLink;
+  if (!links) return '';
+
   return `<button aria-label="Menu" onclick="document.getElementById('sitespark-menu-panel').style.display='block'" style="position:fixed;top:14px;left:14px;z-index:9996;width:42px;height:42px;border-radius:10px;border:none;background:#0F172A;color:#fff;font-size:18px;cursor:pointer;">&#9776;</button>
 <div id="sitespark-menu-panel" style="display:none;position:fixed;inset:0;z-index:9998;background:#000000AA;" onclick="if(event.target===this)this.style.display='none';">
   <div style="width:82%;max-width:300px;height:100%;background:#fff;box-shadow:2px 0 12px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif;overflow-y:auto;">
@@ -2045,7 +2081,7 @@ function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefine
       <span style="font-weight:800;font-size:15px;color:#0F172A;">Menu</span>
       <button aria-label="Close" onclick="document.getElementById('sitespark-menu-panel').style.display='none';" style="background:none;border:none;font-size:22px;color:#94A3B8;cursor:pointer;">&times;</button>
     </div>
-    ${trackLink}${customLinks}
+    ${links}
   </div>
 </div>`;
 }
@@ -2088,7 +2124,7 @@ export function renderPolicyPageHtml(
   </style>
 </head>
 <body>
-  ${renderMenuHtml(menu, pages, false)}
+  ${renderMenuHtml(menu, pages, false, policies)}
   <div class="wrap">
     <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
     <h1 style="font-size:26px;margin:16px 0 20px;">${escapeHtml(policy.title)}</h1>
@@ -2127,7 +2163,7 @@ export function renderPoliciesIndexHtml(
   </style>
 </head>
 <body>
-  ${renderMenuHtml(menu, pages, false)}
+  ${renderMenuHtml(menu, pages, false, policies)}
   <div class="wrap">
     <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
     <h1 style="font-size:26px;margin:16px 0 20px;">Policies</h1>
@@ -2192,7 +2228,15 @@ export function renderProjectHtml(
   discountValidateUrl: string,
   ordersByEmailUrl: string,
   discountAnnouncementUrl: string,
-  navHtml = ''
+  navHtml = '',
+  // Whether this is the last (or only) page of the site -- the "Built by SiteSpark" badge
+  // only ever renders once per whole published site, at the very end, never once per page of
+  // a multi-page site (see the publishProject loop in index.ts, which passes false for every
+  // page except the last).
+  isLastPage = true,
+  // Lowercase ISO 4217 code, e.g. "usd" -- the seller's own SellerAccount.currency at publish
+  // time (see currency.ts). Defaults to 'usd' for any project with no seller/products.
+  currency = 'usd'
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
   const hasMultiplayerGame = project.elements.some(
@@ -2229,7 +2273,7 @@ export function renderProjectHtml(
   const elementsHtml = project.elements
     .slice()
     .sort((a, b) => a.zIndex - b.zIndex)
-    .map((el) => renderElement(el, slug, productStockUrl, project.elements))
+    .map((el) => renderElement(el, slug, productStockUrl, project.elements, currency))
     .join('\n');
 
   const { width, height } = project.canvasSize;
@@ -2257,16 +2301,16 @@ export function renderProjectHtml(
       overflow: hidden;
     }
     .sitespark-badge {
-      position: fixed; bottom: 10px; right: 10px; z-index: 9999;
-      font-family: -apple-system, sans-serif; font-size: 11px; color: #94A3B8;
-      background: #FFFFFFCC; padding: 4px 8px; border-radius: 8px; text-decoration: none;
+      display: block; width: 100%; box-sizing: border-box; text-align: center;
+      padding: 16px 10px; font-family: -apple-system, sans-serif; font-size: 11px;
+      color: #94A3B8; background: #F8FAFC; text-decoration: none;
     }
   </style>
 </head>
 <body>
   ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
   ${hasTargetRange3D ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
-  ${renderMenuHtml(project.menu, project.pages, hasProducts)}
+  ${renderMenuHtml(project.menu, project.pages, hasProducts, project.policies)}
   ${navHtml}
   ${hasProducts ? renderDiscountAnnouncementScript(slug, discountAnnouncementUrl) : ''}
   ${renderAnnouncementBars(project)}
@@ -2276,10 +2320,16 @@ export function renderProjectHtml(
     </div>
   </div>
   ${renderPolicyFooterHtml(project.policies)}
-  <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
+  ${isLastPage ? '<a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built by SiteSpark</a>' : ''}
+  <!-- Fixed-position UI (report link always; cart/track FABs when hasProducts) is pinned to
+       the viewport bottom regardless of document height -- on a page short enough to fit in
+       one screen, the real in-flow content above (policy footer/badge) would otherwise end
+       inside that same reserved band and visibly collide with it. This invisible spacer just
+       pushes the true end of the document below that band instead. -->
+  <div aria-hidden="true" style="height:${hasProducts ? 130 : 50}px;"></div>
   ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
   ${renderPopupAnnouncements(project)}
-  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl, ordersByEmailUrl) : ''}
+  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl, ordersByEmailUrl, currency) : ''}
   <script>
     (function () {
       var canvas = document.getElementById('canvas');

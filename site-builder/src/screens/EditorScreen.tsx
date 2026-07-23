@@ -11,7 +11,7 @@ import ElementsPanel from '@/components/elements/ElementsPanel';
 import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
 import LayersPanel from '@/components/elements/LayersPanel';
-import PageTabsBar from '@/components/editor/PageTabsBar';
+import PageTabsBar, { PageTabsBarHandle } from '@/components/editor/PageTabsBar';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import { LibraryItem } from '@/data/elementsLibrary';
@@ -36,6 +36,7 @@ function EditorInner({ navigation }: Props) {
     addPage,
     renamePage,
     removePage,
+    duplicatePage,
     setPageBackground,
     selectedId,
     select,
@@ -64,9 +65,14 @@ function EditorInner({ navigation }: Props) {
   // most wants to see it land in the stack.
   const [showLayers, setShowLayers] = useState(false);
   // Background editing for single-page projects (Social/Logo/Video, and any Website with no
-  // `pages`) -- multi-page websites edit background per-page instead, via PageTabsBar's long
-  // press menu, since each page there can have its own.
+  // `pages`) -- multi-page websites edit background per-page instead, via PageTabsBar's own
+  // edit-page modal (see pageTabsBarRef below), since each page there can have its own.
   const [bgEditorOpen, setBgEditorOpen] = useState(false);
+  const pageTabsBarRef = useRef<PageTabsBarHandle>(null);
+  const openBackgroundEditor = () => {
+    if (pages && activePageId) pageTabsBarRef.current?.openBackgroundEditor(activePageId);
+    else setBgEditorOpen(true);
+  };
   const [menuPoliciesOpen, setMenuPoliciesOpen] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
@@ -144,6 +150,17 @@ function EditorInner({ navigation }: Props) {
 
   const canvasCenterX = project.canvasSize.width / 2;
   const canvasCenterY = project.canvasSize.height / 2;
+  const canvasScrollRef = useRef<ScrollView>(null);
+
+  // "+" at the bottom of the canvas -- gives the page more real, empty room to build into
+  // (rather than just cramming new elements into whatever space is already there) and opens
+  // the Elements tray right away so adding something into that new room is the very next tap.
+  const EXTEND_CANVAS_INCREMENT = 300;
+  const extendCanvas = () => {
+    updateProject({ canvasSize: { ...project.canvasSize, height: project.canvasSize.height + EXTEND_CANVAS_INCREMENT } });
+    setPanel('elements');
+    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+  };
 
   const handleAddLibraryItem = (item: LibraryItem) => {
     const el = item.build(generateId('el'), canvasCenterX, canvasCenterY);
@@ -366,11 +383,9 @@ function EditorInner({ navigation }: Props) {
               <Pressable onPress={() => setShowLayers((v) => !v)} hitSlop={8}>
                 <Ionicons name="layers-outline" size={22} color={showLayers ? theme.accent : theme.text} />
               </Pressable>
-              {!pages && (
-                <Pressable onPress={() => setBgEditorOpen(true)} hitSlop={8}>
-                  <Ionicons name="color-palette-outline" size={22} color={theme.text} />
-                </Pressable>
-              )}
+              <Pressable onPress={openBackgroundEditor} hitSlop={8}>
+                <Ionicons name="color-palette-outline" size={22} color={theme.text} />
+              </Pressable>
               <Pressable onPress={() => setMenuPoliciesOpen(true)} hitSlop={8}>
                 <Ionicons name="menu-outline" size={22} color={theme.text} />
               </Pressable>
@@ -388,12 +403,14 @@ function EditorInner({ navigation }: Props) {
 
       {pages && !isGenerating && (
         <PageTabsBar
+          ref={pageTabsBarRef}
           pages={pages}
           activePageId={activePageId}
           onSwitch={switchPage}
           onAdd={addPage}
           onRename={renamePage}
           onRemove={removePage}
+          onDuplicate={duplicatePage}
           onSetBackground={setPageBackground}
         />
       )}
@@ -441,6 +458,7 @@ function EditorInner({ navigation }: Props) {
         <>
       <View style={styles.canvasArea}>
         <ScrollView
+          ref={canvasScrollRef}
           contentContainerStyle={styles.canvasScroll}
           minimumZoomScale={1}
           maximumZoomScale={3}
@@ -459,6 +477,9 @@ function EditorInner({ navigation }: Props) {
             onInteractionChange={setCanvasInteracting}
             forceLocked={pageLocked}
             onOpenLink={openLinkInEditor}
+            onBackgroundTap={openBackgroundEditor}
+            isLastPage={!pages || pages[pages.length - 1]?.id === activePageId}
+            onExtend={extendCanvas}
           />
         </ScrollView>
       </View>

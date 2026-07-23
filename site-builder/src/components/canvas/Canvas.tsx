@@ -48,6 +48,35 @@ function PolicyFooterBar({ project, width }: { project: Project; width: number }
   );
 }
 
+// A dashed, translucent preview of the real "Built by SiteSpark" badge every published site
+// gets automatically (see renderProjectHtml in siteHtml.ts) -- shown live while building so
+// there's no surprise about it after publishing. It only ever appears once for the whole
+// site, at the very end (the last page, or the only page), matching the real publish output.
+function SiteSparkBadgePreview({ width, isLastPage }: { width: number; isLastPage: boolean }) {
+  return (
+    <View style={[styles.badgePreview, { width }]}>
+      <Text style={styles.badgePreviewText} numberOfLines={2}>
+        {isLastPage
+          ? '"Built by SiteSpark" will be shown here automatically once published'
+          : '"Built by SiteSpark" appears once, at the end of your site (not on this page)'}
+      </Text>
+    </View>
+  );
+}
+
+// A real "+" that extends this page with more empty room to build into, positioned right at
+// the bottom of the canvas content itself (in normal document flow, sized as its own full-
+// width row) so it can never float on top of -- or get floated on top of by -- anything else,
+// unlike a screen-fixed FAB would.
+function ExtendCanvasButton({ width, onPress }: { width: number; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.extendBtn, { width }]} onPress={onPress}>
+      <Ionicons name="add-circle" size={22} color="#4338CA" />
+      <Text style={styles.extendBtnText}>Add more to this page</Text>
+    </Pressable>
+  );
+}
+
 interface Props {
   project: Project;
   selectedId: string | null;
@@ -61,6 +90,17 @@ interface Props {
   forceLocked?: boolean;
   // See DraggableElement's onOpenLink comment.
   onOpenLink?: (link: string) => void;
+  // Fires (in addition to deselecting) when the empty canvas background itself is tapped --
+  // lets a tap on the page background double as a shortcut into the background color/gradient
+  // editor, instead of requiring the header's palette icon every time.
+  onBackgroundTap?: () => void;
+  // Whether the page currently being edited is the site's last (or only) page -- see
+  // SiteSparkBadgePreview. Defaults true (matches every single-page project).
+  isLastPage?: boolean;
+  // Fires when the "+" below the canvas is tapped -- see EditorScreen's extendCanvas.
+  // Omitted (no button rendered) wherever there's no editor to extend into, e.g. a locked
+  // read-only preview.
+  onExtend?: () => void;
 }
 
 export default function Canvas({
@@ -74,6 +114,9 @@ export default function Canvas({
   onInteractionChange,
   forceLocked,
   onOpenLink,
+  onBackgroundTap,
+  isLastPage = true,
+  onExtend,
 }: Props) {
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
   const sizeStyle = { width: project.canvasSize.width, height: project.canvasSize.height };
@@ -81,7 +124,17 @@ export default function Canvas({
   const content = (
     <>
       <AnnouncementBarView settings={project.announcements} />
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => onSelect(null)} />
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={() => {
+          // First tap on the background just deselects whatever was selected (so you can tap
+          // away from an element you were editing without anything else popping up). Only once
+          // nothing is selected does tapping the bare background double as "edit this page's
+          // background color" -- keeps the shortcut from feeling like it hijacks every deselect.
+          if (selectedId) onSelect(null);
+          else onBackgroundTap?.();
+        }}
+      />
       {sorted.map((el) => (
         <DraggableElement
           key={el.id}
@@ -110,7 +163,9 @@ export default function Canvas({
         <LinearGradient colors={project.backgroundGradient.colors} start={start} end={end} style={[styles.canvas, sizeStyle]}>
           {content}
         </LinearGradient>
+        {onExtend && <ExtendCanvasButton width={project.canvasSize.width} onPress={onExtend} />}
         <PolicyFooterBar project={project} width={project.canvasSize.width} />
+        <SiteSparkBadgePreview width={project.canvasSize.width} isLastPage={isLastPage} />
       </View>
     );
   }
@@ -118,12 +173,35 @@ export default function Canvas({
   return (
     <View>
       <View style={[styles.canvas, sizeStyle, { backgroundColor: project.backgroundColor }]}>{content}</View>
+      {onExtend && <ExtendCanvasButton width={project.canvasSize.width} onPress={onExtend} />}
       <PolicyFooterBar project={project} width={project.canvasSize.width} />
+      <SiteSparkBadgePreview width={project.canvasSize.width} isLastPage={isLastPage} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  extendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    backgroundColor: '#EEF2FF',
+    borderTopWidth: 1,
+    borderTopColor: '#E0E7FF',
+  },
+  extendBtnText: { fontSize: 14, fontWeight: '700', color: '#4338CA' },
+  badgePreview: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#94A3B8',
+    backgroundColor: '#94A3B822',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  badgePreviewText: { fontSize: 11, color: '#64748B', textAlign: 'center', fontStyle: 'italic' },
   canvas: {
     overflow: 'hidden',
     borderRadius: 18,

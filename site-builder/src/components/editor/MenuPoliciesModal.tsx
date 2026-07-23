@@ -119,7 +119,7 @@ export default function MenuPoliciesModal({
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.body}>
+        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           {tab === 'menu' && (
             <>
               <View style={styles.rowBetween}>

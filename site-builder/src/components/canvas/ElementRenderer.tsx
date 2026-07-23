@@ -9,6 +9,19 @@ import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement, Collect
 import { useGoogleFont } from '@/utils/useGoogleFont';
 import { gradientStartEnd } from '@/utils/gradient';
 import GameView from '@/components/canvas/GameView';
+import { useAuth } from '@/context/AuthContext';
+import { sellerAccountStore } from '@/services/store';
+import { currencySymbol } from '@/utils/currency';
+
+function useSellerCurrencySymbol(): string {
+  const { user } = useAuth();
+  const [currency, setCurrency] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!user) return;
+    return sellerAccountStore.subscribe(user.uid, (account) => setCurrency(account?.currency));
+  }, [user]);
+  return currencySymbol(currency);
+}
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -255,6 +268,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
   const imageHeight = showImage ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
   const compact = width < 110;
   const inStock = element.inStock !== false;
+  const sym = useSellerCurrencySymbol();
 
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
@@ -279,10 +293,10 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
           {element.name || 'Untitled product'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-          <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700' }}>${element.priceUsd.toFixed(2)}</Text>
+          <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700' }}>{sym}{element.priceUsd.toFixed(2)}</Text>
           {element.compareAtPriceUsd != null && element.compareAtPriceUsd > element.priceUsd && !compact && (
             <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-              ${element.compareAtPriceUsd.toFixed(2)}
+              {sym}{element.compareAtPriceUsd.toFixed(2)}
             </Text>
           )}
         </View>
@@ -311,10 +325,10 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
               <Text style={styles.detailBadge}>{productBadge(element)}</Text>
               <Text style={styles.detailName}>{element.name || 'Untitled product'}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                <Text style={styles.detailPrice}>${element.priceUsd.toFixed(2)}</Text>
+                <Text style={styles.detailPrice}>{sym}{element.priceUsd.toFixed(2)}</Text>
                 {element.compareAtPriceUsd != null && element.compareAtPriceUsd > element.priceUsd && (
                   <Text style={{ fontSize: 15, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-                    ${element.compareAtPriceUsd.toFixed(2)}
+                    {sym}{element.compareAtPriceUsd.toFixed(2)}
                   </Text>
                 )}
               </View>
@@ -359,6 +373,7 @@ function CollectionView({
   const showGrid = height - MIN_TEXT_AREA >= 28;
   const gridHeight = showGrid ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
   const thumbs = products.slice(0, 4);
+  const sym = useSellerCurrencySymbol();
 
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
@@ -432,7 +447,7 @@ function CollectionView({
                       <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
                         {p.name || 'Untitled product'}
                       </Text>
-                      <Text style={{ fontSize: 12, color: '#4338CA', fontWeight: '700' }}>${p.priceUsd.toFixed(2)}</Text>
+                      <Text style={{ fontSize: 12, color: '#4338CA', fontWeight: '700' }}>{sym}{p.priceUsd.toFixed(2)}</Text>
                     </View>
                   </View>
                 ))

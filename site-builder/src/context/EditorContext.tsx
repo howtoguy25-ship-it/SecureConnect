@@ -37,6 +37,7 @@ interface EditorContextValue {
   addPage: (name: string) => void;
   renamePage: (id: string, name: string) => void;
   removePage: (id: string) => void;
+  duplicatePage: (id: string) => void;
   setPageBackground: (id: string, patch: { backgroundColor?: string; backgroundGradient?: GradientFill | null }) => void;
 }
 
@@ -154,7 +155,15 @@ export function EditorProvider({
       setProject((prev) => {
         if (!prev) return prev;
         pushHistory(prev);
-        const next = applyElementsUpdate(prev, (elements) => [...elements, el]);
+        // Every element-library build() hardcodes a placeholder zIndex, so without this every
+        // freshly-added element would tie at the same stacking value -- reorderElement's up/down
+        // swap exchanges two elements' zIndex values, which is a no-op between two ties, making
+        // Layers reordering silently do nothing until something else (duplicate/bring-to-front)
+        // happened to diverge them first.
+        const next = applyElementsUpdate(prev, (elements) => {
+          const maxZ = Math.max(0, ...elements.map((e) => e.zIndex));
+          return [...elements, { ...el, zIndex: maxZ + 1 }];
+        });
         scheduleSave(next);
         return next;
       });
@@ -214,28 +223,30 @@ export function EditorProvider({
     [scheduleSave, applyElementsUpdate, pushHistory]
   );
 
-  // Swaps z-index with the neighboring element in stacking order -- 'up' moves this
-  // element in front of (visually over) whatever is currently just above it, 'down' moves
-  // it behind whatever is currently just below it. Lets the Layers panel reorder overlaps
-  // without needing a drag-to-reorder gesture inside its own list.
+  // Moves this element one step up/down in stacking order -- 'up' brings it in front of
+  // (visually over) whatever is currently just above it, 'down' sends it behind whatever is
+  // currently just below it. Lets the Layers panel reorder overlaps without needing a
+  // drag-to-reorder gesture inside its own list.
   const reorderElement = useCallback(
     (id: string, direction: 'up' | 'down') => {
       setProject((prev) => {
         if (!prev) return prev;
         pushHistory(prev);
         const next = applyElementsUpdate(prev, (elements) => {
-          const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+          const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex); // stable: ties keep original order
           const index = sorted.findIndex((el) => el.id === id);
           if (index === -1) return elements;
           const swapIndex = direction === 'up' ? index + 1 : index - 1;
           if (swapIndex < 0 || swapIndex >= sorted.length) return elements;
-          const a = sorted[index];
-          const b = sorted[swapIndex];
-          return elements.map((el) => {
-            if (el.id === a.id) return { ...el, zIndex: b.zIndex };
-            if (el.id === b.id) return { ...el, zIndex: a.zIndex };
-            return el;
-          });
+          // Re-number every element's zIndex sequentially from the swapped order, rather than
+          // exchanging the two elements' raw zIndex *values* -- a value-swap is a silent no-op
+          // whenever the two happen to tie (true of any elements added before zIndex-on-add was
+          // fixed, since they'd all share the same placeholder value), which is exactly what
+          // made Layers reordering "just bug out" for pages built before this fix.
+          const reordered = sorted.slice();
+          [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+          const zIndexById = new Map(reordered.map((el, i) => [el.id, i]));
+          return elements.map((el) => ({ ...el, zIndex: zIndexById.get(el.id) ?? el.zIndex }));
         });
         scheduleSave(next);
         return next;
@@ -319,6 +330,35 @@ export function EditorProvider({
     [scheduleSave, pushHistory]
   );
 
+  // Clones a page's own elements + background into a brand-new page inserted right after it
+  // -- every cloned element gets a fresh id (same reasoning as duplicateElement) so nothing on
+  // the new page is ever mistaken for the same element as its source when either is edited.
+  const duplicatePage = useCallback(
+    (id: string) => {
+      setProject((prev) => {
+        if (!prev || !prev.pages) return prev;
+        const sourceIndex = prev.pages.findIndex((p) => p.id === id);
+        if (sourceIndex === -1) return prev;
+        pushHistory(prev);
+        const source = prev.pages[sourceIndex];
+        const newPage: SitePage = {
+          ...source,
+          id: generateId('page'),
+          name: `${source.name} Copy`,
+          slug: slugifyPageName(`${source.name} Copy`, prev.pages.map((p) => p.slug)),
+          elements: source.elements.map((el) => ({ ...el, id: generateId('el') })),
+        };
+        const pages = [...prev.pages.slice(0, sourceIndex + 1), newPage, ...prev.pages.slice(sourceIndex + 1)];
+        const next = { ...prev, pages };
+        scheduleSave(next);
+        setActivePageId(newPage.id);
+        setSelectedId(null);
+        return next;
+      });
+    },
+    [scheduleSave, pushHistory]
+  );
+
   const setPageBackground = useCallback(
     (id: string, patch: { backgroundColor?: string; backgroundGradient?: GradientFill | null }) => {
       setProject((prev) => {
@@ -384,6 +424,7 @@ export function EditorProvider({
     addPage,
     renamePage,
     removePage,
+    duplicatePage,
     setPageBackground,
     selectedId,
     select: setSelectedId,

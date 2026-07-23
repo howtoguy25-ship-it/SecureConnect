@@ -35,6 +35,7 @@ import { createOpenAIClient, generateSitePlan, generateImage, editImageBackgroun
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo } from './layout';
 import { searchYouTubeVideo } from './youtube';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
+import { isValidCurrency } from './currency';
 import {
   renderProjectHtml,
   renderPageNavHtml,
@@ -817,15 +818,14 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
   // and editing products is always allowed; only *publishing* them is blocked here, and only
   // for projects that actually contain a product element.
   const hasProducts = allElementsAcrossPages.some((el) => el.type === 'product');
-  if (hasProducts) {
-    const seller = (await sellerAccountRef(uid).get()).data() as SellerAccount | undefined;
-    if (!seller?.chargesEnabled) {
-      throw new HttpsError(
-        'failed-precondition',
-        'Set up payouts before publishing — this site has products for sale, so Stripe payouts must be connected first. Go to Seller Account to connect Stripe.'
-      );
-    }
+  const seller: SellerAccount | undefined = hasProducts ? ((await sellerAccountRef(uid).get()).data() as SellerAccount | undefined) : undefined;
+  if (hasProducts && !seller?.chargesEnabled) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Set up payouts before publishing — this site has products for sale, so Stripe payouts must be connected first. Go to Seller Account to connect Stripe.'
+    );
   }
+  const currency = seller?.currency ?? 'usd';
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
 
@@ -841,14 +841,30 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
 
   if (project.pages && project.pages.length > 0) {
     const pagesHtml: Record<string, string> = { ...extraPagesHtml };
-    for (const page of project.pages) {
+    for (let i = 0; i < project.pages.length; i++) {
+      const page = project.pages[i];
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
-      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, renderPageNavHtml(project.pages, page.slug));
+      // "Built by SiteSpark" only ever appears once for the whole site -- on the very last
+      // page -- never once per page, so a 3-page site doesn't show it 3 times.
+      const isLastPage = i === project.pages.length - 1;
+      pagesHtml[page.slug] = renderProjectHtml(
+        pageProject,
+        slug,
+        STORE_CHECKOUT_URL,
+        REPORT_SITE_URL,
+        PRODUCT_STOCK_URL,
+        DISCOUNT_VALIDATE_URL,
+        ORDERS_BY_EMAIL_URL,
+        DISCOUNT_ANNOUNCEMENT_URL,
+        renderPageNavHtml(project.pages, page.slug),
+        isLastPage,
+        currency
+      );
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, '', true, currency);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
@@ -1544,6 +1560,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
   const bookingDetails: BookingDetails | null = session.metadata?.booking ? (JSON.parse(session.metadata.booking) as BookingDetails) : null;
   const subtotalUsd = items.reduce((sum, item) => sum + item.priceUsd * item.quantity, 0);
   const shippingFeeUsd = session.metadata?.shippingFeeUsd ? Number(session.metadata.shippingFeeUsd) : 0;
+  const currency = session.metadata?.currency || 'usd';
   const discountCode = session.metadata?.discountCode ?? null;
   const discountAmountUsd = session.metadata?.discountAmountUsd ? Number(session.metadata.discountAmountUsd) : 0;
   const discountedTotalUsd = Math.round((subtotalUsd + shippingFeeUsd - discountAmountUsd) * 100) / 100;
@@ -1594,6 +1611,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
     items,
     subtotalUsd,
     shippingFeeUsd,
+    currency,
     discountCode,
     discountAmountUsd,
     platformFeeUsd,
@@ -2135,6 +2153,20 @@ export const setShippingFee = onCall({ invoker: 'public' }, withCallableErrors('
     throw new HttpsError('invalid-argument', 'Shipping fee must be 0 or greater.');
   }
   await sellerAccountRef(uid).set({ shippingFeeUsd: shippingFeeUsd ?? null, updatedAt: Date.now() }, { merge: true });
+  return { ok: true };
+}));
+
+// Lets a seller pick which real currency their prices are denominated in and get charged
+// through Stripe as -- see currency.ts for the supported list and symbol mapping.
+export const setCurrency = onCall({ invoker: 'public' }, withCallableErrors('setCurrency', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { currency } = request.data as { currency: string };
+  const normalized = (currency ?? '').toLowerCase();
+  if (!isValidCurrency(normalized)) {
+    throw new HttpsError('invalid-argument', 'Unsupported currency.');
+  }
+  await sellerAccountRef(uid).set({ currency: normalized, updatedAt: Date.now() }, { merge: true });
   return { ok: true };
 }));
 
@@ -2689,8 +2721,11 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       const variantLabel = variant ? variantLabelFor(product.variantOptions, variant.optionValues) : null;
       subtotalUsd += effectivePriceUsd * quantity;
       lineItems.push({
+        // currency is filled in below once the seller doc (and their real currency) has been
+        // fetched -- sellerUid itself isn't known until this loop resolves it from the first
+        // product, so it can't be fetched any earlier than this.
         price_data: {
-          currency: 'usd',
+          currency: '',
           product_data: {
             name:
               (product.saleType === 'service' ? `${product.name} (booking)` : product.name) + (variantLabel ? ` (${variantLabel})` : ''),
@@ -2727,6 +2762,10 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       res.status(400).json({ error: 'This store cannot accept payments yet.' });
       return;
     }
+    const currency = seller.currency ?? 'usd';
+    for (const li of lineItems) {
+      if (li.price_data) li.price_data.currency = currency;
+    }
 
     // A real, seller-set flat fee -- added as its own Stripe line item (not Stripe's separate
     // shipping_options feature) specifically so a 'shipping' discount code can be expressed
@@ -2735,7 +2774,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
     const shippingFeeUsd = needsShipping ? (seller.shippingFeeUsd ?? 0) : 0;
     if (shippingFeeUsd > 0) {
       lineItems.push({
-        price_data: { currency: 'usd', product_data: { name: 'Shipping' }, unit_amount: Math.round(shippingFeeUsd * 100) },
+        price_data: { currency, product_data: { name: 'Shipping' }, unit_amount: Math.round(shippingFeeUsd * 100) },
         quantity: 1,
       });
     }
@@ -2782,7 +2821,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       const coupon = await stripe.coupons.create(
         isWholeOrderPercent
           ? { percent_off: appliedDiscount.amount, duration: 'once', name: appliedDiscount.code }
-          : { amount_off: Math.round(discountAmountUsd * 100), currency: 'usd', duration: 'once', name: appliedDiscount.code }
+          : { amount_off: Math.round(discountAmountUsd * 100), currency, duration: 'once', name: appliedDiscount.code }
       );
       discounts = [{ coupon: coupon.id }];
     }
@@ -2809,6 +2848,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         sellerUid,
         items: JSON.stringify(orderItems),
         shippingFeeUsd: String(shippingFeeUsd),
+        currency,
         ...(bookingDetails ? { booking: JSON.stringify(bookingDetails) } : {}),
         ...(appliedDiscount ? { discountCode: appliedDiscount.code, discountAmountUsd: String(discountAmountUsd) } : {}),
       },

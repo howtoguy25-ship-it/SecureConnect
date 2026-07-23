@@ -485,6 +485,7 @@ export interface SellerAccount {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   shippingFeeUsd?: number | null;
+  currency?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -525,6 +526,7 @@ export interface StoreOrder {
   items: StoreOrderItem[];
   subtotalUsd: number;
   shippingFeeUsd: number;
+  currency: string;
   discountCode: string | null;
   discountAmountUsd: number;
   platformFeeUsd: number;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,8 +16,10 @@ import {
   createSellerDashboardLink,
   resetSellerOnboarding,
   setShippingFee,
+  setCurrency,
 } from '@/services/store';
 import { SellerAccount } from '@/types';
+import { CURRENCY_OPTIONS, CURRENCY_LABELS, CurrencyCode, currencySymbol } from '@/utils/currency';
 
 // The seller's own device region, e.g. "AU" -- Stripe fixes an Express account's country
 // permanently at creation, so this has to be right the first time (see createSellerOnboardingLink
@@ -36,6 +38,8 @@ export default function SellerAccountScreen({ navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [shippingFeeInput, setShippingFeeInput] = useState('');
   const [savingShippingFee, setSavingShippingFee] = useState(false);
+  const [savingCurrency, setSavingCurrency] = useState(false);
+  const sym = currencySymbol(account?.currency);
 
   useEffect(() => {
     if (!user) return;
@@ -122,6 +126,19 @@ export default function SellerAccountScreen({ navigation }: Props) {
   };
 
   const status = account?.onboardingStatus ?? 'not_connected';
+  const activeCurrency = (account?.currency ?? 'usd') as CurrencyCode;
+
+  const handleSetCurrency = async (code: CurrencyCode) => {
+    if (code === activeCurrency || savingCurrency) return;
+    setSavingCurrency(true);
+    try {
+      await setCurrency(code);
+    } catch (err: any) {
+      showAlert('Could not update currency', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setSavingCurrency(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -133,6 +150,7 @@ export default function SellerAccountScreen({ navigation }: Props) {
         <View style={{ width: 26 }} />
       </View>
 
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
         <Ionicons
           name={status === 'active' ? 'checkmark-circle' : status === 'pending' ? 'time-outline' : 'storefront-outline'}
@@ -174,12 +192,38 @@ export default function SellerAccountScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.shippingTitle}>Currency</Text>
+        <Text style={styles.statusBody}>
+          What buyers are actually charged in, and the symbol shown next to every price on your published sites.
+        </Text>
+        <View style={styles.currencyWrap}>
+          {CURRENCY_OPTIONS.map((code) => {
+            const active = code === activeCurrency;
+            return (
+              <Pressable
+                key={code}
+                style={[styles.currencyChip, active && styles.currencyChipActive]}
+                onPress={() => handleSetCurrency(code)}
+                disabled={savingCurrency}
+              >
+                <Text style={[styles.currencyChipText, active && styles.currencyChipTextActive]}>{CURRENCY_LABELS[code]}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {savingCurrency && <ActivityIndicator style={{ marginTop: 12 }} />}
+        <Text style={styles.currencyNote}>
+          Changing this only affects new orders — orders you've already been paid for keep the currency they were actually charged in.
+        </Text>
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.shippingTitle}>Shipping fee</Text>
         <Text style={styles.statusBody}>
           A flat fee added at checkout whenever a buyer's order needs real shipping. Leave blank for no shipping fee.
         </Text>
         <View style={styles.shippingRow}>
-          <Text style={styles.shippingDollar}>$</Text>
+          <Text style={styles.shippingDollar}>{sym}</Text>
           <TextInput
             style={styles.shippingInput}
             value={shippingFeeInput}
@@ -199,6 +243,7 @@ export default function SellerAccountScreen({ navigation }: Props) {
       </View>
 
       <Text style={styles.note}>SiteSpark takes an 8% platform fee on each order — the rest is transferred to you automatically.</Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -235,4 +280,10 @@ const styles = StyleSheet.create({
   },
   shippingDollar: { fontSize: 15, fontWeight: '700', color: '#64748B', marginRight: 4 },
   shippingInput: { flex: 1, fontSize: 15, color: '#0F172A', paddingVertical: 10 },
+  currencyWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 16, width: '100%' },
+  currencyChip: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  currencyChipActive: { backgroundColor: '#4338CA', borderColor: '#4338CA' },
+  currencyChipText: { fontSize: 13, fontWeight: '600', color: '#0F172A' },
+  currencyChipTextActive: { color: '#FFFFFF' },
+  currencyNote: { fontSize: 11, color: '#94A3B8', textAlign: 'center', marginTop: 14, lineHeight: 16 },
 });

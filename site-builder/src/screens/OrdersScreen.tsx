@@ -8,6 +8,7 @@ import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
 import { ordersStore, updateOrderFulfillment } from '@/services/store';
 import { StoreOrder, FulfillmentStatus } from '@/types';
+import { currencySymbol } from '@/utils/currency';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Orders'>;
 
@@ -26,6 +27,11 @@ const STATUS_COLOR: Record<FulfillmentStatus, string> = {
 };
 
 function OrderRow({ order }: { order: StoreOrder }) {
+  // Each order records the real currency it was actually charged in at checkout time (see
+  // handleStoreOrderCompleted) -- always show that order's own currency, never the seller's
+  // *current* setting, since a seller who changes currency later shouldn't have old orders
+  // silently relabeled into a currency they were never actually paid in.
+  const sym = currencySymbol(order.currency);
   const itemsSummary = order.items.map((i) => `${i.quantity}× ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''}`).join(', ');
   const [expanded, setExpanded] = useState(false);
   const [status, setStatus] = useState<FulfillmentStatus>(order.fulfillmentStatus);
@@ -68,8 +74,8 @@ function OrderRow({ order }: { order: StoreOrder }) {
           <Text style={[styles.statusText, { color: STATUS_COLOR[order.fulfillmentStatus] }]}>{STATUS_LABEL[order.fulfillmentStatus]}</Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={styles.netText}>${order.sellerNetUsd.toFixed(2)}</Text>
-          <Text style={styles.feeText}>after ${order.platformFeeUsd.toFixed(2)} fee</Text>
+          <Text style={styles.netText}>{sym}{order.sellerNetUsd.toFixed(2)}</Text>
+          <Text style={styles.feeText}>after {sym}{order.platformFeeUsd.toFixed(2)} fee</Text>
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color="#94A3B8" style={{ marginTop: 6 }} />
         </View>
       </Pressable>

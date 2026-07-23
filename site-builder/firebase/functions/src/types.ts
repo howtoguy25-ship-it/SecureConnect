@@ -445,6 +445,11 @@ export interface SellerAccount {
   // non-pickup product) -- null/0 means no shipping fee is charged. Set via setShippingFee,
   // never client-written directly (see firestore.rules), same as the rest of this doc.
   shippingFeeUsd?: number | null;
+  // Which real currency (lowercase ISO 4217 code, e.g. "usd"/"eur"/"gbp") every *Usd price
+  // field on this seller's products/orders is actually denominated in and charged through
+  // Stripe as -- see currency.ts. Undefined (never set) means "usd", same as every seller
+  // account created before currency selection existed. Set via setCurrency.
+  currency?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -586,6 +591,10 @@ export interface StoreOrder {
   items: StoreOrderItem[];
   subtotalUsd: number;
   shippingFeeUsd: number;
+  // The real currency every *Usd amount on this order was actually charged in -- copied from
+  // the seller's SellerAccount.currency at the moment of checkout, so it stays historically
+  // accurate even if the seller changes their currency setting later.
+  currency: string;
   discountCode: string | null;
   discountAmountUsd: number;
   platformFeeUsd: number;
