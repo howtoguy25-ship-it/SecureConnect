@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game';
 
 // Mirrors the client's GradientFill -- `angle` is the CSS linear-gradient() angle (0deg =
 // bottom-to-top, 90deg = left-to-right), so siteHtml.ts can drop it straight into real CSS.
@@ -141,6 +141,26 @@ export interface CollectionElement extends BaseElement {
   productIds: string[];
 }
 
+export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker';
+
+export interface TriviaQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+}
+
+// Mirrors the client's GameElement -- see that file's comment for why one type covers every
+// kind instead of a discriminated union.
+export interface GameElement extends BaseElement {
+  type: 'game';
+  kind: GameKind;
+  title: string;
+  questions: TriviaQuestion[];
+  memorySymbols: string[];
+  clickerLabel: string;
+  clickerTarget: number;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -151,7 +171,8 @@ export type CanvasElement =
   | VideoElement
   | VideoEmbedElement
   | ProductElement
-  | CollectionElement;
+  | CollectionElement
+  | GameElement;
 
 export interface CanvasSize {
   width: number;

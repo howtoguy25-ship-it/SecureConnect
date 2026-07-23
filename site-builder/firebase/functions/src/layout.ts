@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement } from './types';
+import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement, GameElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -68,6 +68,21 @@ function videoEmbedEl(
   };
 }
 
+function gameEl(partial: Partial<GameElement> & Pick<GameElement, 'y' | 'height' | 'kind' | 'title'>): GameElement {
+  return {
+    id: nextId('el'),
+    type: 'game',
+    x: 0,
+    width: CANVAS_WIDTH,
+    zIndex: 1,
+    questions: [],
+    memorySymbols: [],
+    clickerLabel: 'Tap!',
+    clickerTarget: 20,
+    ...partial,
+  };
+}
+
 // Estimates how tall a text block needs to be for the canvas's fixed width, so the next
 // section stacked below it never starts inside space this one's real wrapped text still
 // needs -- undercounting here is exactly what causes headline/body/button text to visibly
@@ -128,6 +143,24 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
         elements.push(videoEmbedEl({ y, height: videoHeight, videoId: video.videoId, title: video.title ?? section.headline }));
         y += videoHeight + 16;
       }
+    }
+
+    if (section.kind === 'game' && section.gameKind) {
+      // Taller for trivia/memory (need room for a question + 4 options, or a card grid) than
+      // tic-tac-toe/clicker, which are compact by nature.
+      const gameHeight = section.gameKind === 'trivia' || section.gameKind === 'memory' ? 340 : 260;
+      elements.push(
+        gameEl({
+          y,
+          height: gameHeight,
+          kind: section.gameKind,
+          title: section.headline,
+          questions: section.gameQuestions,
+          memorySymbols: section.gameMemorySymbols,
+          clickerLabel: section.gameClickerLabel || 'Tap!',
+        })
+      );
+      y += gameHeight + 16;
     }
 
     const headlineSize = isHero ? 28 : 22;

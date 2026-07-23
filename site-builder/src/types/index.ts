@@ -37,7 +37,8 @@ export type ElementType =
   | 'video'
   | 'videoEmbed'
   | 'product'
-  | 'collection';
+  | 'collection'
+  | 'game';
 
 interface BaseElement {
   id: string;
@@ -187,6 +188,32 @@ export interface CollectionElement extends BaseElement {
   productIds: string[];
 }
 
+export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker';
+
+export interface TriviaQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+}
+
+// A real, playable mini-game -- not a screenshot or a mockup. One element type covers every
+// kind rather than a discriminated union per kind, matching ProductElement's pattern (fields
+// only meaningful for one saleType); here, only the fields relevant to `kind` are ever read.
+// 'tictactoe' needs none of the data fields at all -- it's pure, self-contained game logic.
+export interface GameElement extends BaseElement {
+  type: 'game';
+  kind: GameKind;
+  title: string;
+  // Only meaningful for kind === 'trivia'.
+  questions: TriviaQuestion[];
+  // Only meaningful for kind === 'memory' -- each entry is one symbol shown on exactly 2
+  // cards (its matching pair) -- plain short text/emoji so the game needs no image assets.
+  memorySymbols: string[];
+  // Only meaningful for kind === 'clicker'.
+  clickerLabel: string;
+  clickerTarget: number;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -197,7 +224,8 @@ export type CanvasElement =
   | VideoElement
   | VideoEmbedElement
   | ProductElement
-  | CollectionElement;
+  | CollectionElement
+  | GameElement;
 
 export interface AnnouncementBarConfig {
   id: string;

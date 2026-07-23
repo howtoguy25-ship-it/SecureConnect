@@ -1,4 +1,4 @@
-import { CanvasElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage } from './types';
+import { CanvasElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage } from './types';
 import { getFontOption } from './fonts';
 
 // Renders a Project's absolutely-positioned canvas into a real, self-contained static
@@ -78,6 +78,193 @@ function renderShape(el: Extract<CanvasElement, { type: 'shape' }>): string {
     default:
       return `<div style="${base}background:${color};"></div>`;
   }
+}
+
+// Four real, playable mini-games rendered as plain DOM + vanilla JS (no framework/build step
+// available on a published static page) -- the exact same rules as the editor's GameView.tsx
+// RN components, just re-implemented against document.createElement/innerHTML instead of RN
+// state. Owner-authored text (title/labels/questions) is HTML-escaped before being embedded
+// as a JS string literal, so it round-trips safely through innerHTML either way.
+function ticTacToeScript(bodyId: string): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var board = Array(9).fill(null);
+  var turn = 'X';
+  var LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  function winner(){
+    for (var i=0;i<LINES.length;i++){
+      var a=LINES[i][0],b=LINES[i][1],c=LINES[i][2];
+      if (board[a] && board[a]===board[b] && board[a]===board[c]) return board[a];
+    }
+    return null;
+  }
+  function render(){
+    var w = winner();
+    var draw = !w && board.every(function(c){return c!==null;});
+    var html = '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px;">' + (w ? w+' wins!' : draw ? "It&#39;s a draw!" : turn+"&#39;s turn") + '</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;width:132px;">';
+    for (var i=0;i<9;i++){
+      html += '<div data-cell="'+i+'" style="width:44px;height:44px;border:1px solid #CBD5E1;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:'+(board[i]==='X'?'#4338CA':'#DC2626')+';cursor:pointer;">'+(board[i]||'')+'</div>';
+    }
+    html += '</div>';
+    if (w || draw) html += '<button data-reset style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+    root.innerHTML = html;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-cell]'), function(cell){
+      cell.addEventListener('click', function(){
+        var i = parseInt(cell.getAttribute('data-cell'),10);
+        if (board[i] || winner()) return;
+        board[i] = turn;
+        turn = turn === 'X' ? 'O' : 'X';
+        render();
+      });
+    });
+    var resetBtn = root.querySelector('[data-reset]');
+    if (resetBtn) resetBtn.addEventListener('click', function(){ board = Array(9).fill(null); turn='X'; render(); });
+  }
+  render();
+})();</script>`;
+}
+
+function clickerScript(bodyId: string, label: string, target: number): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var label = ${JSON.stringify(escapeHtml(label || 'Tap!'))};
+  var target = ${JSON.stringify(Math.max(1, target))};
+  var count = 0;
+  function render(){
+    var won = count >= target;
+    var html = '<div style="font-weight:700;font-size:13px;color:#334155;">' + (won ? 'You did it!' : count + ' / ' + target) + '</div>';
+    html += '<button data-tap style="margin-top:8px;background:'+(won?'#16A34A':'#4338CA')+';color:#fff;border:none;border-radius:12px;padding:14px 20px;font-weight:800;font-size:15px;cursor:pointer;">'+(won?'🎉':label)+'</button>';
+    if (won) html += '<button data-reset style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+    root.innerHTML = html;
+    var tapBtn = root.querySelector('[data-tap]');
+    if (tapBtn && !won) tapBtn.addEventListener('click', function(){ count++; render(); });
+    var resetBtn = root.querySelector('[data-reset]');
+    if (resetBtn) resetBtn.addEventListener('click', function(){ count=0; render(); });
+  }
+  render();
+})();</script>`;
+}
+
+function memoryScript(bodyId: string, symbols: string[]): string {
+  const safeSymbols = (symbols.length >= 2 ? symbols : ['🍎', '🍋', '🍇', '🍓']).map((s) => escapeHtml(s));
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var symbols = ${JSON.stringify(safeSymbols)};
+  var deck = symbols.concat(symbols).map(function(s,i){ return {id:i, symbol:s}; });
+  for (var i=deck.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=deck[i]; deck[i]=deck[j]; deck[j]=t; }
+  var flipped = [];
+  var matched = {};
+  function render(){
+    var matchedCount = Object.keys(matched).length;
+    var won = matchedCount === deck.length;
+    var cols = deck.length <= 12 ? 4 : 5;
+    var cell = 40;
+    var html = '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px;">' + (won ? 'All matched! 🎉' : 'Find the pairs') + '</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;width:'+(cell*cols)+'px;justify-content:center;">';
+    deck.forEach(function(card, idx){
+      var shown = flipped.indexOf(idx) !== -1 || matched[idx];
+      html += '<div data-card="'+idx+'" style="width:'+cell+'px;height:'+cell+'px;border:1px solid #CBD5E1;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;background:#F8FAFC;margin:1px;cursor:pointer;">'+(shown?card.symbol:'')+'</div>';
+    });
+    html += '</div>';
+    if (won) html += '<button data-reset style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+    root.innerHTML = html;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-card]'), function(elCard){
+      elCard.addEventListener('click', function(){
+        var idx = parseInt(elCard.getAttribute('data-card'),10);
+        if (flipped.length===2 || flipped.indexOf(idx)!==-1 || matched[idx]) return;
+        flipped.push(idx);
+        render();
+        if (flipped.length===2){
+          var a=flipped[0], b=flipped[1];
+          if (deck[a].symbol === deck[b].symbol){
+            matched[a]=true; matched[b]=true; flipped=[];
+            render();
+          } else {
+            setTimeout(function(){ flipped=[]; render(); }, 700);
+          }
+        }
+      });
+    });
+    var resetBtn = root.querySelector('[data-reset]');
+    if (resetBtn) resetBtn.addEventListener('click', function(){ matched={}; flipped=[]; render(); });
+  }
+  render();
+})();</script>`;
+}
+
+function triviaScript(bodyId: string, questions: GameElement['questions']): string {
+  const safeQuestions = questions.map((q) => ({
+    question: escapeHtml(q.question),
+    options: q.options.map((o) => escapeHtml(o)),
+    correctIndex: q.correctIndex,
+  }));
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var questions = ${JSON.stringify(safeQuestions)};
+  var index = 0, score = 0, selected = null;
+  function render(){
+    if (questions.length === 0){ root.innerHTML = '<div style="font-size:13px;color:#94A3B8;">No questions yet.</div>'; return; }
+    if (index >= questions.length){
+      root.innerHTML = '<div style="font-weight:700;font-size:15px;color:#334155;">Score: '+score+' / '+questions.length+'</div><button data-again style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+      root.querySelector('[data-again]').addEventListener('click', function(){ index=0; score=0; selected=null; render(); });
+      return;
+    }
+    var q = questions[index];
+    var html = '<div style="font-weight:700;font-size:14px;color:#0F172A;text-align:center;margin-bottom:8px;padding:0 8px;">'+q.question+'</div>';
+    html += '<div style="width:100%;padding:0 8px;">';
+    q.options.forEach(function(opt, i){
+      var bg = '#F8FAFC', border='#E2E8F0';
+      if (selected !== null && i === q.correctIndex) { bg='#DCFCE7'; border='#16A34A'; }
+      else if (selected === i && i !== q.correctIndex) { bg='#FEE2E2'; border='#DC2626'; }
+      html += '<div data-opt="'+i+'" style="border:1px solid '+border+';background:'+bg+';border-radius:8px;padding:8px;margin-bottom:6px;font-size:13px;color:#1E293B;font-weight:600;cursor:pointer;">'+opt+'</div>';
+    });
+    html += '</div>';
+    if (selected !== null) html += '<button data-next style="margin-top:6px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">'+((index+1>=questions.length)?'See Score':'Next')+'</button>';
+    root.innerHTML = html;
+    if (selected === null){
+      Array.prototype.forEach.call(root.querySelectorAll('[data-opt]'), function(optEl){
+        optEl.addEventListener('click', function(){
+          var i = parseInt(optEl.getAttribute('data-opt'),10);
+          selected = i;
+          if (i === q.correctIndex) score++;
+          render();
+        });
+      });
+    } else {
+      var nextBtn = root.querySelector('[data-next]');
+      if (nextBtn) nextBtn.addEventListener('click', function(){ selected=null; index++; render(); });
+    }
+  }
+  render();
+})();</script>`;
+}
+
+function renderGameHtml(el: GameElement, base: string): string {
+  const bodyId = `game-${el.id}-body`;
+  const titleHtml = el.title
+    ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(el.title)}</div>`
+    : '';
+  let gameScript = '';
+  switch (el.kind) {
+    case 'tictactoe':
+      gameScript = ticTacToeScript(bodyId);
+      break;
+    case 'clicker':
+      gameScript = clickerScript(bodyId, el.clickerLabel, el.clickerTarget);
+      break;
+    case 'memory':
+      gameScript = memoryScript(bodyId, el.memorySymbols);
+      break;
+    case 'trivia':
+      gameScript = triviaScript(bodyId, el.questions);
+      break;
+  }
+  return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:8px;display:flex;flex-direction:column;box-sizing:border-box;">
+  ${titleHtml}
+  <div id="${bodyId}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;overflow:auto;"></div>
+</div>
+${gameScript}`;
 }
 
 function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[]): string {
@@ -344,6 +531,8 @@ ${script}`;
   </div>
 </div>`;
     }
+    case 'game':
+      return renderGameHtml(el, base);
     default:
       return '';
   }

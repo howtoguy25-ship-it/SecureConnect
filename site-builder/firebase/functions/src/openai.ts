@@ -1,7 +1,7 @@
 import OpenAI, { toFile } from 'openai';
 
 export interface SitePlanSection {
-  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video';
+  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video' | 'game';
   headline: string;
   body: string;
   buttonLabel: string;
@@ -12,6 +12,19 @@ export interface SitePlanSection {
   // whether a real matching video exists, so this is resolved separately after the plan
   // is generated (see searchYouTubeVideo) rather than fabricated here.
   videoSearchQuery: string;
+  // Only set for kind 'game' -- which real, playable mini-game this section becomes (see
+  // GameElement in types.ts). Unlike video, a game's content is entirely the model's own
+  // writing (trivia questions, themed emoji, a themed clicker label), so it's built directly
+  // from these fields with no separate resolution step.
+  gameKind: 'trivia' | 'memory' | 'tictactoe' | 'clicker' | '';
+  // Only for gameKind 'trivia' -- 3-6 real questions genuinely about the site's topic (e.g.
+  // real NBA trivia for a basketball site), each with 2-4 options and one correct answer.
+  gameQuestions: { question: string; options: string[]; correctIndex: number }[];
+  // Only for gameKind 'memory' -- 4-8 short emoji/words themed to the site's topic, each
+  // becomes one matching pair of cards.
+  gameMemorySymbols: string[];
+  // Only for gameKind 'clicker' -- a short, themed button label (e.g. "Tap the Basketball!").
+  gameClickerLabel: string;
 }
 
 export interface SitePlan {
@@ -43,22 +56,63 @@ const SITE_PLAN_SCHEMA = {
           type: 'object',
           additionalProperties: false,
           properties: {
-            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video'] },
+            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video', 'game'] },
             headline: { type: 'string' },
             body: { type: 'string' },
             buttonLabel: { type: 'string' },
             imagePrompt: {
               type: 'string',
               description:
-                'A vivid, concrete image-generation prompt illustrating this section, in the visual style implied by the user request. Empty string if this section has no image (always empty for kind "video").',
+                'A vivid, concrete image-generation prompt illustrating this section, in the visual style implied by the user request. Empty string if this section has no image (always empty for kind "video" and "game").',
             },
             videoSearchQuery: {
               type: 'string',
               description:
                 'Only for kind "video": a real, specific YouTube search phrase for an actual existing video matching this section (e.g. real news/highlights/how-to content the user asked for) -- specific enough to find a real relevant result, not a generic topic word. Empty string for every other kind.',
             },
+            gameKind: {
+              type: 'string',
+              enum: ['trivia', 'memory', 'tictactoe', 'clicker', ''],
+              description: 'Only for kind "game": which real, playable mini-game this becomes. Empty string for every other kind.',
+            },
+            gameQuestions: {
+              type: 'array',
+              maxItems: 6,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  question: { type: 'string' },
+                  options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'string' } },
+                  correctIndex: { type: 'integer' },
+                },
+                required: ['question', 'options', 'correctIndex'],
+              },
+              description: 'Only for gameKind "trivia": 3-6 real questions genuinely about the site\'s own topic, each with one correct answer. Empty array otherwise.',
+            },
+            gameMemorySymbols: {
+              type: 'array',
+              maxItems: 8,
+              items: { type: 'string' },
+              description: 'Only for gameKind "memory": 4-8 short emoji/words themed to the site\'s topic. Empty array otherwise.',
+            },
+            gameClickerLabel: {
+              type: 'string',
+              description: 'Only for gameKind "clicker": a short, themed button label. Empty string otherwise.',
+            },
           },
-          required: ['kind', 'headline', 'body', 'buttonLabel', 'imagePrompt', 'videoSearchQuery'],
+          required: [
+            'kind',
+            'headline',
+            'body',
+            'buttonLabel',
+            'imagePrompt',
+            'videoSearchQuery',
+            'gameKind',
+            'gameQuestions',
+            'gameMemorySymbols',
+            'gameClickerLabel',
+          ],
         },
       },
     },
@@ -79,6 +133,7 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string 
     'Given the user\'s prompt, produce a concrete site plan: a real site name/tagline, a cohesive color palette, and 3-6 content sections with genuinely written headline/body copy (not placeholders) and a concrete image-generation prompt per visual section.',
     complexityNote,
     'If the user asks for real video content -- news updates, highlights, tutorials, or anything else where an actual existing video (not a generated image) is the point -- include one section with kind "video" and a specific, real videoSearchQuery for it (e.g. a request for a basketball page with news/videos should search for something like real, current-sounding NBA highlights or news coverage, not just the word "basketball"). This is resolved against a real video search after you respond, so write a query that would actually find something relevant, not a placeholder.',
+    'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe" needs no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one.',
     'Only use information relevant to building and describing this website. If the prompt asks for anything unrelated to the site itself, ignore that part.',
   ].join(' ');
 }

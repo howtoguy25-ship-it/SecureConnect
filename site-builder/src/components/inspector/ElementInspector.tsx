@@ -762,7 +762,203 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             </Text>
           </>
         )}
+
+        {element.type === 'game' && (
+          <>
+            <Text style={styles.fieldLabel}>Game type</Text>
+            <View style={styles.rowButtons}>
+              {(
+                [
+                  ['tictactoe', 'Tic-Tac-Toe'],
+                  ['memory', 'Memory Match'],
+                  ['trivia', 'Trivia Quiz'],
+                  ['clicker', 'Clicker'],
+                ] as const
+              ).map(([kind, label]) => (
+                <Pressable
+                  key={kind}
+                  style={[styles.toggleBtn, element.kind === kind && styles.toggleBtnActive]}
+                  onPress={() => onChange({ kind } as any)}
+                >
+                  <Text style={styles.toggleBtnText}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Title</Text>
+            <TextInput style={styles.textInput} value={element.title} onChangeText={(title) => onChange({ title } as any)} />
+
+            {element.kind === 'tictactoe' && (
+              <Text style={styles.helperText}>Ready to play as-is — two visitors take turns tapping the same board, no setup needed.</Text>
+            )}
+
+            {element.kind === 'clicker' && (
+              <>
+                <Text style={styles.fieldLabel}>Button label</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={element.clickerLabel}
+                  onChangeText={(clickerLabel) => onChange({ clickerLabel } as any)}
+                  placeholder="e.g. Tap the ball!"
+                />
+                <Text style={styles.fieldLabel}>Target taps to win</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={String(element.clickerTarget)}
+                  onChangeText={(text) => {
+                    const value = parseInt(text, 10);
+                    onChange({ clickerTarget: Number.isFinite(value) && value > 0 ? value : 1 } as any);
+                  }}
+                  keyboardType="number-pad"
+                />
+              </>
+            )}
+
+            {element.kind === 'memory' && (
+              <>
+                <Text style={styles.fieldLabel}>Symbols (each appears as one matching pair)</Text>
+                <View style={styles.rowButtons}>
+                  {element.memorySymbols.map((symbol, i) => (
+                    <Pressable
+                      key={i}
+                      style={[styles.toggleBtn, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+                      onPress={() => onChange({ memorySymbols: element.memorySymbols.filter((_, j) => j !== i) } as any)}
+                    >
+                      <Text style={styles.toggleBtnText}>{symbol}</Text>
+                      <Ionicons name="close" size={12} color="#64748B" />
+                    </Pressable>
+                  ))}
+                </View>
+                <MemorySymbolAdder onAdd={(symbol) => onChange({ memorySymbols: [...element.memorySymbols, symbol] } as any)} />
+                <Text style={styles.helperText}>
+                  Emoji work great (🍎 🏀 ⭐). Add at least 3 pairs for a real game — the board reshuffles each time it's played.
+                </Text>
+              </>
+            )}
+
+            {element.kind === 'trivia' && (
+              <>
+                <Text style={styles.fieldLabel}>Questions</Text>
+                {element.questions.length === 0 && <Text style={styles.helperText}>No questions yet — add one below.</Text>}
+                {element.questions.map((q, qi) => (
+                  <View key={qi} style={styles.gameQuestionCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <TextInput
+                        style={[styles.textInput, { flex: 1 }]}
+                        value={q.question}
+                        onChangeText={(question) =>
+                          onChange({ questions: element.questions.map((x, i) => (i === qi ? { ...x, question } : x)) } as any)
+                        }
+                        placeholder={`Question ${qi + 1}`}
+                        multiline
+                      />
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() => onChange({ questions: element.questions.filter((_, i) => i !== qi) } as any)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                      </Pressable>
+                    </View>
+                    {q.options.map((opt, oi) => (
+                      <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <Pressable
+                          hitSlop={8}
+                          onPress={() =>
+                            onChange({ questions: element.questions.map((x, i) => (i === qi ? { ...x, correctIndex: oi } : x)) } as any)
+                          }
+                        >
+                          <Ionicons
+                            name={q.correctIndex === oi ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={18}
+                            color={q.correctIndex === oi ? '#16A34A' : '#94A3B8'}
+                          />
+                        </Pressable>
+                        <TextInput
+                          style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+                          value={opt}
+                          onChangeText={(text) =>
+                            onChange({
+                              questions: element.questions.map((x, i) =>
+                                i === qi ? { ...x, options: x.options.map((o, j) => (j === oi ? text : o)) } : x
+                              ),
+                            } as any)
+                          }
+                          placeholder={`Option ${oi + 1}`}
+                        />
+                        {q.options.length > 2 && (
+                          <Pressable
+                            hitSlop={8}
+                            onPress={() =>
+                              onChange({
+                                questions: element.questions.map((x, i) =>
+                                  i === qi
+                                    ? {
+                                        ...x,
+                                        options: x.options.filter((_, j) => j !== oi),
+                                        correctIndex: x.correctIndex >= oi && x.correctIndex > 0 ? x.correctIndex - 1 : x.correctIndex,
+                                      }
+                                    : x
+                                ),
+                              } as any)
+                            }
+                          >
+                            <Ionicons name="close" size={16} color="#94A3B8" />
+                          </Pressable>
+                        )}
+                      </View>
+                    ))}
+                    {q.options.length < 4 && (
+                      <Pressable
+                        onPress={() =>
+                          onChange({ questions: element.questions.map((x, i) => (i === qi ? { ...x, options: [...x.options, ''] } : x)) } as any)
+                        }
+                      >
+                        <Text style={styles.addOptionText}>+ Add option</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+                <Pressable
+                  style={styles.uploadBtn}
+                  onPress={() =>
+                    onChange({
+                      questions: [...element.questions, { question: '', options: ['', ''], correctIndex: 0 }],
+                    } as any)
+                  }
+                >
+                  <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.uploadBtnText}>Add question</Text>
+                </Pressable>
+                <Text style={styles.helperText}>Tap the circle beside an option to mark it as the correct answer.</Text>
+              </>
+            )}
+          </>
+        )}
       </ScrollView>
+    </View>
+  );
+}
+
+function MemorySymbolAdder({ onAdd }: { onAdd: (symbol: string) => void }) {
+  const [value, setValue] = useState('');
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+      <TextInput
+        style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+        value={value}
+        onChangeText={setValue}
+        placeholder="e.g. 🏀"
+      />
+      <Pressable
+        style={styles.smallAddBtn}
+        onPress={() => {
+          if (!value.trim()) return;
+          onAdd(value.trim());
+          setValue('');
+        }}
+      >
+        <Text style={styles.smallAddBtnText}>Add</Text>
+      </Pressable>
     </View>
   );
 }
@@ -816,6 +1012,17 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   uploadBtnText: { color: '#FFFFFF', fontWeight: '600' },
+  gameQuestionCard: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    backgroundColor: '#F8FAFC',
+  },
+  addOptionText: { color: '#2563EB', fontWeight: '600', fontSize: 13, marginTop: 2, marginBottom: 4 },
+  smallAddBtn: { backgroundColor: '#111827', borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' },
+  smallAddBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   confirmBtn: {
     flexDirection: 'row',
     alignItems: 'center',

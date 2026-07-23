@@ -16,7 +16,7 @@ import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
@@ -280,6 +280,30 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
+  const addGame = () => {
+    // Defaults to Tic-Tac-Toe -- the only kind that's a real, complete, playable game with
+    // zero setup; the other kinds (Trivia/Memory/Clicker) need real content first, added via
+    // the inspector's kind picker.
+    const el: GameElement = {
+      id: generateId('el'),
+      type: 'game',
+      kind: 'tictactoe',
+      title: 'Tic-Tac-Toe',
+      questions: [],
+      memorySymbols: [],
+      clickerLabel: 'Tap!',
+      clickerTarget: 20,
+      x: canvasCenterX - 90,
+      y: canvasCenterY - 100,
+      width: 200,
+      height: 220,
+      zIndex: 5,
+    };
+    addElement(el);
+    select(el.id);
+    setPanel(null);
+  };
+
   const confirmDeleteId = (id: string) => {
     showAlert('Delete element?', undefined, [
       { text: 'Cancel', style: 'cancel' },
@@ -495,6 +519,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
             <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
+            <TabButton icon="game-controller-outline" label="Game" active={false} onPress={addGame} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
             <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
           </ScrollView>

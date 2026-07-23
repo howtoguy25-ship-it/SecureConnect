@@ -22,6 +22,8 @@ export function labelForElement(element: CanvasElement): string {
       return element.name || 'Product';
     case 'collection':
       return element.name || 'Collection';
+    case 'game':
+      return element.title || 'Game';
     default:
       return 'Element';
   }
@@ -49,6 +51,8 @@ export function iconForElement(element: CanvasElement): keyof typeof import('@ex
       return 'pricetag-outline';
     case 'collection':
       return 'albums-outline';
+    case 'game':
+      return 'game-controller-outline';
     default:
       return 'square-outline';
   }

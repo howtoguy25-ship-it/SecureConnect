@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement, CollectionElement } from '@/types';
 import { useGoogleFont } from '@/utils/useGoogleFont';
 import { gradientStartEnd } from '@/utils/gradient';
+import GameView from '@/components/canvas/GameView';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -531,6 +532,8 @@ export default function ElementRenderer({ element, allElements }: { element: Can
       return <ProductCardView element={element} width={width} height={height} />;
     case 'collection':
       return <CollectionView element={element} allElements={allElements} width={width} height={height} />;
+    case 'game':
+      return <GameView element={element} width={width} height={height} />;
     default:
       return null;
   }
