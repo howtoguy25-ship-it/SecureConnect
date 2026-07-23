@@ -38,22 +38,27 @@ export default function AIPromptScreen({ navigation, route }: Props) {
   }, [uid]);
 
   const pickReferenceImage = async () => {
-    if (referenceImages.length >= MAX_REFERENCE_IMAGES) return;
+    const remaining = MAX_REFERENCE_IMAGES - referenceImages.length;
+    if (remaining <= 0) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) return;
     // Compressed and modestly sized -- these are only ever shown to the model as visual
     // inspiration (color/style/mood), never inserted into the site itself, so full
     // resolution/quality would just waste bandwidth and callable-function payload budget.
+    // allowsMultipleSelection gives a real "Add" confirm step (and a working Cancel) instead
+    // of the single-select picker's "tap a photo and it's instantly chosen" behavior.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.5,
       base64: true,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
     });
     if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
-    if (!asset.base64) return;
-    const mime = asset.mimeType ?? 'image/jpeg';
-    setReferenceImages((prev) => [...prev, `data:${mime};base64,${asset.base64}`]);
+    const newImages = result.assets
+      .filter((asset) => !!asset.base64)
+      .map((asset) => `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`);
+    setReferenceImages((prev) => [...prev, ...newImages].slice(0, MAX_REFERENCE_IMAGES));
   };
 
   const removeReferenceImage = (index: number) => {

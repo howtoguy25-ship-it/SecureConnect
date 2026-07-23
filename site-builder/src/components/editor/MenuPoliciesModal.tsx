@@ -123,7 +123,7 @@ export default function MenuPoliciesModal({
           {tab === 'menu' && (
             <>
               <View style={styles.rowBetween}>
-                <View>
+                <View style={styles.rowBetweenText}>
                   <Text style={styles.sectionTitle}>Show menu on published site</Text>
                   <Text style={styles.helperText}>The three-line menu button visitors tap to navigate your site.</Text>
                 </View>
@@ -423,6 +423,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 6 },
   helperText: { fontSize: 12, color: '#64748B', marginTop: 2, marginBottom: 8 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  rowBetweenText: { flex: 1, marginRight: 14 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
   chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0' },
   chipActive: { borderColor: '#2563EB', backgroundColor: '#EFF6FF' },
