@@ -37,6 +37,10 @@ import {
   renderPrivacyPolicyHtml,
   renderReturnPolicyHtml,
   renderSupportHtml,
+  renderPolicyPageHtml,
+  renderPoliciesIndexHtml,
+  policyHref,
+  POLICIES_INDEX_HREF,
 } from './siteHtml';
 import { slugify, uniqueSlug } from './publish';
 import { createHostingDomain, getHostingDomain, deleteHostingDomain } from './hostingApi';
@@ -809,8 +813,17 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
 
   const site: PublishedSite = { uid, projectId, html: '', updatedAt: Date.now() };
+  const extraPagesHtml: Record<string, string> = {};
+  const policies = project.policies ?? [];
+  for (const policy of policies) {
+    extraPagesHtml[policyHref(policy.id).replace(/^\//, '')] = renderPolicyPageHtml(project.name, policy, project.menu, project.pages, policies);
+  }
+  if (policies.length > 0) {
+    extraPagesHtml[POLICIES_INDEX_HREF.replace(/^\//, '')] = renderPoliciesIndexHtml(project.name, policies, project.menu, project.pages);
+  }
+
   if (project.pages && project.pages.length > 0) {
-    const pagesHtml: Record<string, string> = {};
+    const pagesHtml: Record<string, string> = { ...extraPagesHtml };
     for (const page of project.pages) {
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
       pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, renderPageNavHtml(project.pages, page.slug));
@@ -819,6 +832,7 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
     site.html = pagesHtml[project.pages[0].slug];
   } else {
     site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL);
+    if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
   await db.collection('publishedSites').doc(slug).set(site);
@@ -1031,16 +1045,24 @@ export const servePublishedSite = onRequest({ invoker: 'public' }, async (req, r
   }
 
   res.set('Cache-Control', 'public, max-age=60');
-  if (site.pages) {
-    // A manually-built multi-page website -- pick the requested page by its slug segment
-    // ('' for Home), matching how publishProject keyed the `pages` map.
-    const pageSlug = pagePath.replace(/^\/|\/$/g, '');
-    const pageHtml = site.pages[pageSlug];
+  // A manually-built multi-page website keys every real page by its slug segment ('' for
+  // Home) in `site.pages`; a single-page project has no `site.pages` entry for Home at all
+  // (its Home is just `site.html`), but MAY still have policy/policies-index sub-pages
+  // stashed there (see publishProject) -- so a non-root path always checks `site.pages`
+  // first regardless of whether this is "really" a multi-page site, and only root falls
+  // back to `site.html` when there's no explicit '' entry.
+  const pageSlug = pagePath.replace(/^\/|\/$/g, '');
+  if (pageSlug) {
+    const pageHtml = site.pages?.[pageSlug];
     if (!pageHtml) {
       res.status(404).send('Page not found.');
       return;
     }
     res.status(200).send(pageHtml);
+    return;
+  }
+  if (site.pages && site.pages[''] !== undefined) {
+    res.status(200).send(site.pages['']);
     return;
   }
   res.status(200).send(site.html);

@@ -179,6 +179,42 @@ export interface AnnouncementSettings {
   popups: PopupAnnouncementConfig[];
 }
 
+// Mirrors src/types/index.ts's RichTextRun/PolicyDoc/MenuItemTarget/MenuItem/SiteMenu -- see
+// that file's comments for why this is duplicated instead of shared.
+export interface RichTextRun {
+  text: string;
+  bold?: boolean;
+  underline?: boolean;
+  color?: string | null;
+  link?: string | null;
+}
+
+export type PolicyKind = 'privacy' | 'terms' | 'shipping' | 'refund' | 'contact' | 'custom';
+
+export interface PolicyDoc {
+  id: string;
+  kind: PolicyKind;
+  title: string;
+  paragraphs: RichTextRun[][];
+  updatedAt: number;
+}
+
+export type MenuItemTarget =
+  | { type: 'page'; pageId: string }
+  | { type: 'policy'; policyId: string }
+  | { type: 'url'; url: string };
+
+export interface MenuItem {
+  id: string;
+  label: string;
+  target: MenuItemTarget;
+}
+
+export interface SiteMenu {
+  enabled: boolean;
+  items: MenuItem[];
+}
+
 // Mirrors src/types/index.ts's SitePage -- see that file's comment for why this is
 // duplicated instead of shared (separate Node project, can't import from the client).
 export interface SitePage {
@@ -207,6 +243,8 @@ export interface Project {
   publishedAt?: number | null;
   customDomain?: string | null;
   domainStatus?: 'pending' | 'active' | 'failed' | null;
+  policies?: PolicyDoc[];
+  menu?: SiteMenu;
 }
 
 // A published project's rendered output, looked up by slug (or by custom domain hostname

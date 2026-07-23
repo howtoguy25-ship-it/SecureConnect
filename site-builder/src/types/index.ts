@@ -237,6 +237,55 @@ export interface CanvasSize {
   label: string;
 }
 
+// A single formatted span of text within a policy's body. `link` (a real https://, mailto:,
+// or tel: target) makes this run render as a real, underlined, clickable link in both the
+// editor and the published site -- "insert a link and it becomes a working clickable link
+// once saved" -- rather than a separate hyperlink widget bolted on top of plain text.
+export interface RichTextRun {
+  text: string;
+  bold?: boolean;
+  underline?: boolean;
+  color?: string | null;
+  link?: string | null;
+}
+
+export type PolicyKind = 'privacy' | 'terms' | 'shipping' | 'refund' | 'contact' | 'custom';
+
+// A real, publishable page a site owner writes once and can link to from buttons, the
+// automatic footer bar, or the site menu -- e.g. a Privacy Policy or a custom "Our Story"
+// page. `paragraphs` is a list of paragraphs, each itself a list of RichTextRun spans, so one
+// paragraph can mix plain, bold, and linked text. `title` is what shows on the footer
+// button/page (independent of `kind`, so "Refund/Return" can be renamed to "Returns &
+// Exchanges" without losing what it actually is).
+export interface PolicyDoc {
+  id: string;
+  kind: PolicyKind;
+  title: string;
+  paragraphs: RichTextRun[][];
+  updatedAt: number;
+}
+
+// Where a tap on a menu item goes -- another page of the same site, a policy page, or a
+// plain external URL/mailto/tel, mirroring the same three targets a button can already link
+// to (see ButtonElement's link/linkTargetElementId).
+export type MenuItemTarget =
+  | { type: 'page'; pageId: string }
+  | { type: 'policy'; policyId: string }
+  | { type: 'url'; url: string };
+
+export interface MenuItem {
+  id: string;
+  label: string;
+  target: MenuItemTarget;
+}
+
+// The real hamburger (three-line) menu automatically shown at the top of every published
+// page. `enabled` lets a site owner turn it off entirely rather than show an empty menu.
+export interface SiteMenu {
+  enabled: boolean;
+  items: MenuItem[];
+}
+
 // One page of a multi-page website (Home, About, Contact, ...). Only ever used when
 // pageType === 'website' -- Social/Logo/Video stay single-page/fixed-card, they're not
 // meant to have connected sub-pages. `slug` is the URL segment other pages link to it by
@@ -277,6 +326,11 @@ export interface Project {
   publishedAt?: number | null;
   customDomain?: string | null;
   domainStatus?: 'pending' | 'active' | 'failed' | null;
+  // Optional -- absent/undefined means "none created yet" for every project made before this
+  // feature existed, same treatment as `pages`. Shared across every page of the site (not
+  // per-page), since a Privacy Policy or site menu is a whole-site concern, not a per-page one.
+  policies?: PolicyDoc[];
+  menu?: SiteMenu;
 }
 
 // -- AI Site Builder (Phase 3) --

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, PanResponder, useWindowDimensions, Modal } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, PanResponder, useWindowDimensions, Modal, Linking } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,6 +13,7 @@ import ElementInspector from '@/components/inspector/ElementInspector';
 import LayersPanel from '@/components/elements/LayersPanel';
 import PageTabsBar from '@/components/editor/PageTabsBar';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
+import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement } from '@/types';
@@ -66,6 +67,7 @@ function EditorInner({ navigation }: Props) {
   // `pages`) -- multi-page websites edit background per-page instead, via PageTabsBar's long
   // press menu, since each page there can have its own.
   const [bgEditorOpen, setBgEditorOpen] = useState(false);
+  const [menuPoliciesOpen, setMenuPoliciesOpen] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
   // same touch underneath an active element drag, which is what made moving or resizing a
@@ -291,6 +293,24 @@ function EditorInner({ navigation }: Props) {
     updateElement(id, { locked: !target.locked });
   };
 
+  // A locked button's raw `link` field can be a real external URL, or (on a multi-page
+  // website) a same-site page slug like "/about" -- Linking.openURL can't do in-app
+  // navigation, so a slug that matches a real page switches to it right here in the editor,
+  // exactly like tapping it would on the published site. Anything else opens for real.
+  const openLinkInEditor = (link: string) => {
+    const trimmed = link.trim();
+    if (pages) {
+      const slug = trimmed.replace(/^\//, '');
+      const target = pages.find((p) => p.slug === slug);
+      if (target) {
+        switchPage(target.id);
+        return;
+      }
+    }
+    const isAbsolute = /^https?:\/\//i.test(trimmed) || /^(mailto|tel):/i.test(trimmed);
+    Linking.openURL(isAbsolute ? trimmed : `https://${trimmed}`);
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
@@ -320,6 +340,9 @@ function EditorInner({ navigation }: Props) {
                   <Ionicons name="color-palette-outline" size={22} color={theme.text} />
                 </Pressable>
               )}
+              <Pressable onPress={() => setMenuPoliciesOpen(true)} hitSlop={8}>
+                <Ionicons name="menu-outline" size={22} color={theme.text} />
+              </Pressable>
             </>
           )}
           {isGenerating ? (
@@ -404,6 +427,7 @@ function EditorInner({ navigation }: Props) {
             onToggleLock={toggleLock}
             onInteractionChange={setCanvasInteracting}
             forceLocked={pageLocked}
+            onOpenLink={openLinkInEditor}
           />
         </ScrollView>
       </View>
@@ -478,6 +502,14 @@ function EditorInner({ navigation }: Props) {
       )}
         </>
       )}
+
+      <MenuPoliciesModal
+        visible={menuPoliciesOpen}
+        onClose={() => setMenuPoliciesOpen(false)}
+        project={project}
+        pages={pages}
+        updateProject={updateProject}
+      />
 
       <Modal visible={bgEditorOpen} transparent animationType="fade" onRequestClose={() => setBgEditorOpen(false)}>
         <View style={styles.bgModalBackdrop}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput, Linking } from 'react-native';
+import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
@@ -37,6 +37,10 @@ interface Props {
   // linkTargetElementId's comment), so "lock the page to see how it really looks" is
   // actually true for buttons too, not just their visual chrome.
   onNavigateToElement?: (id: string) => void;
+  // Handles a locked button's raw `link` field -- lets the caller (EditorScreen) decide
+  // whether it's really an internal page-slug (switch pages in-editor, since Linking.openURL
+  // can't do in-app navigation) or a genuine external URL/mailto/tel (open it for real).
+  onOpenLink?: (link: string) => void;
 }
 
 const MIN_TEXT_FONT_SIZE = 6;
@@ -96,6 +100,7 @@ export default function DraggableElement({
   onInteractionChange,
   forceLocked,
   onNavigateToElement,
+  onOpenLink,
 }: Props) {
   const elementLocked = !!element.locked;
   const locked = elementLocked || !!forceLocked;
@@ -330,11 +335,7 @@ export default function DraggableElement({
           style={{ width: '100%', height: '100%' }}
           onPress={() => {
             if (element.linkTargetElementId) onNavigateToElement?.(element.linkTargetElementId);
-            else if (element.link) {
-              const trimmed = element.link.trim();
-              const isAbsolute = /^https?:\/\//i.test(trimmed) || /^(mailto|tel):/i.test(trimmed) || trimmed.startsWith('/');
-              Linking.openURL(isAbsolute ? trimmed : `https://${trimmed}`);
-            }
+            else if (element.link) onOpenLink?.(element.link);
           }}
         >
           <ElementRenderer element={liveElement} allElements={allElements} />

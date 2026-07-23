@@ -1,4 +1,4 @@
-import { CanvasElement, GradientFill, Project, SitePage } from './types';
+import { CanvasElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage } from './types';
 import { getFontOption } from './fonts';
 
 // Renders a Project's absolutely-positioned canvas into a real, self-contained static
@@ -631,6 +631,154 @@ export function renderPageNavHtml(pages: SitePage[], currentSlug: string): strin
   return `<nav style="position:sticky;top:0;z-index:9997;display:flex;flex-wrap:wrap;justify-content:center;gap:2px;padding:6px 10px;background:#0F172A;font-family:-apple-system,sans-serif;font-size:14px;">${links}</nav>`;
 }
 
+// A real, standalone, real published page's URL path for a given policy -- kept as one
+// literal path segment (no nested slash) so servePublishedSite's slug lookup in index.ts
+// doesn't need any special-casing beyond stripping leading/trailing slashes.
+export function policyHref(policyId: string): string {
+  return `/policy-${policyId}`;
+}
+
+export const POLICIES_INDEX_HREF = '/site-policies';
+
+function resolveMenuTargetHref(target: MenuItem['target'], pages: SitePage[] | undefined): string {
+  if (target.type === 'page') {
+    const page = pages?.find((p) => p.id === target.pageId);
+    return page ? (page.slug ? `/${page.slug}` : '/') : '/';
+  }
+  if (target.type === 'policy') return policyHref(target.policyId);
+  return safeUrl(target.url);
+}
+
+function renderRichTextRunHtml(run: RichTextRun): string {
+  let inner = escapeHtml(run.text);
+  const styleParts: string[] = [];
+  if (run.color) styleParts.push(`color:${escapeAttr(run.color)};`);
+  if (run.link) {
+    return `<a href="${escapeAttr(safeUrl(run.link))}" style="color:#2563EB;text-decoration:underline;">${inner}</a>`;
+  }
+  if (run.underline) styleParts.push('text-decoration:underline;');
+  if (styleParts.length > 0) inner = `<span style="${styleParts.join('')}">${inner}</span>`;
+  if (run.bold) inner = `<b>${inner}</b>`;
+  return inner;
+}
+
+export function renderRichTextParagraphsHtml(paragraphs: RichTextRun[][]): string {
+  return paragraphs
+    .map((paragraph) => `<p style="margin:0 0 16px;">${paragraph.map(renderRichTextRunHtml).join('')}</p>`)
+    .join('');
+}
+
+// The real three-line menu button shown at the top of every published page (multi-page or
+// not) -- a plain CSS/JS slide-out panel, no framework needed for something this small.
+// `menu.enabled === false` (an explicit site-owner choice, distinct from never having set one
+// up) is the only thing that hides it entirely.
+function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefined): string {
+  if (!menu || !menu.enabled || menu.items.length === 0) return '';
+  const links = menu.items
+    .map(
+      (item) =>
+        `<a href="${escapeAttr(resolveMenuTargetHref(item.target, pages))}" style="display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;">${escapeHtml(item.label)}</a>`
+    )
+    .join('');
+  return `<button aria-label="Menu" onclick="document.getElementById('sitespark-menu-panel').style.display='block'" style="position:fixed;top:14px;left:14px;z-index:9996;width:42px;height:42px;border-radius:10px;border:none;background:#0F172A;color:#fff;font-size:18px;cursor:pointer;">&#9776;</button>
+<div id="sitespark-menu-panel" style="display:none;position:fixed;inset:0;z-index:9998;background:#000000AA;" onclick="if(event.target===this)this.style.display='none';">
+  <div style="width:82%;max-width:300px;height:100%;background:#fff;box-shadow:2px 0 12px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #E2E8F0;">
+      <span style="font-weight:800;font-size:15px;color:#0F172A;">Menu</span>
+      <button aria-label="Close" onclick="document.getElementById('sitespark-menu-panel').style.display='none';" style="background:none;border:none;font-size:22px;color:#94A3B8;cursor:pointer;">&times;</button>
+    </div>
+    ${links}
+  </div>
+</div>`;
+}
+
+// The real, evenly-spaced row of policy buttons automatically shown at the bottom of every
+// published page -- one per policy the site owner has created, each a real link to that
+// policy's own page, plus a "View all" link once there's more than one.
+function renderPolicyFooterHtml(policies: PolicyDoc[] | undefined): string {
+  if (!policies || policies.length === 0) return '';
+  const buttons = policies
+    .map(
+      (p) =>
+        `<a href="${escapeAttr(policyHref(p.id))}" style="flex:1;text-align:center;padding:10px 8px;color:#334155;font-size:12px;font-weight:600;text-decoration:none;border-radius:8px;background:#F1F5F9;">${escapeHtml(p.title)}</a>`
+    )
+    .join('');
+  return `<footer style="display:flex;flex-wrap:wrap;gap:8px;padding:16px;font-family:-apple-system,sans-serif;background:#FFFFFF;border-top:1px solid #E2E8F0;">${buttons}</footer>`;
+}
+
+// A real, flowing (not absolute-canvas) page for one policy's written content -- distinct
+// from renderProjectHtml, which lays out the fixed-size design canvas; a policy is just text
+// the owner wrote, so it gets a normal readable column instead.
+export function renderPolicyPageHtml(
+  siteName: string,
+  policy: PolicyDoc,
+  menu: SiteMenu | undefined,
+  pages: SitePage[] | undefined,
+  policies: PolicyDoc[] | undefined
+): string {
+  const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(policy.title)} — ${escapeHtml(siteName)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background: #F8FAFC; color: #1E293B; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; }
+  </style>
+</head>
+<body>
+  ${renderMenuHtml(menu, pages)}
+  <div class="wrap">
+    <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
+    <h1 style="font-size:26px;margin:16px 0 20px;">${escapeHtml(policy.title)}</h1>
+    ${renderRichTextParagraphsHtml(policy.paragraphs)}
+  </div>
+  ${renderPolicyFooterHtml(policies)}
+</body>
+</html>`;
+}
+
+// Lists every real policy the site owner has created, each linking to its own real page --
+// the "view all policies" page a button/menu item/link can point at.
+export function renderPoliciesIndexHtml(
+  siteName: string,
+  policies: PolicyDoc[],
+  menu: SiteMenu | undefined,
+  pages: SitePage[] | undefined
+): string {
+  const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
+  const rows = policies
+    .map(
+      (p) =>
+        `<a href="${escapeAttr(policyHref(p.id))}" style="display:block;padding:14px 16px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;margin-bottom:10px;color:#0F172A;font-weight:700;text-decoration:none;">${escapeHtml(p.title)}</a>`
+    )
+    .join('');
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Policies — ${escapeHtml(siteName)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background: #F8FAFC; color: #1E293B; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; }
+  </style>
+</head>
+<body>
+  ${renderMenuHtml(menu, pages)}
+  <div class="wrap">
+    <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
+    <h1 style="font-size:26px;margin:16px 0 20px;">Policies</h1>
+    ${rows}
+  </div>
+</body>
+</html>`;
+}
+
 export function renderProjectHtml(
   project: Project,
   slug: string,
@@ -705,6 +853,7 @@ export function renderProjectHtml(
   </style>
 </head>
 <body>
+  ${renderMenuHtml(project.menu, project.pages)}
   ${navHtml}
   ${renderAnnouncementBars(project)}
   <div id="site-wrapper">
@@ -712,6 +861,7 @@ export function renderProjectHtml(
       ${elementsHtml}
     </div>
   </div>
+  ${renderPolicyFooterHtml(project.policies)}
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
   ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
   ${renderPopupAnnouncements(project)}
