@@ -44,55 +44,80 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
   // Default to a portrait 9:16-ish shape before the project doc (and its real canvasSize)
   // has loaded, so the frame doesn't flash as a stretched-out landscape box for a beat.
   const canvasSize = project?.canvasSize ?? { width: 390, height: 693 };
-  const scale = Math.min(maxWidth / canvasSize.width, maxHeight / canvasSize.height, 1);
-  const frameWidth = Math.round(canvasSize.width * scale);
-  const frameHeight = Math.round(canvasSize.height * scale);
+  const bezel = 10;
+  const screenMaxWidth = maxWidth - bezel * 2;
+  const screenMaxHeight = maxHeight - bezel * 2;
+  // Scale by width alone (never by the page's total height) -- a real generated site is a
+  // tall scrolling page, often several times taller than one screen. Fitting the *whole*
+  // page into maxHeight (the old behavior) forced the width ratio down to match, squashing
+  // the frame into a tall narrow "bottle" instead of a phone. A real phone shows the page at
+  // one true width-based zoom and lets the rest scroll off the bottom of the visible screen
+  // -- so here the screen height is just a fixed viewport and anything below it is clipped
+  // by overflow:hidden, exactly like scrolling would reveal it on an actual device.
+  const scale = Math.min(screenMaxWidth / canvasSize.width, 1);
+  const screenWidth = Math.round(canvasSize.width * scale);
+  const screenHeight = screenMaxHeight;
 
   return (
-    <View
-      style={[
-        styles.frame,
-        { width: frameWidth, height: frameHeight, backgroundColor: project?.backgroundColor ?? '#F1F5F9' },
-      ]}
-    >
-      {!hasContent && <View style={styles.placeholderDot} />}
-      {hasContent &&
-        [...project!.elements]
-          .sort((a, b) => a.zIndex - b.zIndex)
-          .map((el) => {
-            const scaledEl = scaleElement(el, scale);
-            return (
-              <View
-                key={el.id}
-                style={{
-                  position: 'absolute',
-                  left: scaledEl.x,
-                  top: scaledEl.y,
-                  width: scaledEl.width,
-                  height: scaledEl.height,
-                  overflow: 'hidden',
-                }}
-              >
-                <ElementRenderer element={scaledEl} allElements={project!.elements} />
-              </View>
-            );
-          })}
+    <View style={[styles.phoneBezel, { width: screenWidth + bezel * 2, height: screenHeight + bezel * 2, padding: bezel }]}>
+      <View style={styles.notch} />
+      <View
+        style={[
+          styles.screen,
+          { width: screenWidth, height: screenHeight, backgroundColor: project?.backgroundColor ?? '#F1F5F9' },
+        ]}
+      >
+        {!hasContent && <View style={styles.placeholderDot} />}
+        {hasContent &&
+          [...project!.elements]
+            .sort((a, b) => a.zIndex - b.zIndex)
+            .map((el) => {
+              const scaledEl = scaleElement(el, scale);
+              return (
+                <View
+                  key={el.id}
+                  style={{
+                    position: 'absolute',
+                    left: scaledEl.x,
+                    top: scaledEl.y,
+                    width: scaledEl.width,
+                    height: scaledEl.height,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <ElementRenderer element={scaledEl} allElements={project!.elements} />
+                </View>
+              );
+            })}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  frame: {
-    borderRadius: 14,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+  phoneBezel: {
+    borderRadius: 34,
+    backgroundColor: '#111827',
     alignSelf: 'center',
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+  notch: {
+    position: 'absolute',
+    top: 10,
+    width: 70,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#111827',
+    zIndex: 2,
+  },
+  screen: {
+    borderRadius: 24,
+    overflow: 'hidden',
   },
   placeholderDot: {
     width: 8,

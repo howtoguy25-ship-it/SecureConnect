@@ -95,6 +95,21 @@ function gameEl(partial: Partial<GameElement> & Pick<GameElement, 'y' | 'height'
 // undercount a 4-line list as one line); (2) word-wrapping breaks at spaces, not mid-word,
 // so real lines almost always hold noticeably fewer characters than a flat width/charWidth
 // division suggests. Both are fixed here, plus a per-block safety margin.
+// The AI writes plain copy meant for a real <Text>/<div> element, but models often slip into
+// chat-markdown habits (**bold**, `code`, "- " bullets) that render as literal asterisks/
+// backticks once dropped into a page instead of being formatted -- stripped here, the single
+// point where every generated headline/body/label becomes real element text, so every
+// consumer (live build preview, the editor canvas, and the published site) sees clean text.
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '• ')
+    .trim();
+}
+
 function estimateTextHeight(text: string, fontSize: number): number {
   // ~0.62 (rather than 0.55) accounts for word-wrap leaving a ragged right edge unused,
   // and bold/mixed-width system fonts running wider than a flat monospace-style estimate.
@@ -129,6 +144,11 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
   plan.sections.forEach((section, index) => {
     const isHero = index === 0 && section.kind === 'hero';
     const image = imageFor(section);
+    const headline = stripMarkdown(section.headline);
+    const body = section.body ? stripMarkdown(section.body) : section.body;
+    const buttonLabel = section.buttonLabel ? stripMarkdown(section.buttonLabel) : section.buttonLabel;
+    const gameClickerLabel = section.gameClickerLabel ? stripMarkdown(section.gameClickerLabel) : section.gameClickerLabel;
+    const gameMemorySymbols = section.gameMemorySymbols.map((s) => stripMarkdown(s));
 
     if (image && (section.kind === 'hero' || section.kind === 'gallery')) {
       const imgHeight = section.kind === 'hero' ? 200 : 220;
@@ -140,7 +160,7 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
       const video = videoFor(section);
       if (video?.videoId) {
         const videoHeight = Math.round((CANVAS_WIDTH * 9) / 16); // real 16:9 embed
-        elements.push(videoEmbedEl({ y, height: videoHeight, videoId: video.videoId, title: video.title ?? section.headline }));
+        elements.push(videoEmbedEl({ y, height: videoHeight, videoId: video.videoId, title: video.title ? stripMarkdown(video.title) : headline }));
         y += videoHeight + 16;
       }
     }
@@ -160,20 +180,20 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
           y,
           height: gameHeight,
           kind: section.gameKind,
-          title: section.headline,
-          questions: section.gameQuestions,
-          memorySymbols: section.gameMemorySymbols,
-          clickerLabel: section.gameClickerLabel || 'Tap!',
+          title: headline,
+          questions: section.gameQuestions.map((q) => ({ ...q, question: stripMarkdown(q.question), options: q.options.map((o) => stripMarkdown(o)) })),
+          memorySymbols: gameMemorySymbols,
+          clickerLabel: gameClickerLabel || 'Tap!',
         })
       );
       y += gameHeight + 16;
     }
 
     const headlineSize = isHero ? 28 : 22;
-    const headlineHeight = estimateTextHeight(section.headline, headlineSize);
+    const headlineHeight = estimateTextHeight(headline, headlineSize);
     elements.push(
       textEl({
-        text: section.headline,
+        text: headline,
         y,
         fontSize: headlineSize,
         fontWeight: 'bold',
@@ -184,11 +204,11 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
     );
     y += headlineHeight + 6;
 
-    if (section.body) {
-      const bodyHeight = estimateTextHeight(section.body, 15);
+    if (body) {
+      const bodyHeight = estimateTextHeight(body, 15);
       elements.push(
         textEl({
-          text: section.body,
+          text: body,
           y,
           fontSize: 15,
           color: '#475569',
@@ -199,9 +219,9 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
       y += bodyHeight + 10;
     }
 
-    if (section.buttonLabel && (section.kind === 'hero' || section.kind === 'cta')) {
+    if (buttonLabel && (section.kind === 'hero' || section.kind === 'cta')) {
       const buttonX = section.kind === 'cta' ? (CANVAS_WIDTH - 160) / 2 : MARGIN;
-      elements.push(buttonEl({ label: section.buttonLabel, y, x: buttonX, backgroundColor: plan.accentColor }));
+      elements.push(buttonEl({ label: buttonLabel, y, x: buttonX, backgroundColor: plan.accentColor }));
       y += 48 + 16;
     }
 

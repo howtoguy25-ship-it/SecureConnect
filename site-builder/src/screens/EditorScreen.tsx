@@ -261,6 +261,11 @@ function EditorInner({ navigation }: Props) {
     addElement(el);
     select(el.id);
     setPanel(null);
+    // Force the inspector sheet open at full height even if it was left minimized from a
+    // previous selection -- a freshly-created "New product" placeholder is meaningless until
+    // its name/price/photo get filled in, so the create-a-product moment should land the
+    // user straight in those fields instead of a collapsed "tap to edit" row.
+    setSheetHeight(DEFAULT_SHEET_HEIGHT);
   };
 
   const addCollection = () => {
@@ -517,7 +522,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="image-outline" label="Image" active={false} onPress={addImage} />
             <TabButton icon="images-outline" label="Slideshow" active={false} onPress={addSlideshow} />
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
-            <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
+            <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} highlightColor="#16A34A" />
             <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
             <TabButton icon="game-controller-outline" label="Game" active={false} onPress={addGame} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
@@ -562,18 +567,24 @@ function TabButton({
   label,
   active,
   onPress,
+  highlightColor,
 }: {
   icon: string;
   label: string;
   active: boolean;
   onPress: () => void;
+  // Makes this entry read as a distinct, prominent action (like Shopify's "Add product")
+  // instead of blending into the row of otherwise-identical gray design-tool icons -- always
+  // tinted, not just when active, so it's easy to spot at a glance while scanning the strip.
+  highlightColor?: string;
 }) {
   const { theme } = useAppTheme();
+  const color = highlightColor ?? (active ? theme.accent : theme.textMuted);
   return (
     <Pressable style={styles.tabButton} onPress={onPress}>
-      <Ionicons name={icon as any} size={20} color={active ? theme.accent : theme.textMuted} />
+      <Ionicons name={icon as any} size={20} color={active ? theme.accent : color} />
       <Text
-        style={[styles.tabButtonLabel, { color: theme.textMuted }, active && { color: theme.accent }]}
+        style={[styles.tabButtonLabel, { color }, active && { color: theme.accent }]}
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.8}

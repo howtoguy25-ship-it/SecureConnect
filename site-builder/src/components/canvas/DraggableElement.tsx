@@ -319,12 +319,18 @@ export default function DraggableElement({
             element.type === 'text'
               ? {
                   fontSize: element.fontSize,
-                  color: element.color,
+                  // Always a fixed dark color here, not element.color -- the input box behind
+                  // it is always solid white (see inlineInput.backgroundColor below), so text
+                  // authored in a light/white color (common for captions meant to sit on dark
+                  // backgrounds) would otherwise render white-on-white and look blank while
+                  // typing, even though the real saved color is untouched and still applies
+                  // once editing ends.
+                  color: '#0F172A',
                   textAlign: element.align,
                   fontWeight: element.fontWeight,
                   ...(textFontFamily ? { fontFamily: textFontFamily } : null),
                 }
-              : { fontSize: 15, color: element.type === 'button' ? element.textColor : '#0F172A', textAlign: 'center', fontWeight: '600' },
+              : { fontSize: 15, color: '#0F172A', textAlign: 'center', fontWeight: '600' },
           ]}
         />
       ) : locked && element.type === 'button' && (element.link || element.linkTargetElementId) ? (
