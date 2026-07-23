@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { Project, CanvasElement } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
+import ElementErrorBoundary from '@/components/canvas/ElementErrorBoundary';
 
 interface Props {
   uid: string;
@@ -85,7 +86,9 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
                     overflow: 'hidden',
                   }}
                 >
-                  <ElementRenderer element={scaledEl} allElements={project!.elements} />
+                  <ElementErrorBoundary>
+                    <ElementRenderer element={scaledEl} allElements={project!.elements} />
+                  </ElementErrorBoundary>
                 </View>
               );
             })}

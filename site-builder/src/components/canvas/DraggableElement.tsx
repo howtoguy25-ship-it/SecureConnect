@@ -3,6 +3,7 @@ import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextIn
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
+import ElementErrorBoundary from '@/components/canvas/ElementErrorBoundary';
 import { useGoogleFont } from '@/utils/useGoogleFont';
 
 interface Props {
@@ -344,10 +345,14 @@ export default function DraggableElement({
             else if (element.link) onOpenLink?.(element.link);
           }}
         >
-          <ElementRenderer element={liveElement} allElements={allElements} />
+          <ElementErrorBoundary>
+            <ElementRenderer element={liveElement} allElements={allElements} />
+          </ElementErrorBoundary>
         </Pressable>
       ) : (
-        <ElementRenderer element={liveElement} allElements={allElements} />
+        <ElementErrorBoundary>
+          <ElementRenderer element={liveElement} allElements={allElements} />
+        </ElementErrorBoundary>
       )}
 
       {elementLocked && (
