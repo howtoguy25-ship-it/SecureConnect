@@ -19,4 +19,5 @@ export type RootStackParamList = {
   Account: undefined;
   SellerAccount: undefined;
   Orders: undefined;
+  DiscountCodes: undefined;
 };

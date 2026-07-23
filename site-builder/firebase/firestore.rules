@@ -139,6 +139,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // A seller's promo codes -- only ever created/edited through callables
+    // (createDiscountCode/setDiscountCodeActive/deleteDiscountCode), never client-writable,
+    // since redemptionCount has to be trustworthy (it's what enforces maxRedemptions) and a
+    // seller editing their own count client-side could let a code be reused past its limit.
+    match /users/{uid}/discountCodes/{code} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
     // Reports submitted via a published page's "Report this site" link (App Store
     // Review Guideline 1.2) -- written only by reportPublishedSite via the Admin SDK, from
     // an unauthenticated visitor's browser talking to that Cloud Function, never directly

@@ -21,6 +21,7 @@ import {
   StoreInventoryVariant,
   StoreOrder,
   StoreOrderItem,
+  DiscountCode,
   SellerAccount,
   OrderNotice,
   BookingDetails,
@@ -129,6 +130,10 @@ const REPORT_SITE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloud
 // product card so it can show real live stock/in-stock status instead of a stale number
 // baked in at publish time (see siteHtml.ts).
 const PRODUCT_STOCK_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getProductStock`;
+// Same pattern, for validateDiscountCode (defined further down) -- baked into every
+// published page's cart panel so a buyer gets real feedback ("10% off applied") as soon as
+// they type a code, before committing to checkout (see siteHtml.ts).
+const DISCOUNT_VALIDATE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/validateDiscountCode`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -828,12 +833,12 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
     const pagesHtml: Record<string, string> = { ...extraPagesHtml };
     for (const page of project.pages) {
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
-      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, renderPageNavHtml(project.pages, page.slug));
+      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, renderPageNavHtml(project.pages, page.slug));
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
@@ -1528,13 +1533,20 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
   const items = JSON.parse(itemsJson) as StoreOrderItem[];
   const bookingDetails: BookingDetails | null = session.metadata?.booking ? (JSON.parse(session.metadata.booking) as BookingDetails) : null;
   const subtotalUsd = items.reduce((sum, item) => sum + item.priceUsd * item.quantity, 0);
-  const platformFeeUsd = Math.round(subtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
-  const sellerNetUsd = Math.round((subtotalUsd - platformFeeUsd) * 100) / 100;
+  const discountCode = session.metadata?.discountCode ?? null;
+  const discountAmountUsd = session.metadata?.discountAmountUsd ? Number(session.metadata.discountAmountUsd) : 0;
+  const discountedSubtotalUsd = Math.round((subtotalUsd - discountAmountUsd) * 100) / 100;
+  const platformFeeUsd = Math.round(discountedSubtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+  const sellerNetUsd = Math.round((discountedSubtotalUsd - platformFeeUsd) * 100) / 100;
 
   const inventoryRefs = items.map((item) => db.collection('storeInventory').doc(slug).collection('products').doc(item.productId));
+  const discountRef = discountCode ? discountCodeRef(sellerUid, discountCode) : null;
   let projectId = '';
   await db.runTransaction(async (tx) => {
     const docs = await Promise.all(inventoryRefs.map((ref) => tx.get(ref)));
+    // Reads must precede writes in a Firestore transaction, so the discount code's current
+    // redemptionCount is read here (even though it's only used after the loop below).
+    const discountDoc = discountRef ? await tx.get(discountRef) : null;
     docs.forEach((doc, i) => {
       if (!doc.exists) return;
       const data = doc.data() as StoreInventoryItem;
@@ -1555,6 +1567,9 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
         tx.update(inventoryRefs[i], { stockQuantity: Math.max(0, data.stockQuantity - items[i].quantity) });
       }
     });
+    if (discountRef && discountDoc?.exists) {
+      tx.update(discountRef, { redemptionCount: FieldValue.increment(1) });
+    }
   });
 
   const order: StoreOrder = {
@@ -1566,6 +1581,8 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
     buyerName: session.customer_details?.name ?? null,
     items,
     subtotalUsd,
+    discountCode,
+    discountAmountUsd,
     platformFeeUsd,
     sellerNetUsd,
     stripeSessionId: session.id,
@@ -2089,16 +2106,137 @@ export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey], in
   return { url };
 }));
 
+const discountCodeRef = (uid: string, code: string) => db.collection('users').doc(uid).collection('discountCodes').doc(code.trim().toUpperCase());
+
+const CODE_PATTERN = /^[A-Z0-9]{3,20}$/;
+
+// A seller's own promo code, created against their own account -- the uppercased code
+// itself is the doc id (see discountCodeRef), so createStoreCheckout/validateDiscountCode
+// can look one up with a single get once a slug's been resolved to a sellerUid.
+export const createDiscountCode = onCall({ invoker: 'public' }, withCallableErrors('createDiscountCode', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { code, type, amount, maxRedemptions, expiresAt } = request.data as {
+    code: string;
+    type: 'percent' | 'fixed';
+    amount: number;
+    maxRedemptions: number | null;
+    expiresAt: number | null;
+  };
+  const normalized = (code ?? '').trim().toUpperCase();
+  if (!CODE_PATTERN.test(normalized)) {
+    throw new HttpsError('invalid-argument', 'Codes must be 3-20 letters/numbers, e.g. SUMMER20.');
+  }
+  if (type !== 'percent' && type !== 'fixed') throw new HttpsError('invalid-argument', 'Invalid discount type.');
+  if (!Number.isFinite(amount) || amount <= 0 || (type === 'percent' && amount > 100)) {
+    throw new HttpsError('invalid-argument', type === 'percent' ? 'Percent off must be between 1 and 100.' : 'Amount off must be greater than 0.');
+  }
+
+  const ref = discountCodeRef(uid, normalized);
+  if ((await ref.get()).exists) {
+    throw new HttpsError('already-exists', `You already have a code called ${normalized}.`);
+  }
+
+  const discountCode: DiscountCode = {
+    code: normalized,
+    sellerUid: uid,
+    type,
+    amount,
+    active: true,
+    maxRedemptions: maxRedemptions != null && Number.isFinite(maxRedemptions) ? Math.max(1, Math.floor(maxRedemptions)) : null,
+    redemptionCount: 0,
+    expiresAt: expiresAt != null && Number.isFinite(expiresAt) ? expiresAt : null,
+    createdAt: Date.now(),
+  };
+  await ref.set(discountCode);
+  return { ok: true };
+}));
+
+export const setDiscountCodeActive = onCall({ invoker: 'public' }, withCallableErrors('setDiscountCodeActive', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { code, active } = request.data as { code: string; active: boolean };
+  const ref = discountCodeRef(uid, code ?? '');
+  if (!(await ref.get()).exists) throw new HttpsError('not-found', 'Code not found.');
+  await ref.update({ active: !!active });
+  return { ok: true };
+}));
+
+export const deleteDiscountCode = onCall({ invoker: 'public' }, withCallableErrors('deleteDiscountCode', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { code } = request.data as { code: string };
+  await discountCodeRef(uid, code ?? '').delete();
+  return { ok: true };
+}));
+
+interface DiscountValidation {
+  valid: boolean;
+  error?: string;
+  discount?: DiscountCode;
+}
+
+// Shared by validateDiscountCode (a live preview as the buyer types) and createStoreCheckout
+// (the real, authoritative check at the moment of payment) -- same rules both times so a
+// code that looked valid while typing can't turn out invalid (or vice versa) at checkout.
+async function validateDiscountCodeForSeller(sellerUid: string, rawCode: string): Promise<DiscountValidation> {
+  const code = (rawCode ?? '').trim().toUpperCase();
+  if (!code) return { valid: false, error: 'Enter a code.' };
+
+  const doc = await discountCodeRef(sellerUid, code).get();
+  if (!doc.exists) return { valid: false, error: 'Code not found.' };
+  const discount = doc.data() as DiscountCode;
+  if (!discount.active) return { valid: false, error: 'This code is no longer active.' };
+  if (discount.expiresAt != null && discount.expiresAt < Date.now()) return { valid: false, error: 'This code has expired.' };
+  if (discount.maxRedemptions != null && discount.redemptionCount >= discount.maxRedemptions) {
+    return { valid: false, error: 'This code has already been fully redeemed.' };
+  }
+  return { valid: true, discount };
+}
+
+async function validateDiscountCodeForSlug(slug: string, rawCode: string): Promise<DiscountValidation> {
+  const siteDoc = await db.collection('publishedSites').doc(slug).get();
+  const sellerUid = (siteDoc.data() as { uid?: string } | undefined)?.uid;
+  if (!sellerUid) return { valid: false, error: 'Code not found.' };
+  return validateDiscountCodeForSeller(sellerUid, rawCode);
+}
+
+// A discount amount is computed off the pre-discount subtotal and clamped so it can never
+// exceed it (a $50-off code on a $20 order discounts $20, not into negative territory).
+function computeDiscountAmount(discount: DiscountCode, subtotalUsd: number): number {
+  const raw = discount.type === 'percent' ? subtotalUsd * (discount.amount / 100) : discount.amount;
+  return Math.round(Math.min(Math.max(raw, 0), subtotalUsd) * 100) / 100;
+}
+
+// Public, unauthenticated -- lets the published-site checkout show "10% off applied" (or a
+// real error) as soon as a buyer types a code, before they commit to actually checking out.
+export const validateDiscountCode = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
+  const slug = (req.query.slug as string) ?? '';
+  const code = (req.query.code as string) ?? '';
+  if (!slug || !code) {
+    res.status(400).json({ valid: false, error: 'Missing slug or code.' });
+    return;
+  }
+  const result = await validateDiscountCodeForSlug(slug, code);
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json(
+    result.valid && result.discount
+      ? { valid: true, type: result.discount.type, amount: result.discount.amount }
+      : { valid: false, error: result.error }
+  );
+});
+
 // Public webhook (no auth -- a buyer's browser calls this), computes the real order total
 // against storeInventory (never trusting whatever price/stock the static page happened to
 // have baked in), and creates a real Stripe Checkout Session with the commission split
 // baked into the PaymentIntent itself.
 export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors: true, invoker: 'public' }, async (req, res) => {
   try {
-    const { slug, items, booking } = req.body as {
+    const { slug, items, booking, discountCode } = req.body as {
       slug: string;
       items: { productId: string; quantity: number; variantKey?: string }[];
       booking?: { preferredDate?: string; preferredTime?: string; notes?: string };
+      discountCode?: string;
     };
     if (!slug || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'Missing slug or items.' });
@@ -2203,7 +2341,26 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       return;
     }
 
-    const platformFeeUsd = Math.round(subtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+    // Re-validated here (never trusting whatever discount amount the page displayed while
+    // the buyer was typing) -- redemptionCount itself is only ever incremented once the
+    // order actually completes (handleStoreOrderCompleted), same as stock, so an abandoned
+    // checkout never uses up a redemption.
+    let appliedDiscount: DiscountCode | null = null;
+    if (discountCode) {
+      const result = await validateDiscountCodeForSeller(sellerUid, discountCode);
+      if (!result.valid || !result.discount) {
+        res.status(400).json({ error: result.error ?? 'Invalid discount code.' });
+        return;
+      }
+      appliedDiscount = result.discount;
+    }
+    const discountAmountUsd = appliedDiscount ? computeDiscountAmount(appliedDiscount, subtotalUsd) : 0;
+    const discountedSubtotalUsd = Math.round((subtotalUsd - discountAmountUsd) * 100) / 100;
+
+    // The platform fee is computed off what the seller actually gets paid on (post-discount),
+    // not the pre-discount subtotal -- otherwise application_fee_amount could exceed the real
+    // charged total once a coupon is applied, which Stripe rejects outright.
+    const platformFeeUsd = Math.round(discountedSubtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
     const stripe = createStripeClient(stripeSecretKey.value());
     const bookingDetails: BookingDetails | null = hasService
       ? {
@@ -2213,10 +2370,25 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         }
       : null;
 
+    // An ad hoc, one-time-use Stripe coupon rather than syncing our own codes into Stripe's
+    // own Coupon/PromotionCode objects -- our DiscountCode is the single source of truth
+    // (active flag, expiry, redemption limit), this just makes Stripe's own Checkout Session
+    // total reflect it.
+    let discounts: Stripe.Checkout.SessionCreateParams.Discount[] | undefined;
+    if (appliedDiscount && discountAmountUsd > 0) {
+      const coupon = await stripe.coupons.create(
+        appliedDiscount.type === 'percent'
+          ? { percent_off: appliedDiscount.amount, duration: 'once', name: appliedDiscount.code }
+          : { amount_off: Math.round(discountAmountUsd * 100), currency: 'usd', duration: 'once', name: appliedDiscount.code }
+      );
+      discounts = [{ coupon: coupon.id }];
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment', // always a single real one-time charge -- never a subscription, booking or not
       payment_method_types: ['card'],
       line_items: lineItems,
+      ...(discounts ? { discounts } : {}),
       ...(needsShipping ? { shipping_address_collection: { allowed_countries: ['US', 'CA', 'GB', 'AU', 'NZ'] as Stripe.Checkout.SessionCreateParams.ShippingAddressCollection.AllowedCountry[] } } : {}),
       success_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=success`,
       cancel_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=cancelled`,
@@ -2230,6 +2402,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         sellerUid,
         items: JSON.stringify(orderItems),
         ...(bookingDetails ? { booking: JSON.stringify(bookingDetails) } : {}),
+        ...(appliedDiscount ? { discountCode: appliedDiscount.code, discountAmountUsd: String(discountAmountUsd) } : {}),
       },
     });
 

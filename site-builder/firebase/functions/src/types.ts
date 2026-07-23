@@ -500,6 +500,28 @@ export interface StoreOrderItem {
 
 export type StoreOrderStatus = 'paid' | 'refunded';
 
+export type DiscountType = 'percent' | 'fixed';
+
+// A seller-created promo code -- stored at users/{sellerUid}/discountCodes/{code} with the
+// uppercased code itself as the doc id, so checkout can look one up with a single get (no
+// query) once it's resolved a slug to a sellerUid via the publishedSites doc. Only ever
+// created/edited through callables (createDiscountCode/setDiscountCodeActive/
+// deleteDiscountCode), never client-writable -- see firestore.rules -- since redemptionCount
+// has to be trustworthy (it's what enforces maxRedemptions) and a seller changing their own
+// redemption count client-side could let a code be reused past its real limit.
+export interface DiscountCode {
+  code: string;
+  sellerUid: string;
+  type: DiscountType;
+  // Percent off (1-100) for type 'percent', or a flat USD amount off for type 'fixed'.
+  amount: number;
+  active: boolean;
+  maxRedemptions: number | null;
+  redemptionCount: number;
+  expiresAt: number | null; // epoch ms, null = never expires
+  createdAt: number;
+}
+
 // A real-life service's requested date/time + any special request -- collected once per
 // checkout (not per line item), since a booking checkout is inherently one reservation
 // even if it bundles a couple of add-on services together. Present only when the order
@@ -523,6 +545,8 @@ export interface StoreOrder {
   buyerName: string | null;
   items: StoreOrderItem[];
   subtotalUsd: number;
+  discountCode: string | null;
+  discountAmountUsd: number;
   platformFeeUsd: number;
   sellerNetUsd: number;
   stripeSessionId: string;

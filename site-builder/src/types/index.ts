@@ -507,11 +507,30 @@ export interface StoreOrder {
   buyerName: string | null;
   items: StoreOrderItem[];
   subtotalUsd: number;
+  discountCode: string | null;
+  discountAmountUsd: number;
   platformFeeUsd: number;
   sellerNetUsd: number;
   stripeSessionId: string;
   status: StoreOrderStatus;
   bookingDetails: BookingDetails | null;
+  createdAt: number;
+}
+
+export type DiscountType = 'percent' | 'fixed';
+
+// Mirrors the functions-side DiscountCode -- see that file's comment for why this is
+// server-write-only (createDiscountCode/setDiscountCodeActive/deleteDiscountCode) rather
+// than client-writable.
+export interface DiscountCode {
+  code: string;
+  sellerUid: string;
+  type: DiscountType;
+  amount: number;
+  active: boolean;
+  maxRedemptions: number | null;
+  redemptionCount: number;
+  expiresAt: number | null;
   createdAt: number;
 }
 

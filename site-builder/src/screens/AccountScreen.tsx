@@ -176,6 +176,11 @@ export default function AccountScreen({ navigation }: Props) {
           <Text style={[styles.rowText, { color: theme.text }]}>Orders</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
+        <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('DiscountCodes')}>
+          <Ionicons name="pricetags-outline" size={20} color={theme.textMuted} />
+          <Text style={[styles.rowText, { color: theme.text }]}>Discount Codes</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </Pressable>
         <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => navigation.navigate('Support')}>
           <Ionicons name="help-circle-outline" size={20} color={theme.textMuted} />
           <Text style={[styles.rowText, { color: theme.text }]}>Support</Text>

@@ -3,7 +3,7 @@ import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { functions, db } from '@/services/firebase';
 import { requireFunctions } from '@/services/requireFunctions';
 import { requireDb } from '@/services/requireDb';
-import { SellerAccount, StoreOrder } from '@/types';
+import { SellerAccount, StoreOrder, DiscountCode, DiscountType } from '@/types';
 
 // Real Stripe Express Connect onboarding for sellers -- see stripeConnect.ts /
 // createSellerOnboardingLink in Cloud Functions. Opens Stripe's own hosted flow (identity,
@@ -59,6 +59,39 @@ export const ordersStore = {
     const q = query(collection(requireDb(db), 'users', uid, 'orders'), orderBy('createdAt', 'desc'));
     return onSnapshot(q, (snap) => {
       onChange(snap.docs.map((d) => d.data() as StoreOrder));
+    });
+  },
+};
+
+// Real promo codes redeemable at checkout on any of a seller's published stores -- see
+// createDiscountCode/setDiscountCodeActive/deleteDiscountCode in Cloud Functions for why
+// these always go through callables rather than direct Firestore writes.
+export async function createDiscountCode(params: {
+  code: string;
+  type: DiscountType;
+  amount: number;
+  maxRedemptions: number | null;
+  expiresAt: number | null;
+}): Promise<void> {
+  const call = httpsCallable<typeof params, { ok: boolean }>(requireFunctions(functions), 'createDiscountCode');
+  await call(params);
+}
+
+export async function setDiscountCodeActive(code: string, active: boolean): Promise<void> {
+  const call = httpsCallable<{ code: string; active: boolean }, { ok: boolean }>(requireFunctions(functions), 'setDiscountCodeActive');
+  await call({ code, active });
+}
+
+export async function deleteDiscountCode(code: string): Promise<void> {
+  const call = httpsCallable<{ code: string }, { ok: boolean }>(requireFunctions(functions), 'deleteDiscountCode');
+  await call({ code });
+}
+
+export const discountCodesStore = {
+  subscribe(uid: string, onChange: (codes: DiscountCode[]) => void): () => void {
+    const q = query(collection(requireDb(db), 'users', uid, 'discountCodes'), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snap) => {
+      onChange(snap.docs.map((d) => d.data() as DiscountCode));
     });
   },
 };

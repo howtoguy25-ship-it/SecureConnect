@@ -1529,7 +1529,7 @@ ${script}`;
 // Stock/price are re-validated server-side in createStoreCheckout regardless of what's
 // baked into this page, so a stale published page can never let someone buy at an old
 // price or oversell what's actually left.
-function renderCartWidget(slug: string, checkoutUrl: string): string {
+function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string): string {
   return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
   🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
 </div>
@@ -1545,7 +1545,20 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
     <label style="font-size:11px;color:#64748B;">Notes (optional)</label>
     <textarea id="sitespark-booking-notes" rows="2" placeholder="Anything the business should know" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin-top:2px;resize:vertical;"></textarea>
   </div>
-  <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:10px;color:#0F172A;">
+  <div style="margin-top:10px;border-top:1px solid #F1F5F9;padding-top:10px;">
+    <div style="display:flex;gap:6px;">
+      <input id="sitespark-discount-input" type="text" placeholder="Discount code" style="flex:1;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;text-transform:uppercase;" />
+      <button onclick="siteSparkCart.applyDiscount()" style="background:#111827;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">Apply</button>
+    </div>
+    <div id="sitespark-discount-feedback" style="font-size:11px;margin-top:4px;"></div>
+  </div>
+  <div id="sitespark-cart-subtotal-row" style="display:none;justify-content:space-between;font-size:12px;color:#64748B;margin-top:8px;">
+    <span>Subtotal</span><span id="sitespark-cart-subtotal">$0.00</span>
+  </div>
+  <div id="sitespark-cart-discount-row" style="display:none;justify-content:space-between;font-size:12px;color:#16A34A;margin-top:2px;">
+    <span id="sitespark-cart-discount-label">Discount</span><span id="sitespark-cart-discount-amount">-$0.00</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:6px;color:#0F172A;">
     <span>Total</span><span id="sitespark-cart-total">$0.00</span>
   </div>
   <button onclick="siteSparkCart.checkout()" style="margin-top:10px;width:100%;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">Checkout</button>
@@ -1554,17 +1567,43 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
 <script>(function(){
   var SLUG=${JSON.stringify(slug)};
   var CHECKOUT_URL=${JSON.stringify(checkoutUrl)};
+  var DISCOUNT_URL=${JSON.stringify(discountValidateUrl)};
   var STORAGE_KEY='sitespark_cart_'+SLUG;
+  var DISCOUNT_KEY='sitespark_discount_'+SLUG;
   function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]; } catch(e){ return []; } }
   function save(items){ localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); render(); }
+  function loadDiscount(){ try { return JSON.parse(localStorage.getItem(DISCOUNT_KEY))||null; } catch(e){ return null; } }
+  function saveDiscount(discount){ if (discount) localStorage.setItem(DISCOUNT_KEY, JSON.stringify(discount)); else localStorage.removeItem(DISCOUNT_KEY); render(); }
   function hasService(items){ return items.some(function(i){ return i.saleType === 'service'; }); }
+  function discountAmountFor(discount, subtotal){
+    if (!discount) return 0;
+    var raw = discount.type === 'percent' ? subtotal * (discount.amount / 100) : discount.amount;
+    return Math.min(Math.max(raw, 0), subtotal);
+  }
   function render(){
     var items = load();
+    var discount = loadDiscount();
     var count = items.reduce(function(s,i){return s+i.quantity;},0);
-    var total = items.reduce(function(s,i){return s+i.priceUsd*i.quantity;},0);
+    var subtotal = items.reduce(function(s,i){return s+i.priceUsd*i.quantity;},0);
+    var discountAmount = discountAmountFor(discount, subtotal);
+    var total = subtotal - discountAmount;
     document.getElementById('sitespark-cart-count').textContent = String(count);
     document.getElementById('sitespark-cart-total').textContent = '$'+total.toFixed(2);
     document.getElementById('sitespark-booking-fields').style.display = hasService(items) ? 'block' : 'none';
+
+    var subtotalRow = document.getElementById('sitespark-cart-subtotal-row');
+    var discountRow = document.getElementById('sitespark-cart-discount-row');
+    if (discount) {
+      subtotalRow.style.display = 'flex';
+      document.getElementById('sitespark-cart-subtotal').textContent = '$'+subtotal.toFixed(2);
+      discountRow.style.display = 'flex';
+      document.getElementById('sitespark-cart-discount-label').textContent = discount.code + ' applied';
+      document.getElementById('sitespark-cart-discount-amount').textContent = '-$'+discountAmount.toFixed(2);
+    } else {
+      subtotalRow.style.display = 'none';
+      discountRow.style.display = 'none';
+    }
+
     var list = document.getElementById('sitespark-cart-items');
     if (items.length === 0) { list.innerHTML = '<div style="color:#94A3B8;font-size:13px;">Cart is empty</div>'; return; }
     list.innerHTML = items.map(function(i){
@@ -1598,6 +1637,31 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
     var panel = document.getElementById('sitespark-cart-panel');
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   }
+  // A live preview only (validateDiscountCode is read-only, never redeems anything) --
+  // createStoreCheckout re-validates for real at the moment of payment, since a code could
+  // expire or run out of redemptions between typing it and actually checking out.
+  function applyDiscount(){
+    var input = document.getElementById('sitespark-discount-input');
+    var feedback = document.getElementById('sitespark-discount-feedback');
+    var code = (input.value || '').trim().toUpperCase();
+    if (!code) { saveDiscount(null); feedback.textContent = ''; return; }
+    feedback.style.color = '#94A3B8';
+    feedback.textContent = 'Checking…';
+    fetch(DISCOUNT_URL + '?slug=' + encodeURIComponent(SLUG) + '&code=' + encodeURIComponent(code))
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.valid) {
+          saveDiscount({ code: code, type: data.type, amount: data.amount });
+          feedback.style.color = '#16A34A';
+          feedback.textContent = (data.type === 'percent' ? data.amount + '% off' : '$' + data.amount.toFixed(2) + ' off') + ' applied!';
+        } else {
+          saveDiscount(null);
+          feedback.style.color = '#DC2626';
+          feedback.textContent = data.error || 'Invalid code.';
+        }
+      })
+      .catch(function(){ feedback.style.color = '#DC2626'; feedback.textContent = 'Could not check that code.'; });
+  }
   function checkout(){
     var items = load();
     if (items.length === 0) return;
@@ -1610,6 +1674,7 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
       if (!date || !time) { alert('Please pick a preferred date and time for your booking.'); return; }
       booking = { preferredDate: date, preferredTime: time, notes: notes };
     }
+    var discount = loadDiscount();
     fetch(CHECKOUT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1617,6 +1682,7 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
         slug: SLUG,
         items: items.map(function(i){ return { productId: i.productId, quantity: i.quantity, variantKey: i.variantKey || undefined }; }),
         booking: booking,
+        discountCode: discount ? discount.code : undefined,
       }),
     })
       .then(function(r){ return r.json(); })
@@ -1626,7 +1692,7 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
       })
       .catch(function(){ alert('Could not start checkout.'); });
   }
-  window.siteSparkCart = { add: add, remove: remove, togglePanel: togglePanel, checkout: checkout };
+  window.siteSparkCart = { add: add, remove: remove, togglePanel: togglePanel, checkout: checkout, applyDiscount: applyDiscount };
   render();
 
   var params = new URLSearchParams(window.location.search);
@@ -1634,6 +1700,7 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
   if (order === 'success' || order === 'cancelled') {
     var wasBooking = hasService(load());
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(DISCOUNT_KEY);
     var banner = document.getElementById('sitespark-order-banner');
     banner.textContent = order === 'success'
       ? (wasBooking ? 'Thanks — your booking is confirmed!' : 'Thanks — your order is confirmed!')
@@ -1968,6 +2035,7 @@ export function renderProjectHtml(
   storeCheckoutUrl: string,
   reportUrl: string,
   productStockUrl: string,
+  discountValidateUrl: string,
   navHtml = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
@@ -2054,7 +2122,7 @@ export function renderProjectHtml(
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
   ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
   ${renderPopupAnnouncements(project)}
-  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl) : ''}
+  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl) : ''}
   <script>
     (function () {
       var canvas = document.getElementById('canvas');
