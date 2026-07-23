@@ -1,4 +1,5 @@
 require('dotenv/config');
+const withGoogleMobileAds = require('./plugins/withGoogleMobileAds');
 
 module.exports = ({ config }) => ({
   ...config,
@@ -74,19 +75,13 @@ module.exports = ({ config }) => ({
       },
     ],
     [
-      // Referencing the plugin file directly (rather than just the package name) skips
-      // Expo's own "does this package have an app.plugin.js" auto-discovery step. That
-      // discovery step failed on EAS's build machine (reporting "No app.plugin.js file
-      // found" despite the file being right there in the published package), which sent it
-      // down its fallback path -- requiring the package's plain CommonJS main entry in raw
-      // Node with no Metro/Babel involved. That entry pulls in `react-native` itself, whose
-      // own main entry (node_modules/react-native/index.js) contains real Flow syntax
-      // (`import typeof * as ReactNativePublicAPI from './index.js.flow'`) meant to be
-      // stripped by Metro, not parsed by plain Node -- hence "Unexpected token 'typeof'".
-      // Reproduced this exact crash locally by requiring that fallback path directly.
-      // Pointing straight at the concrete file removes the discovery step (and therefore
-      // the broken fallback) entirely.
-      'react-native-google-mobile-ads/app.plugin.js',
+      // A local plugin (plugins/withGoogleMobileAds.js) that reimplements
+      // react-native-google-mobile-ads' own config plugin, instead of referencing that
+      // package's plugin at all -- see that file's header comment for the full story.
+      // Passing the actual function here (not a string) means Expo never has to resolve
+      // anything by name for this plugin; it just runs the function we already required
+      // ourselves in plain Node, above.
+      withGoogleMobileAds,
       {
         // Real AdMob App ID (from admob.google.com) -- used once for the whole app
         // regardless of which ad formats are active. Rewarded interstitial credits
