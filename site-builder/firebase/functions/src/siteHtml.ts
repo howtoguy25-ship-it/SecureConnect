@@ -1529,7 +1529,7 @@ ${script}`;
 // Stock/price are re-validated server-side in createStoreCheckout regardless of what's
 // baked into this page, so a stale published page can never let someone buy at an old
 // price or oversell what's actually left.
-function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string): string {
+function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string, orderStatusUrl: string): string {
   return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
   🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
 </div>
@@ -1564,12 +1564,26 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   <button onclick="siteSparkCart.checkout()" style="margin-top:10px;width:100%;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">Checkout</button>
 </div>
 <div id="sitespark-order-banner" style="display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;padding:12px 20px;border-radius:10px;font-family:-apple-system,sans-serif;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);"></div>
+<div id="sitespark-track-fab" style="position:fixed;bottom:20px;left:20px;z-index:9998;background:#111827;color:#fff;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;font-family:-apple-system,sans-serif;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.toggleTrackPanel()">
+  📦 Track Order
+</div>
+<div id="sitespark-track-panel" style="display:none;position:fixed;bottom:70px;left:20px;z-index:9998;width:260px;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
+  <div style="font-weight:700;margin-bottom:8px;color:#0F172A;">Track your order</div>
+  <label style="font-size:11px;color:#64748B;">Order number</label>
+  <input id="sitespark-track-orderid" type="text" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
+  <label style="font-size:11px;color:#64748B;">Email used at checkout</label>
+  <input id="sitespark-track-email" type="email" style="width:100%;padding:6px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;margin:2px 0 8px;" />
+  <button onclick="siteSparkCart.checkOrderStatus()" style="width:100%;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;">Check Status</button>
+  <div id="sitespark-track-result" style="font-size:12px;margin-top:8px;color:#64748B;"></div>
+</div>
 <script>(function(){
   var SLUG=${JSON.stringify(slug)};
   var CHECKOUT_URL=${JSON.stringify(checkoutUrl)};
   var DISCOUNT_URL=${JSON.stringify(discountValidateUrl)};
+  var ORDER_STATUS_URL=${JSON.stringify(orderStatusUrl)};
   var STORAGE_KEY='sitespark_cart_'+SLUG;
   var DISCOUNT_KEY='sitespark_discount_'+SLUG;
+  var LAST_ORDER_KEY='sitespark_last_order_'+SLUG;
   function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]; } catch(e){ return []; } }
   function save(items){ localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); render(); }
   function loadDiscount(){ try { return JSON.parse(localStorage.getItem(DISCOUNT_KEY))||null; } catch(e){ return null; } }
@@ -1637,6 +1651,34 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     var panel = document.getElementById('sitespark-cart-panel');
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   }
+  function toggleTrackPanel(){
+    var panel = document.getElementById('sitespark-track-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }
+  // No buyer account exists in this app -- an order number (their own Stripe Checkout
+  // session id, shown once on the success banner and remembered on this device) plus the
+  // email they paid with is the only "login" a buyer has to check on their own order later.
+  function checkOrderStatus(){
+    var orderId = document.getElementById('sitespark-track-orderid').value.trim();
+    var email = document.getElementById('sitespark-track-email').value.trim();
+    var result = document.getElementById('sitespark-track-result');
+    if (!orderId || !email) { result.style.color = '#DC2626'; result.textContent = 'Enter both your order number and email.'; return; }
+    result.style.color = '#94A3B8';
+    result.textContent = 'Checking…';
+    fetch(ORDER_STATUS_URL + '?slug=' + encodeURIComponent(SLUG) + '&orderId=' + encodeURIComponent(orderId) + '&email=' + encodeURIComponent(email))
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.error) { result.style.color = '#DC2626'; result.textContent = data.error; return; }
+        var statusLabel = { unfulfilled: 'Preparing your order', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' }[data.fulfillmentStatus] || data.fulfillmentStatus;
+        var html = '<strong>' + statusLabel + '</strong>';
+        if (data.trackingCarrier || data.trackingNumber) {
+          html += '<br>' + (data.trackingCarrier || 'Carrier') + (data.trackingNumber ? ': ' + data.trackingNumber : '');
+        }
+        result.style.color = '#0F172A';
+        result.innerHTML = html;
+      })
+      .catch(function(){ result.style.color = '#DC2626'; result.textContent = 'Could not check that order.'; });
+  }
   // A live preview only (validateDiscountCode is read-only, never redeems anything) --
   // createStoreCheckout re-validates for real at the moment of payment, since a code could
   // expire or run out of redemptions between typing it and actually checking out.
@@ -1692,18 +1734,37 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
       })
       .catch(function(){ alert('Could not start checkout.'); });
   }
-  window.siteSparkCart = { add: add, remove: remove, togglePanel: togglePanel, checkout: checkout, applyDiscount: applyDiscount };
+  window.siteSparkCart = {
+    add: add, remove: remove, togglePanel: togglePanel, checkout: checkout, applyDiscount: applyDiscount,
+    toggleTrackPanel: toggleTrackPanel, checkOrderStatus: checkOrderStatus,
+  };
   render();
+
+  // Pre-fills the track-order widget with this device's most recent order, so a buyer who
+  // just checked out doesn't have to hunt down their own order number again -- only stored
+  // locally, never sent anywhere until they actually press Check Status.
+  var lastOrder = null;
+  try { lastOrder = JSON.parse(localStorage.getItem(LAST_ORDER_KEY)); } catch (e) {}
+  if (lastOrder && lastOrder.orderId) {
+    document.getElementById('sitespark-track-orderid').value = lastOrder.orderId;
+    if (lastOrder.email) document.getElementById('sitespark-track-email').value = lastOrder.email;
+  }
 
   var params = new URLSearchParams(window.location.search);
   var order = params.get('order');
+  var sessionId = params.get('session_id');
   if (order === 'success' || order === 'cancelled') {
     var wasBooking = hasService(load());
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(DISCOUNT_KEY);
+    if (order === 'success' && sessionId) {
+      localStorage.setItem(LAST_ORDER_KEY, JSON.stringify({ orderId: sessionId, email: (lastOrder && lastOrder.email) || '' }));
+      document.getElementById('sitespark-track-orderid').value = sessionId;
+    }
     var banner = document.getElementById('sitespark-order-banner');
+    var orderNumberSuffix = order === 'success' && sessionId ? ' Order #' + sessionId.slice(-8).toUpperCase() + '.' : '';
     banner.textContent = order === 'success'
-      ? (wasBooking ? 'Thanks — your booking is confirmed!' : 'Thanks — your order is confirmed!')
+      ? (wasBooking ? 'Thanks — your booking is confirmed!' : 'Thanks — your order is confirmed!') + orderNumberSuffix
       : 'Checkout was cancelled.';
     banner.style.background = order === 'success' ? '#16A34A' : '#64748B';
     banner.style.color = '#fff';
@@ -2036,6 +2097,7 @@ export function renderProjectHtml(
   reportUrl: string,
   productStockUrl: string,
   discountValidateUrl: string,
+  orderStatusUrl: string,
   navHtml = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
@@ -2122,7 +2184,7 @@ export function renderProjectHtml(
   <a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built with SiteSpark</a>
   ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
   ${renderPopupAnnouncements(project)}
-  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl) : ''}
+  ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl, orderStatusUrl) : ''}
   <script>
     (function () {
       var canvas = document.getElementById('canvas');

@@ -53,6 +53,38 @@ export async function sendOrderNotificationEmail(apiKey: string, sellerEmail: st
   });
 }
 
+// Sent to the buyer (not the seller) the moment a seller marks an order shipped -- the only
+// way a buyer finds out their order is moving, since there's no buyer account/notification
+// system in this app, just whatever email they gave Stripe at checkout.
+export async function sendShippingNotificationEmail(
+  apiKey: string,
+  buyerEmail: string,
+  order: StoreOrder,
+  sellerName: string
+): Promise<void> {
+  const resend = new Resend(apiKey);
+  const itemsList = order.items.map((item) => `${item.quantity} × ${escapeHtml(item.name)}${item.variantLabel ? ` (${escapeHtml(item.variantLabel)})` : ''}`).join('<br>');
+  const trackingBlock =
+    order.trackingCarrier || order.trackingNumber
+      ? `<p><strong>Carrier:</strong> ${order.trackingCarrier ? escapeHtml(order.trackingCarrier) : 'Not specified'}<br>
+         <strong>Tracking number:</strong> ${order.trackingNumber ? escapeHtml(order.trackingNumber) : 'Not provided'}</p>`
+      : '';
+
+  await resend.emails.send({
+    from: 'SiteSpark Orders <orders@buildsitespark.com>',
+    to: buyerEmail,
+    subject: `Your order from ${sellerName} has shipped`,
+    html: `
+      <div style="font-family:-apple-system,sans-serif;max-width:480px;margin:0 auto;">
+        <h2>Your order is on its way!</h2>
+        <p>${itemsList}</p>
+        ${trackingBlock}
+        <p style="color:#64748B;font-size:13px;">Order #${order.id.slice(-8).toUpperCase()}</p>
+      </div>
+    `,
+  });
+}
+
 export interface ContentReport {
   slug: string;
   reason: string;

@@ -3,7 +3,7 @@ import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { functions, db } from '@/services/firebase';
 import { requireFunctions } from '@/services/requireFunctions';
 import { requireDb } from '@/services/requireDb';
-import { SellerAccount, StoreOrder, DiscountCode, DiscountType } from '@/types';
+import { SellerAccount, StoreOrder, DiscountCode, DiscountType, FulfillmentStatus } from '@/types';
 
 // Real Stripe Express Connect onboarding for sellers -- see stripeConnect.ts /
 // createSellerOnboardingLink in Cloud Functions. Opens Stripe's own hosted flow (identity,
@@ -53,6 +53,19 @@ export const sellerAccountStore = {
     });
   },
 };
+
+// Moves an order through unfulfilled -> shipped -> delivered (or marks it cancelled) and
+// attaches real carrier/tracking info -- see updateOrderFulfillment in Cloud Functions for
+// why this sends a shipping-notification email to the buyer the moment it's marked shipped.
+export async function updateOrderFulfillment(params: {
+  orderId: string;
+  fulfillmentStatus: FulfillmentStatus;
+  trackingCarrier?: string | null;
+  trackingNumber?: string | null;
+}): Promise<void> {
+  const call = httpsCallable<typeof params, { ok: boolean }>(requireFunctions(functions), 'updateOrderFulfillment');
+  await call(params);
+}
 
 export const ordersStore = {
   subscribe(uid: string, onChange: (orders: StoreOrder[]) => void): () => void {

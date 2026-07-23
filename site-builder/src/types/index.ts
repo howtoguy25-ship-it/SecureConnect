@@ -514,8 +514,16 @@ export interface StoreOrder {
   stripeSessionId: string;
   status: StoreOrderStatus;
   bookingDetails: BookingDetails | null;
+  fulfillmentStatus: FulfillmentStatus;
+  trackingCarrier: string | null;
+  trackingNumber: string | null;
+  trackingUpdatedAt: number | null;
   createdAt: number;
 }
+
+// Separate from StoreOrderStatus (payment state) -- tracks physical/logical fulfillment of
+// what was paid for. Every order starts 'unfulfilled'.
+export type FulfillmentStatus = 'unfulfilled' | 'shipped' | 'delivered' | 'cancelled';
 
 export type DiscountType = 'percent' | 'fixed';
 

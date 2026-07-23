@@ -500,6 +500,12 @@ export interface StoreOrderItem {
 
 export type StoreOrderStatus = 'paid' | 'refunded';
 
+// Separate from StoreOrderStatus (payment state) -- this tracks physical/logical fulfillment
+// of what was paid for. Every order starts 'unfulfilled' regardless of saleType; sellers of
+// physical products typically move it through shipped -> delivered, while pickup/digital/
+// service orders might jump straight to 'delivered' once handed over/downloaded/completed.
+export type FulfillmentStatus = 'unfulfilled' | 'shipped' | 'delivered' | 'cancelled';
+
 export type DiscountType = 'percent' | 'fixed';
 
 // A seller-created promo code -- stored at users/{sellerUid}/discountCodes/{code} with the
@@ -552,5 +558,9 @@ export interface StoreOrder {
   stripeSessionId: string;
   status: StoreOrderStatus;
   bookingDetails: BookingDetails | null;
+  fulfillmentStatus: FulfillmentStatus;
+  trackingCarrier: string | null;
+  trackingNumber: string | null;
+  trackingUpdatedAt: number | null;
   createdAt: number;
 }

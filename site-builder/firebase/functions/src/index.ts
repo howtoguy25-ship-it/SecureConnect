@@ -21,6 +21,7 @@ import {
   StoreInventoryVariant,
   StoreOrder,
   StoreOrderItem,
+  FulfillmentStatus,
   DiscountCode,
   SellerAccount,
   OrderNotice,
@@ -59,7 +60,7 @@ import {
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession, createSubscriptionCheckoutSession, createOneTimeCheckoutSession } from './stripeApi';
 import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink, deleteExpressAccount } from './stripeConnect';
-import { sendOrderNotificationEmail, sendContentReportEmail } from './emailApi';
+import { sendOrderNotificationEmail, sendContentReportEmail, sendShippingNotificationEmail } from './emailApi';
 import { sendPushNotification } from './pushApi';
 import { getTransactionInfo } from './appStoreApi';
 import { SUBSCRIPTION_PRODUCT_IDS, CREDIT_PACK_PRODUCT_IDS, THEME_IDS_BY_PRODUCT, MONTHLY_CREDITS_FOR_PLAN, APPLE_BUNDLE_ID } from './iapProducts';
@@ -134,6 +135,10 @@ const PRODUCT_STOCK_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.clo
 // published page's cart panel so a buyer gets real feedback ("10% off applied") as soon as
 // they type a code, before committing to checkout (see siteHtml.ts).
 const DISCOUNT_VALIDATE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/validateDiscountCode`;
+// Same pattern, for getOrderStatus (defined further down) -- baked into every published
+// page's "Track your order" widget so a buyer with no account can still check
+// fulfillment/tracking status using just their order id and email (see siteHtml.ts).
+const ORDER_STATUS_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getOrderStatus`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -833,12 +838,12 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
     const pagesHtml: Record<string, string> = { ...extraPagesHtml };
     for (const page of project.pages) {
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
-      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, renderPageNavHtml(project.pages, page.slug));
+      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDER_STATUS_URL, renderPageNavHtml(project.pages, page.slug));
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDER_STATUS_URL);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
@@ -1588,6 +1593,10 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
     stripeSessionId: session.id,
     bookingDetails,
     status: 'paid',
+    fulfillmentStatus: 'unfulfilled',
+    trackingCarrier: null,
+    trackingNumber: null,
+    trackingUpdatedAt: null,
     createdAt: Date.now(),
   };
   await orderRef.set(order);
@@ -2106,6 +2115,93 @@ export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey], in
   return { url };
 }));
 
+const FULFILLMENT_STATUSES: FulfillmentStatus[] = ['unfulfilled', 'shipped', 'delivered', 'cancelled'];
+
+// Lets a seller move an order through unfulfilled -> shipped -> delivered (or mark it
+// cancelled) and attach real carrier/tracking info. Sends the buyer a shipping-notification
+// email the moment it's marked 'shipped' with tracking info attached -- the only way a buyer
+// finds out, since there's no buyer account/notification system in this app.
+export const updateOrderFulfillment = onCall({ secrets: [resendApiKey], invoker: 'public' }, withCallableErrors('updateOrderFulfillment', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { orderId, fulfillmentStatus, trackingCarrier, trackingNumber } = request.data as {
+    orderId: string;
+    fulfillmentStatus: FulfillmentStatus;
+    trackingCarrier?: string | null;
+    trackingNumber?: string | null;
+  };
+  if (!orderId || !FULFILLMENT_STATUSES.includes(fulfillmentStatus)) {
+    throw new HttpsError('invalid-argument', 'Missing or invalid orderId/fulfillmentStatus.');
+  }
+
+  const orderRef = db.collection('users').doc(uid).collection('orders').doc(orderId);
+  const doc = await orderRef.get();
+  if (!doc.exists) throw new HttpsError('not-found', 'Order not found.');
+  const order = doc.data() as StoreOrder;
+
+  const update = {
+    fulfillmentStatus,
+    trackingCarrier: trackingCarrier?.trim() || null,
+    trackingNumber: trackingNumber?.trim() || null,
+    trackingUpdatedAt: Date.now(),
+  };
+  await orderRef.update(update);
+
+  if (fulfillmentStatus === 'shipped' && order.buyerEmail) {
+    try {
+      await sendShippingNotificationEmail(resendApiKey.value(), order.buyerEmail, { ...order, ...update }, order.slug);
+    } catch (err) {
+      // The status update above already succeeded and is what matters most -- a failed
+      // notification email (e.g. sending domain not yet verified) shouldn't roll that back
+      // or block the seller, just log it for follow-up.
+      console.error('sendShippingNotificationEmail failed', err);
+    }
+  }
+
+  return { ok: true };
+}));
+
+// Public, unauthenticated -- lets a buyer (who has no account) check their own order's
+// fulfillment/tracking status from the published site using only their order id (shown to
+// them right after checkout) and the email they paid with, resolving sellerUid from the
+// slug's publishedSites doc the same way validateDiscountCodeForSlug does.
+export const getOrderStatus = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
+  const slug = (req.query.slug as string) ?? '';
+  const orderId = (req.query.orderId as string) ?? '';
+  const email = ((req.query.email as string) ?? '').trim().toLowerCase();
+  if (!slug || !orderId || !email) {
+    res.status(400).json({ error: 'Missing slug, orderId, or email.' });
+    return;
+  }
+
+  const siteDoc = await db.collection('publishedSites').doc(slug).get();
+  const sellerUid = (siteDoc.data() as { uid?: string } | undefined)?.uid;
+  if (!sellerUid) {
+    res.status(404).json({ error: 'Order not found.' });
+    return;
+  }
+
+  const doc = await db.collection('users').doc(sellerUid).collection('orders').doc(orderId).get();
+  if (!doc.exists) {
+    res.status(404).json({ error: 'Order not found.' });
+    return;
+  }
+  const order = doc.data() as StoreOrder;
+  if (!order.buyerEmail || order.buyerEmail.trim().toLowerCase() !== email) {
+    res.status(404).json({ error: 'Order not found.' });
+    return;
+  }
+
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({
+    fulfillmentStatus: order.fulfillmentStatus,
+    trackingCarrier: order.trackingCarrier,
+    trackingNumber: order.trackingNumber,
+    createdAt: order.createdAt,
+    items: order.items.map((item) => ({ name: item.name, quantity: item.quantity, variantLabel: item.variantLabel })),
+  });
+});
+
 const discountCodeRef = (uid: string, code: string) => db.collection('users').doc(uid).collection('discountCodes').doc(code.trim().toUpperCase());
 
 const CODE_PATTERN = /^[A-Z0-9]{3,20}$/;
@@ -2390,7 +2486,11 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       line_items: lineItems,
       ...(discounts ? { discounts } : {}),
       ...(needsShipping ? { shipping_address_collection: { allowed_countries: ['US', 'CA', 'GB', 'AU', 'NZ'] as Stripe.Checkout.SessionCreateParams.ShippingAddressCollection.AllowedCountry[] } } : {}),
-      success_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=success`,
+      // Stripe substitutes the literal {CHECKOUT_SESSION_ID} placeholder with the real
+      // session id (== this order's real id, see handleStoreOrderCompleted) -- that's what
+      // lets the success banner show a real order number and pre-fill the track-order
+      // widget, since there's no buyer account to look orders up through otherwise.
+      success_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=cancelled`,
       payment_intent_data: {
         application_fee_amount: Math.round(platformFeeUsd * 100),
