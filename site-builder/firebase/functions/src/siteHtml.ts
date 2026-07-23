@@ -1274,6 +1274,9 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const qtyId = `qty-${el.id}`;
       const stockId = `stock-${el.id}`;
       const addBtnId = `addbtn-${el.id}`;
+      const priceId = `price-${el.id}`;
+      const pickerId = `variantpicker-${el.id}`;
+      const hasVariants = el.variantOptions.length > 0;
       const badge = isService
         ? `📅 Service booking${el.serviceDurationMinutes ? ` · ${el.serviceDurationMinutes} min` : ''}`
         : isDigital
@@ -1323,37 +1326,119 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
 })();</script>`
         : '';
 
+      // Option/value swatches use data-attributes + addEventListener (not inline onclick)
+      // so option names/values with quotes or other characters never risk breaking out of a
+      // hand-built inline JS string -- the same convention used by the arcade games' buttons.
+      const variantPicker = hasVariants
+        ? `<div id="${pickerId}" style="margin-top:6px;">
+  ${el.variantOptions
+    .map(
+      (opt) => `<div style="margin-bottom:6px;">
+    <div style="font-size:10px;font-weight:700;color:#64748B;margin-bottom:4px;">${escapeHtml(opt.name)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      ${opt.values
+        .map(
+          (v) =>
+            `<button type="button" data-opt="${escapeAttr(opt.name)}" data-val="${escapeAttr(v)}" style="border:1px solid #E2E8F0;background:#F1F5F9;color:#0F172A;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;">${escapeHtml(v)}</button>`
+        )
+        .join('')}
+    </div>
+  </div>`
+    )
+    .join('')}
+</div>`
+        : '';
+
       const script = isReady
         ? `<script>(function(){
-  var stockUrl = ${JSON.stringify(productStockUrl)} + '?slug=' + encodeURIComponent(${JSON.stringify(slug)}) + '&productId=' + encodeURIComponent(${JSON.stringify(el.productId)});
+  var productId = ${JSON.stringify(el.productId)};
+  var baseName = ${JSON.stringify(el.name)};
+  var basePriceUsd = ${el.priceUsd};
+  var variantOptions = ${JSON.stringify(el.variantOptions)};
+  var stockUrl = ${JSON.stringify(productStockUrl)} + '?slug=' + encodeURIComponent(${JSON.stringify(slug)}) + '&productId=' + encodeURIComponent(productId);
   var stockEl = document.getElementById(${JSON.stringify(stockId)});
   var qtyEl = document.getElementById(${JSON.stringify(qtyId)});
   var btnEl = document.getElementById(${JSON.stringify(addBtnId)});
-  fetch(stockUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
-    if (!data || !stockEl) return;
-    if (!data.inStock) {
-      stockEl.textContent = 'Out of stock';
-      stockEl.style.color = '#DC2626';
-      stockEl.style.fontWeight = '700';
-      if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; btnEl.textContent = 'Out of Stock'; }
-    } else if (data.trackInventory) {
-      stockEl.textContent = data.stockQuantity + ' ${isService ? 'bookings left' : 'available'}';
-      if (qtyEl) qtyEl.max = String(Math.max(1, data.stockQuantity));
-      if (data.stockQuantity <= 0 && btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; btnEl.textContent = '${isService ? 'Fully Booked' : 'Sold Out'}'; }
-    } else {
-      stockEl.textContent = '${isService ? 'Available to book' : 'In stock'}';
-      stockEl.style.color = '#16A34A';
+  var priceEl = document.getElementById(${JSON.stringify(priceId)});
+  var pickerEl = document.getElementById(${JSON.stringify(pickerId)});
+  var selected = {};
+  var liveTop = null; // { trackInventory, stockQuantity, inStock, variants }
+
+  function setState(text, color, disabled, btnText){
+    if (stockEl) { stockEl.textContent = text; stockEl.style.color = color; }
+    if (btnEl) {
+      btnEl.disabled = disabled;
+      btnEl.style.opacity = disabled ? '0.5' : '1';
+      btnEl.style.cursor = disabled ? 'not-allowed' : 'pointer';
+      btnEl.textContent = btnText;
     }
+  }
+
+  // undefined = a required option still has no selection yet; null = a complete selection
+  // that doesn't match any real combination (shouldn't happen -- the picker only offers
+  // values that exist); otherwise the matching live variant (with its own price/stock).
+  function currentVariant(){
+    if (!variantOptions.length) return null;
+    var values = variantOptions.map(function(o){ return selected[o.name]; });
+    if (values.some(function(v){ return !v; })) return undefined;
+    var key = values.join('|');
+    var match = (liveTop && liveTop.variants || []).filter(function(v){ return v.key === key; })[0];
+    return match || null;
+  }
+
+  function refresh(){
+    var variant = currentVariant();
+    var effectivePrice = (variant && variant.priceUsd != null) ? variant.priceUsd : basePriceUsd;
+    if (priceEl) priceEl.textContent = '$' + effectivePrice.toFixed(2);
+    if (!liveTop) return;
+    if (!liveTop.inStock) { setState('Out of stock', '#DC2626', true, '${isService ? 'Not Available' : 'Out of Stock'}'); return; }
+    if (variant === undefined) { setState('Select ${escapeHtml(el.variantOptions.map((o) => o.name).join(' & '))} to continue', '#94A3B8', true, 'Select Options'); return; }
+    var stockQuantity = variant ? variant.stockQuantity : liveTop.stockQuantity;
+    if (liveTop.trackInventory && stockQuantity != null) {
+      if (stockQuantity <= 0) { setState('${isService ? 'Fully booked' : 'Sold out'}', '#DC2626', true, '${isService ? 'Fully Booked' : 'Sold Out'}'); return; }
+      setState(stockQuantity + ' ${isService ? 'bookings left' : 'available'}', '#64748B', false, '${isService ? 'Book Now' : 'Add to Cart'}');
+      if (qtyEl) qtyEl.max = String(Math.max(1, stockQuantity));
+    } else {
+      setState('${isService ? 'Available to book' : 'In stock'}', '#16A34A', false, '${isService ? 'Book Now' : 'Add to Cart'}');
+    }
+  }
+
+  if (pickerEl) {
+    Array.prototype.forEach.call(pickerEl.querySelectorAll('button[data-opt]'), function(btn){
+      btn.addEventListener('click', function(){
+        selected[btn.getAttribute('data-opt')] = btn.getAttribute('data-val');
+        Array.prototype.forEach.call(btn.parentElement.children, function(sib){
+          sib.style.background = '#F1F5F9'; sib.style.color = '#0F172A'; sib.style.borderColor = '#E2E8F0';
+        });
+        btn.style.background = '#4338CA'; btn.style.color = '#fff'; btn.style.borderColor = '#4338CA';
+        refresh();
+      });
+    });
+  }
+
+  if (btnEl) {
+    btnEl.addEventListener('click', function(){
+      var variant = currentVariant();
+      var qty = qtyEl ? qtyEl.value : 1;
+      var effectivePrice = (variant && variant.priceUsd != null) ? variant.priceUsd : basePriceUsd;
+      var variantKey = variant ? variant.key : null;
+      var variantLabel = variant ? variantOptions.map(function(o, i){ return o.name + ': ' + variant.optionValues[i]; }).join(', ') : null;
+      siteSparkCart.add(productId, baseName, effectivePrice, qty, ${JSON.stringify(el.saleType)}, variantKey, variantLabel);
+    });
+  }
+
+  fetch(stockUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
+    if (!data) return;
+    liveTop = data;
+    refresh();
   }).catch(function(){});
+
+  refresh();
 })();</script>`
         : '';
 
       const buyButton = isReady
-        ? `<button
-      id="${addBtnId}"
-      onclick="siteSparkCart.add(${JSON.stringify(el.productId)},${JSON.stringify(el.name)},${el.priceUsd},document.getElementById(${JSON.stringify(qtyId)}).value,${JSON.stringify(el.saleType)})"
-      style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;"
-    >${isService ? 'Book Now' : 'Add to Cart'}</button>`
+        ? `<button id="${addBtnId}" style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
         : `<button disabled style="margin-top:8px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:not-allowed;">Coming Soon</button>`;
 
       return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
@@ -1362,10 +1447,11 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
     <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name)}</div>
     <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
+    ${variantPicker}
     ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
       <div style="display:flex;align-items:baseline;gap:6px;">
-        <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
+        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
         ${
           el.compareAtPriceUsd != null && el.compareAtPriceUsd > el.priceUsd
             ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">$${el.compareAtPriceUsd.toFixed(2)}</div>`
@@ -1483,22 +1569,31 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
     if (items.length === 0) { list.innerHTML = '<div style="color:#94A3B8;font-size:13px;">Cart is empty</div>'; return; }
     list.innerHTML = items.map(function(i){
       var badge = i.saleType === 'service' ? '📅 ' : i.saleType === 'digital' ? '💾 ' : '';
+      var label = i.variantLabel ? ' (' + i.variantLabel + ')' : '';
       return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px;">'
-        + '<span>'+badge+i.quantity+'&times; '+i.name+'</span>'
+        + '<span>'+badge+i.quantity+'&times; '+i.name+label+'</span>'
         + '<span style="display:flex;align-items:center;gap:6px;"><span>$'+(i.priceUsd*i.quantity).toFixed(2)+'</span>'
-        + '<a href="#" onclick="siteSparkCart.remove('+JSON.stringify(i.productId)+');return false;" style="color:#DC2626;">&times;</a></span>'
+        + '<a href="#" onclick="siteSparkCart.remove('+JSON.stringify(i.productId)+','+JSON.stringify(i.variantKey||null)+');return false;" style="color:#DC2626;">&times;</a></span>'
         + '</div>';
     }).join('');
   }
-  function add(productId, name, priceUsd, qtyRaw, saleType){
+  // Two lines of the same product but different variants (e.g. Size M vs Size L) are kept as
+  // separate cart entries -- dedup/removal always matches on productId AND variantKey
+  // together, never productId alone, so adding a different size never merges into an
+  // unrelated one.
+  function add(productId, name, priceUsd, qtyRaw, saleType, variantKey, variantLabel){
     var qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
     var items = load();
-    var existing = items.filter(function(i){ return i.productId === productId; })[0];
-    if (existing) { existing.quantity += qty; } else { items.push({ productId: productId, name: name, priceUsd: priceUsd, quantity: qty, saleType: saleType }); }
+    var existing = items.filter(function(i){ return i.productId === productId && (i.variantKey||null) === (variantKey||null); })[0];
+    if (existing) { existing.quantity += qty; } else {
+      items.push({ productId: productId, name: name, priceUsd: priceUsd, quantity: qty, saleType: saleType, variantKey: variantKey||null, variantLabel: variantLabel||null });
+    }
     save(items);
     document.getElementById('sitespark-cart-panel').style.display = 'block';
   }
-  function remove(productId){ save(load().filter(function(i){ return i.productId !== productId; })); }
+  function remove(productId, variantKey){
+    save(load().filter(function(i){ return !(i.productId === productId && (i.variantKey||null) === (variantKey||null)); }));
+  }
   function togglePanel(){
     var panel = document.getElementById('sitespark-cart-panel');
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
@@ -1520,7 +1615,7 @@ function renderCartWidget(slug: string, checkoutUrl: string): string {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         slug: SLUG,
-        items: items.map(function(i){ return { productId: i.productId, quantity: i.quantity }; }),
+        items: items.map(function(i){ return { productId: i.productId, quantity: i.quantity, variantKey: i.variantKey || undefined }; }),
         booking: booking,
       }),
     })

@@ -16,7 +16,9 @@ import {
   UserAccount,
   CanvasElement,
   ProductElement,
+  ProductVariantOption,
   StoreInventoryItem,
+  StoreInventoryVariant,
   StoreOrder,
   StoreOrderItem,
   SellerAccount,
@@ -850,6 +852,12 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
 // stockQuantity on an existing doc (only real orders or the seller directly editing it
 // change that after the first publish) so republishing a project never silently restocks
 // or resets what a seller already sold.
+// Mirrors the client's variantLabelFor (src/utils/productVariants.ts) -- e.g. options
+// [{name:"Size"},{name:"Color"}] + optionValues ["M","Red"] -> "Size: M, Color: Red".
+function variantLabelFor(options: ProductVariantOption[], optionValues: string[]): string {
+  return options.map((opt, i) => `${opt.name}: ${optionValues[i]}`).join(', ');
+}
+
 async function syncStoreInventory(uid: string, projectId: string, slug: string, project: Project): Promise<void> {
   const allElements = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
   const productElements = allElements.filter((el): el is ProductElement => el.type === 'product');
@@ -861,11 +869,30 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
   const batch = db.batch();
   productElements.forEach((el, i) => {
     const existing = existingDocs[i];
-    const stockQuantity = existing.exists
-      ? (existing.data() as StoreInventoryItem).stockQuantity
+    const existingItem = existing.exists ? (existing.data() as StoreInventoryItem) : undefined;
+    const stockQuantity = existingItem
+      ? existingItem.stockQuantity
       : el.trackInventory
         ? (el.initialStock ?? 0)
         : null;
+
+    // Same never-overwritten-by-republish rule as the top-level stockQuantity above, but
+    // per variant combination (keyed by ProductVariant.key): a combination that already has
+    // an inventory doc keeps its real, possibly-already-sold-against stock count; only a
+    // brand new combination (e.g. a seller just added a new Size value) gets seeded from
+    // initialStock.
+    const existingVariantsByKey = new Map((existingItem?.variants ?? []).map((v) => [v.key, v]));
+    const variants = el.variants.map((v) => {
+      const prior = existingVariantsByKey.get(v.key);
+      return {
+        key: v.key,
+        optionValues: v.optionValues,
+        priceUsd: v.priceUsd,
+        sku: v.sku,
+        stockQuantity: prior ? prior.stockQuantity : el.trackInventory ? (v.initialStock ?? 0) : null,
+      };
+    });
+
     const item: StoreInventoryItem = {
       productId: el.productId,
       sellerUid: uid,
@@ -881,6 +908,8 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
       saleType: el.saleType,
       fulfillment: el.fulfillment,
       serviceDurationMinutes: el.serviceDurationMinutes,
+      variantOptions: el.variantOptions,
+      variants,
       updatedAt: Date.now(),
     };
     batch.set(refs[i], item);
@@ -969,7 +998,17 @@ export const getProductStock = onRequest({ cors: true, invoker: 'public' }, asyn
   }
   const item = doc.data() as StoreInventoryItem;
   res.set('Cache-Control', 'no-store');
-  res.status(200).json({ trackInventory: item.trackInventory, stockQuantity: item.stockQuantity, inStock: item.inStock !== false });
+  // variants/variantOptions are included wholesale (not just the requested product's overall
+  // stock) so the published page can build its size/color picker and show the right
+  // price/stock for whichever combination a buyer selects, without a round trip per option.
+  res.status(200).json({
+    trackInventory: item.trackInventory,
+    stockQuantity: item.stockQuantity,
+    inStock: item.inStock !== false,
+    priceUsd: item.priceUsd,
+    variantOptions: item.variantOptions,
+    variants: item.variants,
+  });
 });
 
 // Public, unauthenticated -- every request to this Hosting site (any of its attached
@@ -1500,7 +1539,19 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
       if (!doc.exists) return;
       const data = doc.data() as StoreInventoryItem;
       if (i === 0) projectId = data.projectId;
-      if (data.trackInventory && data.stockQuantity != null) {
+      if (!data.trackInventory) return;
+
+      const variantKey = items[i].variantKey;
+      if (variantKey) {
+        // Decrement only the specific combination that was bought -- every other
+        // combination's stock is untouched, same as before variants existed.
+        const variants = data.variants.map((v) =>
+          v.key === variantKey && v.stockQuantity != null
+            ? { ...v, stockQuantity: Math.max(0, v.stockQuantity - items[i].quantity) }
+            : v
+        );
+        tx.update(inventoryRefs[i], { variants });
+      } else if (data.stockQuantity != null) {
         tx.update(inventoryRefs[i], { stockQuantity: Math.max(0, data.stockQuantity - items[i].quantity) });
       }
     });
@@ -2046,7 +2097,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
   try {
     const { slug, items, booking } = req.body as {
       slug: string;
-      items: { productId: string; quantity: number }[];
+      items: { productId: string; quantity: number; variantKey?: string }[];
       booking?: { preferredDate?: string; preferredTime?: string; notes?: string };
     };
     if (!slug || !Array.isArray(items) || items.length === 0) {
@@ -2087,7 +2138,21 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         });
         return;
       }
-      if (product.trackInventory && (product.stockQuantity ?? 0) < quantity) {
+      // A product with variant options must have one picked -- there's no such thing as
+      // ordering "a T-shirt" with no size/color once options exist. A product with no
+      // variantOptions ignores whatever variantKey (if any) the client sent.
+      let variant: StoreInventoryVariant | undefined;
+      if (product.variantOptions.length > 0) {
+        variant = product.variants.find((v) => v.key === items[i].variantKey);
+        if (!variant) {
+          res.status(400).json({ error: `Please select options for ${product.name}.` });
+          return;
+        }
+      }
+      const effectivePriceUsd = variant?.priceUsd ?? product.priceUsd;
+      const effectiveStockQuantity = variant ? variant.stockQuantity : product.stockQuantity;
+
+      if (product.trackInventory && (effectiveStockQuantity ?? 0) < quantity) {
         res.status(400).json({
           error: product.saleType === 'service' ? `No more bookings available for ${product.name}.` : `Not enough stock left for ${product.name}.`,
         });
@@ -2096,16 +2161,28 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       if (product.saleType === 'service') hasService = true;
       if (product.saleType === 'product' && product.fulfillment !== 'pickup') needsShipping = true;
 
-      subtotalUsd += product.priceUsd * quantity;
+      const variantLabel = variant ? variantLabelFor(product.variantOptions, variant.optionValues) : null;
+      subtotalUsd += effectivePriceUsd * quantity;
       lineItems.push({
         price_data: {
           currency: 'usd',
-          product_data: { name: product.saleType === 'service' ? `${product.name} (booking)` : product.name },
-          unit_amount: Math.round(product.priceUsd * 100),
+          product_data: {
+            name:
+              (product.saleType === 'service' ? `${product.name} (booking)` : product.name) + (variantLabel ? ` (${variantLabel})` : ''),
+          },
+          unit_amount: Math.round(effectivePriceUsd * 100),
         },
         quantity,
       });
-      orderItems.push({ productId: product.productId, name: product.name, priceUsd: product.priceUsd, quantity, saleType: product.saleType });
+      orderItems.push({
+        productId: product.productId,
+        name: product.name,
+        priceUsd: effectivePriceUsd,
+        quantity,
+        saleType: product.saleType,
+        variantKey: variant?.key ?? null,
+        variantLabel,
+      });
     }
 
     if (!sellerUid) {

@@ -3,7 +3,8 @@ import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndic
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement, ImageElement } from '@/types';
+import { CanvasElement, ImageElement, ProductVariantOption, ProductVariant } from '@/types';
+import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import SliderRow from '@/components/inspector/SliderRow';
@@ -633,6 +634,14 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               ))}
             </View>
 
+            <ProductVariantsEditor
+              options={element.variantOptions}
+              variants={element.variants}
+              trackInventory={element.trackInventory}
+              baseFallbackPriceLabel={`Same as $${element.priceUsd.toFixed(2)}`}
+              onChange={(patch) => onChange(patch as any)}
+            />
+
             {element.saleType === 'product' && (
               <>
                 <Text style={styles.fieldLabel}>How do buyers get it?</Text>
@@ -674,7 +683,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                 {element.trackInventory ? 'On' : 'Off'}
               </Text>
             </Pressable>
-            {element.trackInventory && (
+            {element.trackInventory && element.variantOptions.length === 0 && (
               <SliderRow
                 label={element.saleType === 'service' ? 'Bookings available' : element.saleType === 'digital' ? 'Copies for sale' : 'Starting stock'}
                 value={element.initialStock ?? 0}
@@ -684,11 +693,15 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               />
             )}
             <Text style={styles.fieldLabel}>
-              {element.trackInventory
-                ? `${element.saleType === 'service' ? 'Booking limit' : element.saleType === 'digital' ? 'Copies for sale' : 'Stock'} only sets on first publish — after that, only real ${element.saleType === 'service' ? 'bookings' : 'orders'} (or editing it here) change it.`
-                : element.saleType === 'service'
-                  ? 'No limit on bookings — buyers can always reserve a slot.'
-                  : 'Unlimited — buyers can always check out.'}
+              {element.variantOptions.length > 0
+                ? element.trackInventory
+                  ? 'Stock is tracked per combination above — set each one’s starting stock there.'
+                  : 'Unlimited — buyers can always check out.'
+                : element.trackInventory
+                  ? `${element.saleType === 'service' ? 'Booking limit' : element.saleType === 'digital' ? 'Copies for sale' : 'Stock'} only sets on first publish — after that, only real ${element.saleType === 'service' ? 'bookings' : 'orders'} (or editing it here) change it.`
+                  : element.saleType === 'service'
+                    ? 'No limit on bookings — buyers can always reserve a slot.'
+                    : 'Unlimited — buyers can always check out.'}
             </Text>
 
             <Pressable
@@ -712,7 +725,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                 : "Turned off — buyers will see it's out of stock and can't check out, no matter the quantity."}
             </Text>
 
-            {projectId ? (
+            {projectId && element.variantOptions.length === 0 ? (
               <ProductLiveStockSave
                 projectId={projectId}
                 elementId={element.id}
@@ -978,6 +991,153 @@ function MemorySymbolAdder({ onAdd }: { onAdd: (symbol: string) => void }) {
   );
 }
 
+// Add/rename/remove option groups (Size, Color, ...) and their values, regenerating the full
+// combination list on every change -- see regenerateVariants for why existing combinations'
+// price/stock overrides survive edits to unrelated options/values.
+function ProductVariantsEditor({
+  options,
+  variants,
+  trackInventory,
+  baseFallbackPriceLabel,
+  onChange,
+}: {
+  options: ProductVariantOption[];
+  variants: ProductVariant[];
+  trackInventory: boolean;
+  baseFallbackPriceLabel: string;
+  onChange: (patch: { variantOptions: ProductVariantOption[]; variants: ProductVariant[] }) => void;
+}) {
+  const [newOptionName, setNewOptionName] = useState('');
+
+  const setOptions = (nextOptions: ProductVariantOption[]) => {
+    onChange({ variantOptions: nextOptions, variants: regenerateVariants(nextOptions, variants) });
+  };
+
+  const addOption = () => {
+    const name = newOptionName.trim();
+    if (!name) return;
+    setOptions([...options, { name, values: [] }]);
+    setNewOptionName('');
+  };
+
+  const updateVariant = (key: string, patch: Partial<ProductVariant>) => {
+    onChange({ variantOptions: options, variants: variants.map((v) => (v.key === key ? { ...v, ...patch } : v)) });
+  };
+
+  return (
+    <View>
+      <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Variants (optional)</Text>
+      <Text style={styles.helperText}>
+        Add option groups like Size or Color — buyers pick one value from each before checking out. Leave empty for a simple product
+        with no choices.
+      </Text>
+
+      {options.map((option, index) => (
+        <View key={index} style={styles.variantOptionCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TextInput
+              style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+              value={option.name}
+              onChangeText={(name) => setOptions(options.map((o, i) => (i === index ? { ...o, name } : o)))}
+              placeholder="e.g. Size"
+            />
+            <Pressable onPress={() => setOptions(options.filter((_, i) => i !== index))} hitSlop={8}>
+              <Ionicons name="trash-outline" size={18} color="#DC2626" />
+            </Pressable>
+          </View>
+          <View style={[styles.rowButtons, { marginTop: 8 }]}>
+            {option.values.map((value) => (
+              <Pressable
+                key={value}
+                style={styles.removeChip}
+                onPress={() => setOptions(options.map((o, i) => (i === index ? { ...o, values: o.values.filter((v) => v !== value) } : o)))}
+              >
+                <Text style={styles.removeChipText}>{value} ✕</Text>
+              </Pressable>
+            ))}
+          </View>
+          <VariantValueAdder
+            onAdd={(value) =>
+              setOptions(options.map((o, i) => (i === index && !o.values.includes(value) ? { ...o, values: [...o.values, value] } : o)))
+            }
+          />
+        </View>
+      ))}
+
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+        <TextInput
+          style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+          value={newOptionName}
+          onChangeText={setNewOptionName}
+          placeholder="New option name, e.g. Color"
+        />
+        <Pressable style={styles.smallAddBtn} onPress={addOption}>
+          <Text style={styles.smallAddBtnText}>Add Option</Text>
+        </Pressable>
+      </View>
+
+      {variants.length > 0 && (
+        <>
+          <Text style={[styles.fieldLabel, { marginTop: 6 }]}>Combinations ({variants.length})</Text>
+          {variants.map((variant) => (
+            <View key={variant.key} style={styles.variantRow}>
+              <Text style={styles.variantRowLabel}>{variantLabelFor(options, variant.optionValues)}</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                <TextInput
+                  style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+                  value={variant.priceUsd != null ? String(variant.priceUsd) : ''}
+                  placeholder={baseFallbackPriceLabel}
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="decimal-pad"
+                  onChangeText={(text) => {
+                    if (!text.trim()) {
+                      updateVariant(variant.key, { priceUsd: null });
+                      return;
+                    }
+                    const value = parseFloat(text);
+                    updateVariant(variant.key, { priceUsd: Number.isFinite(value) ? Math.max(0, value) : null });
+                  }}
+                />
+                {trackInventory && (
+                  <TextInput
+                    style={[styles.textInput, { width: 80, marginBottom: 0 }]}
+                    value={String(variant.initialStock ?? 0)}
+                    placeholder="Stock"
+                    keyboardType="number-pad"
+                    onChangeText={(text) => {
+                      const value = parseInt(text, 10);
+                      updateVariant(variant.key, { initialStock: Number.isFinite(value) ? Math.max(0, value) : 0 });
+                    }}
+                  />
+                )}
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
+function VariantValueAdder({ onAdd }: { onAdd: (value: string) => void }) {
+  const [value, setValue] = useState('');
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+      <TextInput style={[styles.textInput, { flex: 1, marginBottom: 0 }]} value={value} onChangeText={setValue} placeholder="e.g. Medium" />
+      <Pressable
+        style={styles.smallAddBtn}
+        onPress={() => {
+          if (!value.trim()) return;
+          onAdd(value.trim());
+          setValue('');
+        }}
+      >
+        <Text style={styles.smallAddBtnText}>Add</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { padding: 16, flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
@@ -1052,6 +1212,9 @@ const styles = StyleSheet.create({
   confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   removeChip: { backgroundColor: '#FEE2E2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   removeChipText: { fontSize: 11, color: '#B91C1C', fontWeight: '600' },
+  variantOptionCard: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 10 },
+  variantRow: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 8 },
+  variantRowLabel: { fontSize: 12, fontWeight: '700', color: '#0F172A' },
   fontRow: { gap: 8, paddingBottom: 10, paddingRight: 4 },
   fontChip: {
     paddingHorizontal: 14,

@@ -252,6 +252,8 @@ function EditorInner({ navigation }: Props) {
       saleType: 'product',
       fulfillment: 'pickup',
       serviceDurationMinutes: null,
+      variantOptions: [],
+      variants: [],
       x: canvasCenterX - 90,
       y: canvasCenterY - 100,
       width: 180,

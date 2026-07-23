@@ -103,6 +103,21 @@ export interface VideoEmbedElement extends BaseElement {
 export type ProductSaleType = 'product' | 'service' | 'digital';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
 
+// Mirrors the client's ProductVariantOption/ProductVariant -- see that file's comments for
+// the full rationale (key stability, price/stock override semantics).
+export interface ProductVariantOption {
+  name: string;
+  values: string[];
+}
+
+export interface ProductVariant {
+  key: string;
+  optionValues: string[];
+  priceUsd: number | null;
+  initialStock: number | null;
+  sku: string | null;
+}
+
 // A sellable product block -- part of the canvas like any other element (positioned,
 // resized), but also mirrored server-side into a StoreInventoryItem at publish time (see
 // storeInventory in index.ts) since checkout has to validate price/stock authoritatively,
@@ -131,6 +146,8 @@ export interface ProductElement extends BaseElement {
   saleType: ProductSaleType;
   fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
   serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
+  variantOptions: ProductVariantOption[]; // empty = simple product, no variant picker
+  variants: ProductVariant[]; // one per real combination across variantOptions
 }
 
 // Mirrors the client's CollectionElement -- see that file's comment for why productIds
@@ -434,6 +451,16 @@ export interface SellerAccount {
 // tampered with). Synced from a project's ProductElements on every publishProject call,
 // except stockQuantity, which republishing never overwrites once the doc exists -- only a
 // real order (decrementing it) or the seller editing it directly changes it after that.
+// Mirrors ProductVariant, but stockQuantity replaces initialStock -- same
+// never-overwritten-by-republish rule as the top-level StoreInventoryItem.stockQuantity.
+export interface StoreInventoryVariant {
+  key: string;
+  optionValues: string[];
+  priceUsd: number | null;
+  stockQuantity: number | null;
+  sku: string | null;
+}
+
 export interface StoreInventoryItem {
   productId: string;
   sellerUid: string;
@@ -453,6 +480,8 @@ export interface StoreInventoryItem {
   saleType: ProductSaleType;
   fulfillment: ProductFulfillment;
   serviceDurationMinutes: number | null;
+  variantOptions: ProductVariantOption[];
+  variants: StoreInventoryVariant[];
   updatedAt: number;
 }
 
@@ -462,6 +491,11 @@ export interface StoreOrderItem {
   priceUsd: number;
   quantity: number;
   saleType: ProductSaleType;
+  // Which specific combination was bought, e.g. key "M|Red" with a human-readable label
+  // "Size: M, Color: Red" for display in the seller's Orders screen and order emails. Both
+  // null for a simple product with no variants.
+  variantKey: string | null;
+  variantLabel: string | null;
 }
 
 export type StoreOrderStatus = 'paid' | 'refunded';

@@ -14,7 +14,9 @@ import { escapeHtml } from './siteHtml';
 // so a failure here is visible in the Cloud Functions logs, not a mystery.
 export async function sendOrderNotificationEmail(apiKey: string, sellerEmail: string, order: StoreOrder): Promise<void> {
   const resend = new Resend(apiKey);
-  const itemsList = order.items.map((item) => `${item.quantity} × ${item.name} — $${(item.priceUsd * item.quantity).toFixed(2)}`).join('<br>');
+  const itemsList = order.items
+    .map((item) => `${item.quantity} × ${item.name}${item.variantLabel ? ` (${item.variantLabel})` : ''} — $${(item.priceUsd * item.quantity).toFixed(2)}`)
+    .join('<br>');
 
   // A booking's date/time/notes are shown prominently -- this is what makes it read as a
   // real, specific reservation to fulfill, not just an anonymous charge that arrived.

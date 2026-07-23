@@ -143,6 +143,32 @@ export interface VideoEmbedElement extends BaseElement {
 export type ProductSaleType = 'product' | 'service' | 'digital';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
 
+// One buyer-facing choice axis, e.g. { name: "Size", values: ["S","M","L"] }. An empty
+// variantOptions array on ProductElement means "no variants" (simple product) -- same
+// empty-array-means-off convention as questions/memorySymbols on GameElement.
+export interface ProductVariantOption {
+  name: string;
+  values: string[];
+}
+
+// One specific combination across every option, e.g. Size "M" + Color "Red" -- generated
+// as the full cross-product of variantOptions whenever options/values change, so there's
+// always exactly one ProductVariant per real buyable combination.
+export interface ProductVariant {
+  // Stable across regeneration as long as the same option values still exist (built from
+  // the option values themselves, e.g. "M|Red") -- this is what ties a variant's own stock
+  // count to a specific real-world combination across edits/republishes, the same way
+  // productId ties a whole ProductElement to its inventory doc.
+  key: string;
+  optionValues: string[]; // parallel to variantOptions, e.g. ["M", "Red"]
+  // Null = use the product's own priceUsd -- most sellers don't need per-variant pricing.
+  priceUsd: number | null;
+  // Only used to *initialize* this variant's stock the first time it's published -- same
+  // never-overwritten-by-republish rule as ProductElement.initialStock.
+  initialStock: number | null;
+  sku: string | null;
+}
+
 // A sellable product block -- positioned/resized like any other canvas element, and also
 // mirrored server-side into a StoreInventoryItem at publish time (see storeInventory in
 // firebase/functions), since checkout validates price/stock authoritatively there, not
@@ -174,6 +200,8 @@ export interface ProductElement extends BaseElement {
   saleType: ProductSaleType;
   fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
   serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
+  variantOptions: ProductVariantOption[]; // empty = simple product, no variant picker
+  variants: ProductVariant[]; // one per real combination across variantOptions
 }
 
 // Groups 2+ existing Product elements from the same page under one named, browsable card --
@@ -451,6 +479,10 @@ export interface StoreOrderItem {
   priceUsd: number;
   quantity: number;
   saleType: ProductSaleType;
+  // Which specific variant combination was bought (e.g. key "M|Red", label "Size: M, Color:
+  // Red") -- both null for a simple product with no variants.
+  variantKey: string | null;
+  variantLabel: string | null;
 }
 
 export type StoreOrderStatus = 'paid' | 'refunded';

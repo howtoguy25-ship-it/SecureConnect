@@ -11,7 +11,7 @@ import { StoreOrder } from '@/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'Orders'>;
 
 function OrderRow({ order }: { order: StoreOrder }) {
-  const itemsSummary = order.items.map((i) => `${i.quantity}× ${i.name}`).join(', ');
+  const itemsSummary = order.items.map((i) => `${i.quantity}× ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''}`).join(', ');
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
