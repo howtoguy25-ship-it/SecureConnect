@@ -73,7 +73,7 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
                   overflow: 'hidden',
                 }}
               >
-                <ElementRenderer element={scaledEl} />
+                <ElementRenderer element={scaledEl} allElements={project!.elements} />
               </View>
             );
           })}

@@ -5,7 +5,14 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection';
+
+// Mirrors the client's GradientFill -- `angle` is the CSS linear-gradient() angle (0deg =
+// bottom-to-top, 90deg = left-to-right), so siteHtml.ts can drop it straight into real CSS.
+export interface GradientFill {
+  colors: [string, string];
+  angle: number;
+}
 
 interface BaseElement {
   id: string;
@@ -42,11 +49,13 @@ export interface ButtonElement extends BaseElement {
   type: 'button';
   label: string;
   backgroundColor: string;
+  backgroundGradient?: GradientFill | null;
   textColor: string;
   borderRadius: number;
   borderWidth?: number;
   borderColor?: string;
   link?: string | null;
+  linkTargetElementId?: string | null;
 }
 
 export interface IconElement extends BaseElement {
@@ -104,6 +113,11 @@ export interface ProductElement extends BaseElement {
   name: string;
   description: string;
   priceUsd: number;
+  // A crossed-out "was" price shown next to priceUsd on the published site -- marketing
+  // display only, never affects what's actually charged at checkout.
+  compareAtPriceUsd: number | null;
+  // What this costs the seller -- seller-only, never rendered on the published site.
+  costUsd: number | null;
   images: string[];
   trackInventory: boolean;
   // Only used to *initialize* the inventory doc's stockQuantity the first time this
@@ -119,6 +133,14 @@ export interface ProductElement extends BaseElement {
   serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
 }
 
+// Mirrors the client's CollectionElement -- see that file's comment for why productIds
+// points at sibling ProductElement.id values instead of embedding a copy of their data.
+export interface CollectionElement extends BaseElement {
+  type: 'collection';
+  name: string;
+  productIds: string[];
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -128,7 +150,8 @@ export type CanvasElement =
   | SlideshowElement
   | VideoElement
   | VideoEmbedElement
-  | ProductElement;
+  | ProductElement
+  | CollectionElement;
 
 export interface CanvasSize {
   width: number;
@@ -164,6 +187,7 @@ export interface SitePage {
   slug: string;
   elements: CanvasElement[];
   backgroundColor: string;
+  backgroundGradient?: GradientFill | null;
 }
 
 export interface Project {
@@ -173,6 +197,7 @@ export interface Project {
   themeId: string;
   canvasSize: CanvasSize;
   backgroundColor: string;
+  backgroundGradient?: GradientFill | null;
   elements: CanvasElement[];
   pages?: SitePage[];
   announcements: AnnouncementSettings;

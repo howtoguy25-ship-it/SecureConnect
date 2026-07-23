@@ -1,4 +1,4 @@
-import { CanvasElement, Project, SitePage } from './types';
+import { CanvasElement, GradientFill, Project, SitePage } from './types';
 import { getFontOption } from './fonts';
 
 // Renders a Project's absolutely-positioned canvas into a real, self-contained static
@@ -29,6 +29,12 @@ function hexToRgba(hex: string, alpha: number): string {
   const g = (bigint >> 8) & 255;
   const b = bigint & 255;
   return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
+}
+
+// `angle` already matches CSS linear-gradient()'s own angle convention (see GradientFill's
+// comment in types.ts), so it drops straight in with no conversion.
+function cssGradient(gradient: GradientFill): string {
+  return `linear-gradient(${gradient.angle}deg, ${escapeAttr(gradient.colors[0])}, ${escapeAttr(gradient.colors[1])})`;
 }
 
 // Popup buttonUrl is authored by the site owner (not visitor input), but still guard
@@ -74,7 +80,7 @@ function renderShape(el: Extract<CanvasElement, { type: 'shape' }>): string {
   }
 }
 
-function renderElement(el: CanvasElement, slug: string, productStockUrl: string): string {
+function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[]): string {
   const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
   switch (el.type) {
     case 'text': {
@@ -91,16 +97,21 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
     case 'shape':
       return renderShape(el);
     case 'button': {
-      const buttonStyle = `${base}background:${escapeAttr(el.backgroundColor)};color:${escapeAttr(
+      const buttonBackground = el.backgroundGradient ? cssGradient(el.backgroundGradient) : escapeAttr(el.backgroundColor);
+      const buttonStyle = `${base}background:${buttonBackground};color:${escapeAttr(
         el.textColor
       )};border-radius:${el.borderRadius}px;${
         el.borderWidth ? `border:${el.borderWidth}px solid ${escapeAttr(el.borderColor ?? '#000000')};` : ''
       }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;`;
-      // Only a real, non-empty link renders as a clickable <a> -- a button with nothing
-      // set stays a plain div, exactly as before this field existed, instead of a dead
-      // link that goes nowhere or reloads the page.
-      return el.link?.trim()
-        ? `<a href="${escapeAttr(safeUrl(el.link))}" style="${buttonStyle}">${escapeHtml(el.label)}</a>`
+      // A linked Product/Collection takes priority over a raw URL (the inspector already
+      // keeps them mutually exclusive) -- jumps to that element's own real card further down
+      // the same page via its id="el-{id}" (see the 'product'/'collection' cases below),
+      // rather than duplicating that element's info here. Only a real, non-empty link/target
+      // renders as a clickable <a> -- a button with nothing set stays a plain div, exactly as
+      // before this field existed, instead of a dead link that goes nowhere or reloads the page.
+      const href = el.linkTargetElementId ? `#el-${el.linkTargetElementId}` : el.link?.trim() ? safeUrl(el.link) : null;
+      return href
+        ? `<a href="${escapeAttr(href)}" style="${buttonStyle}">${escapeHtml(el.label)}</a>`
         : `<div style="${buttonStyle}">${escapeHtml(el.label)}</div>`;
     }
     case 'icon':
@@ -259,7 +270,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
     >${isService ? 'Book Now' : 'Add to Cart'}</button>`
         : `<button disabled style="margin-top:8px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:not-allowed;">Coming Soon</button>`;
 
-      return `<div style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
+      return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
@@ -267,7 +278,14 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
     <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
     ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
-      <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;">
+        <div style="font-weight:800;color:#4338CA;font-size:14px;">$${el.priceUsd.toFixed(2)}</div>
+        ${
+          el.compareAtPriceUsd != null && el.compareAtPriceUsd > el.priceUsd
+            ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">$${el.compareAtPriceUsd.toFixed(2)}</div>`
+            : ''
+        }
+      </div>
       ${isReady ? `<input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />` : ''}
     </div>
     ${buyButton}
@@ -277,6 +295,54 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
 </div>
 ${lightbox}
 ${script}`;
+    }
+    case 'collection': {
+      const products = el.productIds
+        .map((id) => allElements.find((sib) => sib.id === id))
+        .filter((sib): sib is Extract<CanvasElement, { type: 'product' }> => !!sib && sib.type === 'product');
+      const modalId = `collection-modal-${el.id}`;
+      const thumbs = products
+        .slice(0, 4)
+        .map((p) =>
+          p.images[0]
+            ? `<img src="${escapeAttr(p.images[0])}" style="width:50%;height:50%;object-fit:cover;display:block;" />`
+            : `<div style="width:50%;height:50%;background:#F1F5F9;"></div>`
+        )
+        .join('');
+      const rows = products.length
+        ? products
+            .map(
+              (p) => `<a href="#el-${p.id}" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
+  ${
+    p.images[0]
+      ? `<img src="${escapeAttr(p.images[0])}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" />`
+      : `<div style="width:44px;height:44px;border-radius:8px;background:#F1F5F9;flex-shrink:0;"></div>`
+  }
+  <div style="flex:1;min-width:0;">
+    <div style="font-weight:700;font-size:13px;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name || 'Untitled product')}</div>
+    <div style="font-size:12px;color:#4338CA;font-weight:700;">$${p.priceUsd.toFixed(2)}</div>
+  </div>
+</a>`
+            )
+            .join('')
+        : `<div style="font-size:13px;color:#94A3B8;padding:12px 0;">No products in this collection yet.</div>`;
+
+      return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;cursor:pointer;" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='flex';">
+  <div style="width:100%;height:55%;flex-shrink:0;display:flex;flex-wrap:wrap;">${thumbs || '<div style="width:100%;height:100%;background:#F1F5F9;"></div>'}</div>
+  <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
+    <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">Collection</div>
+    <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name || 'Untitled collection')}</div>
+    <div style="font-size:12px;color:#64748B;margin-top:2px;">${products.length} ${products.length === 1 ? 'item' : 'items'}</div>
+  </div>
+</div>
+<div id="${modalId}" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000AA;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;" onclick="if(event.target===this)this.style.display='none';">
+  <div style="width:90%;max-width:360px;max-height:75vh;overflow-y:auto;background:#fff;border-radius:16px;padding:18px;">
+    <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">Collection</div>
+    <div style="font-weight:800;font-size:17px;color:#0F172A;margin-top:2px;margin-bottom:8px;">${escapeHtml(el.name || 'Untitled collection')}</div>
+    ${rows}
+    <button onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="width:100%;margin-top:14px;background:#111827;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:13px;cursor:pointer;">Close</button>
+  </div>
+</div>`;
     }
     default:
       return '';
@@ -604,10 +670,11 @@ export function renderProjectHtml(
   const elementsHtml = project.elements
     .slice()
     .sort((a, b) => a.zIndex - b.zIndex)
-    .map((el) => renderElement(el, slug, productStockUrl))
+    .map((el) => renderElement(el, slug, productStockUrl, project.elements))
     .join('\n');
 
   const { width, height } = project.canvasSize;
+  const pageBackground = project.backgroundGradient ? cssGradient(project.backgroundGradient) : escapeAttr(project.backgroundColor);
 
   return `<!doctype html>
 <html lang="en">
@@ -619,13 +686,14 @@ export function renderProjectHtml(
   ${fontLink}
   <style>
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: ${escapeAttr(project.backgroundColor)}; }
+    html { scroll-behavior: smooth; }
+    html, body { margin: 0; padding: 0; background: ${pageBackground}; }
     #site-wrapper { display: flex; justify-content: center; }
     #canvas {
       position: relative;
       width: ${width}px;
       height: ${height}px;
-      background: ${escapeAttr(project.backgroundColor)};
+      background: ${pageBackground};
       transform-origin: top center;
       overflow: hidden;
     }

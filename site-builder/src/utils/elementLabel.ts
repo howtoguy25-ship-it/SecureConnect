@@ -20,6 +20,8 @@ export function labelForElement(element: CanvasElement): string {
       return element.title || 'Video (YouTube)';
     case 'product':
       return element.name || 'Product';
+    case 'collection':
+      return element.name || 'Collection';
     default:
       return 'Element';
   }
@@ -45,6 +47,8 @@ export function iconForElement(element: CanvasElement): keyof typeof import('@ex
       return 'logo-youtube';
     case 'product':
       return 'pricetag-outline';
+    case 'collection':
+      return 'albums-outline';
     default:
       return 'square-outline';
   }

@@ -59,6 +59,12 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
   onSelectRef.current = onSelect;
   const dragState = useRef({ startIndex: index, appliedSteps: 0 });
   const [dragging, setDragging] = React.useState(false);
+  // How far the finger has moved past the row-boundary swaps already applied -- rendered as
+  // a translateY so the row visibly lifts and follows the finger between slots, instead of
+  // just snapping between list positions with no floating feedback. Bounded to roughly one
+  // row's height either way since a full boundary crossing resets it back near zero (that
+  // step having just been applied).
+  const [liftY, setLiftY] = React.useState(0);
   // Tracks the hold-before-drag disambiguation: a long-press timer (cleared on quick
   // release or on excess movement) plus how far the finger has actually wandered, so a
   // normal tap-to-select still works from the exact same touch area as the drag gesture.
@@ -100,11 +106,13 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
           onReorderRef.current(elIdRef.current, 'up');
           dragState.current.appliedSteps -= 1;
         }
+        setLiftY(gestureState.dy - dragState.current.appliedSteps * step);
       },
       onPanResponderRelease: () => {
         if (gesture.current.timer) clearTimeout(gesture.current.timer);
         if (gesture.current.isDragging) {
           setDragging(false);
+          setLiftY(0);
           onDragStateChangeRef.current(false);
         } else if (gesture.current.maxMove < TAP_MOVE_THRESHOLD) {
           // Never committed to a drag and barely moved -- a plain tap, so select like the
@@ -116,6 +124,7 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
       onPanResponderTerminate: () => {
         if (gesture.current.timer) clearTimeout(gesture.current.timer);
         setDragging(false);
+        setLiftY(0);
         onDragStateChangeRef.current(false);
         gesture.current.isDragging = false;
       },
@@ -124,7 +133,12 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
 
   return (
     <View
-      style={[styles.row, isSelected && styles.rowSelected, dragging && styles.rowDragging]}
+      style={[
+        styles.row,
+        isSelected && styles.rowSelected,
+        dragging && styles.rowDragging,
+        dragging && { transform: [{ translateY: liftY }] },
+      ]}
       onLayout={(e) => {
         if (e.nativeEvent.layout.height > 0) rowHeightRef.current = e.nativeEvent.layout.height;
       }}
@@ -233,7 +247,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   rowSelected: { backgroundColor: '#EEF2FF' },
-  rowDragging: { backgroundColor: '#DBEAFE', opacity: 0.9 },
+  // A real "lifted" look -- shadow + elevation + a higher zIndex so the dragged row visibly
+  // floats above its neighbors while `liftY` (see the responder above) moves it with the
+  // finger, rather than just recoloring it in place.
+  rowDragging: {
+    backgroundColor: '#DBEAFE',
+    zIndex: 20,
+    elevation: 10,
+    shadowColor: '#1E293B',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowLabel: { flex: 1, fontSize: 13, fontWeight: '600', color: '#334155' },
   rowLabelSelected: { color: '#2563EB' },

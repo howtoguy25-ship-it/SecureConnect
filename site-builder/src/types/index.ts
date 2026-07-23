@@ -16,6 +16,17 @@ export interface Theme {
   seedElements: CanvasElement[];
 }
 
+// A simple two-color linear gradient -- `angle` follows the CSS linear-gradient()
+// convention (0deg = bottom-to-top, 90deg = left-to-right, clockwise from there), so the
+// same value drives both the editor's RN <LinearGradient> and the published site's real CSS
+// with no conversion needed. Optional everywhere it appears; a null/absent value means "use
+// the plain solid color field instead" -- gradient never fully replaces the solid field, it
+// only overrides it when present.
+export interface GradientFill {
+  colors: [string, string];
+  angle: number;
+}
+
 export type ElementType =
   | 'text'
   | 'image'
@@ -25,7 +36,8 @@ export type ElementType =
   | 'slideshow'
   | 'video'
   | 'videoEmbed'
-  | 'product';
+  | 'product'
+  | 'collection';
 
 interface BaseElement {
   id: string;
@@ -63,6 +75,8 @@ export interface ButtonElement extends BaseElement {
   type: 'button';
   label: string;
   backgroundColor: string;
+  // Overrides backgroundColor when set -- see GradientFill's comment.
+  backgroundGradient?: GradientFill | null;
   textColor: string;
   borderRadius: number;
   borderWidth?: number;
@@ -70,7 +84,13 @@ export interface ButtonElement extends BaseElement {
   // Where a tap on the published site actually goes -- a full URL (https://...), a
   // mailto:/tel: link, or a same-site page slug (e.g. "/about"). Null/empty means the
   // button renders but does nothing when clicked, same as before this field existed.
+  // Mutually exclusive with linkTargetElementId -- setting one clears the other.
   link?: string | null;
+  // Instead of a raw URL, jump straight to a Product or Collection element already on this
+  // page (e.g. a "Shop Now" button scrolling down to a specific listing) -- holds that
+  // element's id. Published as a same-page anchor link (see id="el-{id}" in siteHtml.ts),
+  // so it always points at that element's current position, even after reordering.
+  linkTargetElementId?: string | null;
 }
 
 export interface IconElement extends BaseElement {
@@ -132,6 +152,14 @@ export interface ProductElement extends BaseElement {
   name: string;
   description: string;
   priceUsd: number;
+  // A crossed-out "was" price shown next to priceUsd on the published site (e.g. "$59
+  // ~~$79~~") -- purely a marketing display, never affects what's actually charged at
+  // checkout. Null/0 means don't show one.
+  compareAtPriceUsd: number | null;
+  // What this item actually costs the seller to acquire/make -- shown only to the seller in
+  // the editor, for their own margin tracking. Never rendered anywhere on the published
+  // site or exposed to a buyer.
+  costUsd: number | null;
   images: string[];
   trackInventory: boolean;
   // Only used to *initialize* stockQuantity the first time this product is published --
@@ -147,6 +175,18 @@ export interface ProductElement extends BaseElement {
   serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
 }
 
+// Groups 2+ existing Product elements from the same page under one named, browsable card --
+// e.g. "Summer Collection" bundling several products a seller already built individually.
+// Deliberately holds no product data of its own (name/price/images/stock): `productIds`
+// points at the real ProductElement.id values on the same page, so a collection always shows
+// each product's current, live info (and buys through that exact same product card/checkout
+// path) instead of a copy that could drift out of sync.
+export interface CollectionElement extends BaseElement {
+  type: 'collection';
+  name: string;
+  productIds: string[];
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -156,7 +196,8 @@ export type CanvasElement =
   | SlideshowElement
   | VideoElement
   | VideoEmbedElement
-  | ProductElement;
+  | ProductElement
+  | CollectionElement;
 
 export interface AnnouncementBarConfig {
   id: string;
@@ -207,6 +248,8 @@ export interface SitePage {
   slug: string;
   elements: CanvasElement[];
   backgroundColor: string;
+  // Overrides backgroundColor when set -- see GradientFill's comment.
+  backgroundGradient?: GradientFill | null;
 }
 
 export interface Project {
@@ -216,6 +259,8 @@ export interface Project {
   themeId: string;
   canvasSize: CanvasSize;
   backgroundColor: string;
+  // Overrides backgroundColor when set -- see GradientFill's comment.
+  backgroundGradient?: GradientFill | null;
   elements: CanvasElement[];
   // Present only for a manually-built multi-page website (see BuildMethodScreen -> Manual
   // Build). When set, `pages` is the source of truth for content -- the top-level

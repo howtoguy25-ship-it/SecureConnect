@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { CanvasElement, ImageElement } from '@/types';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
+import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import SliderRow from '@/components/inspector/SliderRow';
 import { labelForElement } from '@/utils/elementLabel';
 import { FONT_OPTIONS, FontOption } from '@/data/fonts';
@@ -17,6 +18,9 @@ const MAX_PRODUCT_IMAGES = 7;
 
 interface Props {
   element: CanvasElement;
+  // Every sibling element on the same page -- only the 'collection' case reads this, to
+  // list real Product elements the user can pick to add to the collection.
+  allElements: CanvasElement[];
   onChange: (patch: Partial<CanvasElement>) => void;
   onDelete: () => void;
   onBringToFront: () => void;
@@ -183,7 +187,7 @@ function ImageBackgroundTools({ element, onChange }: { element: ImageElement; on
   );
 }
 
-export default function ElementInspector({ element, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug }: Props) {
+export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -276,7 +280,7 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             <TextInput
               style={styles.textInput}
               value={element.link ?? ''}
-              onChangeText={(link) => onChange({ link: link.trim() ? link : null } as any)}
+              onChangeText={(link) => onChange({ link: link.trim() ? link : null, linkTargetElementId: link.trim() ? null : element.linkTargetElementId } as any)}
               placeholder="https://example.com, mailto:you@site.com, or /page-slug"
               autoCapitalize="none"
               autoCorrect={false}
@@ -285,8 +289,41 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             <Text style={[styles.fieldLabel, { marginTop: -6 }]}>
               {element.link
                 ? 'Visitors on your published site will be taken here when they tap this button.'
-                : "Empty — this button won't do anything when tapped on your published site."}
+                : element.linkTargetElementId
+                  ? 'Empty — this button links to a product/collection below instead.'
+                  : "Empty — this button won't do anything when tapped on your published site."}
             </Text>
+
+            <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Or link to a product/collection on this page</Text>
+            {(() => {
+              const targets = allElements.filter(
+                (el): el is Extract<CanvasElement, { type: 'product' | 'collection' }> => el.type === 'product' || el.type === 'collection'
+              );
+              if (targets.length === 0) {
+                return <Text style={styles.helperText}>Add a Product or Collection to this page to link this button straight to it.</Text>;
+              }
+              return (
+                <View style={styles.rowButtons}>
+                  {targets.map((t) => {
+                    const selected = element.linkTargetElementId === t.id;
+                    const label = t.type === 'product' ? t.name || 'Untitled product' : t.name || 'Untitled collection';
+                    return (
+                      <Pressable
+                        key={t.id}
+                        style={[styles.toggleBtn, selected && styles.toggleBtnActive]}
+                        onPress={() => onChange({ linkTargetElementId: selected ? null : t.id, link: selected ? element.link : null } as any)}
+                      >
+                        <Text style={styles.toggleBtnText}>
+                          {t.type === 'product' ? '🛍️ ' : '📦 '}
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              );
+            })()}
+
             <SliderRow
               label="Corner Radius"
               value={element.borderRadius}
@@ -294,10 +331,12 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               max={24}
               onChange={(v) => onChange({ borderRadius: v } as any)}
             />
-            <ColorSwatchRow
+            <GradientPickerRow
               label="Background"
-              value={element.backgroundColor}
-              onChange={(backgroundColor) => onChange({ backgroundColor } as any)}
+              solidColor={element.backgroundColor}
+              onSolidColorChange={(backgroundColor) => onChange({ backgroundColor } as any)}
+              gradient={element.backgroundGradient}
+              onGradientChange={(backgroundGradient) => onChange({ backgroundGradient } as any)}
             />
             <ColorSwatchRow
               label="Text Color"
@@ -520,6 +559,50 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
               }}
             />
 
+            <Text style={styles.fieldLabel}>Compare-at price (optional)</Text>
+            <TextInput
+              style={styles.textInput}
+              value={element.compareAtPriceUsd != null ? String(element.compareAtPriceUsd) : ''}
+              placeholder="e.g. 79.00"
+              placeholderTextColor="#94A3B8"
+              keyboardType="decimal-pad"
+              onChangeText={(text) => {
+                if (!text.trim()) {
+                  onChange({ compareAtPriceUsd: null } as any);
+                  return;
+                }
+                const value = parseFloat(text);
+                onChange({ compareAtPriceUsd: Number.isFinite(value) ? Math.max(0, value) : null } as any);
+              }}
+            />
+            <Text style={styles.helperText}>
+              Shown to buyers as a crossed-out "was" price next to your real price — leave blank to not show one. Doesn't change
+              what's actually charged.
+            </Text>
+
+            <Text style={styles.fieldLabel}>Your cost (optional, private)</Text>
+            <TextInput
+              style={styles.textInput}
+              value={element.costUsd != null ? String(element.costUsd) : ''}
+              placeholder="e.g. 22.00"
+              placeholderTextColor="#94A3B8"
+              keyboardType="decimal-pad"
+              onChangeText={(text) => {
+                if (!text.trim()) {
+                  onChange({ costUsd: null } as any);
+                  return;
+                }
+                const value = parseFloat(text);
+                onChange({ costUsd: Number.isFinite(value) ? Math.max(0, value) : null } as any);
+              }}
+            />
+            <Text style={styles.helperText}>
+              For your own margin tracking only — buyers and visitors never see this, it never appears anywhere on your published site.
+              {element.costUsd != null && element.priceUsd > element.costUsd
+                ? ` Profit: $${(element.priceUsd - element.costUsd).toFixed(2)} per sale.`
+                : ''}
+            </Text>
+
             {element.images.length < MAX_PRODUCT_IMAGES ? (
               <Pressable
                 style={styles.uploadBtn}
@@ -638,6 +721,45 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
                 published={!!publishSlug}
               />
             ) : null}
+          </>
+        )}
+
+        {element.type === 'collection' && (
+          <>
+            <Text style={styles.fieldLabel}>Collection Name</Text>
+            <TextInput style={styles.textInput} value={element.name} onChangeText={(name) => onChange({ name } as any)} />
+
+            <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Products in this collection</Text>
+            {(() => {
+              const availableProducts = allElements.filter((el): el is Extract<CanvasElement, { type: 'product' }> => el.type === 'product');
+              if (availableProducts.length === 0) {
+                return <Text style={styles.helperText}>Add a Product to this page first, then come back here to group it into a collection.</Text>;
+              }
+              return availableProducts.map((p) => {
+                const selected = element.productIds.includes(p.id);
+                return (
+                  <Pressable
+                    key={p.id}
+                    style={[
+                      styles.toggleBtn,
+                      selected && styles.toggleBtnActive,
+                      { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, justifyContent: 'flex-start' },
+                    ]}
+                    onPress={() =>
+                      onChange({
+                        productIds: selected ? element.productIds.filter((id) => id !== p.id) : [...element.productIds, p.id],
+                      } as any)
+                    }
+                  >
+                    <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={selected ? '#2563EB' : '#94A3B8'} />
+                    <Text style={styles.toggleBtnText}>{p.name || 'Untitled product'}</Text>
+                  </Pressable>
+                );
+              });
+            })()}
+            <Text style={styles.helperText}>
+              Pick 2 or more products built on this page to group them into one browsable collection card on your published site.
+            </Text>
           </>
         )}
       </ScrollView>

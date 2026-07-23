@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, PanResponder, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, PanResponder, useWindowDimensions, Modal } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,9 +12,10 @@ import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
 import LayersPanel from '@/components/elements/LayersPanel';
 import PageTabsBar from '@/components/editor/PageTabsBar';
+import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
@@ -34,7 +35,7 @@ function EditorInner({ navigation }: Props) {
     addPage,
     renamePage,
     removePage,
-    setPageBackgroundColor,
+    setPageBackground,
     selectedId,
     select,
     addElement,
@@ -61,6 +62,10 @@ function EditorInner({ navigation }: Props) {
   // new element (which auto-selects it) makes the layer list disappear right when a user
   // most wants to see it land in the stack.
   const [showLayers, setShowLayers] = useState(false);
+  // Background editing for single-page projects (Social/Logo/Video, and any Website with no
+  // `pages`) -- multi-page websites edit background per-page instead, via PageTabsBar's long
+  // press menu, since each page there can have its own.
+  const [bgEditorOpen, setBgEditorOpen] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
   // same touch underneath an active element drag, which is what made moving or resizing a
@@ -130,7 +135,9 @@ function EditorInner({ navigation }: Props) {
   // The canvas/layers/inspector all render whatever page is currently active for a multi-
   // page website (see PageTabsBar); every other project has no `pages` and this is just
   // `project` unchanged, so nothing below needs to know multi-page projects exist at all.
-  const displayProject = currentPage ? { ...project, elements: currentPage.elements, backgroundColor: currentPage.backgroundColor } : project;
+  const displayProject = currentPage
+    ? { ...project, elements: currentPage.elements, backgroundColor: currentPage.backgroundColor, backgroundGradient: currentPage.backgroundGradient }
+    : project;
   const activeElements = displayProject.elements;
 
   const canvasCenterX = project.canvasSize.width / 2;
@@ -234,6 +241,8 @@ function EditorInner({ navigation }: Props) {
       name: 'New product',
       description: '',
       priceUsd: 10,
+      compareAtPriceUsd: null,
+      costUsd: null,
       images: [],
       trackInventory: false,
       initialStock: null,
@@ -241,6 +250,23 @@ function EditorInner({ navigation }: Props) {
       saleType: 'product',
       fulfillment: 'pickup',
       serviceDurationMinutes: null,
+      x: canvasCenterX - 90,
+      y: canvasCenterY - 100,
+      width: 180,
+      height: 220,
+      zIndex: 5,
+    };
+    addElement(el);
+    select(el.id);
+    setPanel(null);
+  };
+
+  const addCollection = () => {
+    const el: CollectionElement = {
+      id: generateId('el'),
+      type: 'collection',
+      name: 'New collection',
+      productIds: [],
       x: canvasCenterX - 90,
       y: canvasCenterY - 100,
       width: 180,
@@ -289,6 +315,11 @@ function EditorInner({ navigation }: Props) {
               <Pressable onPress={() => setShowLayers((v) => !v)} hitSlop={8}>
                 <Ionicons name="layers-outline" size={22} color={showLayers ? theme.accent : theme.text} />
               </Pressable>
+              {!pages && (
+                <Pressable onPress={() => setBgEditorOpen(true)} hitSlop={8}>
+                  <Ionicons name="color-palette-outline" size={22} color={theme.text} />
+                </Pressable>
+              )}
             </>
           )}
           {isGenerating ? (
@@ -309,7 +340,7 @@ function EditorInner({ navigation }: Props) {
           onAdd={addPage}
           onRename={renamePage}
           onRemove={removePage}
-          onSetColor={setPageBackgroundColor}
+          onSetBackground={setPageBackground}
         />
       )}
 
@@ -400,6 +431,7 @@ function EditorInner({ navigation }: Props) {
           ) : (
             <ElementInspector
               element={selectedElement}
+              allElements={activeElements}
               onChange={(patch) => updateElement(selectedElement.id, patch)}
               onDelete={() => confirmDeleteId(selectedElement.id)}
               onBringToFront={() => bringToFront(selectedElement.id)}
@@ -438,6 +470,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="images-outline" label="Slideshow" active={false} onPress={addSlideshow} />
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} />
+            <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
             <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
           </ScrollView>
@@ -445,6 +478,24 @@ function EditorInner({ navigation }: Props) {
       )}
         </>
       )}
+
+      <Modal visible={bgEditorOpen} transparent animationType="fade" onRequestClose={() => setBgEditorOpen(false)}>
+        <View style={styles.bgModalBackdrop}>
+          <View style={styles.bgModalCard}>
+            <Text style={styles.bgModalTitle}>Page Background</Text>
+            <GradientPickerRow
+              label="Background"
+              solidColor={project.backgroundColor}
+              onSolidColorChange={(backgroundColor) => updateProject({ backgroundColor })}
+              gradient={project.backgroundGradient}
+              onGradientChange={(backgroundGradient) => updateProject({ backgroundGradient })}
+            />
+            <Pressable style={styles.bgModalDoneBtn} onPress={() => setBgEditorOpen(false)}>
+              <Text style={styles.bgModalDoneBtnText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -598,4 +649,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   minimizedLabel: { fontSize: 13, fontWeight: '600', flex: 1 },
+  bgModalBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  bgModalCard: { width: '100%', maxWidth: 360, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20 },
+  bgModalTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A', marginBottom: 14 },
+  bgModalDoneBtn: { marginTop: 4, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: '#111827' },
+  bgModalDoneBtnText: { color: '#FFFFFF', fontWeight: '600' },
 });

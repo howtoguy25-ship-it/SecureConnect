@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Modal, TextInput } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
-import { SitePage } from '@/types';
-import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
+import { GradientFill, SitePage } from '@/types';
+import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 
 // Lets a manually-built website have real, connected multiple pages (Home, About,
 // Contact, ...) -- see EditorContext's page CRUD functions. Only ever rendered when
@@ -16,7 +16,7 @@ export default function PageTabsBar({
   onAdd,
   onRename,
   onRemove,
-  onSetColor,
+  onSetBackground,
 }: {
   pages: SitePage[];
   activePageId: string | null;
@@ -24,12 +24,21 @@ export default function PageTabsBar({
   onAdd: (name: string) => void;
   onRename: (id: string, name: string) => void;
   onRemove: (id: string) => void;
-  onSetColor: (id: string, color: string) => void;
+  onSetBackground: (id: string, patch: { backgroundColor?: string; backgroundGradient?: GradientFill | null }) => void;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState('');
   const [editing, setEditing] = useState<SitePage | null>(null);
   const [editName, setEditName] = useState('');
+
+  // Keeps the modal's snapshot live while it's open -- e.g. `onSetBackground` writes into
+  // `pages` (the real source of truth) rather than `editing`, so without this the
+  // Solid/Gradient toggle and swatch highlights would never reflect a tap back at the user.
+  useEffect(() => {
+    if (!editing) return;
+    const latest = pages.find((p) => p.id === editing.id);
+    if (latest && latest !== editing) setEditing(latest);
+  }, [pages, editing]);
 
   const openAdd = () => {
     setAddName(`Page ${pages.length + 1}`);
@@ -116,7 +125,13 @@ export default function PageTabsBar({
             <Text style={styles.modalTitle}>Edit page</Text>
             <TextInput style={styles.nameInput} value={editName} onChangeText={setEditName} placeholder="Page name" />
             {editing && (
-              <ColorSwatchRow label="Background Color" value={editing.backgroundColor} onChange={(color) => onSetColor(editing.id, color)} />
+              <GradientPickerRow
+                label="Background"
+                solidColor={editing.backgroundColor}
+                onSolidColorChange={(backgroundColor) => onSetBackground(editing.id, { backgroundColor })}
+                gradient={editing.backgroundGradient}
+                onGradientChange={(backgroundGradient) => onSetBackground(editing.id, { backgroundGradient })}
+              />
             )}
             <View style={styles.modalActions}>
               <Pressable style={styles.modalCancel} onPress={confirmDelete} disabled={pages.length <= 1}>

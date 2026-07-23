@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput } from 'react-native';
+import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
@@ -7,6 +7,10 @@ import { useGoogleFont } from '@/utils/useGoogleFont';
 
 interface Props {
   element: CanvasElement;
+  // Every sibling element on the same page -- only 'collection' elements read this, to
+  // resolve their linked ProductElements' live name/price/images/stock at render time
+  // instead of holding a copy that could drift out of sync.
+  allElements: CanvasElement[];
   isSelected: boolean;
   onSelect: () => void;
   onChange: (patch: Partial<CanvasElement>) => void;
@@ -28,6 +32,11 @@ interface Props {
   // Unlike a real per-element lock, this doesn't show the little lock badge on every
   // element or persist anywhere -- it's a purely local, toggle-off-anytime viewing mode.
   forceLocked?: boolean;
+  // Lets a locked button element jump straight to its linked Product/Collection when tapped
+  // in the editor -- the same real behavior a published page gives visitors (see
+  // linkTargetElementId's comment), so "lock the page to see how it really looks" is
+  // actually true for buttons too, not just their visual chrome.
+  onNavigateToElement?: (id: string) => void;
 }
 
 const MIN_TEXT_FONT_SIZE = 6;
@@ -76,6 +85,7 @@ function resizeFromCorner(corner: Corner, origin: Box, dx: number, dy: number, m
 
 export default function DraggableElement({
   element,
+  allElements,
   isSelected,
   onSelect,
   onChange,
@@ -85,6 +95,7 @@ export default function DraggableElement({
   canvasSize,
   onInteractionChange,
   forceLocked,
+  onNavigateToElement,
 }: Props) {
   const elementLocked = !!element.locked;
   const locked = elementLocked || !!forceLocked;
@@ -282,7 +293,11 @@ export default function DraggableElement({
       style={[
         styles.wrapper,
         { left: box.x, top: box.y, width: box.width, height: box.height, zIndex: element.zIndex },
-        isSelected && styles.selected,
+        // Once locked, this should render exactly as the real, final page would -- the
+        // dashed selection outline is edit-mode chrome, and leaving it up just because the
+        // element still happens to be the last-selected one made a locked page look like it
+        // was still mid-edit instead of a clean preview.
+        isSelected && !locked && styles.selected,
       ]}
       {...moveResponder.panHandlers}
     >
@@ -307,8 +322,25 @@ export default function DraggableElement({
               : { fontSize: 15, color: element.type === 'button' ? element.textColor : '#0F172A', textAlign: 'center', fontWeight: '600' },
           ]}
         />
+      ) : locked && element.type === 'button' && (element.link || element.linkTargetElementId) ? (
+        // Only mounted while locked -- the outer moveResponder above already goes inert once
+        // locked (onStartShouldSetPanResponder returns false), so there's no responder to
+        // compete with for the tap, unlike trying to add this to the unlocked/editable case.
+        <Pressable
+          style={{ width: '100%', height: '100%' }}
+          onPress={() => {
+            if (element.linkTargetElementId) onNavigateToElement?.(element.linkTargetElementId);
+            else if (element.link) {
+              const trimmed = element.link.trim();
+              const isAbsolute = /^https?:\/\//i.test(trimmed) || /^(mailto|tel):/i.test(trimmed) || trimmed.startsWith('/');
+              Linking.openURL(isAbsolute ? trimmed : `https://${trimmed}`);
+            }
+          }}
+        >
+          <ElementRenderer element={liveElement} allElements={allElements} />
+        </Pressable>
       ) : (
-        <ElementRenderer element={liveElement} />
+        <ElementRenderer element={liveElement} allElements={allElements} />
       )}
 
       {elementLocked && (
@@ -372,9 +404,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   lockBadge: {
+    // Sits straddling the top-left corner (like the resize handles' negative offsets)
+    // instead of inside the box, where it was covering the first word/character of
+    // whatever text or content started there.
     position: 'absolute',
-    top: 4,
-    left: 4,
+    top: -9,
+    left: -9,
     width: 18,
     height: 18,
     borderRadius: 9,

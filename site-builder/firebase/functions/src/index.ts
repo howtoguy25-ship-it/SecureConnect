@@ -812,7 +812,7 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
   if (project.pages && project.pages.length > 0) {
     const pagesHtml: Record<string, string> = {};
     for (const page of project.pages) {
-      const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor };
+      const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
       pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, renderPageNavHtml(project.pages, page.slug));
     }
     site.pages = pagesHtml;
@@ -917,7 +917,7 @@ export const updateProductStock = onCall({ invoker: 'public' }, withCallableErro
     const found = project.pages.flatMap((p) => p.elements).find((el): el is ProductElement => el.id === elementId && el.type === 'product');
     productId = found?.productId ?? null;
     const pages = project.pages.map((p) => ({ ...p, elements: applyToElements(p.elements) }));
-    await projectRef.update({ pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor, updatedAt: Date.now() });
+    await projectRef.update({ pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor, backgroundGradient: pages[0].backgroundGradient ?? null, updatedAt: Date.now() });
   } else {
     const found = project.elements.find((el): el is ProductElement => el.id === elementId && el.type === 'product');
     productId = found?.productId ?? null;

@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { CanvasElement, Project, SitePage } from '@/types';
+import { CanvasElement, GradientFill, Project, SitePage } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import { generateId } from '@/utils/id';
 
@@ -37,7 +37,7 @@ interface EditorContextValue {
   addPage: (name: string) => void;
   renamePage: (id: string, name: string) => void;
   removePage: (id: string) => void;
-  setPageBackgroundColor: (id: string, color: string) => void;
+  setPageBackground: (id: string, patch: { backgroundColor?: string; backgroundGradient?: GradientFill | null }) => void;
 }
 
 // Builds a URL-safe slug from a page name, falling back to a short random suffix if it's
@@ -142,7 +142,7 @@ export function EditorProvider({
       if (prev.pages && prev.pages.length > 0) {
         const targetId = prev.pages.some((p) => p.id === activePageId) ? activePageId : prev.pages[0].id;
         const pages = prev.pages.map((p) => (p.id === targetId ? { ...p, elements: updater(p.elements) } : p));
-        return { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor };
+        return { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor, backgroundGradient: pages[0].backgroundGradient };
       }
       return { ...prev, elements: updater(prev.elements) };
     },
@@ -310,7 +310,7 @@ export function EditorProvider({
         if (!prev || !prev.pages || prev.pages.length <= 1) return prev;
         pushHistory(prev);
         const pages = prev.pages.filter((p) => p.id !== id);
-        const next = { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor };
+        const next = { ...prev, pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor, backgroundGradient: pages[0].backgroundGradient };
         scheduleSave(next);
         setActivePageId((current) => (current === id ? pages[0].id : current));
         return next;
@@ -319,13 +319,13 @@ export function EditorProvider({
     [scheduleSave, pushHistory]
   );
 
-  const setPageBackgroundColor = useCallback(
-    (id: string, color: string) => {
+  const setPageBackground = useCallback(
+    (id: string, patch: { backgroundColor?: string; backgroundGradient?: GradientFill | null }) => {
       setProject((prev) => {
         if (!prev || !prev.pages) return prev;
         pushHistory(prev);
-        const pages = prev.pages.map((p) => (p.id === id ? { ...p, backgroundColor: color } : p));
-        const next = { ...prev, pages, backgroundColor: pages[0].backgroundColor };
+        const pages = prev.pages.map((p) => (p.id === id ? { ...p, ...patch } : p));
+        const next = { ...prev, pages, backgroundColor: pages[0].backgroundColor, backgroundGradient: pages[0].backgroundGradient };
         scheduleSave(next);
         return next;
       });
@@ -384,7 +384,7 @@ export function EditorProvider({
     addPage,
     renamePage,
     removePage,
-    setPageBackgroundColor,
+    setPageBackground,
     selectedId,
     select: setSelectedId,
     addElement,

@@ -4,8 +4,10 @@ import Svg, { Rect, Circle, Polygon, Line, Path } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useAudioPlayer } from 'expo-audio';
-import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement } from '@/types';
+import { LinearGradient } from 'expo-linear-gradient';
+import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement, CollectionElement } from '@/types';
 import { useGoogleFont } from '@/utils/useGoogleFont';
+import { gradientStartEnd } from '@/utils/gradient';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -275,7 +277,14 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: compact ? 11 : 13, color: '#0F172A', marginTop: 1 }}>
           {element.name || 'Untitled product'}
         </Text>
-        <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700', marginTop: 2 }}>${element.priceUsd.toFixed(2)}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+          <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700' }}>${element.priceUsd.toFixed(2)}</Text>
+          {element.compareAtPriceUsd != null && element.compareAtPriceUsd > element.priceUsd && !compact && (
+            <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+              ${element.compareAtPriceUsd.toFixed(2)}
+            </Text>
+          )}
+        </View>
         {element.trackInventory && !compact ? (
           <Text numberOfLines={1} style={{ fontSize: 10, color: inStock ? '#94A3B8' : '#DC2626', marginTop: 2, fontWeight: inStock ? '400' : '700' }}>
             {inStock
@@ -300,7 +309,14 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
               <ProductImageCarousel images={element.images} height={180} />
               <Text style={styles.detailBadge}>{productBadge(element)}</Text>
               <Text style={styles.detailName}>{element.name || 'Untitled product'}</Text>
-              <Text style={styles.detailPrice}>${element.priceUsd.toFixed(2)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+                <Text style={styles.detailPrice}>${element.priceUsd.toFixed(2)}</Text>
+                {element.compareAtPriceUsd != null && element.compareAtPriceUsd > element.priceUsd && (
+                  <Text style={{ fontSize: 15, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+                    ${element.compareAtPriceUsd.toFixed(2)}
+                  </Text>
+                )}
+              </View>
               {!!element.description && <Text style={styles.detailDescription}>{element.description}</Text>}
               <Text style={[styles.detailStock, { color: inStock ? '#16A34A' : '#DC2626', fontWeight: '700' }]}>
                 {inStock
@@ -322,7 +338,116 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
   );
 }
 
-export default function ElementRenderer({ element }: { element: CanvasElement }) {
+function CollectionView({
+  element,
+  allElements,
+  width,
+  height,
+}: {
+  element: CollectionElement;
+  allElements: CanvasElement[];
+  width: number;
+  height: number;
+}) {
+  const [showDetail, setShowDetail] = useState(false);
+  const products = element.productIds
+    .map((id) => allElements.find((el) => el.id === id))
+    .filter((el): el is ProductElement => !!el && el.type === 'product');
+  const compact = width < 110;
+  const MIN_TEXT_AREA = 62;
+  const showGrid = height - MIN_TEXT_AREA >= 28;
+  const gridHeight = showGrid ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
+  const thumbs = products.slice(0, 4);
+
+  return (
+    <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
+      {showGrid &&
+        (thumbs.length > 0 ? (
+          <View style={{ width, height: gridHeight, flexDirection: 'row', flexWrap: 'wrap' }}>
+            {thumbs.map((p) => (
+              <View key={p.id} style={{ width: width / 2, height: gridHeight / 2 }}>
+                {p.images[0] ? (
+                  <Image source={{ uri: p.images[0] }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.placeholder, { width: '100%', height: '100%', borderRadius: 0 }]}>
+                    <Ionicons name="pricetag-outline" size={compact ? 12 : 18} color="#94A3B8" />
+                  </View>
+                )}
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={[styles.placeholder, { width, height: gridHeight, borderRadius: 0 }]}>
+            <Ionicons name="albums-outline" size={compact ? 16 : 24} color="#94A3B8" />
+          </View>
+        ))}
+      <View style={{ padding: compact ? 6 : 8, flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: compact ? 8 : 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
+          Collection
+        </Text>
+        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: compact ? 11 : 13, color: '#0F172A', marginTop: 1 }}>
+          {element.name || 'Untitled collection'}
+        </Text>
+        {!compact && (
+          <Text numberOfLines={1} style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>
+            {products.length} {products.length === 1 ? 'item' : 'items'}
+          </Text>
+        )}
+      </View>
+
+      <Pressable style={styles.productInfoBtn} onPress={() => setShowDetail(true)} hitSlop={8}>
+        <Ionicons name="information" size={13} color="#FFFFFF" />
+      </Pressable>
+
+      <Modal visible={showDetail} transparent animationType="fade" onRequestClose={() => setShowDetail(false)}>
+        <View style={styles.detailBackdrop}>
+          <View style={styles.detailCard}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.detailBadge}>Collection</Text>
+              <Text style={styles.detailName}>{element.name || 'Untitled collection'}</Text>
+              {products.length === 0 ? (
+                <Text style={styles.detailDescription}>No products added yet — edit this collection to pick some.</Text>
+              ) : (
+                products.map((p) => (
+                  <View
+                    key={p.id}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingVertical: 8,
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                      borderTopColor: '#E2E8F0',
+                    }}
+                  >
+                    {p.images[0] ? (
+                      <Image source={{ uri: p.images[0] }} style={{ width: 44, height: 44, borderRadius: 8 }} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.placeholder, { width: 44, height: 44 }]}>
+                        <Ionicons name="pricetag-outline" size={14} color="#94A3B8" />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
+                        {p.name || 'Untitled product'}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#4338CA', fontWeight: '700' }}>${p.priceUsd.toFixed(2)}</Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+            <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>
+              <Text style={styles.detailCloseBtnText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+export default function ElementRenderer({ element, allElements }: { element: CanvasElement; allElements: CanvasElement[] }) {
   const { width, height } = element;
   // Called unconditionally (rules-of-hooks) regardless of element.type -- resolves to
   // undefined for anything but a text element with a custom font picked.
@@ -356,23 +481,30 @@ export default function ElementRenderer({ element }: { element: CanvasElement })
       );
     case 'shape':
       return <ShapeSvg kind={element.shapeKind} color={element.color} width={width} height={height} />;
-    case 'button':
+    case 'button': {
+      const buttonInnerStyle = {
+        width,
+        height,
+        borderRadius: element.borderRadius,
+        borderWidth: element.borderWidth ?? 0,
+        borderColor: element.borderColor ?? 'transparent',
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+      };
+      if (element.backgroundGradient) {
+        const { start, end } = gradientStartEnd(element.backgroundGradient.angle);
+        return (
+          <LinearGradient colors={element.backgroundGradient.colors} start={start} end={end} style={buttonInnerStyle}>
+            <Text style={{ color: element.textColor, fontWeight: '600' }}>{element.label}</Text>
+          </LinearGradient>
+        );
+      }
       return (
-        <View
-          style={{
-            width,
-            height,
-            backgroundColor: element.backgroundColor,
-            borderRadius: element.borderRadius,
-            borderWidth: element.borderWidth ?? 0,
-            borderColor: element.borderColor ?? 'transparent',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
+        <View style={{ ...buttonInnerStyle, backgroundColor: element.backgroundColor }}>
           <Text style={{ color: element.textColor, fontWeight: '600' }}>{element.label}</Text>
         </View>
       );
+    }
     case 'icon': {
       const IconComp = ICON_SETS[element.iconSet] as any;
       return (
@@ -397,6 +529,8 @@ export default function ElementRenderer({ element }: { element: CanvasElement })
       return <VideoEmbedView element={element} width={width} height={height} />;
     case 'product':
       return <ProductCardView element={element} width={width} height={height} />;
+    case 'collection':
+      return <CollectionView element={element} allElements={allElements} width={width} height={height} />;
     default:
       return null;
   }
