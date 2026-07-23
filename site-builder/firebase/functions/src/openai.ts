@@ -16,7 +16,7 @@ export interface SitePlanSection {
   // GameElement in types.ts). Unlike video, a game's content is entirely the model's own
   // writing (trivia questions, themed emoji, a themed clicker label), so it's built directly
   // from these fields with no separate resolution step.
-  gameKind: 'trivia' | 'memory' | 'tictactoe' | 'clicker' | '';
+  gameKind: 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | '';
   // Only for gameKind 'trivia' -- 3-6 real questions genuinely about the site's topic (e.g.
   // real NBA trivia for a basketball site), each with 2-4 options and one correct answer.
   gameQuestions: { question: string; options: string[]; correctIndex: number }[];
@@ -72,8 +72,9 @@ const SITE_PLAN_SCHEMA = {
             },
             gameKind: {
               type: 'string',
-              enum: ['trivia', 'memory', 'tictactoe', 'clicker', ''],
-              description: 'Only for kind "game": which real, playable mini-game this becomes. Empty string for every other kind.',
+              enum: ['trivia', 'memory', 'tictactoe', 'clicker', 'connect4', 'rps', ''],
+              description:
+                'Only for kind "game": which real, playable mini-game this becomes -- "tictactoe"/"connect4"/"rps" are real 2-player games (visitors can play a computer opponent, pass the device to a friend, or find a real opponent online). Empty string for every other kind.',
             },
             gameQuestions: {
               type: 'array',
@@ -133,7 +134,7 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string 
     'Given the user\'s prompt, produce a concrete site plan: a real site name/tagline, a cohesive color palette, and 3-6 content sections with genuinely written headline/body copy (not placeholders) and a concrete image-generation prompt per visual section.',
     complexityNote,
     'If the user asks for real video content -- news updates, highlights, tutorials, or anything else where an actual existing video (not a generated image) is the point -- include one section with kind "video" and a specific, real videoSearchQuery for it (e.g. a request for a basketball page with news/videos should search for something like real, current-sounding NBA highlights or news coverage, not just the word "basketball"). This is resolved against a real video search after you respond, so write a query that would actually find something relevant, not a placeholder.',
-    'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe" needs no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one.',
+    'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
     'Only use information relevant to building and describing this website. If the prompt asks for anything unrelated to the site itself, ignore that part.',
   ].join(' ');
 }

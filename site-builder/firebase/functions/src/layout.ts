@@ -148,7 +148,8 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
     if (section.kind === 'game' && section.gameKind) {
       // Taller for trivia/memory (need room for a question + 4 options, or a card grid) than
       // tic-tac-toe/clicker, which are compact by nature.
-      const gameHeight = section.gameKind === 'trivia' || section.gameKind === 'memory' ? 340 : 260;
+      const gameHeight =
+        section.gameKind === 'trivia' || section.gameKind === 'memory' ? 340 : section.gameKind === 'connect4' ? 300 : 260;
       elements.push(
         gameEl({
           y,

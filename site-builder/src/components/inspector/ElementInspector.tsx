@@ -770,6 +770,8 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               {(
                 [
                   ['tictactoe', 'Tic-Tac-Toe'],
+                  ['connect4', 'Connect Four'],
+                  ['rps', 'Rock Paper Scissors'],
                   ['memory', 'Memory Match'],
                   ['trivia', 'Trivia Quiz'],
                   ['clicker', 'Clicker'],
@@ -788,8 +790,11 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             <Text style={styles.fieldLabel}>Title</Text>
             <TextInput style={styles.textInput} value={element.title} onChangeText={(title) => onChange({ title } as any)} />
 
-            {element.kind === 'tictactoe' && (
-              <Text style={styles.helperText}>Ready to play as-is — two visitors take turns tapping the same board, no setup needed.</Text>
+            {(element.kind === 'tictactoe' || element.kind === 'connect4' || element.kind === 'rps') && (
+              <Text style={styles.helperText}>
+                Ready to play as-is, no setup needed — visitors on your published site can play against the computer, pass the
+                device to a friend, or find a real opponent online.
+              </Text>
             )}
 
             {element.kind === 'clicker' && (

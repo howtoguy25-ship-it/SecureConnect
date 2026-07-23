@@ -80,46 +80,514 @@ function renderShape(el: Extract<CanvasElement, { type: 'shape' }>): string {
   }
 }
 
-// Four real, playable mini-games rendered as plain DOM + vanilla JS (no framework/build step
+// Real, playable mini-games rendered as plain DOM + vanilla JS (no framework/build step
 // available on a published static page) -- the exact same rules as the editor's GameView.tsx
 // RN components, just re-implemented against document.createElement/innerHTML instead of RN
 // state. Owner-authored text (title/labels/questions) is HTML-escaped before being embedded
 // as a JS string literal, so it round-trips safely through innerHTML either way.
-function ticTacToeScript(bodyId: string): string {
-  return `<script>(function(){
-  var root = document.getElementById(${JSON.stringify(bodyId)});
-  var board = Array(9).fill(null);
-  var turn = 'X';
-  var LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-  function winner(){
-    for (var i=0;i<LINES.length;i++){
-      var a=LINES[i][0],b=LINES[i][1],c=LINES[i][2];
-      if (board[a] && board[a]===board[b] && board[a]===board[c]) return board[a];
+//
+// Tic-Tac-Toe/Connect Four/Rock Paper Scissors are real 2-player games, so each gets a mode
+// row (vs Computer / 2 Players same device / Play Online) -- Play Online is genuine real-time
+// multiplayer between two actual visitors, matched via Firestore (see sharedGameRuntimeScript
+// below), not a simulation. Memory/Trivia/Clicker stay solo score-attempt games.
+
+// Loaded once per published page (only if it has at least one multiplayer-capable game
+// element) -- the Firebase Web SDK plus real matchmaking + the shared game logic every
+// per-element script below calls into via window.SiteSparkGames. Visitors on a published
+// site are anonymous (no SiteSpark account), so this talks to Firestore directly from the
+// page itself rather than through a Cloud Function -- see firestore.rules' gameLobbies/
+// gameRooms comment for why that's safe here (no personal data, no stakes).
+function sharedGameRuntimeScript(): string {
+  return `<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>(function(){
+  if (window.SiteSparkGames) return;
+  firebase.initializeApp({
+    apiKey: "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
+    authDomain: "sitespark-a5817.firebaseapp.com",
+    projectId: "sitespark-a5817",
+    storageBucket: "sitespark-a5817.firebasestorage.app",
+    messagingSenderId: "776375566908",
+    appId: "1:776375566908:web:1c7c75437bf1d3a415b939"
+  });
+  var db = firebase.firestore();
+  var myId = localStorage.getItem('sitespark_player_id');
+  if (!myId) { myId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2,8); localStorage.setItem('sitespark_player_id', myId); }
+
+  var TTT_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  function tttWinner(board){
+    for (var i=0;i<TTT_LINES.length;i++){ var L=TTT_LINES[i]; if (board[L[0]] && board[L[0]]===board[L[1]] && board[L[0]]===board[L[2]]) return board[L[0]]; }
+    return null;
+  }
+  function tttScore(board, me, opp, maximizing, depth){
+    var w = tttWinner(board);
+    if (w===me) return 10 - depth;
+    if (w===opp) return depth - 10;
+    if (board.every(function(c){return c!==null;})) return 0;
+    var best = maximizing ? -Infinity : Infinity;
+    for (var i=0;i<9;i++){
+      if (board[i]) continue;
+      var next = board.slice();
+      next[i] = maximizing ? me : opp;
+      var s = tttScore(next, me, opp, !maximizing, depth + 1);
+      best = maximizing ? Math.max(best, s) : Math.min(best, s);
+    }
+    return best;
+  }
+  function tttBestMove(board, me, opp){
+    var bestScore = -Infinity, bestMove = -1;
+    for (var i=0;i<9;i++){
+      if (board[i]) continue;
+      var next = board.slice(); next[i] = me;
+      var s = tttScore(next, me, opp, false, 1);
+      if (s > bestScore) { bestScore = s; bestMove = i; }
+    }
+    return bestMove;
+  }
+
+  var C4_ROWS = 6, C4_COLS = 7;
+  function c4Empty(){ var b=[]; for (var r=0;r<C4_ROWS;r++) b.push(new Array(C4_COLS).fill(null)); return b; }
+  function c4Clone(b){ return b.map(function(row){ return row.slice(); }); }
+  function c4DropRow(b, col){ for (var r=C4_ROWS-1;r>=0;r--) if (!b[r][col]) return r; return -1; }
+  function c4ValidCols(b){ var out=[]; for (var c=0;c<C4_COLS;c++) if (!b[0][c]) out.push(c); return out; }
+  function c4Winner(b){
+    for (var r=0;r<C4_ROWS;r++) for (var c=0;c<C4_COLS;c++){
+      var cell = b[r][c]; if (!cell) continue;
+      if (c+3<C4_COLS && cell===b[r][c+1] && cell===b[r][c+2] && cell===b[r][c+3]) return cell;
+      if (r+3<C4_ROWS && cell===b[r+1][c] && cell===b[r+2][c] && cell===b[r+3][c]) return cell;
+      if (r+3<C4_ROWS && c+3<C4_COLS && cell===b[r+1][c+1] && cell===b[r+2][c+2] && cell===b[r+3][c+3]) return cell;
+      if (r+3<C4_ROWS && c-3>=0 && cell===b[r+1][c-1] && cell===b[r+2][c-2] && cell===b[r+3][c-3]) return cell;
     }
     return null;
   }
-  function render(){
-    var w = winner();
-    var draw = !w && board.every(function(c){return c!==null;});
-    var html = '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px;">' + (w ? w+' wins!' : draw ? "It&#39;s a draw!" : turn+"&#39;s turn") + '</div>';
-    html += '<div style="display:flex;flex-wrap:wrap;width:132px;">';
-    for (var i=0;i<9;i++){
-      html += '<div data-cell="'+i+'" style="width:44px;height:44px;border:1px solid #CBD5E1;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:'+(board[i]==='X'?'#4338CA':'#DC2626')+';cursor:pointer;">'+(board[i]||'')+'</div>';
+  function c4Full(b){ return b[0].every(function(c){return c!==null;}); }
+  function c4Window(cells, me, opp){
+    var meCount=0, oppCount=0, emptyCount=0;
+    cells.forEach(function(c){ if (c===me) meCount++; else if (c===opp) oppCount++; else emptyCount++; });
+    if (meCount===4) return 100000;
+    if (meCount===3 && emptyCount===1) return 50;
+    if (meCount===2 && emptyCount===2) return 10;
+    if (oppCount===3 && emptyCount===1) return -60;
+    return 0;
+  }
+  function c4Score(b, me, opp){
+    var score=0, centerCol=Math.floor(C4_COLS/2);
+    for (var r=0;r<C4_ROWS;r++) if (b[r][centerCol]===me) score += 3;
+    for (var r=0;r<C4_ROWS;r++) for (var c=0;c<C4_COLS-3;c++) score += c4Window([b[r][c],b[r][c+1],b[r][c+2],b[r][c+3]], me, opp);
+    for (var c=0;c<C4_COLS;c++) for (var r=0;r<C4_ROWS-3;r++) score += c4Window([b[r][c],b[r+1][c],b[r+2][c],b[r+3][c]], me, opp);
+    for (var r=0;r<C4_ROWS-3;r++) for (var c=0;c<C4_COLS-3;c++) score += c4Window([b[r][c],b[r+1][c+1],b[r+2][c+2],b[r+3][c+3]], me, opp);
+    for (var r=3;r<C4_ROWS;r++) for (var c=0;c<C4_COLS-3;c++) score += c4Window([b[r][c],b[r-1][c+1],b[r-2][c+2],b[r-3][c+3]], me, opp);
+    return score;
+  }
+  function c4Minimax(b, depth, alpha, beta, maximizing, me, opp){
+    var winner = c4Winner(b);
+    if (winner===me) return 1000000+depth;
+    if (winner===opp) return -1000000-depth;
+    if (c4Full(b) || depth===0) return c4Score(b, me, opp);
+    var cols = c4ValidCols(b);
+    var i, c, b2, r;
+    if (maximizing){
+      var best=-Infinity;
+      for (i=0;i<cols.length;i++){ c=cols[i]; b2=c4Clone(b); r=c4DropRow(b2,c); b2[r][c]=me; best=Math.max(best, c4Minimax(b2, depth-1, alpha, beta, false, me, opp)); alpha=Math.max(alpha,best); if (alpha>=beta) break; }
+      return best;
     }
-    html += '</div>';
-    if (w || draw) html += '<button data-reset style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
-    root.innerHTML = html;
-    Array.prototype.forEach.call(root.querySelectorAll('[data-cell]'), function(cell){
-      cell.addEventListener('click', function(){
-        var i = parseInt(cell.getAttribute('data-cell'),10);
-        if (board[i] || winner()) return;
-        board[i] = turn;
-        turn = turn === 'X' ? 'O' : 'X';
+    var worst=Infinity;
+    for (i=0;i<cols.length;i++){ c=cols[i]; b2=c4Clone(b); r=c4DropRow(b2,c); b2[r][c]=opp; worst=Math.min(worst, c4Minimax(b2, depth-1, alpha, beta, true, me, opp)); beta=Math.min(beta,worst); if (alpha>=beta) break; }
+    return worst;
+  }
+  function c4BestMove(b, me, opp){
+    var cols = c4ValidCols(b), i, c, b2, r;
+    for (i=0;i<cols.length;i++){ c=cols[i]; b2=c4Clone(b); r=c4DropRow(b2,c); b2[r][c]=me; if (c4Winner(b2)===me) return c; }
+    for (i=0;i<cols.length;i++){ c=cols[i]; b2=c4Clone(b); r=c4DropRow(b2,c); b2[r][c]=opp; if (c4Winner(b2)===opp) return c; }
+    var bestCol=cols[0], bestVal=-Infinity;
+    for (i=0;i<cols.length;i++){ c=cols[i]; b2=c4Clone(b); r=c4DropRow(b2,c); b2[r][c]=me; var val=c4Minimax(b2,4,-Infinity,Infinity,false,me,opp); if (val>bestVal){bestVal=val;bestCol=c;} }
+    return bestCol;
+  }
+
+  function rpsWinner(a,b){
+    if (a===b) return 'draw';
+    if ((a==='rock'&&b==='scissors')||(a==='paper'&&b==='rock')||(a==='scissors'&&b==='paper')) return 'a';
+    return 'b';
+  }
+
+  // Two-document handshake: a waiting player parks itself in gameLobbies/{lobbyId}; the next
+  // visitor to call findMatch for that same lobbyId claims it inside a transaction (so two
+  // simultaneous claims can't both succeed), creates the real gameRooms/{roomId} both will
+  // play in, and writes the roomId back onto the lobby doc for the original waiter's listener
+  // to pick up. lobbyId is scoped to this exact game element (see renderGameHtml), so visitors
+  // playing different games/sites are never matched together.
+  function findMatch(lobbyId, initialState, onMatched, onWaiting){
+    var lobbyRef = db.collection('gameLobbies').doc(lobbyId);
+    var unsub = null;
+    db.runTransaction(function(tx){
+      return tx.get(lobbyRef).then(function(doc){
+        var data = doc.exists ? doc.data() : null;
+        var now = Date.now();
+        var stale = !data || !data.waitingUid || (data.waitingSince && now - data.waitingSince > 60000);
+        if (stale || data.waitingUid === myId) {
+          tx.set(lobbyRef, { waitingUid: myId, waitingSince: now, matchedRoomId: null, matchedFor: null, expiresAt: new Date(now+3600000) });
+          return { role: 'waiting' };
+        }
+        var roomRef = db.collection('gameRooms').doc();
+        tx.set(roomRef, { state: initialState, players: [data.waitingUid, myId], createdAt: now, updatedAt: now, expiresAt: new Date(now+3600000) });
+        tx.set(lobbyRef, { waitingUid: null, waitingSince: null, matchedRoomId: roomRef.id, matchedFor: data.waitingUid }, { merge: true });
+        return { role: 'claimed', roomId: roomRef.id };
+      });
+    }).then(function(result){
+      if (result.role === 'claimed') { onMatched(result.roomId, 1); }
+      else {
+        if (onWaiting) onWaiting();
+        unsub = lobbyRef.onSnapshot(function(doc){
+          var data = doc.data();
+          if (data && data.matchedRoomId && data.matchedFor === myId) {
+            unsub(); unsub = null;
+            onMatched(data.matchedRoomId, 0);
+          }
+        });
+      }
+    }).catch(function(err){ console.error('SiteSpark matchmaking error', err); });
+    return function cancel(){ if (unsub) { unsub(); unsub = null; } };
+  }
+
+  window.SiteSparkGames = {
+    myId: myId,
+    db: db,
+    tttWinner: tttWinner,
+    tttBestMove: tttBestMove,
+    c4Empty: c4Empty,
+    c4Winner: c4Winner,
+    c4Full: c4Full,
+    c4DropRow: c4DropRow,
+    c4BestMove: c4BestMove,
+    rpsWinner: rpsWinner,
+    findMatch: findMatch
+  };
+})();</script>`;
+}
+
+function ticTacToeScript(bodyId: string, lobbyId: string): string {
+  return `<script>(function(){
+  var G = window.SiteSparkGames;
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var mode = 'computer';
+  var board = Array(9).fill(null);
+  var turn = 'X';
+  var thinking = false;
+  var onlineRoomId = null, onlineUnsub = null, onlineCancel = null, mySeat = null, onlineStatus = '';
+
+  function computerTurn(){
+    thinking = true; render();
+    setTimeout(function(){
+      var move = G.tttBestMove(board.slice(), 'O', 'X');
+      if (move !== -1) { board[move] = 'O'; turn = 'X'; }
+      thinking = false; render();
+    }, 450);
+  }
+
+  function localTap(i){
+    if (board[i] || G.tttWinner(board) || board.every(function(c){return c!==null;}) || thinking) return;
+    if (mode==='computer' && turn==='O') return;
+    board[i] = turn;
+    turn = turn === 'X' ? 'O' : 'X';
+    render();
+    if (mode==='computer' && turn==='O' && !G.tttWinner(board) && !board.every(function(c){return c!==null;})) computerTurn();
+  }
+
+  function onlineTap(i){
+    if (!onlineRoomId || board[i]) return;
+    var mySym = mySeat===0 ? 'X' : 'O';
+    if (turn !== mySym || G.tttWinner(board)) return;
+    var next = board.slice(); next[i] = mySym;
+    var nextTurn = mySym === 'X' ? 'O' : 'X';
+    G.db.collection('gameRooms').doc(onlineRoomId).update({ state: { board: next, turn: nextTurn }, updatedAt: Date.now() });
+  }
+
+  function startOnline(){
+    mode = 'online'; onlineStatus = 'searching'; onlineRoomId = null; board = Array(9).fill(null); turn = 'X';
+    render();
+    onlineCancel = G.findMatch(${JSON.stringify(lobbyId)}, { board: Array(9).fill(null), turn: 'X' }, function(roomId, seat){
+      onlineRoomId = roomId; mySeat = seat; onlineStatus = 'playing';
+      onlineUnsub = G.db.collection('gameRooms').doc(roomId).onSnapshot(function(doc){
+        var data = doc.data(); if (!data) return;
+        board = data.state.board; turn = data.state.turn;
         render();
+      });
+    }, function(){ onlineStatus = 'searching'; render(); });
+  }
+  function stopOnline(){ if (onlineUnsub) { onlineUnsub(); onlineUnsub = null; } if (onlineCancel) { onlineCancel(); onlineCancel = null; } onlineRoomId = null; }
+  function setMode(m){ stopOnline(); mode = m; board = Array(9).fill(null); turn = 'X'; thinking = false; if (m==='online') startOnline(); else render(); }
+
+  function modeBtnsHtml(){
+    function btn(key,label){ return '<button data-mode="'+key+'" style="padding:4px 10px;border-radius:999px;border:none;font-size:10px;font-weight:700;margin:0 3px;cursor:pointer;background:'+(mode===key?'#111827':'#F1F5F9')+';color:'+(mode===key?'#fff':'#64748B')+';">'+label+'</button>'; }
+    return '<div style="margin-bottom:8px;">'+btn('computer','vs Computer')+btn('local','2 Players')+btn('online','Play Online')+'</div>';
+  }
+
+  function render(){
+    var winner = G.tttWinner(board);
+    var draw = !winner && board.every(function(c){return c!==null;});
+    var statusText;
+    if (mode==='online' && onlineStatus==='searching') statusText = 'Searching for an opponent…';
+    else if (winner) statusText = winner + ' wins!';
+    else if (draw) statusText = "It's a draw!";
+    else if (thinking) statusText = 'Computer thinking…';
+    else if (mode==='online') statusText = (turn === (mySeat===0?'X':'O')) ? 'Your turn' : "Opponent's turn";
+    else statusText = turn + "'s turn";
+
+    var html = modeBtnsHtml();
+    html += '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px;">'+statusText+'</div>';
+    if (!(mode==='online' && onlineStatus==='searching')) {
+      html += '<div style="display:flex;flex-wrap:wrap;width:132px;">';
+      for (var i=0;i<9;i++){
+        html += '<div data-cell="'+i+'" style="width:44px;height:44px;border:1px solid #CBD5E1;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:'+(board[i]==='X'?'#4338CA':'#DC2626')+';cursor:pointer;">'+(board[i]||'')+'</div>';
+      }
+      html += '</div>';
+    }
+    if (winner || draw) html += '<button data-reset style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+    root.innerHTML = html;
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function(btn){ btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); }); });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-cell]'), function(cellEl){
+      cellEl.addEventListener('click', function(){
+        var i = parseInt(cellEl.getAttribute('data-cell'),10);
+        if (mode==='online') onlineTap(i); else localTap(i);
       });
     });
     var resetBtn = root.querySelector('[data-reset]');
-    if (resetBtn) resetBtn.addEventListener('click', function(){ board = Array(9).fill(null); turn='X'; render(); });
+    if (resetBtn) resetBtn.addEventListener('click', function(){ if (mode==='online') { stopOnline(); startOnline(); } else { board = Array(9).fill(null); turn='X'; render(); } });
+  }
+  render();
+})();</script>`;
+}
+
+function connectFourScript(bodyId: string, lobbyId: string): string {
+  return `<script>(function(){
+  var G = window.SiteSparkGames;
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var ROWS = 6, COLS = 7;
+  var mode = 'computer';
+  var board = G.c4Empty();
+  var turn = 'R';
+  var thinking = false;
+  var onlineRoomId = null, onlineUnsub = null, onlineCancel = null, mySeat = null, onlineStatus = '';
+
+  function computerTurn(){
+    thinking = true; render();
+    setTimeout(function(){
+      var col = G.c4BestMove(board, 'Y', 'R');
+      var row = G.c4DropRow(board, col);
+      if (row !== -1) { board[row][col] = 'Y'; turn = 'R'; }
+      thinking = false; render();
+    }, 500);
+  }
+
+  function localTap(col){
+    if (G.c4Winner(board) || G.c4Full(board) || thinking) return;
+    if (mode==='computer' && turn==='Y') return;
+    var row = G.c4DropRow(board, col);
+    if (row===-1) return;
+    board[row][col] = turn;
+    turn = turn==='R' ? 'Y' : 'R';
+    render();
+    if (mode==='computer' && turn==='Y' && !G.c4Winner(board) && !G.c4Full(board)) computerTurn();
+  }
+
+  function onlineTap(col){
+    if (!onlineRoomId) return;
+    var mySym = mySeat===0 ? 'R' : 'Y';
+    if (turn !== mySym || G.c4Winner(board)) return;
+    var row = G.c4DropRow(board, col);
+    if (row===-1) return;
+    var next = board.map(function(r){ return r.slice(); });
+    next[row][col] = mySym;
+    var nextTurn = mySym==='R' ? 'Y' : 'R';
+    G.db.collection('gameRooms').doc(onlineRoomId).update({ state: { board: next, turn: nextTurn }, updatedAt: Date.now() });
+  }
+
+  function startOnline(){
+    mode='online'; onlineStatus='searching'; onlineRoomId=null; board=G.c4Empty(); turn='R';
+    render();
+    onlineCancel = G.findMatch(${JSON.stringify(lobbyId)}, { board: G.c4Empty(), turn: 'R' }, function(roomId, seat){
+      onlineRoomId = roomId; mySeat = seat; onlineStatus='playing';
+      onlineUnsub = G.db.collection('gameRooms').doc(roomId).onSnapshot(function(doc){
+        var data = doc.data(); if (!data) return;
+        board = data.state.board; turn = data.state.turn;
+        render();
+      });
+    }, function(){ onlineStatus='searching'; render(); });
+  }
+  function stopOnline(){ if (onlineUnsub) { onlineUnsub(); onlineUnsub=null; } if (onlineCancel) { onlineCancel(); onlineCancel=null; } onlineRoomId=null; }
+  function setMode(m){ stopOnline(); mode=m; board=G.c4Empty(); turn='R'; thinking=false; if (m==='online') startOnline(); else render(); }
+
+  function modeBtnsHtml(){
+    function btn(key,label){ return '<button data-mode="'+key+'" style="padding:4px 10px;border-radius:999px;border:none;font-size:10px;font-weight:700;margin:0 3px;cursor:pointer;background:'+(mode===key?'#111827':'#F1F5F9')+';color:'+(mode===key?'#fff':'#64748B')+';">'+label+'</button>'; }
+    return '<div style="margin-bottom:8px;">'+btn('computer','vs Computer')+btn('local','2 Players')+btn('online','Play Online')+'</div>';
+  }
+
+  function render(){
+    var winner = G.c4Winner(board);
+    var full = G.c4Full(board);
+    var statusText;
+    if (mode==='online' && onlineStatus==='searching') statusText = 'Searching for an opponent…';
+    else if (winner) statusText = (winner==='R'?'Red':'Yellow') + ' wins!';
+    else if (full) statusText = "It's a draw!";
+    else if (thinking) statusText = 'Computer thinking…';
+    else if (mode==='online') statusText = (turn === (mySeat===0?'R':'Y')) ? 'Your turn' : "Opponent's turn";
+    else statusText = (turn==='R'?'Red':'Yellow') + "'s turn";
+
+    var html = modeBtnsHtml();
+    html += '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px;">'+statusText+'</div>';
+    if (!(mode==='online' && onlineStatus==='searching')) {
+      html += '<div>';
+      for (var r=0;r<ROWS;r++){
+        html += '<div style="display:flex;">';
+        for (var c=0;c<COLS;c++){
+          var cell = board[r][c];
+          html += '<div data-col="'+c+'" style="width:26px;height:26px;border:1px solid #93C5FD;background:#DBEAFE;display:flex;align-items:center;justify-content:center;cursor:pointer;">'+(cell?'<div style="width:20px;height:20px;border-radius:10px;background:'+(cell==='R'?'#DC2626':'#EAB308')+';"></div>':'')+'</div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    if (winner || full) html += '<button data-reset style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+    root.innerHTML = html;
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function(btn){ btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); }); });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-col]'), function(colEl){
+      colEl.addEventListener('click', function(){
+        var c = parseInt(colEl.getAttribute('data-col'),10);
+        if (mode==='online') onlineTap(c); else localTap(c);
+      });
+    });
+    var resetBtn = root.querySelector('[data-reset]');
+    if (resetBtn) resetBtn.addEventListener('click', function(){ if (mode==='online') { stopOnline(); startOnline(); } else { board=G.c4Empty(); turn='R'; render(); } });
+  }
+  render();
+})();</script>`;
+}
+
+function rpsScript(bodyId: string, lobbyId: string): string {
+  return `<script>(function(){
+  var G = window.SiteSparkGames;
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var CHOICES = ['rock','paper','scissors'];
+  var EMOJI = { rock:'✊', paper:'✋', scissors:'✌️' };
+  var mode = 'computer';
+  var myChoice=null, oppChoice=null, scoreA=0, scoreB=0, waitingForP2=false;
+  var onlineRoomId=null, onlineUnsub=null, onlineCancel=null, mySeat=null, onlineStatus='';
+
+  function localPick(choice){
+    if (mode==='computer'){
+      var comp = CHOICES[Math.floor(Math.random()*3)];
+      myChoice = choice; oppChoice = comp;
+      var result = G.rpsWinner(choice, comp);
+      if (result==='a') scoreA++; else if (result==='b') scoreB++;
+      render();
+    } else if (myChoice===null){
+      myChoice = choice; waitingForP2 = true; render();
+    } else if (oppChoice===null){
+      oppChoice = choice; waitingForP2 = false;
+      var result2 = G.rpsWinner(myChoice, oppChoice);
+      if (result2==='a') scoreA++; else if (result2==='b') scoreB++;
+      render();
+    }
+  }
+
+  function onlinePick(choice){
+    if (!onlineRoomId) return;
+    var roomRef = G.db.collection('gameRooms').doc(onlineRoomId);
+    G.db.runTransaction(function(tx){
+      return tx.get(roomRef).then(function(doc){
+        var data = doc.data();
+        var state = data.state;
+        if (state.resolvedRound === state.round) state = Object.assign({}, state, { round: state.round + 1, choices: {} });
+        state.choices = Object.assign({}, state.choices);
+        state.choices[G.myId] = choice;
+        var uids = Object.keys(state.choices);
+        if (uids.length===2 && state.resolvedRound !== state.round) {
+          var a = data.players[0], b = data.players[1];
+          var ca = state.choices[a], cb = state.choices[b];
+          var result = G.rpsWinner(ca, cb);
+          state.scoreA = (state.scoreA||0) + (result==='a'?1:0);
+          state.scoreB = (state.scoreB||0) + (result==='b'?1:0);
+          state.lastResult = { a: ca, b: cb, result: result };
+          state.resolvedRound = state.round;
+        }
+        tx.update(roomRef, { state: state, updatedAt: Date.now() });
+      });
+    }).catch(function(err){ console.error('rps move error', err); });
+  }
+
+  function startOnline(){
+    mode='online'; onlineStatus='searching'; onlineRoomId=null; myChoice=null; oppChoice=null;
+    render();
+    onlineCancel = G.findMatch(${JSON.stringify(lobbyId)}, { round: 0, resolvedRound: -1, choices: {}, scoreA: 0, scoreB: 0, lastResult: null }, function(roomId, seat){
+      onlineRoomId = roomId; mySeat = seat; onlineStatus='playing';
+      onlineUnsub = G.db.collection('gameRooms').doc(roomId).onSnapshot(function(doc){
+        var data = doc.data(); if (!data) return;
+        renderOnline(data);
+      });
+    }, function(){ onlineStatus='searching'; render(); });
+  }
+  function stopOnline(){ if (onlineUnsub) { onlineUnsub(); onlineUnsub=null; } if (onlineCancel) { onlineCancel(); onlineCancel=null; } onlineRoomId=null; }
+  function setMode(m){ stopOnline(); mode=m; myChoice=null; oppChoice=null; waitingForP2=false; scoreA=0; scoreB=0; if (m==='online') startOnline(); else render(); }
+
+  function modeBtnsHtml(){
+    function btn(key,label){ return '<button data-mode="'+key+'" style="padding:4px 10px;border-radius:999px;border:none;font-size:10px;font-weight:700;margin:0 3px;cursor:pointer;background:'+(mode===key?'#111827':'#F1F5F9')+';color:'+(mode===key?'#fff':'#64748B')+';">'+label+'</button>'; }
+    return '<div style="margin-bottom:8px;">'+btn('computer','vs Computer')+btn('local','2 Players')+btn('online','Play Online')+'</div>';
+  }
+  function choiceButtonsHtml(){
+    var html = '<div>';
+    CHOICES.forEach(function(c){ html += '<button data-choice="'+c+'" style="width:48px;height:48px;border-radius:24px;background:#F1F5F9;border:none;font-size:22px;margin:0 4px;cursor:pointer;">'+EMOJI[c]+'</button>'; });
+    html += '</div>';
+    return html;
+  }
+
+  function render(){
+    var html = modeBtnsHtml();
+    var showResult = myChoice!==null && oppChoice!==null;
+    html += '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:6px;">Player 1: '+scoreA+' · '+(mode==='computer'?'Computer':'Player 2')+': '+scoreB+'</div>';
+    if (!showResult){
+      html += '<div style="font-size:11px;color:#64748B;margin-bottom:6px;">'+(mode==='computer'?'Make your move':(waitingForP2?'Player 2: make your move':'Player 1: make your move'))+'</div>';
+      html += choiceButtonsHtml();
+    } else {
+      var result = G.rpsWinner(myChoice, oppChoice);
+      html += '<div style="font-size:30px;margin-bottom:6px;">'+EMOJI[myChoice]+' vs '+EMOJI[oppChoice]+'</div>';
+      html += '<div style="font-weight:700;font-size:14px;color:#334155;margin-bottom:8px;">'+(result==='draw'?"It's a tie!":(result==='a'?'Player 1 wins!':(mode==='computer'?'Computer wins!':'Player 2 wins!')))+'</div>';
+      html += '<button data-reset style="background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">Play Again</button>';
+    }
+    root.innerHTML = html;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function(btn){ btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); }); });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-choice]'), function(btn){ btn.addEventListener('click', function(){ localPick(btn.getAttribute('data-choice')); }); });
+    var resetBtn = root.querySelector('[data-reset]');
+    if (resetBtn) resetBtn.addEventListener('click', function(){ myChoice=null; oppChoice=null; render(); });
+  }
+
+  function renderOnline(data){
+    var state = data.state;
+    var myUid = G.myId;
+    var haveMine = state.choices && state.choices[myUid] != null;
+    var lastResult = state.resolvedRound === state.round ? state.lastResult : null;
+    var html = modeBtnsHtml();
+    html += '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:6px;">You: '+(mySeat===0?state.scoreA:state.scoreB)+' · Opponent: '+(mySeat===0?state.scoreB:state.scoreA)+'</div>';
+    if (onlineStatus==='searching') {
+      html += '<div style="font-size:12px;color:#64748B;">Searching for an opponent…</div>';
+    } else if (lastResult) {
+      var myChoiceShown = mySeat===0 ? lastResult.a : lastResult.b;
+      var oppChoiceShown = mySeat===0 ? lastResult.b : lastResult.a;
+      var mine = mySeat===0 ? 'a' : 'b';
+      html += '<div style="font-size:30px;margin-bottom:6px;">'+EMOJI[myChoiceShown]+' vs '+EMOJI[oppChoiceShown]+'</div>';
+      html += '<div style="font-weight:700;font-size:14px;color:#334155;margin-bottom:8px;">'+(lastResult.result==='draw'?"It's a tie!":(lastResult.result===mine?'You win!':'Opponent wins!'))+'</div>';
+      html += choiceButtonsHtml();
+      html += '<div style="font-size:10px;color:#94A3B8;margin-top:4px;">Pick again to start the next round</div>';
+    } else if (haveMine) {
+      html += '<div style="font-size:12px;color:#64748B;">Waiting for opponent…</div>';
+    } else {
+      html += '<div style="font-size:11px;color:#64748B;margin-bottom:6px;">Make your move</div>';
+      html += choiceButtonsHtml();
+    }
+    root.innerHTML = html;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function(btn){ btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); }); });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-choice]'), function(btn){ btn.addEventListener('click', function(){ onlinePick(btn.getAttribute('data-choice')); }); });
   }
   render();
 })();</script>`;
@@ -240,15 +708,24 @@ function triviaScript(bodyId: string, questions: GameElement['questions']): stri
 })();</script>`;
 }
 
-function renderGameHtml(el: GameElement, base: string): string {
+function renderGameHtml(el: GameElement, base: string, slug: string): string {
   const bodyId = `game-${el.id}-body`;
+  // Scopes real-time matchmaking to this exact game element on this exact published site --
+  // two visitors are only ever matched if they're both looking at the same game.
+  const lobbyId = `${slug}-${el.id}`;
   const titleHtml = el.title
     ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(el.title)}</div>`
     : '';
   let gameScript = '';
   switch (el.kind) {
     case 'tictactoe':
-      gameScript = ticTacToeScript(bodyId);
+      gameScript = ticTacToeScript(bodyId, lobbyId);
+      break;
+    case 'connect4':
+      gameScript = connectFourScript(bodyId, lobbyId);
+      break;
+    case 'rps':
+      gameScript = rpsScript(bodyId, lobbyId);
       break;
     case 'clicker':
       gameScript = clickerScript(bodyId, el.clickerLabel, el.clickerTarget);
@@ -532,7 +1009,7 @@ ${script}`;
 </div>`;
     }
     case 'game':
-      return renderGameHtml(el, base);
+      return renderGameHtml(el, base, slug);
     default:
       return '';
   }
@@ -977,6 +1454,9 @@ export function renderProjectHtml(
   navHtml = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
+  const hasMultiplayerGame = project.elements.some(
+    (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
+  );
   const usesMdi = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'MaterialCommunityIcons');
   const usesFa = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'FontAwesome5');
   const usesIon = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'Ionicons');
@@ -1042,6 +1522,7 @@ export function renderProjectHtml(
   </style>
 </head>
 <body>
+  ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
   ${renderMenuHtml(project.menu, project.pages)}
   ${navHtml}
   ${renderAnnouncementBars(project)}

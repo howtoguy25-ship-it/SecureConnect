@@ -146,5 +146,21 @@ service cloud.firestore {
     match /contentReports/{reportId} {
       allow read, write: if false;
     }
+
+    // Real-time multiplayer for published-site mini-games (Tic-Tac-Toe/Connect Four/Rock
+    // Paper Scissors) -- visitors on a published site are anonymous (no app account at all),
+    // so unlike everything above this talks to Firestore directly from that plain-JS page,
+    // not through a Cloud Function. Deliberately open read/write: these hold only a game
+    // board + two random per-browser player ids, never anything personal or of value, so the
+    // usual "only the owner can write" pattern doesn't apply and isn't worth the complexity
+    // of wiring anonymous auth just for this. A stray/abandoned lobby or room is harmless
+    // clutter, not a security problem -- `expiresAt` is set on every write so a Firestore TTL
+    // policy (configured once in the console, not via these rules) can sweep old ones.
+    match /gameLobbies/{lobbyId} {
+      allow read, write: if true;
+    }
+    match /gameRooms/{roomId} {
+      allow read, write: if true;
+    }
   }
 }
