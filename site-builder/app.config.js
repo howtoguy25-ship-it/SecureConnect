@@ -1,5 +1,10 @@
 require('dotenv/config');
 const withGoogleMobileAds = require('./plugins/withGoogleMobileAds');
+// Requiring this directly (and passing the .default function itself into `plugins` below,
+// not a string) sidesteps the exact class of failure the AdMob plugin hit -- no name-based
+// module resolution happens for this plugin at all. Confirmed this package's app.plugin.js
+// requires cleanly in plain Node before wiring it in this way.
+const SentryExpoPlugin = require('@sentry/react-native/app.plugin.js').default;
 
 module.exports = ({ config }) => ({
   ...config,
@@ -91,6 +96,17 @@ module.exports = ({ config }) => ({
         iosAppId: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID || 'ca-app-pub-6423632749110820~3428142480',
         androidAppId: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || 'ca-app-pub-3940256099942544~3347511713',
       },
+    ],
+    [
+      // Real crash reporting (see src/services/crashReporting.ts) -- this plugin's only job
+      // is wiring up native source-map/debug-symbol upload during EAS builds so a crash
+      // report shows the actual file/line instead of a minified stack trace. It degrades
+      // gracefully (just a build-log warning, never a failure) when organization/project/
+      // authToken aren't set, so it's safe to leave in even before a real Sentry project
+      // exists -- set SENTRY_ORG, SENTRY_PROJECT, and SENTRY_AUTH_TOKEN as EAS secrets
+      // (`eas secret:create`) once one does, never committed here.
+      SentryExpoPlugin,
+      {},
     ],
   ],
   extra: {

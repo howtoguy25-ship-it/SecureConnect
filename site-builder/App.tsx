@@ -6,7 +6,9 @@ import { AppThemeProvider, useAppTheme } from '@/context/AppThemeContext';
 import RootNavigator from '@/navigation/RootNavigator';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { installGlobalErrorHandler } from '@/utils/globalErrorHandler';
+import { initCrashReporting } from '@/services/crashReporting';
 
+initCrashReporting();
 installGlobalErrorHandler();
 
 function ThemedStatusBar() {

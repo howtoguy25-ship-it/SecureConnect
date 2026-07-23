@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { reportError } from '@/services/crashReporting';
 
 interface Props {
   children: React.ReactNode;
@@ -27,6 +28,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('ErrorBoundary caught a render error that would otherwise have crashed the app:', error, info.componentStack);
+    reportError(error, { componentStack: info.componentStack });
     this.setState({ componentStack: info.componentStack ?? null });
   }
 
@@ -42,10 +44,9 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           <Pressable style={styles.button} onPress={() => this.setState({ error: null, componentStack: null })}>
             <Text style={styles.buttonText}>Back to My Projects</Text>
           </Pressable>
-          {/* Beta-stage app with no crash reporting wired up yet -- showing the real error
-              here (instead of hiding it behind a generic message) is what actually lets a
-              crash like this get reported back with enough detail to fix, rather than just a
-              screen recording of "it closed." */}
+          {/* Also reported to Sentry (see services/crashReporting) with the full component
+              stack -- showing it here too means it's visible immediately, not just after
+              digging through a dashboard. */}
           <ScrollView style={styles.detailsBox}>
             <Text style={styles.detailsText} selectable>
               {this.state.error.message}

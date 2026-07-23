@@ -1,4 +1,5 @@
 import { showAlert } from '@/utils/alert';
+import { reportError } from '@/services/crashReporting';
 
 declare const ErrorUtils:
   | {
@@ -20,6 +21,7 @@ export function installGlobalErrorHandler() {
   if (typeof ErrorUtils === 'undefined') return;
   ErrorUtils.setGlobalHandler((error, isFatal) => {
     console.error(isFatal ? 'Fatal JS error (kept the app alive):' : 'JS error:', error);
+    reportError(error, { isFatal });
     if (isFatal) {
       showAlert('Something went wrong', "That last action didn't go through. If something looks stuck, try going back to My Projects.");
     }
