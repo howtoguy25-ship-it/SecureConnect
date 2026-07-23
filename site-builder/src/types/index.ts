@@ -2,10 +2,25 @@ export type PageType = 'website' | 'video' | 'social' | 'logo';
 
 export type ThemeTier = 'blank' | 'free' | 'luxury' | 'luxury-crazy';
 
+// A style/industry tag for browsing (e.g. "Business", "Restaurant", "Portfolio") --
+// independent of tier/pricing, purely for the marketplace's category filter.
+export type ThemeCategory =
+  | 'Business'
+  | 'Portfolio'
+  | 'Retail'
+  | 'Restaurant'
+  | 'Fitness'
+  | 'Real Estate'
+  | 'Fashion'
+  | 'Tech'
+  | 'Media'
+  | 'Other';
+
 export interface Theme {
   id: string;
   name: string;
   tier: ThemeTier;
+  category: ThemeCategory;
   price: number; // 0 for blank/free
   description: string;
   swatch: [string, string]; // gradient preview colors

@@ -17,7 +17,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { THEMES } from '@/data/themes';
 import ThemeMiniPreview from '@/components/ThemeMiniPreview';
-import { Theme, ThemeTier } from '@/types';
+import { Theme, ThemeTier, ThemeCategory } from '@/types';
 import { unlockedThemesStore } from '@/storage/unlockedThemesStore';
 import { projectsStore } from '@/storage/projectsStore';
 import { createProject } from '@/utils/createProject';
@@ -34,6 +34,10 @@ const TIER_LABEL: Record<ThemeTier, string> = {
   luxury: 'Luxury',
   'luxury-crazy': 'Luxury Crazy',
 };
+
+// Every category actually used by a real theme, in a fixed, sensible order -- 'All' is
+// prepended separately so it always leads the filter row.
+const ALL_CATEGORIES: ThemeCategory[] = ['Business', 'Portfolio', 'Retail', 'Restaurant', 'Fitness', 'Real Estate', 'Fashion', 'Tech', 'Media', 'Other'];
 
 export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const { pageType, customSize } = route.params;
@@ -102,8 +106,17 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   }, [uid, purchaseTheme, pageType]);
 
   const [swatchWidth, setSwatchWidth] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState<ThemeCategory | 'All'>('All');
+  const [search, setSearch] = useState('');
 
   const isLocked = (theme: Theme) => theme.price > 0 && !unlocked.includes(theme.id);
+
+  const filteredThemes = THEMES.filter((theme) => {
+    if (selectedCategory !== 'All' && theme.category !== selectedCategory) return false;
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+    return theme.name.toLowerCase().includes(query) || theme.description.toLowerCase().includes(query) || theme.category.toLowerCase().includes(query);
+  });
 
   const openTheme = (theme: Theme) => {
     if (isLocked(theme)) {
@@ -146,7 +159,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   };
 
   const renderGroup = (tier: ThemeTier) => {
-    const items = THEMES.filter((t) => t.tier === tier);
+    const items = filteredThemes.filter((t) => t.tier === tier);
     if (items.length === 0) return null;
     return (
       <View style={styles.group} key={tier}>
@@ -169,6 +182,7 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
                 )}
               </View>
               <Text style={styles.themeName}>{theme.name}</Text>
+              <Text style={styles.themeCategory}>{theme.category}</Text>
               <Text style={styles.themeDesc} numberOfLines={2}>
                 {theme.description}
               </Text>
@@ -192,11 +206,43 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
         <View style={{ width: 26 }} />
       </View>
 
+      <View style={styles.searchRow}>
+        <Ionicons name="search" size={16} color="#94A3B8" style={{ marginRight: 6 }} />
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search themes"
+          placeholderTextColor="#94A3B8"
+        />
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+        {(['All', ...ALL_CATEGORIES] as const).map((cat) => (
+          <Pressable
+            key={cat}
+            style={[styles.categoryChip, selectedCategory === cat && styles.categoryChipActive]}
+            onPress={() => setSelectedCategory(cat)}
+          >
+            <Text style={[styles.categoryChipText, selectedCategory === cat && styles.categoryChipTextActive]}>{cat}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {renderGroup('blank')}
-        {renderGroup('free')}
-        {renderGroup('luxury')}
-        {renderGroup('luxury-crazy')}
+        {filteredThemes.length === 0 ? (
+          <View style={styles.empty}>
+            <Ionicons name="color-palette-outline" size={36} color="#CBD5E1" />
+            <Text style={styles.emptyText}>No themes match "{search}" — try a different search or category.</Text>
+          </View>
+        ) : (
+          <>
+            {renderGroup('blank')}
+            {renderGroup('free')}
+            {renderGroup('luxury')}
+            {renderGroup('luxury-crazy')}
+          </>
+        )}
       </ScrollView>
 
       <Modal visible={!!purchaseTheme} transparent animationType="fade">
@@ -264,6 +310,25 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   title: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 10,
+  },
+  searchInput: { flex: 1, paddingVertical: 8, fontSize: 14, color: '#0F172A' },
+  categoryRow: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
+  categoryChip: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
+  categoryChipActive: { backgroundColor: '#111827', borderColor: '#111827' },
+  categoryChipText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
+  categoryChipTextActive: { color: '#FFFFFF' },
+  empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, paddingHorizontal: 40, gap: 12 },
+  emptyText: { color: '#94A3B8', fontSize: 13, textAlign: 'center', lineHeight: 19 },
   group: { paddingHorizontal: 16, marginTop: 18 },
   groupTitle: { fontSize: 15, fontWeight: '700', color: '#334155', marginBottom: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
@@ -293,6 +358,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   themeName: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginTop: 8 },
+  themeCategory: { fontSize: 10, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 1 },
   themeDesc: { fontSize: 11, color: '#64748B', marginTop: 2, height: 28 },
   themePrice: { fontSize: 13, fontWeight: '700', color: '#B45309', marginTop: 4 },
   modalBackdrop: {
