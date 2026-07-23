@@ -1587,8 +1587,30 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   function loadDiscount(){ try { return JSON.parse(localStorage.getItem(DISCOUNT_KEY))||null; } catch(e){ return null; } }
   function saveDiscount(discount){ if (discount) localStorage.setItem(DISCOUNT_KEY, JSON.stringify(discount)); else localStorage.removeItem(DISCOUNT_KEY); render(); }
   function hasService(items){ return items.some(function(i){ return i.saleType === 'service'; }); }
-  function discountAmountFor(discount, subtotal){
+  // Mirrors computeDiscountAmount in index.ts closely enough for an accurate cart preview --
+  // createStoreCheckout is still the authoritative computation at the moment of payment.
+  function discountAmountFor(discount, subtotal, items){
     if (!discount) return 0;
+    var kind = discount.kind || 'order';
+    if (kind === 'item' || kind === 'bogo') {
+      var targetName = (discount.targetProductName || '').trim().toLowerCase();
+      var target = null;
+      for (var i = 0; i < items.length; i++) { if (items[i].name.trim().toLowerCase() === targetName) { target = items[i]; break; } }
+      if (!target) return 0;
+      var lineTotal = target.priceUsd * target.quantity;
+      if (kind === 'bogo') {
+        if (!discount.bogoBuyQuantity || !discount.bogoGetQuantity) return 0;
+        var groupSize = discount.bogoBuyQuantity + discount.bogoGetQuantity;
+        var fullGroups = Math.floor(target.quantity / groupSize);
+        var remainder = target.quantity % groupSize;
+        var freeFromRemainder = Math.max(0, remainder - discount.bogoBuyQuantity);
+        var freeUnits = fullGroups * discount.bogoGetQuantity + freeFromRemainder;
+        return Math.min(freeUnits * target.priceUsd, lineTotal);
+      }
+      var rawItem = discount.type === 'percent' ? lineTotal * (discount.amount / 100) : discount.amount;
+      return Math.min(Math.max(rawItem, 0), lineTotal);
+    }
+    if (kind === 'shipping') return 0; // reflected in the real total only after checkout -- see below
     var raw = discount.type === 'percent' ? subtotal * (discount.amount / 100) : discount.amount;
     return Math.min(Math.max(raw, 0), subtotal);
   }
@@ -1597,7 +1619,7 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     var discount = loadDiscount();
     var count = items.reduce(function(s,i){return s+i.quantity;},0);
     var subtotal = items.reduce(function(s,i){return s+i.priceUsd*i.quantity;},0);
-    var discountAmount = discountAmountFor(discount, subtotal);
+    var discountAmount = discountAmountFor(discount, subtotal, items);
     var total = subtotal - discountAmount;
     document.getElementById('sitespark-cart-count').textContent = String(count);
     document.getElementById('sitespark-cart-total').textContent = '$'+total.toFixed(2);
@@ -1610,7 +1632,10 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
       document.getElementById('sitespark-cart-subtotal').textContent = '$'+subtotal.toFixed(2);
       discountRow.style.display = 'flex';
       document.getElementById('sitespark-cart-discount-label').textContent = discount.code + ' applied';
-      document.getElementById('sitespark-cart-discount-amount').textContent = '-$'+discountAmount.toFixed(2);
+      // A 'shipping' discount has nothing to show here (there's no shipping fee line in this
+      // subtotal-only breakdown) -- it's still real, just reflected once the buyer reaches
+      // the actual Stripe checkout page where the shipping fee itself appears.
+      document.getElementById('sitespark-cart-discount-amount').textContent = discount.kind === 'shipping' ? 'at checkout' : '-$'+discountAmount.toFixed(2);
     } else {
       subtotalRow.style.display = 'none';
       discountRow.style.display = 'none';
@@ -1696,13 +1721,22 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     if (!code) { saveDiscount(null); feedback.textContent = ''; return; }
     feedback.style.color = '#94A3B8';
     feedback.textContent = 'Checking…';
-    fetch(DISCOUNT_URL + '?slug=' + encodeURIComponent(SLUG) + '&code=' + encodeURIComponent(code))
+    var itemsForPreview = load().map(function(i){ return { name: i.name, priceUsd: i.priceUsd, quantity: i.quantity }; });
+    fetch(DISCOUNT_URL + '?slug=' + encodeURIComponent(SLUG) + '&code=' + encodeURIComponent(code) + '&items=' + encodeURIComponent(JSON.stringify(itemsForPreview)))
       .then(function(r){ return r.json(); })
       .then(function(data){
         if (data.valid) {
-          saveDiscount({ code: code, type: data.type, amount: data.amount });
+          saveDiscount({
+            code: code, kind: data.kind, type: data.type, amount: data.amount,
+            targetProductName: data.targetProductName, bogoBuyQuantity: data.bogoBuyQuantity, bogoGetQuantity: data.bogoGetQuantity,
+          });
           feedback.style.color = '#16A34A';
-          feedback.textContent = (data.type === 'percent' ? data.amount + '% off' : '$' + data.amount.toFixed(2) + ' off') + ' applied!';
+          var summary = data.kind === 'bogo'
+            ? 'Buy ' + data.bogoBuyQuantity + ' ' + data.targetProductName + ', get ' + data.bogoGetQuantity + ' free'
+            : data.kind === 'shipping'
+              ? (data.type === 'percent' && data.amount >= 100 ? 'Free shipping' : (data.type === 'percent' ? data.amount + '% off shipping' : '$' + data.amount.toFixed(2) + ' off shipping'))
+              : (data.type === 'percent' ? data.amount + '% off' : '$' + data.amount.toFixed(2) + ' off') + (data.kind === 'item' ? ' ' + data.targetProductName : '');
+          feedback.textContent = summary + ' applied!';
         } else {
           saveDiscount(null);
           feedback.style.color = '#DC2626';
@@ -2103,6 +2137,52 @@ export function renderPoliciesIndexHtml(
 </html>`;
 }
 
+// A real banner announcing whichever discount code the seller has "announce on site" turned
+// on for right now -- polled live (not baked in at publish time), so turning the toggle on
+// shows up immediately without republishing. A plain block at the very top of the page (not
+// position:sticky) deliberately: renderAnnouncementBars above already uses sticky top:0, and
+// stacking a second sticky sibling at the same top:0 would make them visually overlap once
+// scrolled (a real CSS gotcha, not just a style choice) -- a flash promo banner doesn't need
+// to follow scroll anyway. announceDurationMs only controls this per-visit auto-fade timer;
+// whether the banner is eligible to show at all is entirely the seller's announceOnSite
+// toggle (see getActiveDiscountAnnouncement in index.ts).
+function renderDiscountAnnouncementScript(slug: string, announceUrl: string): string {
+  const FIVE_MINUTES_MS = 5 * 60 * 1000;
+  // Left padding clears the fixed hamburger-menu button (top:14px;left:14px;42x42, see
+  // renderMenuHtml) which floats above this banner regardless of document flow -- without it
+  // the banner's own text would render directly underneath that button and get clipped/hidden.
+  return `<div id="sitespark-discount-banner" style="display:none;position:relative;width:100%;box-sizing:border-box;padding:12px 40px 12px 66px;background:linear-gradient(90deg,#7C3AED,#4338CA);color:#fff;font-family:-apple-system,sans-serif;font-size:13px;font-weight:700;text-align:center;">
+  <span id="sitespark-discount-banner-text"></span>
+  <button aria-label="Dismiss" onclick="siteSparkDiscountBanner.dismiss()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
+</div>
+<script>(function(){
+  var SLUG=${JSON.stringify(slug)};
+  var ANNOUNCE_URL=${JSON.stringify(announceUrl)};
+  var banner=document.getElementById('sitespark-discount-banner');
+  var dismissKey=null;
+  function dismiss(){
+    banner.style.display='none';
+    if (dismissKey) sessionStorage.setItem(dismissKey, '1');
+  }
+  window.siteSparkDiscountBanner = { dismiss: dismiss };
+  fetch(ANNOUNCE_URL + '?slug=' + encodeURIComponent(SLUG))
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (!data.active) return;
+      dismissKey = 'sitespark_discount_dismissed_' + SLUG + '_' + data.code;
+      if (sessionStorage.getItem(dismissKey)) return;
+      document.getElementById('sitespark-discount-banner-text').textContent = '🎉 ' + data.message + ' — use code ' + data.code;
+      banner.style.display = 'block';
+      // Short "flash" durations auto-fade themselves off screen; anything longer just stays
+      // up (this visit, until closed) rather than running a real timer for hours/days/weeks.
+      if (data.durationMs && data.durationMs <= ${FIVE_MINUTES_MS}) {
+        setTimeout(dismiss, data.durationMs);
+      }
+    })
+    .catch(function(){});
+})();</script>`;
+}
+
 export function renderProjectHtml(
   project: Project,
   slug: string,
@@ -2111,6 +2191,7 @@ export function renderProjectHtml(
   productStockUrl: string,
   discountValidateUrl: string,
   ordersByEmailUrl: string,
+  discountAnnouncementUrl: string,
   navHtml = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
@@ -2187,6 +2268,7 @@ export function renderProjectHtml(
   ${hasTargetRange3D ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
   ${renderMenuHtml(project.menu, project.pages, hasProducts)}
   ${navHtml}
+  ${hasProducts ? renderDiscountAnnouncementScript(slug, discountAnnouncementUrl) : ''}
   ${renderAnnouncementBars(project)}
   <div id="site-wrapper">
     <div id="canvas">

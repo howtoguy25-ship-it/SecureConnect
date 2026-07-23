@@ -441,6 +441,10 @@ export interface SellerAccount {
   onboardingStatus: 'not_connected' | 'pending' | 'active';
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
+  // A flat USD fee added at checkout whenever the cart needs real shipping (a physical,
+  // non-pickup product) -- null/0 means no shipping fee is charged. Set via setShippingFee,
+  // never client-written directly (see firestore.rules), same as the rest of this doc.
+  shippingFeeUsd?: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -508,23 +512,49 @@ export type FulfillmentStatus = 'unfulfilled' | 'shipped' | 'delivered' | 'cance
 
 export type DiscountType = 'percent' | 'fixed';
 
+// What the code discounts. 'order' (the original/default) takes a percent or fixed amount
+// off the whole product subtotal. 'item' takes it off one named product's line total only.
+// 'bogo' ("buy X get Y free") ignores type/amount entirely -- see bogoBuyQuantity/
+// bogoGetQuantity. 'shipping' takes a percent or fixed amount off the seller's own flat
+// shipping fee (see SellerAccount.shippingFeeUsd) instead of anything product-related.
+export type DiscountKind = 'order' | 'item' | 'bogo' | 'shipping';
+
 // A seller-created promo code -- stored at users/{sellerUid}/discountCodes/{code} with the
 // uppercased code itself as the doc id, so checkout can look one up with a single get (no
 // query) once it's resolved a slug to a sellerUid via the publishedSites doc. Only ever
 // created/edited through callables (createDiscountCode/setDiscountCodeActive/
-// deleteDiscountCode), never client-writable -- see firestore.rules -- since redemptionCount
-// has to be trustworthy (it's what enforces maxRedemptions) and a seller changing their own
-// redemption count client-side could let a code be reused past its real limit.
+// setDiscountCodeAnnouncement/deleteDiscountCode), never client-writable -- see
+// firestore.rules -- since redemptionCount has to be trustworthy (it's what enforces
+// maxRedemptions) and a seller changing their own redemption count client-side could let a
+// code be reused past its real limit.
 export interface DiscountCode {
   code: string;
   sellerUid: string;
-  type: DiscountType;
+  kind: DiscountKind;
   // Percent off (1-100) for type 'percent', or a flat USD amount off for type 'fixed'.
+  // Ignored for kind 'bogo' (always stored as percent/100 by convention, unused).
+  type: DiscountType;
   amount: number;
+  // The exact product name (as typed in the editor) this applies to -- required for kinds
+  // 'item' and 'bogo', null for 'order'/'shipping'. Matched case-insensitively against the
+  // real cart line items at redemption time, so no separate product-id lookup is needed.
+  targetProductName: string | null;
+  // 'bogo' only: for every (bogoBuyQuantity + bogoGetQuantity) units of targetProductName in
+  // the cart, bogoGetQuantity of them are free -- e.g. buy 2 get 1 free repeats every 3 units.
+  bogoBuyQuantity: number | null;
+  bogoGetQuantity: number | null;
   active: boolean;
   maxRedemptions: number | null;
   redemptionCount: number;
+  startsAt: number | null; // epoch ms, null = usable immediately
   expiresAt: number | null; // epoch ms, null = never expires
+  // Whether a real banner announcing this code should show on the published site. When
+  // true, announceDurationMs must be set and announcedAt is stamped (and re-stamped each
+  // time the seller re-activates the announcement), anchoring the display window that
+  // getActiveDiscountAnnouncement checks.
+  announceOnSite: boolean;
+  announceDurationMs: number | null;
+  announcedAt: number | null;
   createdAt: number;
 }
 
@@ -555,6 +585,7 @@ export interface StoreOrder {
   buyerName: string | null;
   items: StoreOrderItem[];
   subtotalUsd: number;
+  shippingFeeUsd: number;
   discountCode: string | null;
   discountAmountUsd: number;
   platformFeeUsd: number;

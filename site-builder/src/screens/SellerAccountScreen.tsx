@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +15,7 @@ import {
   refreshSellerAccountStatus,
   createSellerDashboardLink,
   resetSellerOnboarding,
+  setShippingFee,
 } from '@/services/store';
 import { SellerAccount } from '@/types';
 
@@ -33,11 +34,34 @@ export default function SellerAccountScreen({ navigation }: Props) {
   const { user } = useAuth();
   const [account, setAccount] = useState<SellerAccount | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shippingFeeInput, setShippingFeeInput] = useState('');
+  const [savingShippingFee, setSavingShippingFee] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     return sellerAccountStore.subscribe(user.uid, setAccount);
   }, [user]);
+
+  useEffect(() => {
+    setShippingFeeInput(account?.shippingFeeUsd != null ? String(account.shippingFeeUsd) : '');
+  }, [account?.shippingFeeUsd]);
+
+  const handleSaveShippingFee = async () => {
+    const trimmed = shippingFeeInput.trim();
+    const value = trimmed ? parseFloat(trimmed) : null;
+    if (trimmed && (!Number.isFinite(value) || (value as number) < 0)) {
+      showAlert('Invalid amount', 'Enter a shipping fee of 0 or more, or leave it blank for no fee.');
+      return;
+    }
+    setSavingShippingFee(true);
+    try {
+      await setShippingFee(value);
+    } catch (err: any) {
+      showAlert('Could not save shipping fee', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setSavingShippingFee(false);
+    }
+  };
 
   // Stripe's hosted onboarding closes back to the app (custom URL scheme) whether the
   // seller finishes or just backs out -- re-checking real status on focus, rather than
@@ -149,6 +173,31 @@ export default function SellerAccountScreen({ navigation }: Props) {
         )}
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.shippingTitle}>Shipping fee</Text>
+        <Text style={styles.statusBody}>
+          A flat fee added at checkout whenever a buyer's order needs real shipping. Leave blank for no shipping fee.
+        </Text>
+        <View style={styles.shippingRow}>
+          <Text style={styles.shippingDollar}>$</Text>
+          <TextInput
+            style={styles.shippingInput}
+            value={shippingFeeInput}
+            onChangeText={setShippingFeeInput}
+            placeholder="0.00"
+            placeholderTextColor="#94A3B8"
+            keyboardType="decimal-pad"
+          />
+        </View>
+        {savingShippingFee ? (
+          <ActivityIndicator style={{ marginTop: 12 }} />
+        ) : (
+          <Pressable style={styles.secondaryBtn} onPress={handleSaveShippingFee}>
+            <Text style={styles.secondaryBtnText}>Save shipping fee</Text>
+          </Pressable>
+        )}
+      </View>
+
       <Text style={styles.note}>SiteSpark takes an 8% platform fee on each order — the rest is transferred to you automatically.</Text>
     </SafeAreaView>
   );
@@ -173,4 +222,17 @@ const styles = StyleSheet.create({
   secondaryBtn: { marginTop: 12 },
   secondaryBtnText: { color: '#4338CA', fontWeight: '600', fontSize: 13 },
   note: { fontSize: 12, color: '#94A3B8', textAlign: 'center', marginTop: 20, paddingHorizontal: 32 },
+  shippingTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  shippingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    width: '100%',
+  },
+  shippingDollar: { fontSize: 15, fontWeight: '700', color: '#64748B', marginRight: 4 },
+  shippingInput: { flex: 1, fontSize: 15, color: '#0F172A', paddingVertical: 10 },
 });

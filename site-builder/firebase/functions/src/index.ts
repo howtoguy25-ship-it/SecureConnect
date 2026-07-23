@@ -23,6 +23,8 @@ import {
   StoreOrderItem,
   FulfillmentStatus,
   DiscountCode,
+  DiscountKind,
+  DiscountType,
   SellerAccount,
   OrderNotice,
   BookingDetails,
@@ -139,6 +141,9 @@ const DISCOUNT_VALIDATE_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}
 // page's "Track your order" widget so a buyer with no account and no order id can list every
 // order they've placed at this site using only the email they paid with (see siteHtml.ts).
 const ORDERS_BY_EMAIL_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getOrdersByEmail`;
+// Same pattern, for getActiveDiscountAnnouncement (defined further down) -- polled by every
+// published page with products to show a real "code X is live" banner without republishing.
+const DISCOUNT_ANNOUNCEMENT_URL = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/getActiveDiscountAnnouncement`;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -838,12 +843,12 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
     const pagesHtml: Record<string, string> = { ...extraPagesHtml };
     for (const page of project.pages) {
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
-      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, renderPageNavHtml(project.pages, page.slug));
+      pagesHtml[page.slug] = renderProjectHtml(pageProject, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, renderPageNavHtml(project.pages, page.slug));
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
@@ -1538,11 +1543,12 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
   const items = JSON.parse(itemsJson) as StoreOrderItem[];
   const bookingDetails: BookingDetails | null = session.metadata?.booking ? (JSON.parse(session.metadata.booking) as BookingDetails) : null;
   const subtotalUsd = items.reduce((sum, item) => sum + item.priceUsd * item.quantity, 0);
+  const shippingFeeUsd = session.metadata?.shippingFeeUsd ? Number(session.metadata.shippingFeeUsd) : 0;
   const discountCode = session.metadata?.discountCode ?? null;
   const discountAmountUsd = session.metadata?.discountAmountUsd ? Number(session.metadata.discountAmountUsd) : 0;
-  const discountedSubtotalUsd = Math.round((subtotalUsd - discountAmountUsd) * 100) / 100;
-  const platformFeeUsd = Math.round(discountedSubtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
-  const sellerNetUsd = Math.round((discountedSubtotalUsd - platformFeeUsd) * 100) / 100;
+  const discountedTotalUsd = Math.round((subtotalUsd + shippingFeeUsd - discountAmountUsd) * 100) / 100;
+  const platformFeeUsd = Math.round(discountedTotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+  const sellerNetUsd = Math.round((discountedTotalUsd - platformFeeUsd) * 100) / 100;
 
   const inventoryRefs = items.map((item) => db.collection('storeInventory').doc(slug).collection('products').doc(item.productId));
   const discountRef = discountCode ? discountCodeRef(sellerUid, discountCode) : null;
@@ -1587,6 +1593,7 @@ async function handleStoreOrderCompleted(session: Stripe.Checkout.Session, resen
     buyerName: session.customer_details?.name ?? null,
     items,
     subtotalUsd,
+    shippingFeeUsd,
     discountCode,
     discountAmountUsd,
     platformFeeUsd,
@@ -2116,6 +2123,21 @@ export const createSellerDashboardLink = onCall({ secrets: [stripeSecretKey], in
   return { url };
 }));
 
+// Lets a seller set (or clear) a real flat shipping fee, charged at checkout as its own
+// Stripe line item whenever the cart needs real shipping -- see createStoreCheckout. Doesn't
+// require chargesEnabled/an existing Stripe account since a seller may want to set this
+// before finishing payouts setup.
+export const setShippingFee = onCall({ invoker: 'public' }, withCallableErrors('setShippingFee', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { shippingFeeUsd } = request.data as { shippingFeeUsd: number | null };
+  if (shippingFeeUsd != null && (!Number.isFinite(shippingFeeUsd) || shippingFeeUsd < 0)) {
+    throw new HttpsError('invalid-argument', 'Shipping fee must be 0 or greater.');
+  }
+  await sellerAccountRef(uid).set({ shippingFeeUsd: shippingFeeUsd ?? null, updatedAt: Date.now() }, { merge: true });
+  return { ok: true };
+}));
+
 const FULFILLMENT_STATUSES: FulfillmentStatus[] = ['unfulfilled', 'shipped', 'delivered', 'cancelled'];
 
 // Lets a seller move an order through unfulfilled -> shipped -> delivered (or mark it
@@ -2249,23 +2271,82 @@ const CODE_PATTERN = /^[A-Z0-9]{3,20}$/;
 // A seller's own promo code, created against their own account -- the uppercased code
 // itself is the doc id (see discountCodeRef), so createStoreCheckout/validateDiscountCode
 // can look one up with a single get once a slug's been resolved to a sellerUid.
+// The shortest a real "on-site announcement" is allowed to run -- guards against a seller
+// (or a buggy client) submitting 0/negative and the banner never having a real window.
+const MIN_ANNOUNCE_DURATION_MS = 1000;
+
 export const createDiscountCode = onCall({ invoker: 'public' }, withCallableErrors('createDiscountCode', async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
-  const { code, type, amount, maxRedemptions, expiresAt } = request.data as {
+  const {
+    code,
+    kind: rawKind,
+    type,
+    amount,
+    targetProductName,
+    bogoBuyQuantity,
+    bogoGetQuantity,
+    maxRedemptions,
+    startsAt,
+    expiresAt,
+    announceOnSite,
+    announceDurationMs,
+  } = request.data as {
     code: string;
+    kind?: DiscountKind;
     type: 'percent' | 'fixed';
     amount: number;
+    targetProductName?: string | null;
+    bogoBuyQuantity?: number | null;
+    bogoGetQuantity?: number | null;
     maxRedemptions: number | null;
+    startsAt?: number | null;
     expiresAt: number | null;
+    announceOnSite?: boolean;
+    announceDurationMs?: number | null;
   };
   const normalized = (code ?? '').trim().toUpperCase();
   if (!CODE_PATTERN.test(normalized)) {
     throw new HttpsError('invalid-argument', 'Codes must be 3-20 letters/numbers, e.g. SUMMER20.');
   }
-  if (type !== 'percent' && type !== 'fixed') throw new HttpsError('invalid-argument', 'Invalid discount type.');
-  if (!Number.isFinite(amount) || amount <= 0 || (type === 'percent' && amount > 100)) {
-    throw new HttpsError('invalid-argument', type === 'percent' ? 'Percent off must be between 1 and 100.' : 'Amount off must be greater than 0.');
+
+  const kind: DiscountKind = rawKind === 'item' || rawKind === 'bogo' || rawKind === 'shipping' ? rawKind : 'order';
+
+  let finalType: DiscountType = 'percent';
+  let finalAmount = 100;
+  let finalTargetProductName: string | null = null;
+  let finalBogoBuy: number | null = null;
+  let finalBogoGet: number | null = null;
+
+  if (kind === 'bogo') {
+    const buyQty = Math.floor(Number(bogoBuyQuantity));
+    const getQty = Math.floor(Number(bogoGetQuantity));
+    if (!Number.isFinite(buyQty) || buyQty < 1) throw new HttpsError('invalid-argument', 'Enter how many the buyer must buy, e.g. 2.');
+    if (!Number.isFinite(getQty) || getQty < 1) throw new HttpsError('invalid-argument', 'Enter how many the buyer gets free, e.g. 1.');
+    if (!targetProductName?.trim()) throw new HttpsError('invalid-argument', 'Enter the exact product name this applies to.');
+    finalBogoBuy = buyQty;
+    finalBogoGet = getQty;
+    finalTargetProductName = targetProductName.trim();
+  } else {
+    if (type !== 'percent' && type !== 'fixed') throw new HttpsError('invalid-argument', 'Invalid discount type.');
+    if (!Number.isFinite(amount) || amount <= 0 || (type === 'percent' && amount > 100)) {
+      throw new HttpsError('invalid-argument', type === 'percent' ? 'Percent off must be between 1 and 100.' : 'Amount off must be greater than 0.');
+    }
+    finalType = type;
+    finalAmount = amount;
+    if (kind === 'item') {
+      if (!targetProductName?.trim()) throw new HttpsError('invalid-argument', 'Enter the exact product name this applies to.');
+      finalTargetProductName = targetProductName.trim();
+    }
+  }
+
+  let finalAnnounceDurationMs: number | null = null;
+  if (announceOnSite) {
+    const durationMs = Number(announceDurationMs);
+    if (!Number.isFinite(durationMs) || durationMs < MIN_ANNOUNCE_DURATION_MS) {
+      throw new HttpsError('invalid-argument', 'Pick how long to display the on-site notification.');
+    }
+    finalAnnounceDurationMs = Math.floor(durationMs);
   }
 
   const ref = discountCodeRef(uid, normalized);
@@ -2276,12 +2357,20 @@ export const createDiscountCode = onCall({ invoker: 'public' }, withCallableErro
   const discountCode: DiscountCode = {
     code: normalized,
     sellerUid: uid,
-    type,
-    amount,
+    kind,
+    type: finalType,
+    amount: finalAmount,
+    targetProductName: finalTargetProductName,
+    bogoBuyQuantity: finalBogoBuy,
+    bogoGetQuantity: finalBogoGet,
     active: true,
     maxRedemptions: maxRedemptions != null && Number.isFinite(maxRedemptions) ? Math.max(1, Math.floor(maxRedemptions)) : null,
     redemptionCount: 0,
+    startsAt: startsAt != null && Number.isFinite(startsAt) ? startsAt : null,
     expiresAt: expiresAt != null && Number.isFinite(expiresAt) ? expiresAt : null,
+    announceOnSite: !!announceOnSite,
+    announceDurationMs: finalAnnounceDurationMs,
+    announcedAt: announceOnSite ? Date.now() : null,
     createdAt: Date.now(),
   };
   await ref.set(discountCode);
@@ -2295,6 +2384,29 @@ export const setDiscountCodeActive = onCall({ invoker: 'public' }, withCallableE
   const ref = discountCodeRef(uid, code ?? '');
   if (!(await ref.get()).exists) throw new HttpsError('not-found', 'Code not found.');
   await ref.update({ active: !!active });
+  return { ok: true };
+}));
+
+// Lets a seller turn the on-site announcement banner on/off (or re-trigger it with a fresh
+// display window) for a code that already exists, without having to delete and recreate it.
+// Re-activating always re-stamps announcedAt to now, so the chosen duration counts from this
+// moment -- e.g. re-announcing a "24 hours" code gives it another full 24 hours on-site.
+export const setDiscountCodeAnnouncement = onCall({ invoker: 'public' }, withCallableErrors('setDiscountCodeAnnouncement', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { code, announceOnSite, announceDurationMs } = request.data as { code: string; announceOnSite: boolean; announceDurationMs?: number | null };
+  const ref = discountCodeRef(uid, code ?? '');
+  if (!(await ref.get()).exists) throw new HttpsError('not-found', 'Code not found.');
+
+  if (!announceOnSite) {
+    await ref.update({ announceOnSite: false });
+    return { ok: true };
+  }
+  const durationMs = Number(announceDurationMs);
+  if (!Number.isFinite(durationMs) || durationMs < MIN_ANNOUNCE_DURATION_MS) {
+    throw new HttpsError('invalid-argument', 'Pick how long to display the on-site notification.');
+  }
+  await ref.update({ announceOnSite: true, announceDurationMs: Math.floor(durationMs), announcedAt: Date.now() });
   return { ok: true };
 }));
 
@@ -2323,6 +2435,7 @@ async function validateDiscountCodeForSeller(sellerUid: string, rawCode: string)
   if (!doc.exists) return { valid: false, error: 'Code not found.' };
   const discount = doc.data() as DiscountCode;
   if (!discount.active) return { valid: false, error: 'This code is no longer active.' };
+  if (discount.startsAt != null && discount.startsAt > Date.now()) return { valid: false, error: 'This code isn’t active yet.' };
   if (discount.expiresAt != null && discount.expiresAt < Date.now()) return { valid: false, error: 'This code has expired.' };
   if (discount.maxRedemptions != null && discount.redemptionCount >= discount.maxRedemptions) {
     return { valid: false, error: 'This code has already been fully redeemed.' };
@@ -2337,15 +2450,61 @@ async function validateDiscountCodeForSlug(slug: string, rawCode: string): Promi
   return validateDiscountCodeForSeller(sellerUid, rawCode);
 }
 
-// A discount amount is computed off the pre-discount subtotal and clamped so it can never
-// exceed it (a $50-off code on a $20 order discounts $20, not into negative territory).
-function computeDiscountAmount(discount: DiscountCode, subtotalUsd: number): number {
+// A discount amount is always clamped so it can never exceed whatever it's computed against
+// (a $50-off code on a $20 line discounts $20, not into negative territory). What it's
+// computed against depends on discount.kind:
+//  - 'order' (default, and every pre-kind legacy code): the whole product subtotal.
+//  - 'item': just the named product's own line total (quantity x price).
+//  - 'bogo': the dollar value of whichever units of the named product are free -- every
+//    (bogoBuyQuantity + bogoGetQuantity) units in the cart makes bogoGetQuantity of them free.
+//  - 'shipping': the seller's own flat shipping fee, not anything product-related.
+// `items` only needs name/priceUsd/quantity -- real StoreOrderItem[] and a lightweight preview
+// shape from the buyer's local cart both satisfy that.
+function computeDiscountAmount(
+  discount: DiscountCode,
+  subtotalUsd: number,
+  items: { name: string; priceUsd: number; quantity: number }[],
+  shippingFeeUsd: number
+): number {
+  const kind = discount.kind ?? 'order';
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  if (kind === 'shipping') {
+    if (shippingFeeUsd <= 0) return 0;
+    const raw = discount.type === 'percent' ? shippingFeeUsd * (discount.amount / 100) : discount.amount;
+    return round2(Math.min(Math.max(raw, 0), shippingFeeUsd));
+  }
+
+  if (kind === 'item' || kind === 'bogo') {
+    const targetName = (discount.targetProductName ?? '').trim().toLowerCase();
+    const target = items.find((i) => i.name.trim().toLowerCase() === targetName);
+    if (!target) return 0;
+    const lineTotal = target.priceUsd * target.quantity;
+
+    if (kind === 'bogo') {
+      if (!discount.bogoBuyQuantity || !discount.bogoGetQuantity) return 0;
+      const groupSize = discount.bogoBuyQuantity + discount.bogoGetQuantity;
+      const fullGroups = Math.floor(target.quantity / groupSize);
+      const remainder = target.quantity % groupSize;
+      const freeFromRemainder = Math.max(0, remainder - discount.bogoBuyQuantity);
+      const freeUnits = fullGroups * discount.bogoGetQuantity + freeFromRemainder;
+      return round2(Math.min(freeUnits * target.priceUsd, lineTotal));
+    }
+
+    const raw = discount.type === 'percent' ? lineTotal * (discount.amount / 100) : discount.amount;
+    return round2(Math.min(Math.max(raw, 0), lineTotal));
+  }
+
   const raw = discount.type === 'percent' ? subtotalUsd * (discount.amount / 100) : discount.amount;
-  return Math.round(Math.min(Math.max(raw, 0), subtotalUsd) * 100) / 100;
+  return round2(Math.min(Math.max(raw, 0), subtotalUsd));
 }
 
 // Public, unauthenticated -- lets the published-site checkout show "10% off applied" (or a
 // real error) as soon as a buyer types a code, before they commit to actually checking out.
+// `items` (JSON: {name, priceUsd, quantity}[]) is optional and only needed to preview the
+// real dollar amount for 'item'/'bogo' codes -- createStoreCheckout re-validates and
+// recomputes for real at the moment of payment regardless, so an inexact/missing preview
+// here never lets a buyer under-pay.
 export const validateDiscountCode = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
   const slug = (req.query.slug as string) ?? '';
   const code = (req.query.code as string) ?? '';
@@ -2355,11 +2514,103 @@ export const validateDiscountCode = onRequest({ cors: true, invoker: 'public' },
   }
   const result = await validateDiscountCodeForSlug(slug, code);
   res.set('Cache-Control', 'no-store');
-  res.status(200).json(
-    result.valid && result.discount
-      ? { valid: true, type: result.discount.type, amount: result.discount.amount }
-      : { valid: false, error: result.error }
-  );
+  if (!result.valid || !result.discount) {
+    res.status(200).json({ valid: false, error: result.error });
+    return;
+  }
+  const discount = result.discount;
+  let items: { name: string; priceUsd: number; quantity: number }[] = [];
+  try {
+    items = req.query.items ? (JSON.parse(req.query.items as string) as typeof items) : [];
+  } catch {
+    items = [];
+  }
+  const subtotalUsd = items.reduce((sum, i) => sum + i.priceUsd * i.quantity, 0);
+  let shippingFeeUsd = 0;
+  if ((discount.kind ?? 'order') === 'shipping') {
+    const siteDoc = await db.collection('publishedSites').doc(slug).get();
+    const sellerUid = (siteDoc.data() as { uid?: string } | undefined)?.uid;
+    const seller = sellerUid ? ((await sellerAccountRef(sellerUid).get()).data() as SellerAccount | undefined) : undefined;
+    shippingFeeUsd = seller?.shippingFeeUsd ?? 0;
+  }
+  res.status(200).json({
+    valid: true,
+    kind: discount.kind ?? 'order',
+    type: discount.type,
+    amount: discount.amount,
+    targetProductName: discount.targetProductName,
+    bogoBuyQuantity: discount.bogoBuyQuantity,
+    bogoGetQuantity: discount.bogoGetQuantity,
+    previewAmountUsd: items.length > 0 ? computeDiscountAmount(discount, subtotalUsd, items, shippingFeeUsd) : null,
+  });
+});
+
+// A short buyer-facing description of what a code does, for the on-site announcement
+// banner -- never the seller's own internal code metadata beyond the code itself.
+function describeDiscountForAnnouncement(discount: DiscountCode): string {
+  const kind = discount.kind ?? 'order';
+  if (kind === 'bogo') {
+    return `Buy ${discount.bogoBuyQuantity} ${discount.targetProductName}, get ${discount.bogoGetQuantity} free`;
+  }
+  if (kind === 'shipping') {
+    return discount.type === 'percent' && discount.amount >= 100 ? 'Free shipping' : `${discount.type === 'percent' ? discount.amount + '%' : '$' + discount.amount.toFixed(2)} off shipping`;
+  }
+  const amountText = discount.type === 'percent' ? `${discount.amount}% off` : `$${discount.amount.toFixed(2)} off`;
+  return kind === 'item' && discount.targetProductName ? `${amountText} ${discount.targetProductName}` : amountText;
+}
+
+// Public, unauthenticated -- polled by every published page with products so a discount
+// code the seller just turned "announce on site" on for shows up as a real banner, without
+// needing to republish the site. Single-field query (announceOnSite) needs no composite
+// index; the rest (active, not expired/not-yet-started/not fully redeemed) is filtered in
+// memory since a seller only ever has a handful of codes.
+//
+// announceDurationMs does NOT gate whether the banner shows sitewide -- announceOnSite is
+// the seller's real on/off switch for that, and stays on for as long as they leave it (a
+// literal "5 seconds" eligibility window would mean almost no real visitor could ever load
+// the page fast enough to see it). Instead announceDurationMs is purely how long *each
+// individual visitor's* banner stays on screen before it auto-fades -- the client is the one
+// that runs that per-visit timer (see renderDiscountAnnouncementScript in siteHtml.ts).
+export const getActiveDiscountAnnouncement = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
+  const slug = (req.query.slug as string) ?? '';
+  if (!slug) {
+    res.status(400).json({ active: false });
+    return;
+  }
+  res.set('Cache-Control', 'no-store');
+
+  const siteDoc = await db.collection('publishedSites').doc(slug).get();
+  const sellerUid = (siteDoc.data() as { uid?: string } | undefined)?.uid;
+  if (!sellerUid) {
+    res.status(200).json({ active: false });
+    return;
+  }
+
+  const snap = await db.collection('users').doc(sellerUid).collection('discountCodes').where('announceOnSite', '==', true).get();
+  const now = Date.now();
+  const candidates = snap.docs
+    .map((doc) => doc.data() as DiscountCode)
+    .filter(
+      (d) =>
+        d.active &&
+        d.announceDurationMs != null &&
+        (d.startsAt == null || d.startsAt <= now) &&
+        (d.expiresAt == null || d.expiresAt >= now) &&
+        (d.maxRedemptions == null || d.redemptionCount < d.maxRedemptions)
+    )
+    .sort((a, b) => (b.announcedAt ?? 0) - (a.announcedAt ?? 0));
+
+  const winner = candidates[0];
+  if (!winner) {
+    res.status(200).json({ active: false });
+    return;
+  }
+  res.status(200).json({
+    active: true,
+    code: winner.code,
+    message: describeDiscountForAnnouncement(winner),
+    durationMs: winner.announceDurationMs,
+  });
 });
 
 // Public webhook (no auth -- a buyer's browser calls this), computes the real order total
@@ -2477,6 +2728,17 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       return;
     }
 
+    // A real, seller-set flat fee -- added as its own Stripe line item (not Stripe's separate
+    // shipping_options feature) specifically so a 'shipping' discount code can be expressed
+    // the same way 'item'/'bogo' codes are: a dollar amount off one identifiable line, folded
+    // into the same whole-session coupon below, rather than needing a second discount system.
+    const shippingFeeUsd = needsShipping ? (seller.shippingFeeUsd ?? 0) : 0;
+    if (shippingFeeUsd > 0) {
+      lineItems.push({
+        price_data: { currency: 'usd', product_data: { name: 'Shipping' }, unit_amount: Math.round(shippingFeeUsd * 100) },
+        quantity: 1,
+      });
+    }
     // Re-validated here (never trusting whatever discount amount the page displayed while
     // the buyer was typing) -- redemptionCount itself is only ever incremented once the
     // order actually completes (handleStoreOrderCompleted), same as stock, so an abandoned
@@ -2490,13 +2752,14 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       }
       appliedDiscount = result.discount;
     }
-    const discountAmountUsd = appliedDiscount ? computeDiscountAmount(appliedDiscount, subtotalUsd) : 0;
-    const discountedSubtotalUsd = Math.round((subtotalUsd - discountAmountUsd) * 100) / 100;
+    const discountAmountUsd = appliedDiscount ? computeDiscountAmount(appliedDiscount, subtotalUsd, orderItems, shippingFeeUsd) : 0;
+    const discountedTotalUsd = Math.round((subtotalUsd + shippingFeeUsd - discountAmountUsd) * 100) / 100;
 
-    // The platform fee is computed off what the seller actually gets paid on (post-discount),
-    // not the pre-discount subtotal -- otherwise application_fee_amount could exceed the real
+    // The platform fee is computed off what the seller actually gets paid on (post-discount,
+    // and including the shipping fee since that's real revenue collected too), not the
+    // pre-discount product subtotal -- otherwise application_fee_amount could exceed the real
     // charged total once a coupon is applied, which Stripe rejects outright.
-    const platformFeeUsd = Math.round(discountedSubtotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+    const platformFeeUsd = Math.round(discountedTotalUsd * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
     const stripe = createStripeClient(stripeSecretKey.value());
     const bookingDetails: BookingDetails | null = hasService
       ? {
@@ -2509,11 +2772,15 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
     // An ad hoc, one-time-use Stripe coupon rather than syncing our own codes into Stripe's
     // own Coupon/PromotionCode objects -- our DiscountCode is the single source of truth
     // (active flag, expiry, redemption limit), this just makes Stripe's own Checkout Session
-    // total reflect it.
+    // total reflect it. percent_off is only correct for an 'order'-kind code (a straight
+    // percentage of the whole session) -- 'item'/'bogo'/'shipping' codes have already computed
+    // a real dollar amount off one specific part of the order, so they always use amount_off
+    // even when the seller picked "percent" as the code's own type.
     let discounts: Stripe.Checkout.SessionCreateParams.Discount[] | undefined;
     if (appliedDiscount && discountAmountUsd > 0) {
+      const isWholeOrderPercent = (appliedDiscount.kind ?? 'order') === 'order' && appliedDiscount.type === 'percent';
       const coupon = await stripe.coupons.create(
-        appliedDiscount.type === 'percent'
+        isWholeOrderPercent
           ? { percent_off: appliedDiscount.amount, duration: 'once', name: appliedDiscount.code }
           : { amount_off: Math.round(discountAmountUsd * 100), currency: 'usd', duration: 'once', name: appliedDiscount.code }
       );
@@ -2541,6 +2808,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         slug,
         sellerUid,
         items: JSON.stringify(orderItems),
+        shippingFeeUsd: String(shippingFeeUsd),
         ...(bookingDetails ? { booking: JSON.stringify(bookingDetails) } : {}),
         ...(appliedDiscount ? { discountCode: appliedDiscount.code, discountAmountUsd: String(discountAmountUsd) } : {}),
       },

@@ -3,7 +3,7 @@ import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { functions, db } from '@/services/firebase';
 import { requireFunctions } from '@/services/requireFunctions';
 import { requireDb } from '@/services/requireDb';
-import { SellerAccount, StoreOrder, DiscountCode, DiscountType, FulfillmentStatus } from '@/types';
+import { SellerAccount, StoreOrder, DiscountCode, DiscountType, DiscountKind, FulfillmentStatus } from '@/types';
 
 // Real Stripe Express Connect onboarding for sellers -- see stripeConnect.ts /
 // createSellerOnboardingLink in Cloud Functions. Opens Stripe's own hosted flow (identity,
@@ -46,6 +46,13 @@ export async function createSellerDashboardLink(): Promise<string> {
   return result.data.url;
 }
 
+// A flat USD fee charged as its own line item at checkout whenever the cart needs real
+// shipping -- see createStoreCheckout in Cloud Functions. Pass null to stop charging one.
+export async function setShippingFee(shippingFeeUsd: number | null): Promise<void> {
+  const call = httpsCallable<{ shippingFeeUsd: number | null }, { ok: boolean }>(requireFunctions(functions), 'setShippingFee');
+  await call({ shippingFeeUsd });
+}
+
 export const sellerAccountStore = {
   subscribe(uid: string, onChange: (account: SellerAccount | null) => void): () => void {
     return onSnapshot(doc(requireDb(db), 'users', uid, 'meta', 'sellerAccount'), (snap) => {
@@ -81,10 +88,17 @@ export const ordersStore = {
 // these always go through callables rather than direct Firestore writes.
 export async function createDiscountCode(params: {
   code: string;
+  kind: DiscountKind;
   type: DiscountType;
   amount: number;
+  targetProductName?: string | null;
+  bogoBuyQuantity?: number | null;
+  bogoGetQuantity?: number | null;
   maxRedemptions: number | null;
+  startsAt?: number | null;
   expiresAt: number | null;
+  announceOnSite?: boolean;
+  announceDurationMs?: number | null;
 }): Promise<void> {
   const call = httpsCallable<typeof params, { ok: boolean }>(requireFunctions(functions), 'createDiscountCode');
   await call(params);
@@ -93,6 +107,16 @@ export async function createDiscountCode(params: {
 export async function setDiscountCodeActive(code: string, active: boolean): Promise<void> {
   const call = httpsCallable<{ code: string; active: boolean }, { ok: boolean }>(requireFunctions(functions), 'setDiscountCodeActive');
   await call({ code, active });
+}
+
+// Turns the real on-site announcement banner on (re-triggering its display window) or off
+// for a code that already exists -- see setDiscountCodeAnnouncement in Cloud Functions.
+export async function setDiscountCodeAnnouncement(code: string, announceOnSite: boolean, announceDurationMs?: number | null): Promise<void> {
+  const call = httpsCallable<{ code: string; announceOnSite: boolean; announceDurationMs?: number | null }, { ok: boolean }>(
+    requireFunctions(functions),
+    'setDiscountCodeAnnouncement'
+  );
+  await call({ code, announceOnSite, announceDurationMs });
 }
 
 export async function deleteDiscountCode(code: string): Promise<void> {

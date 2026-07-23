@@ -484,6 +484,7 @@ export interface SellerAccount {
   onboardingStatus: 'not_connected' | 'pending' | 'active';
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
+  shippingFeeUsd?: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -523,6 +524,7 @@ export interface StoreOrder {
   buyerName: string | null;
   items: StoreOrderItem[];
   subtotalUsd: number;
+  shippingFeeUsd: number;
   discountCode: string | null;
   discountAmountUsd: number;
   platformFeeUsd: number;
@@ -543,18 +545,28 @@ export type FulfillmentStatus = 'unfulfilled' | 'shipped' | 'delivered' | 'cance
 
 export type DiscountType = 'percent' | 'fixed';
 
+export type DiscountKind = 'order' | 'item' | 'bogo' | 'shipping';
+
 // Mirrors the functions-side DiscountCode -- see that file's comment for why this is
-// server-write-only (createDiscountCode/setDiscountCodeActive/deleteDiscountCode) rather
-// than client-writable.
+// server-write-only (createDiscountCode/setDiscountCodeActive/setDiscountCodeAnnouncement/
+// deleteDiscountCode) rather than client-writable.
 export interface DiscountCode {
   code: string;
   sellerUid: string;
+  kind: DiscountKind;
   type: DiscountType;
   amount: number;
+  targetProductName: string | null;
+  bogoBuyQuantity: number | null;
+  bogoGetQuantity: number | null;
   active: boolean;
   maxRedemptions: number | null;
   redemptionCount: number;
+  startsAt: number | null;
   expiresAt: number | null;
+  announceOnSite: boolean;
+  announceDurationMs: number | null;
+  announcedAt: number | null;
   createdAt: number;
 }
 
