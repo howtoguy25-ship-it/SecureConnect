@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, ImageElement, TextElement } from './types';
+import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -54,6 +54,20 @@ function imageEl(partial: Partial<ImageElement> & Pick<ImageElement, 'y' | 'heig
   };
 }
 
+function videoEmbedEl(
+  partial: Partial<VideoEmbedElement> & Pick<VideoEmbedElement, 'y' | 'height' | 'videoId' | 'title'>
+): VideoEmbedElement {
+  return {
+    id: nextId('el'),
+    type: 'videoEmbed',
+    provider: 'youtube',
+    x: 0,
+    width: CANVAS_WIDTH,
+    zIndex: 1,
+    ...partial,
+  };
+}
+
 // Estimates how tall a text block needs to be for the canvas's fixed width, so the next
 // section stacked below it never starts inside space this one's real wrapped text still
 // needs -- undercounting here is exactly what causes headline/body/button text to visibly
@@ -83,12 +97,19 @@ export interface SectionImage {
   url: string | null;
 }
 
-export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[]): CanvasElement[] {
+export interface SectionVideo {
+  section: SitePlanSection;
+  videoId: string | null;
+  title: string | null;
+}
+
+export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], sectionVideos: SectionVideo[] = []): CanvasElement[] {
   idCounter = 0;
   const elements: CanvasElement[] = [];
   let y = 32;
 
   const imageFor = (section: SitePlanSection) => sectionImages.find((s) => s.section === section)?.url ?? null;
+  const videoFor = (section: SitePlanSection) => sectionVideos.find((s) => s.section === section) ?? null;
 
   plan.sections.forEach((section, index) => {
     const isHero = index === 0 && section.kind === 'hero';
@@ -98,6 +119,15 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[]): C
       const imgHeight = section.kind === 'hero' ? 200 : 220;
       elements.push(imageEl({ y, height: imgHeight, uri: image, x: 0, width: CANVAS_WIDTH }));
       y += imgHeight + 16;
+    }
+
+    if (section.kind === 'video') {
+      const video = videoFor(section);
+      if (video?.videoId) {
+        const videoHeight = Math.round((CANVAS_WIDTH * 9) / 16); // real 16:9 embed
+        elements.push(videoEmbedEl({ y, height: videoHeight, videoId: video.videoId, title: video.title ?? section.headline }));
+        y += videoHeight + 16;
+      }
     }
 
     const headlineSize = isHero ? 28 : 22;

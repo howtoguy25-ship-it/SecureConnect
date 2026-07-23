@@ -16,6 +16,8 @@ export function labelForElement(element: CanvasElement): string {
       return 'Slideshow';
     case 'video':
       return 'Video';
+    case 'videoEmbed':
+      return element.title || 'Video (YouTube)';
     case 'product':
       return element.name || 'Product';
     default:
@@ -39,6 +41,8 @@ export function iconForElement(element: CanvasElement): keyof typeof import('@ex
       return 'images-outline';
     case 'video':
       return 'videocam-outline';
+    case 'videoEmbed':
+      return 'logo-youtube';
     case 'product':
       return 'pricetag-outline';
     default:

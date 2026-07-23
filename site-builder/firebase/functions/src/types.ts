@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'product';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product';
 
 interface BaseElement {
   id: string;
@@ -74,6 +74,16 @@ export interface VideoElement extends BaseElement {
   audioVolume: number;
 }
 
+// A real video found on the open web (currently YouTube), not one the user uploaded --
+// see the client-side VideoEmbedElement's comment in src/types/index.ts for why this is
+// its own type instead of reusing VideoElement's uri field.
+export interface VideoEmbedElement extends BaseElement {
+  type: 'videoEmbed';
+  provider: 'youtube';
+  videoId: string;
+  title: string;
+}
+
 // 'product': a physical (or shippable/holdable) good -- fulfillment says how the buyer
 // gets it. 'service': a real-life, in-person service (a car wash, a haircut, a table) --
 // booked for a specific date/time instead of shipped, and paid for as one real one-time
@@ -117,6 +127,7 @@ export type CanvasElement =
   | IconElement
   | SlideshowElement
   | VideoElement
+  | VideoEmbedElement
   | ProductElement;
 
 export interface CanvasSize {

@@ -24,6 +24,7 @@ export type ElementType =
   | 'icon'
   | 'slideshow'
   | 'video'
+  | 'videoEmbed'
   | 'product';
 
 interface BaseElement {
@@ -97,6 +98,19 @@ export interface VideoElement extends BaseElement {
   audioVolume: number; // 0-1, only relevant when audioUri is set
 }
 
+// A real, existing video found on the open web (currently YouTube) rather than a clip the
+// user recorded/uploaded themselves -- e.g. the AI Site Builder finding real basketball
+// highlight/news videos for a sports page. Unlike VideoElement's locally-hosted uri, this
+// only ever stores an id pointing at the provider's own hosting, played back via that
+// provider's embed player (a WebView in the editor/live preview, a real <iframe> once
+// published) -- never downloaded or re-hosted, which the provider's terms don't allow.
+export interface VideoEmbedElement extends BaseElement {
+  type: 'videoEmbed';
+  provider: 'youtube';
+  videoId: string;
+  title: string;
+}
+
 // 'product': a physical (or shippable/holdable) good -- fulfillment says how the buyer
 // gets it. 'service': a real-life, in-person service (a car wash, a haircut, a table) --
 // booked for a specific date/time instead of shipped, and paid for as one real one-time
@@ -141,6 +155,7 @@ export type CanvasElement =
   | IconElement
   | SlideshowElement
   | VideoElement
+  | VideoEmbedElement
   | ProductElement;
 
 export interface AnnouncementBarConfig {

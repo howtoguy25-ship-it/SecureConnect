@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, Animated, Pressable, Modal, ScrollView } from 'react-native';
+import { View, Text, Image, StyleSheet, Animated, Pressable, Modal, ScrollView, Linking } from 'react-native';
 import Svg, { Rect, Circle, Polygon, Line, Path } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useAudioPlayer } from 'expo-audio';
-import { CanvasElement, VideoElement, ProductElement } from '@/types';
+import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement } from '@/types';
 import { useGoogleFont } from '@/utils/useGoogleFont';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
@@ -153,6 +153,36 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
       contentFit="cover"
       nativeControls={false}
     />
+  );
+}
+
+// A real, already-existing video (currently only YouTube), not one the user recorded --
+// shown here as its real public thumbnail with a play overlay rather than a live embedded
+// player, since a page with several of these would otherwise mean several simultaneous
+// WebViews/iframes just sitting in the editor canvas. Tapping opens the actual video --
+// the published site (siteHtml.ts) renders a real playable <iframe> embed instead.
+function VideoEmbedView({ element, width, height }: { element: VideoEmbedElement; width: number; height: number }) {
+  return (
+    <Pressable
+      style={[styles.videoEmbedWrap, { width, height }]}
+      onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${element.videoId}`)}
+    >
+      <Image
+        source={{ uri: `https://img.youtube.com/vi/${element.videoId}/hqdefault.jpg` }}
+        style={{ width, height }}
+        resizeMode="cover"
+      />
+      <View style={styles.videoPlayOverlay}>
+        <Ionicons name="play" size={Math.max(20, Math.min(width, height) * 0.22)} color="#FFFFFF" />
+      </View>
+      {!!element.title && (
+        <View style={styles.videoTitleBar}>
+          <Text numberOfLines={1} style={styles.videoTitleText}>
+            {element.title}
+          </Text>
+        </View>
+      )}
+    </Pressable>
   );
 }
 
@@ -363,6 +393,8 @@ export default function ElementRenderer({ element }: { element: CanvasElement })
       );
     case 'video':
       return <VideoElementView element={element} width={width} height={height} />;
+    case 'videoEmbed':
+      return <VideoEmbedView element={element} width={width} height={height} />;
     case 'product':
       return <ProductCardView element={element} width={width} height={height} />;
     default:
@@ -381,6 +413,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   placeholderText: { fontSize: 11, color: '#94A3B8', marginTop: 4, textAlign: 'center', paddingHorizontal: 4 },
+  videoEmbedWrap: { borderRadius: 8, overflow: 'hidden', backgroundColor: '#0F172A' },
+  videoPlayOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,23,42,0.15)',
+  },
+  videoTitleBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15,23,42,0.65)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  videoTitleText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
   productInfoBtn: {
     position: 'absolute',
     top: 6,

@@ -26,7 +26,8 @@ import {
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
-import { layoutSitePlan, estimatedCanvasHeight, SectionImage } from './layout';
+import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo } from './layout';
+import { searchYouTubeVideo } from './youtube';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import {
   renderProjectHtml,
@@ -70,6 +71,7 @@ const appleIapKeyId = defineSecret('APPLE_IAP_KEY_ID');
 const appleIapIssuerId = defineSecret('APPLE_IAP_ISSUER_ID');
 const appleIapPrivateKey = defineSecret('APPLE_IAP_PRIVATE_KEY');
 const resendApiKey = defineSecret('RESEND_API_KEY');
+const youtubeApiKey = defineSecret('YOUTUBE_API_KEY');
 // Private half of the VAPID keypair used to sign real Web Push deliveries (see
 // sendPushNotification in pushApi.ts) -- the public half is safe to hardcode (it's already
 // shipped to every client in app.config.js), but this one must never be committed.
@@ -297,7 +299,7 @@ export const suggestClarifyingQuestions = onCall({ secrets: [openaiApiKey], invo
 }));
 
 export const startGeneration = onCall(
-  { secrets: [openaiApiKey], timeoutSeconds: 540, memory: '512MiB', invoker: 'public' },
+  { secrets: [openaiApiKey, youtubeApiKey], timeoutSeconds: 540, memory: '512MiB', invoker: 'public' },
   withCallableErrors('startGeneration', async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -394,8 +396,8 @@ export const startGeneration = onCall(
     // subscribed to (via previewProjectId) -- called after the plan lands and again after
     // every generated image, so the AI build progress screen's live preview panel shows
     // real text and images appearing incrementally instead of a blank canvas until the end.
-    const pushPreview = async (currentPlan: SitePlan, images: SectionImage[]) => {
-      const previewElements = layoutSitePlan(currentPlan, images);
+    const pushPreview = async (currentPlan: SitePlan, images: SectionImage[], videos: SectionVideo[] = []) => {
+      const previewElements = layoutSitePlan(currentPlan, images, videos);
       await projectRef.update({
         name: currentPlan.siteName,
         backgroundColor: currentPlan.backgroundColor,
@@ -423,6 +425,8 @@ export const startGeneration = onCall(
       const sectionsNeedingImages = plan.sections.filter((s: SitePlanSection) => s.imagePrompt?.trim());
       const sectionImages: SectionImage[] = [];
       const bucket = getStorage().bucket();
+      const sectionsNeedingVideo = plan.sections.filter((s: SitePlanSection) => s.kind === 'video' && s.videoSearchQuery?.trim());
+      const sectionVideos: SectionVideo[] = [];
 
       // Each image is its own slow OpenAI call (often 10-30s) -- generating them one at a
       // time in sequence was the single biggest reason a build could take minutes. Firing
@@ -430,8 +434,14 @@ export const startGeneration = onCall(
       // image instead of the sum of all of them. Each one still pushes its own live-preview
       // update the moment it lands (not waiting for the whole batch), so the progress
       // screen keeps revealing images incrementally rather than all at once at the end.
-      await Promise.all(
-        sectionsNeedingImages.map(async (section: SitePlanSection) => {
+      // Real video search runs alongside the same batch -- finding an actual matching
+      // YouTube video for any section that asked for one (e.g. real basketball news/
+      // highlights), never a generated/fake stand-in.
+      if (sectionsNeedingVideo.length > 0) {
+        await sessionRef.update({ statusMessage: 'Finding real videos for your site...', updatedAt: Date.now() });
+      }
+      await Promise.all([
+        ...sectionsNeedingImages.map(async (section: SitePlanSection) => {
           try {
             const buffer = await generateImage(client, section.imagePrompt);
             const path = `users/${uid}/generated/${sessionId}/${section.kind}-${Date.now()}.png`;
@@ -446,21 +456,33 @@ export const startGeneration = onCall(
             // section that already generated successfully.
             console.error(`Image generation failed for section "${section.kind}"`, err);
           }
-          await pushPreview(plan, sectionImages);
-        })
-      );
+          await pushPreview(plan, sectionImages, sectionVideos);
+        }),
+        ...sectionsNeedingVideo.map(async (section: SitePlanSection) => {
+          try {
+            const result = await searchYouTubeVideo(youtubeApiKey.value(), section.videoSearchQuery);
+            sectionVideos.push({ section, videoId: result?.videoId ?? null, title: result?.title ?? null });
+          } catch (err) {
+            // Same as images -- a failed/quota-exhausted video search must never sink the
+            // whole build, just leave that section without a video.
+            console.error(`Video search failed for section "${section.kind}"`, err);
+            sectionVideos.push({ section, videoId: null, title: null });
+          }
+          await pushPreview(plan, sectionImages, sectionVideos);
+        }),
+      ]);
 
       const injected2 = await checkForPause(sessionRef, pausesUsed);
       if (injected2) {
         await sessionRef.update({ statusMessage: 'Applying your last change...', updatedAt: Date.now() });
-        // Second pause only adjusts copy at this point (images are already generated) --
-        // keeps the second pause fast rather than re-running image generation too.
+        // Second pause only adjusts copy at this point (images/videos are already resolved)
+        // -- keeps the second pause fast rather than re-running that work too.
         plan = await generateSitePlan(client, model, prompt, complexity, injected2);
-        await pushPreview(plan, sectionImages);
+        await pushPreview(plan, sectionImages, sectionVideos);
       }
 
       await sessionRef.update({ statusMessage: 'Assembling your site...', updatedAt: Date.now() });
-      await pushPreview(plan, sectionImages);
+      await pushPreview(plan, sectionImages, sectionVideos);
 
       const minutesElapsed = Math.round(((Date.now() - startedAt) / 60000) * 10) / 10;
       await sessionRef.update({

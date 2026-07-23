@@ -18,6 +18,11 @@ interface Props {
 // far/fast the finger moved.
 const ROW_GAP = 6;
 const DEFAULT_ROW_HEIGHT = 52;
+// A quick tap still selects the row -- only a hold past this delay (with the finger not
+// having wandered more than TAP_MOVE_THRESHOLD px away) commits to a drag-to-reorder, so
+// the two gestures never fight each other on the exact same touch.
+const LONG_PRESS_MS = 300;
+const TAP_MOVE_THRESHOLD = 6;
 
 interface RowProps {
   el: CanvasElement;
@@ -50,20 +55,34 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
   elIdRef.current = el.id;
   const onDragStateChangeRef = useRef(onDragStateChange);
   onDragStateChangeRef.current = onDragStateChange;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const dragState = useRef({ startIndex: index, appliedSteps: 0 });
   const [dragging, setDragging] = React.useState(false);
+  // Tracks the hold-before-drag disambiguation: a long-press timer (cleared on quick
+  // release or on excess movement) plus how far the finger has actually wandered, so a
+  // normal tap-to-select still works from the exact same touch area as the drag gesture.
+  const gesture = useRef({ timer: null as ReturnType<typeof setTimeout> | null, isDragging: false, maxMove: 0 });
 
   const dragResponder = useRef<PanResponderInstance>(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_evt, gestureState) => Math.abs(gestureState.dy) > 2,
+      onMoveShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
-        dragState.current = { startIndex: indexRef.current, appliedSteps: 0 };
-        setDragging(true);
-        onDragStateChangeRef.current(true);
+        gesture.current.maxMove = 0;
+        gesture.current.isDragging = false;
+        gesture.current.timer = setTimeout(() => {
+          if (gesture.current.maxMove >= TAP_MOVE_THRESHOLD) return;
+          gesture.current.isDragging = true;
+          dragState.current = { startIndex: indexRef.current, appliedSteps: 0 };
+          setDragging(true);
+          onDragStateChangeRef.current(true);
+        }, LONG_PRESS_MS);
       },
       onPanResponderMove: (_evt, gestureState) => {
+        gesture.current.maxMove = Math.max(gesture.current.maxMove, Math.abs(gestureState.dx), Math.abs(gestureState.dy));
+        if (!gesture.current.isDragging) return;
         const step = rowHeightRef.current + ROW_GAP;
         const desiredSteps = Math.round(gestureState.dy / step);
         // Applies one swap per row boundary crossed, immediately, in the direction the
@@ -83,12 +102,22 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
         }
       },
       onPanResponderRelease: () => {
-        setDragging(false);
-        onDragStateChangeRef.current(false);
+        if (gesture.current.timer) clearTimeout(gesture.current.timer);
+        if (gesture.current.isDragging) {
+          setDragging(false);
+          onDragStateChangeRef.current(false);
+        } else if (gesture.current.maxMove < TAP_MOVE_THRESHOLD) {
+          // Never committed to a drag and barely moved -- a plain tap, so select like the
+          // rest of the row's tappable area would.
+          onSelectRef.current(elIdRef.current);
+        }
+        gesture.current.isDragging = false;
       },
       onPanResponderTerminate: () => {
+        if (gesture.current.timer) clearTimeout(gesture.current.timer);
         setDragging(false);
         onDragStateChangeRef.current(false);
+        gesture.current.isDragging = false;
       },
     })
   ).current;
@@ -100,12 +129,17 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
         if (e.nativeEvent.layout.height > 0) rowHeightRef.current = e.nativeEvent.layout.height;
       }}
     >
-      <Pressable style={styles.rowMain} onPress={() => onSelect(el.id)} hitSlop={4}>
+      {/* Holding anywhere on the label -- the row's "word" -- for a beat now starts a real
+          drag-to-reorder, not just the small handle icon on the right. A quick tap here
+          still selects the element like before; only a hold that doesn't wander commits to
+          dragging (see the responder above), so the two gestures share this whole area
+          without fighting each other. */}
+      <View style={styles.rowMain} {...dragResponder.panHandlers}>
         <Ionicons name={iconForElement(el)} size={18} color={isSelected ? '#2563EB' : '#334155'} />
         <Text style={[styles.rowLabel, isSelected && styles.rowLabelSelected]} numberOfLines={1}>
           {labelForElement(el)}
         </Text>
-      </Pressable>
+      </View>
       <Pressable hitSlop={8} style={styles.rowIconBtn} onPress={() => onToggleLock(el.id)}>
         <Ionicons name={el.locked ? 'lock-closed' : 'lock-open-outline'} size={16} color="#64748B" />
       </Pressable>
@@ -120,11 +154,8 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
       >
         <Ionicons name="chevron-down" size={18} color={index === count - 1 ? '#E2E8F0' : '#334155'} />
       </Pressable>
-      {/* Hold and drag up/down to reorder directly -- swaps happen immediately as each row
-          boundary is crossed, rather than only one step per tap on the chevrons above.
-          Sized well above the ~44px minimum touch target (rather than just the icon's own
-          bounds) since a small miss here was the main complaint about this gesture not
-          reliably grabbing hold. */}
+      {/* Same hold-to-drag gesture as the label above -- kept as its own dedicated handle
+          too since it's a clearer, more discoverable affordance than the label alone. */}
       <View
         {...dragResponder.panHandlers}
         style={[styles.dragHandle, dragging && styles.dragHandleActive]}

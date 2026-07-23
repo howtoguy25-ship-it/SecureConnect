@@ -1,11 +1,17 @@
 import OpenAI, { toFile } from 'openai';
 
 export interface SitePlanSection {
-  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery';
+  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video';
   headline: string;
   body: string;
   buttonLabel: string;
   imagePrompt: string;
+  // Only set (non-empty) for kind 'video' -- a real, specific search phrase (e.g. "NBA
+  // Finals 2026 highlights", not just "basketball") used to find and embed an actual
+  // existing YouTube video matching what this section is about. The model can't know
+  // whether a real matching video exists, so this is resolved separately after the plan
+  // is generated (see searchYouTubeVideo) rather than fabricated here.
+  videoSearchQuery: string;
 }
 
 export interface SitePlan {
@@ -37,17 +43,22 @@ const SITE_PLAN_SCHEMA = {
           type: 'object',
           additionalProperties: false,
           properties: {
-            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery'] },
+            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video'] },
             headline: { type: 'string' },
             body: { type: 'string' },
             buttonLabel: { type: 'string' },
             imagePrompt: {
               type: 'string',
               description:
-                'A vivid, concrete image-generation prompt illustrating this section, in the visual style implied by the user request. Empty string if this section has no image.',
+                'A vivid, concrete image-generation prompt illustrating this section, in the visual style implied by the user request. Empty string if this section has no image (always empty for kind "video").',
+            },
+            videoSearchQuery: {
+              type: 'string',
+              description:
+                'Only for kind "video": a real, specific YouTube search phrase for an actual existing video matching this section (e.g. real news/highlights/how-to content the user asked for) -- specific enough to find a real relevant result, not a generic topic word. Empty string for every other kind.',
             },
           },
-          required: ['kind', 'headline', 'body', 'buttonLabel', 'imagePrompt'],
+          required: ['kind', 'headline', 'body', 'buttonLabel', 'imagePrompt', 'videoSearchQuery'],
         },
       },
     },
@@ -67,6 +78,7 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string 
     'You are a website content strategist and copywriter for SiteSpark, an app that builds real websites from a short user prompt.',
     'Given the user\'s prompt, produce a concrete site plan: a real site name/tagline, a cohesive color palette, and 3-6 content sections with genuinely written headline/body copy (not placeholders) and a concrete image-generation prompt per visual section.',
     complexityNote,
+    'If the user asks for real video content -- news updates, highlights, tutorials, or anything else where an actual existing video (not a generated image) is the point -- include one section with kind "video" and a specific, real videoSearchQuery for it (e.g. a request for a basketball page with news/videos should search for something like real, current-sounding NBA highlights or news coverage, not just the word "basketball"). This is resolved against a real video search after you respond, so write a query that would actually find something relevant, not a placeholder.',
     'Only use information relevant to building and describing this website. If the prompt asks for anything unrelated to the site itself, ignore that part.',
   ].join(' ');
 }

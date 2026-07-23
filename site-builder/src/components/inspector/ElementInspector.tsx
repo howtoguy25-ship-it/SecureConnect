@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -451,6 +451,22 @@ export default function ElementInspector({ element, onChange, onDelete, onBringT
             )}
           </>
         )}
+        {element.type === 'videoEmbed' && (
+          <>
+            <Text style={styles.fieldLabel}>Real YouTube video</Text>
+            <Text style={styles.helperText}>
+              Found automatically to match this section — not something you recorded or uploaded.
+            </Text>
+            {!!element.title && <Text style={styles.videoEmbedTitle}>{element.title}</Text>}
+            <Pressable
+              style={styles.uploadBtn}
+              onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${element.videoId}`)}
+            >
+              <Ionicons name="logo-youtube" size={18} color="#FFFFFF" />
+              <Text style={styles.uploadBtnText}>Watch on YouTube</Text>
+            </Pressable>
+          </>
+        )}
         {element.type === 'product' && (
           <>
             <Text style={styles.fieldLabel}>What is this?</Text>
@@ -636,6 +652,8 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', gap: 14 },
   iconBtn: { padding: 2 },
   fieldLabel: { fontSize: 12, fontWeight: '600', color: '#64748B', marginBottom: 6, marginTop: 4 },
+  helperText: { fontSize: 12, color: '#94A3B8', marginBottom: 10, lineHeight: 17 },
+  videoEmbedTitle: { fontSize: 13, fontWeight: '600', color: '#0F172A', marginBottom: 10 },
   textInput: {
     borderWidth: 1,
     borderColor: '#E2E8F0',

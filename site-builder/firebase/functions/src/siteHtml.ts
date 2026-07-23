@@ -151,6 +151,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string)
         el.muted ? 'muted' : ''
       } playsinline controls></video>${audioTag}${script}`;
     }
+    case 'videoEmbed': {
+      // A real, already-existing video (not one the site owner uploaded) -- played back
+      // through the provider's own embed player rather than downloaded/re-hosted, which
+      // its terms of service don't allow (see VideoEmbedElement's comment in types.ts).
+      const src = `https://www.youtube.com/embed/${encodeURIComponent(el.videoId)}`;
+      return `<iframe src="${escapeAttr(src)}" title="${escapeAttr(el.title || 'Video')}" style="${base}border:0;background:#000;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
+    }
     case 'product': {
       const isService = el.saleType === 'service';
       const isDigital = el.saleType === 'digital';
