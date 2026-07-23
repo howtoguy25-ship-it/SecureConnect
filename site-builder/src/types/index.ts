@@ -347,6 +347,9 @@ export interface AssistantMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  // Real https:// URLs (already uploaded to Storage) -- e.g. a screenshot of an error the
+  // user wants help with. Up to 5 per message.
+  images?: string[];
 }
 
 export type AssistantActionType =
@@ -356,11 +359,24 @@ export type AssistantActionType =
   | 'openSubscription'
   | 'openAccount';
 
+export type AssistantNavigateScreen =
+  | 'Projects'
+  | 'NewProject'
+  | 'Subscription'
+  | 'Account'
+  | 'Support'
+  | 'SellerAccount'
+  | 'Orders'
+  | 'TransferDomain'
+  | 'Policy';
+
 export interface AssistantAction {
   type: AssistantActionType;
-  screen: 'Projects' | 'NewProject' | 'Subscription' | 'Account' | null;
+  screen: AssistantNavigateScreen | null;
   pageType: PageType | null;
   prompt: string | null;
+  // Only used when screen is 'Policy'.
+  policyType: 'privacy' | 'returns' | null;
 }
 
 // -- Buying a new domain (Phase 7b) --

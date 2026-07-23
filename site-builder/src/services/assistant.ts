@@ -16,12 +16,13 @@ export interface AssistantChatResult {
 export async function sendAssistantMessage(
   message: string,
   history: AssistantChatMessage[],
-  screen: string
+  screen: string,
+  images?: string[]
 ): Promise<AssistantChatResult> {
   const call = httpsCallable<
-    { message: string; history: AssistantChatMessage[]; screen: string },
+    { message: string; history: AssistantChatMessage[]; screen: string; images?: string[] },
     AssistantChatResult
   >(requireFunctions(functions), 'assistantChat');
-  const result = await call({ message, history, screen });
+  const result = await call({ message, history, screen, images });
   return result.data;
 }

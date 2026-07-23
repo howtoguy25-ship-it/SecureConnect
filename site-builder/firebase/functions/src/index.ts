@@ -589,15 +589,19 @@ export const assistantChat = onCall({ secrets: [openaiApiKey], invoker: 'public'
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
-  const { message, history, screen } = request.data as {
+  const { message, history, screen, images } = request.data as {
     message: string;
     history?: AssistantChatMessage[];
     screen?: string;
+    images?: string[];
   };
 
   if (!message?.trim()) throw new HttpsError('invalid-argument', 'Missing message.');
   if (wordCount(message) > MAX_ASSISTANT_MESSAGE_WORDS) {
     throw new HttpsError('invalid-argument', `Keep messages under ${MAX_ASSISTANT_MESSAGE_WORDS} words.`);
+  }
+  if (images && (images.length > 5 || images.some((img) => !img.startsWith('https://')))) {
+    throw new HttpsError('invalid-argument', 'Attach up to 5 uploaded images.');
   }
 
   const userRef = db.collection('users').doc(uid);
@@ -620,13 +624,20 @@ export const assistantChat = onCall({ secrets: [openaiApiKey], invoker: 'public'
   const model = MODEL_FOR_PLAN[account?.plan ?? 'free'];
   const trimmedHistory = (history ?? []).slice(-MAX_ASSISTANT_HISTORY);
 
-  return chatWithAssistant(client, model, trimmedHistory, message.trim(), {
-    screen: screen || 'Projects',
-    credits: account?.credits ?? 0,
-    plan: account?.plan ?? 'free',
-    projectCount: projectsCount.data().count,
-    activeBuilds,
-  });
+  return chatWithAssistant(
+    client,
+    model,
+    trimmedHistory,
+    message.trim(),
+    {
+      screen: screen || 'Projects',
+      credits: account?.credits ?? 0,
+      plan: account?.plan ?? 'free',
+      projectCount: projectsCount.data().count,
+      activeBuilds,
+    },
+    images
+  );
 }));
 
 // Moves a locally-picked photo (only readable by the device, via a file:// URI) into

@@ -5,17 +5,21 @@ import {
   TextInput,
   Pressable,
   FlatList,
+  Image,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
+  Keyboard,
+  KeyboardEvent,
   Platform,
 } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/context/AuthContext';
 import { assistantMessagesStore } from '@/storage/assistantMessagesStore';
 import { sendAssistantMessage } from '@/services/assistant';
+import { uploadLocalImage } from '@/services/uploads';
 import { navigateTo, currentScreenName } from '@/navigation/navigationRef';
 import { generateId } from '@/utils/id';
 import { AssistantAction, AssistantMessage, PageType } from '@/types';
@@ -34,6 +38,11 @@ function runAction(action: AssistantAction, onClose: () => void) {
       else if (action.screen === 'NewProject') navigateTo('NewProject');
       else if (action.screen === 'Subscription') navigateTo('Subscription');
       else if (action.screen === 'Account') navigateTo('Account');
+      else if (action.screen === 'Support') navigateTo('Support');
+      else if (action.screen === 'SellerAccount') navigateTo('SellerAccount');
+      else if (action.screen === 'Orders') navigateTo('Orders');
+      else if (action.screen === 'TransferDomain') navigateTo('TransferDomain');
+      else if (action.screen === 'Policy') navigateTo('Policy', { policyType: action.policyType ?? 'privacy' });
       else return;
       onClose();
       break;
@@ -56,6 +65,8 @@ function runAction(action: AssistantAction, onClose: () => void) {
   }
 }
 
+const MAX_CHAT_IMAGES = 5;
+
 export default function AssistantChatScreen({ onClose }: Props) {
   const { user } = useAuth();
   const uid = user!.uid;
@@ -63,7 +74,25 @@ export default function AssistantChatScreen({ onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const listRef = useRef<FlatList>(null);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const listRef = useRef<FlatList<AssistantMessage>>(null);
+
+  // This screen is presented inside a `pageSheet` Modal (see AssistantLauncher) --
+  // KeyboardAvoidingView's automatic frame measurement is unreliable in that presentation
+  // style on iOS and leaves the input mostly hidden behind the keyboard, so the keyboard's
+  // real height is tracked manually here and applied as explicit bottom padding instead.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e: KeyboardEvent) => setKeyboardHeight(e.endCoordinates.height));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     assistantMessagesStore.list(uid).then((history) => {
@@ -72,22 +101,56 @@ export default function AssistantChatScreen({ onClose }: Props) {
     });
   }, [uid]);
 
+  const pickImage = async () => {
+    if (pendingImages.length >= MAX_CHAT_IMAGES) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6 });
+    if (result.canceled || result.assets.length === 0) return;
+    setPendingImages((prev) => [...prev, result.assets[0].uri].slice(0, MAX_CHAT_IMAGES));
+  };
+
+  const removePendingImage = (index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if ((!text && pendingImages.length === 0) || sending) return;
 
-    const userMessage: AssistantMessage = { id: generateId('msg'), role: 'user', content: text, createdAt: Date.now() };
+    setSending(true);
+    const imagesToUpload = pendingImages;
+    setInput('');
+    setPendingImages([]);
+
+    let imageUrls: string[] = [];
+    try {
+      if (imagesToUpload.length > 0) {
+        imageUrls = await Promise.all(imagesToUpload.map(uploadLocalImage));
+      }
+    } catch (err: any) {
+      setSending(false);
+      showAlert('Could not attach image', err?.message ?? 'Try again.');
+      return;
+    }
+
+    const messageText = text || 'Take a look at this and let me know what you think, or help with what it shows.';
+    const userMessage: AssistantMessage = {
+      id: generateId('msg'),
+      role: 'user',
+      content: messageText,
+      createdAt: Date.now(),
+      images: imageUrls.length > 0 ? imageUrls : undefined,
+    };
     const historyForModel = messages
       .slice(-HISTORY_FOR_MODEL)
       .map((m) => ({ role: m.role, content: m.content }));
 
     setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setSending(true);
     assistantMessagesStore.add(uid, userMessage).catch(() => {});
 
     try {
-      const { reply, actions } = await sendAssistantMessage(text, historyForModel, currentScreenName());
+      const { reply, actions } = await sendAssistantMessage(messageText, historyForModel, currentScreenName(), imageUrls);
       const assistantMessage: AssistantMessage = {
         id: generateId('msg'),
         role: 'assistant',
@@ -106,10 +169,7 @@ export default function AssistantChatScreen({ onClose }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView
-        style={styles.flexOne}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={[styles.flexOne, { paddingBottom: keyboardHeight }]}>
         <View style={styles.header}>
           <View style={styles.headerTitleRow}>
             <Ionicons name="sparkles" size={18} color="#4338CA" />
@@ -134,22 +194,59 @@ export default function AssistantChatScreen({ onClose }: Props) {
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
             ListEmptyComponent={
               <Text style={styles.empty}>
-                Ask me to build you a site, jump to your projects, check plans — anything about SiteSpark.
+                Ask me to build you a site, jump to your projects, check plans, troubleshoot a problem, or find your
+                way around — anything about SiteSpark. You can attach up to {MAX_CHAT_IMAGES} photos too, like a
+                screenshot of something that's not working.
               </Text>
             }
-            renderItem={({ item }) => (
-              <View style={[styles.bubbleRow, item.role === 'user' ? styles.bubbleRowUser : styles.bubbleRowAssistant]}>
-                <View style={[styles.bubble, item.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
-                  <Text style={item.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
-                    {item.content}
-                  </Text>
+            renderItem={({ item }) => {
+              const images = item.images;
+              return (
+                <View style={[styles.bubbleRow, item.role === 'user' ? styles.bubbleRowUser : styles.bubbleRowAssistant]}>
+                  <View style={[styles.bubble, item.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
+                    {images && images.length > 0 && (
+                      <View style={styles.bubbleImages}>
+                        {images.map((uri, index) => (
+                          <Image key={index} source={{ uri }} style={styles.bubbleImage} />
+                        ))}
+                      </View>
+                    )}
+                    <Text style={item.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
+                      {item.content}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            }}
           />
         )}
 
+        {pendingImages.length > 0 && (
+          <View style={styles.pendingImagesRow}>
+            {pendingImages.map((uri, index) => (
+              <View key={index} style={styles.pendingImageWrap}>
+                <Image source={{ uri }} style={styles.pendingImage} />
+                <Pressable style={styles.pendingImageRemove} onPress={() => removePendingImage(index)} hitSlop={8}>
+                  <Ionicons name="close" size={12} color="#FFFFFF" />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.inputRow}>
+          <Pressable
+            style={styles.attachButton}
+            onPress={pickImage}
+            disabled={pendingImages.length >= MAX_CHAT_IMAGES}
+            hitSlop={6}
+          >
+            <Ionicons
+              name="image-outline"
+              size={22}
+              color={pendingImages.length >= MAX_CHAT_IMAGES ? '#CBD5E1' : '#4338CA'}
+            />
+          </Pressable>
           <TextInput
             style={styles.input}
             value={input}
@@ -158,7 +255,11 @@ export default function AssistantChatScreen({ onClose }: Props) {
             placeholderTextColor="#94A3B8"
             multiline
           />
-          <Pressable style={styles.sendButton} onPress={handleSend} disabled={sending || !input.trim()}>
+          <Pressable
+            style={styles.sendButton}
+            onPress={handleSend}
+            disabled={sending || (!input.trim() && pendingImages.length === 0)}
+          >
             {sending ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
@@ -166,7 +267,7 @@ export default function AssistantChatScreen({ onClose }: Props) {
             )}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -197,6 +298,28 @@ const styles = StyleSheet.create({
   bubbleAssistant: { backgroundColor: '#F1F5F9', borderBottomLeftRadius: 4 },
   bubbleTextUser: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
   bubbleTextAssistant: { color: '#0F172A', fontSize: 14, lineHeight: 20 },
+  bubbleImages: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  bubbleImage: { width: 90, height: 90, borderRadius: 10, backgroundColor: '#E2E8F0' },
+  pendingImagesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  pendingImageWrap: { position: 'relative' },
+  pendingImage: { width: 52, height: 52, borderRadius: 10, backgroundColor: '#E2E8F0' },
+  pendingImageRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#0F172ACC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachButton: { paddingBottom: 8 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
