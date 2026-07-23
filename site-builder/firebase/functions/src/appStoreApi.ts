@@ -87,8 +87,19 @@ export async function getTransactionInfo(creds: AppStoreCredentials, transaction
     privateKeyStartsCorrectly: creds.privateKey.trimStart().startsWith('-----BEGIN PRIVATE KEY-----'),
   });
 
-  const fromProduction = await fetchTransaction(PRODUCTION_BASE, transactionId, token);
-  if (fromProduction) return fromProduction;
+  // A 404 from production correctly falls through to sandbox below -- but a *real* error
+  // (401, 500, etc.) used to abort the whole lookup immediately, which is wrong: this app
+  // is still TestFlight-only right now (no live production release yet), and Apple's
+  // production endpoint can reject requests outright for an app with no production history
+  // instead of cleanly 404ing. Every real TestFlight transaction only ever exists in
+  // sandbox anyway, so a production-side error must never stop sandbox from being tried.
+  try {
+    const fromProduction = await fetchTransaction(PRODUCTION_BASE, transactionId, token);
+    if (fromProduction) return fromProduction;
+  } catch (err) {
+    console.error('getTransactionInfo: production lookup failed, falling back to sandbox', err);
+  }
+
   const fromSandbox = await fetchTransaction(SANDBOX_BASE, transactionId, token);
   if (fromSandbox) return fromSandbox;
   throw new Error('Transaction not found in production or sandbox.');

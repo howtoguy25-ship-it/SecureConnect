@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,11 +13,39 @@ import { userAccountStore } from '@/storage/userAccountStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Subscription'>;
 
+// If Apple's server-side verification hangs or the purchase-update event never fires (both
+// real, observed failure modes, not hypothetical), the button showing a spinner had no way
+// to ever stop -- leaving it spinning forever with zero feedback about whether the purchase
+// went through. This is the ceiling on how long that's allowed to happen before the user
+// gets told something's wrong instead of just staring at a stuck spinner.
+const PURCHASE_TIMEOUT_MS = 30000;
+
 export default function SubscriptionScreen({ navigation }: Props) {
   const { user } = useAuth();
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
   const [hasStripeBilling, setHasStripeBilling] = useState(false);
   const [openingPortal, setOpeningPortal] = useState(false);
+  const purchaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPurchaseTimeout = () => {
+    if (purchaseTimeoutRef.current) {
+      clearTimeout(purchaseTimeoutRef.current);
+      purchaseTimeoutRef.current = null;
+    }
+  };
+
+  const armPurchaseTimeout = (id: string) => {
+    clearPurchaseTimeout();
+    purchaseTimeoutRef.current = setTimeout(() => {
+      setPurchasingId((current) => (current === id ? null : current));
+      showAlert(
+        'Still waiting on Apple',
+        "This is taking longer than it should. If you already completed the purchase sheet, check Account → Restore Purchases in a moment — otherwise it's safe to try again."
+      );
+    }, PURCHASE_TIMEOUT_MS);
+  };
+
+  useEffect(() => clearPurchaseTimeout, []);
 
   useEffect(() => {
     if (!user || Platform.OS !== 'web') return;
@@ -73,12 +101,14 @@ export default function SubscriptionScreen({ navigation }: Props) {
   useEffect(() => {
     const detach = attachPurchaseListeners(
       () => {
+        clearPurchaseTimeout();
         setPurchasingId(null);
         showAlert('Purchase complete', 'Your credits/plan have been updated.', [
           { text: 'OK', onPress: () => navigation.goBack() },
         ]);
       },
       (message) => {
+        clearPurchaseTimeout();
         setPurchasingId(null);
         showAlert('Purchase failed', message);
       }
@@ -88,9 +118,11 @@ export default function SubscriptionScreen({ navigation }: Props) {
 
   const handleSelectPlan = async (planId: keyof typeof SUBSCRIPTION_PRODUCT_IDS) => {
     setPurchasingId(planId);
+    armPurchaseTimeout(planId);
     try {
       await buySubscription(SUBSCRIPTION_PRODUCT_IDS[planId]);
     } catch (err: any) {
+      clearPurchaseTimeout();
       setPurchasingId(null);
       showAlert('Could not start purchase', err?.message ?? 'Try again in a moment.');
     }
@@ -100,9 +132,11 @@ export default function SubscriptionScreen({ navigation }: Props) {
     const productId = CREDIT_PACK_PRODUCT_IDS[packId];
     if (!productId) return;
     setPurchasingId(packId);
+    armPurchaseTimeout(packId);
     try {
       await buyProduct(productId);
     } catch (err: any) {
+      clearPurchaseTimeout();
       setPurchasingId(null);
       showAlert('Could not start purchase', err?.message ?? 'Try again in a moment.');
     }
