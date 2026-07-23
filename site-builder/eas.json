@@ -7,6 +7,7 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "node": "20.20.2",
       "ios": { "image": "latest" },
       "env": {
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
@@ -21,6 +22,7 @@
     },
     "preview": {
       "distribution": "internal",
+      "node": "20.20.2",
       "ios": { "image": "latest" },
       "env": {
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
@@ -35,6 +37,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "node": "20.20.2",
       "ios": { "image": "latest" },
       "env": {
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyC--2Xhg5UpRrSggQctwjWfg_3xhQwy2LA",
