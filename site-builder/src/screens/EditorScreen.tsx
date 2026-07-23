@@ -124,6 +124,12 @@ function EditorInner({ navigation }: Props) {
       },
     })
   ).current;
+  // Must be declared before the `!project` early return below -- every hook in this
+  // component has to run on every render regardless of `project`'s state, or React throws
+  // "Rendered more hooks than during the previous render" the instant a still-loading
+  // project (project === null on the first render, while its Firestore subscription is
+  // still in flight) finishes loading and this component stops taking the early-return path.
+  const canvasScrollRef = useRef<ScrollView>(null);
 
   if (!project) {
     return (
@@ -150,7 +156,6 @@ function EditorInner({ navigation }: Props) {
 
   const canvasCenterX = project.canvasSize.width / 2;
   const canvasCenterY = project.canvasSize.height / 2;
-  const canvasScrollRef = useRef<ScrollView>(null);
 
   // "+" at the bottom of the canvas -- gives the page more real, empty room to build into
   // (rather than just cramming new elements into whatever space is already there) and opens
