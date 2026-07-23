@@ -437,6 +437,7 @@ export interface UserAccount {
 export interface SellerAccount {
   uid: string;
   stripeAccountId: string | null;
+  country?: string;
   onboardingStatus: 'not_connected' | 'pending' | 'active';
   chargesEnabled: boolean;
   payoutsEnabled: boolean;

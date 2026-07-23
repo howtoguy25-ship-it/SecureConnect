@@ -55,7 +55,7 @@ import {
   RegistrantContact,
 } from './namecheapApi';
 import { createStripeClient, createCheckoutSession, createSubscriptionCheckoutSession, createOneTimeCheckoutSession } from './stripeApi';
-import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink } from './stripeConnect';
+import { ensureExpressAccount, createOnboardingLink, getAccountFlags, createDashboardLoginLink, deleteExpressAccount } from './stripeConnect';
 import { sendOrderNotificationEmail, sendContentReportEmail } from './emailApi';
 import { sendPushNotification } from './pushApi';
 import { getTransactionInfo } from './appStoreApi';
@@ -1922,16 +1922,22 @@ export const createSellerOnboardingLink = onCall({ secrets: [stripeSecretKey], i
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
 
+  // Only a plausible ISO 3166-1 alpha-2 code is trusted -- falls back to US (Stripe's own
+  // default) for anything else, e.g. an older client build that doesn't send this yet.
+  const requestedCountry = (request.data as { country?: string } | undefined)?.country;
+  const country = typeof requestedCountry === 'string' && /^[A-Z]{2}$/.test(requestedCountry) ? requestedCountry : 'US';
+
   const stripe = createStripeClient(stripeSecretKey.value());
   const ref = sellerAccountRef(uid);
   const existing = (await ref.get()).data() as SellerAccount | undefined;
 
-  const accountId = await ensureExpressAccount(stripe, existing?.stripeAccountId ?? null, request.auth?.token?.email as string | undefined);
+  const accountId = await ensureExpressAccount(stripe, existing?.stripeAccountId ?? null, request.auth?.token?.email as string | undefined, country);
 
   if (!existing?.stripeAccountId) {
     const seller: SellerAccount = {
       uid,
       stripeAccountId: accountId,
+      country,
       onboardingStatus: 'pending',
       chargesEnabled: false,
       payoutsEnabled: false,
@@ -1974,6 +1980,45 @@ export const getSellerAccountStatus = onCall({ secrets: [stripeSecretKey], invok
   );
 
   return { onboardingStatus, chargesEnabled: flags.chargesEnabled, payoutsEnabled: flags.payoutsEnabled };
+}));
+
+// Lets a seller stuck in a broken onboarding (most commonly: their Express account was
+// created under the wrong country, which Stripe never allows changing after the fact) start
+// over with a fresh account. Only allowed before the account has ever actually gone live --
+// once chargesEnabled is true there's a real payout history/balance on that account, and
+// deleting it would be destructive, not a fix.
+export const resetSellerOnboarding = onCall({ secrets: [stripeSecretKey], invoker: 'public' }, withCallableErrors('resetSellerOnboarding', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const ref = sellerAccountRef(uid);
+  const existing = (await ref.get()).data() as SellerAccount | undefined;
+  if (!existing?.stripeAccountId) {
+    return { ok: true };
+  }
+  if (existing.chargesEnabled) {
+    throw new HttpsError('failed-precondition', 'This account is already active and cannot be reset.');
+  }
+
+  const stripe = createStripeClient(stripeSecretKey.value());
+  try {
+    await deleteExpressAccount(stripe, existing.stripeAccountId);
+  } catch {
+    // Already deleted, or Stripe otherwise refuses -- either way, clearing our own record
+    // below is what lets the seller try again, so a delete failure here isn't fatal.
+  }
+
+  await ref.set({
+    uid,
+    stripeAccountId: null,
+    onboardingStatus: 'not_connected',
+    chargesEnabled: false,
+    payoutsEnabled: false,
+    createdAt: existing.createdAt,
+    updatedAt: Date.now(),
+  } satisfies SellerAccount);
+
+  return { ok: true };
 }));
 
 // A real link into the seller's own Stripe Express dashboard -- their actual balance,

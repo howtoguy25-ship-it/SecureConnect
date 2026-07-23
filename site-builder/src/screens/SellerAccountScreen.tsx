@@ -4,12 +4,28 @@ import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
+import * as Localization from 'expo-localization';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
-import { sellerAccountStore, createSellerOnboardingLink, refreshSellerAccountStatus, createSellerDashboardLink } from '@/services/store';
+import {
+  sellerAccountStore,
+  createSellerOnboardingLink,
+  refreshSellerAccountStatus,
+  createSellerDashboardLink,
+  resetSellerOnboarding,
+} from '@/services/store';
 import { SellerAccount } from '@/types';
+
+// The seller's own device region, e.g. "AU" -- Stripe fixes an Express account's country
+// permanently at creation, so this has to be right the first time (see createSellerOnboardingLink
+// in services/store.ts for why). Falls back to US, Stripe's own default, if the device
+// somehow reports no region (observed on some web browsers).
+function deviceCountry(): string {
+  const region = Localization.getLocales()[0]?.regionCode;
+  return region && /^[A-Z]{2}$/i.test(region) ? region.toUpperCase() : 'US';
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SellerAccount'>;
 
@@ -35,7 +51,7 @@ export default function SellerAccountScreen({ navigation }: Props) {
   const handleSetUpPayouts = async () => {
     setBusy(true);
     try {
-      const url = await createSellerOnboardingLink();
+      const url = await createSellerOnboardingLink(deviceCountry());
       await WebBrowser.openBrowserAsync(url);
       await refreshSellerAccountStatus();
     } catch (err: any) {
@@ -43,6 +59,30 @@ export default function SellerAccountScreen({ navigation }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  // Recovers a seller stuck on a broken Stripe onboarding (most often: the account was
+  // created under the wrong country, which Stripe never allows changing afterward) by
+  // abandoning that account and letting them start completely fresh.
+  const handleStartOver = () => {
+    showAlert('Start over?', "This abandons your current in-progress Stripe setup so you can begin again. You haven't lost anything -- it hasn't gone live yet.", [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Start Over',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            await resetSellerOnboarding();
+            await refreshSellerAccountStatus();
+          } catch (err: any) {
+            showAlert('Could not reset', err?.message ?? 'Try again in a moment.');
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
   };
 
   const handleViewDashboard = async () => {
@@ -99,6 +139,12 @@ export default function SellerAccountScreen({ navigation }: Props) {
         {status === 'active' && (
           <Pressable style={styles.secondaryBtn} onPress={handleSetUpPayouts}>
             <Text style={styles.secondaryBtnText}>Update account details</Text>
+          </Pressable>
+        )}
+
+        {status === 'pending' && !busy && (
+          <Pressable style={styles.secondaryBtn} onPress={handleStartOver}>
+            <Text style={styles.secondaryBtnText}>Setup stuck or showing an error? Start over</Text>
           </Pressable>
         )}
       </View>

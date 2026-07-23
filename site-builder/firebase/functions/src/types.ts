@@ -415,6 +415,12 @@ export interface UserAccount {
 export interface SellerAccount {
   uid: string;
   stripeAccountId: string | null;
+  // The ISO 3166-1 alpha-2 country the Stripe Express account was created with -- Stripe
+  // fixes this at account creation and never lets it change afterward, so it's kept here
+  // purely so a broken/mismatched account (created before this field existed, or from a
+  // seller whose device region was wrong) can be recognized and reset rather than silently
+  // reused with the wrong country forever.
+  country?: string;
   onboardingStatus: 'not_connected' | 'pending' | 'active';
   chargesEnabled: boolean;
   payoutsEnabled: boolean;

@@ -54,6 +54,7 @@ module.exports = ({ config }) => ({
     'expo-video',
     'expo-audio',
     'expo-iap',
+    'expo-localization',
     [
       'expo-notifications',
       {

@@ -8,10 +8,25 @@ import { SellerAccount, StoreOrder } from '@/types';
 // Real Stripe Express Connect onboarding for sellers -- see stripeConnect.ts /
 // createSellerOnboardingLink in Cloud Functions. Opens Stripe's own hosted flow (identity,
 // bank details, tax info) in an in-app browser; SiteSpark never sees any of it directly.
-export async function createSellerOnboardingLink(): Promise<string> {
-  const call = httpsCallable<undefined, { url: string }>(requireFunctions(functions), 'createSellerOnboardingLink');
-  const result = await call();
+// `country` (ISO 3166-1 alpha-2, e.g. "AU") is the seller's own device region -- Stripe fixes
+// an Express account's country permanently at creation, and without this it silently defaults
+// to the *platform* account's own country instead of the seller's, which breaks the hosted
+// onboarding form for anyone outside that country (see SellerAccountScreen for how this is
+// determined and resetSellerOnboarding for recovering an account already created without it).
+export async function createSellerOnboardingLink(country: string): Promise<string> {
+  const call = httpsCallable<{ country: string }, { url: string }>(requireFunctions(functions), 'createSellerOnboardingLink');
+  const result = await call({ country });
   return result.data.url;
+}
+
+// Abandons a seller's current Stripe Express account and clears the local record, so the next
+// createSellerOnboardingLink call creates a fresh one -- the only way to recover an account
+// that was created under the wrong country, since Stripe never allows changing it afterward.
+// The server refuses this once the account is already active (chargesEnabled), so it can't be
+// used to destroy a real, working payout account.
+export async function resetSellerOnboarding(): Promise<void> {
+  const call = httpsCallable<undefined, { ok: boolean }>(requireFunctions(functions), 'resetSellerOnboarding');
+  await call();
 }
 
 export async function refreshSellerAccountStatus(): Promise<Pick<SellerAccount, 'onboardingStatus' | 'chargesEnabled' | 'payoutsEnabled'>> {
