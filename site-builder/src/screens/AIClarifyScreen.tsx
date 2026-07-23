@@ -86,7 +86,15 @@ export default function AIClarifyScreen({ navigation, route }: Props) {
       }
     }
 
-    navigation.navigate('AIBuildProgress', { sessionId, pageType, prompt: finalPrompt, complexity });
+    // The session + placeholder "Generating..." project doc are already written to
+    // Firestore by this point (both happen inside startGeneration's very first transaction,
+    // well before the multi-minute OpenAI/image work this same call is still doing in the
+    // background) -- so it's safe to jump straight back to the projects list instead of
+    // forcing the user to sit on a dedicated progress screen with no other option. My
+    // Projects picks the in-progress build up on its own (see ProjectsScreen's
+    // generationSessionStore.listActive) and shows a live "Building..." card the user can
+    // tap at any time to watch the same AIBuildProgress screen if they want to.
+    navigation.popToTop();
   };
 
   const handleStartWithAnswers = () => {

@@ -4,6 +4,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '@/context/AuthContext';
 import { AppThemeProvider, useAppTheme } from '@/context/AppThemeContext';
 import RootNavigator from '@/navigation/RootNavigator';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import { installGlobalErrorHandler } from '@/utils/globalErrorHandler';
+
+installGlobalErrorHandler();
 
 function ThemedStatusBar() {
   const { theme } = useAppTheme();
@@ -12,13 +16,15 @@ function ThemedStatusBar() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AppThemeProvider>
-        <ThemedStatusBar />
-        <AuthProvider>
-          <RootNavigator />
-        </AuthProvider>
-      </AppThemeProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AppThemeProvider>
+          <ThemedStatusBar />
+          <AuthProvider>
+            <RootNavigator />
+          </AuthProvider>
+        </AppThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
