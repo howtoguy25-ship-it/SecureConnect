@@ -1996,7 +1996,7 @@ function renderMenuHtml(menu: SiteMenu | undefined, pages: SitePage[] | undefine
   if (customItems.length === 0 && !trackOrderEnabled) return '';
   const linkStyle = 'display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;';
   const trackLink = trackOrderEnabled
-    ? `<a href="#" onclick="document.getElementById('sitespark-menu-panel').style.display='none';siteSparkCart.toggleTrackPanel();return false;" style="${linkStyle}">📦 Track Your Order</a>`
+    ? `<a href="#" onclick="document.getElementById('sitespark-menu-panel').style.display='none';siteSparkCart.toggleTrackPanel();return false;" style="${linkStyle}">📦 Stay Updated</a>`
     : '';
   const customLinks = customItems
     .map(
