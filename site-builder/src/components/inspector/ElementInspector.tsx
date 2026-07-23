@@ -775,6 +775,10 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                   ['memory', 'Memory Match'],
                   ['trivia', 'Trivia Quiz'],
                   ['clicker', 'Clicker'],
+                  ['simon', 'Simon'],
+                  ['flappy', 'Flappy Bird'],
+                  ['tetris', 'Tetris'],
+                  ['targetrange3d', 'Target Range 3D'],
                 ] as const
               ).map(([kind, label]) => (
                 <Pressable
@@ -794,6 +798,12 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               <Text style={styles.helperText}>
                 Ready to play as-is, no setup needed — visitors on your published site can play against the computer, pass the
                 device to a friend, or find a real opponent online.
+              </Text>
+            )}
+
+            {element.kind === 'targetrange3d' && (
+              <Text style={styles.helperText}>
+                This preview is a simplified 2D stand-in — your published site renders a real interactive 3D shooting range.
               </Text>
             )}
 

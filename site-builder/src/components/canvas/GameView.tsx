@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { GameElement } from '@/types';
 
@@ -577,6 +577,604 @@ function TriviaGame({ questions, compact }: { questions: GameElement['questions'
   );
 }
 
+const SIMON_COLORS = ['#16A34A', '#DC2626', '#EAB308', '#2563EB'];
+
+// Classic "repeat the sequence" memory game -- distinct from MemoryGame's pairs-matching.
+// sequenceRef/playerIndexRef are refs (not state) because the setTimeout chain that plays
+// back the sequence needs the real current value at fire time, not whatever was captured in
+// the closure when the timer was scheduled -- state alone would go stale across the delays.
+function SimonGame({ compact }: { compact: boolean }) {
+  const sequenceRef = useRef<number[]>([]);
+  const playerIndexRef = useRef(0);
+  const [activePanel, setActivePanel] = useState<number | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'showing' | 'waiting' | 'gameover'>('idle');
+  const [level, setLevel] = useState(0);
+
+  const playSequence = () => {
+    setPhase('showing');
+    const seq = sequenceRef.current;
+    seq.forEach((panel, i) => {
+      setTimeout(() => {
+        setActivePanel(panel);
+        setTimeout(() => setActivePanel(null), 350);
+      }, i * 650);
+    });
+    setTimeout(() => {
+      playerIndexRef.current = 0;
+      setPhase('waiting');
+    }, seq.length * 650);
+  };
+
+  const start = () => {
+    sequenceRef.current = [Math.floor(Math.random() * 4)];
+    playerIndexRef.current = 0;
+    setLevel(1);
+    setTimeout(playSequence, 400);
+  };
+
+  const tapPanel = (i: number) => {
+    if (phase !== 'waiting') return;
+    setActivePanel(i);
+    setTimeout(() => setActivePanel(null), 200);
+    if (i === sequenceRef.current[playerIndexRef.current]) {
+      playerIndexRef.current += 1;
+      if (playerIndexRef.current === sequenceRef.current.length) {
+        sequenceRef.current = [...sequenceRef.current, Math.floor(Math.random() * 4)];
+        setLevel(sequenceRef.current.length);
+        setPhase('showing');
+        setTimeout(playSequence, 500);
+      }
+    } else {
+      setPhase('gameover');
+    }
+  };
+
+  const size = compact ? 96 : 132;
+  const half = size / 2 - 3;
+
+  return (
+    <View style={styles.centerFill}>
+      <Text style={[styles.statusText, { fontSize: compact ? 11 : 14 }]}>
+        {phase === 'idle' ? 'Tap Start' : phase === 'gameover' ? `Game over — Level ${level}` : `Level ${level}`}
+      </Text>
+      {(phase === 'showing' || phase === 'waiting') && (
+        <View style={{ width: size, height: size, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {SIMON_COLORS.map((color, i) => (
+            <Pressable
+              key={i}
+              onPress={() => tapPanel(i)}
+              style={{ width: half, height: half, backgroundColor: color, opacity: activePanel === i ? 1 : 0.4, borderRadius: 8 }}
+            />
+          ))}
+        </View>
+      )}
+      {(phase === 'idle' || phase === 'gameover') && (
+        <Pressable style={styles.smallResetBtn} onPress={start}>
+          <Text style={styles.smallResetBtnText}>{phase === 'gameover' ? 'Play Again' : 'Start'}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+const FLAPPY_GRAVITY = 0.8;
+const FLAPPY_FLAP = -8;
+const FLAPPY_PIPE_GAP = 90;
+const FLAPPY_PIPE_WIDTH = 30;
+const FLAPPY_BIRD_SIZE = 16;
+const FLAPPY_TICK_MS = 40;
+const FLAPPY_PIPE_SPEED = 3;
+const FLAPPY_PIPE_SPACING = 130;
+
+interface FlappyPipe {
+  x: number;
+  gapY: number;
+  passed: boolean;
+}
+
+// Real-time physics (gravity + flap impulse), not a turn-based game like the others -- runs
+// on a fixed-interval tick rather than requestAnimationFrame, matching how every other timed
+// bit of behavior in this file (Simon's playback, the match-mismatch delay in MemoryGame)
+// already uses setTimeout/setInterval. birdYRef/pipesRef/velocityRef hold the authoritative
+// per-tick physics state; the matching useState calls exist only to trigger a re-render.
+function FlappyBirdGame({ compact }: { compact: boolean }) {
+  const playW = compact ? 160 : 220;
+  const playH = compact ? 180 : 240;
+  const birdX = Math.round(playW * 0.25);
+
+  const birdYRef = useRef(playH / 2);
+  const velocityRef = useRef(0);
+  const pipesRef = useRef<FlappyPipe[]>([{ x: playW + 40, gapY: playH / 2, passed: false }]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [birdY, setBirdY] = useState(playH / 2);
+  const [pipes, setPipes] = useState<FlappyPipe[]>(pipesRef.current);
+  const [score, setScore] = useState(0);
+  const [phase, setPhase] = useState<'ready' | 'playing' | 'gameover'>('ready');
+
+  const stopLoop = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  const tick = () => {
+    velocityRef.current += FLAPPY_GRAVITY;
+    birdYRef.current += velocityRef.current;
+
+    let newPipes = pipesRef.current.map((p) => ({ ...p, x: p.x - FLAPPY_PIPE_SPEED }));
+    const last = newPipes[newPipes.length - 1];
+    if (!last || last.x < playW - FLAPPY_PIPE_SPACING) {
+      const margin = 40;
+      const gapY = margin + Math.random() * (playH - margin * 2);
+      newPipes = [...newPipes, { x: playW, gapY, passed: false }];
+    }
+    newPipes = newPipes.filter((p) => p.x > -FLAPPY_PIPE_WIDTH);
+
+    let scoreDelta = 0;
+    newPipes = newPipes.map((p) => {
+      if (!p.passed && p.x + FLAPPY_PIPE_WIDTH < birdX) {
+        scoreDelta += 1;
+        return { ...p, passed: true };
+      }
+      return p;
+    });
+    if (scoreDelta) setScore((s) => s + scoreDelta);
+
+    pipesRef.current = newPipes;
+    setPipes(newPipes);
+
+    let dead = birdYRef.current < 0 || birdYRef.current + FLAPPY_BIRD_SIZE > playH;
+    for (const p of newPipes) {
+      const birdLeft = birdX;
+      const birdRight = birdX + FLAPPY_BIRD_SIZE;
+      const pipeLeft = p.x;
+      const pipeRight = p.x + FLAPPY_PIPE_WIDTH;
+      if (birdRight > pipeLeft && birdLeft < pipeRight) {
+        const gapTop = p.gapY - FLAPPY_PIPE_GAP / 2;
+        const gapBottom = p.gapY + FLAPPY_PIPE_GAP / 2;
+        if (birdYRef.current < gapTop || birdYRef.current + FLAPPY_BIRD_SIZE > gapBottom) dead = true;
+      }
+    }
+
+    if (dead) {
+      stopLoop();
+      setPhase('gameover');
+      return;
+    }
+    setBirdY(birdYRef.current);
+  };
+
+  const start = () => {
+    birdYRef.current = playH / 2;
+    velocityRef.current = 0;
+    pipesRef.current = [{ x: playW + 40, gapY: playH / 2, passed: false }];
+    setPipes(pipesRef.current);
+    setBirdY(birdYRef.current);
+    setScore(0);
+    setPhase('playing');
+    stopLoop();
+    intervalRef.current = setInterval(tick, FLAPPY_TICK_MS);
+  };
+
+  const flap = () => {
+    if (phase === 'ready' || phase === 'gameover') {
+      start();
+      return;
+    }
+    velocityRef.current = FLAPPY_FLAP;
+  };
+
+  useEffect(() => stopLoop, []);
+
+  return (
+    <Pressable style={styles.centerFill} onPress={flap}>
+      <Text style={[styles.statusText, { fontSize: compact ? 11 : 14 }]}>
+        {phase === 'ready' ? 'Tap to start' : phase === 'gameover' ? `Game over — Score ${score}` : `Score: ${score}`}
+      </Text>
+      <View style={{ width: playW, height: playH, backgroundColor: '#BAE6FD', overflow: 'hidden', borderRadius: 8 }}>
+        <View
+          style={{
+            position: 'absolute',
+            left: birdX,
+            top: birdY,
+            width: FLAPPY_BIRD_SIZE,
+            height: FLAPPY_BIRD_SIZE,
+            backgroundColor: '#EAB308',
+            borderRadius: FLAPPY_BIRD_SIZE / 2,
+          }}
+        />
+        {pipes.map((p, i) => (
+          <React.Fragment key={i}>
+            <View
+              style={{
+                position: 'absolute',
+                left: p.x,
+                top: 0,
+                width: FLAPPY_PIPE_WIDTH,
+                height: Math.max(0, p.gapY - FLAPPY_PIPE_GAP / 2),
+                backgroundColor: '#16A34A',
+              }}
+            />
+            <View
+              style={{
+                position: 'absolute',
+                left: p.x,
+                top: p.gapY + FLAPPY_PIPE_GAP / 2,
+                width: FLAPPY_PIPE_WIDTH,
+                height: Math.max(0, playH - (p.gapY + FLAPPY_PIPE_GAP / 2)),
+                backgroundColor: '#16A34A',
+              }}
+            />
+          </React.Fragment>
+        ))}
+      </View>
+    </Pressable>
+  );
+}
+
+type TetrisPieceType = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
+
+interface TetrisPiece {
+  type: TetrisPieceType;
+  rotation: number;
+  x: number;
+  y: number;
+}
+
+const TETRIS_COLS = 8;
+const TETRIS_ROWS = 14;
+const TETRIS_BASE_TICK_MS = 700;
+
+const TETRIS_COLORS: Record<TetrisPieceType, string> = {
+  I: '#22D3EE',
+  O: '#FACC15',
+  T: '#A855F7',
+  S: '#22C55E',
+  Z: '#EF4444',
+  J: '#3B82F6',
+  L: '#F97316',
+};
+
+const TETRIS_SHAPES: Record<TetrisPieceType, number[][][]> = {
+  I: [
+    [[0, 1], [1, 1], [2, 1], [3, 1]],
+    [[2, 0], [2, 1], [2, 2], [2, 3]],
+    [[0, 2], [1, 2], [2, 2], [3, 2]],
+    [[1, 0], [1, 1], [1, 2], [1, 3]],
+  ],
+  O: [
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+  ],
+  T: [
+    [[1, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [1, 1], [2, 1], [1, 2]],
+    [[0, 1], [1, 1], [2, 1], [1, 2]],
+    [[1, 0], [0, 1], [1, 1], [1, 2]],
+  ],
+  S: [
+    [[1, 0], [2, 0], [0, 1], [1, 1]],
+    [[1, 0], [1, 1], [2, 1], [2, 2]],
+    [[1, 1], [2, 1], [0, 2], [1, 2]],
+    [[0, 0], [0, 1], [1, 1], [1, 2]],
+  ],
+  Z: [
+    [[0, 0], [1, 0], [1, 1], [2, 1]],
+    [[2, 0], [1, 1], [2, 1], [1, 2]],
+    [[0, 1], [1, 1], [1, 2], [2, 2]],
+    [[1, 0], [0, 1], [1, 1], [0, 2]],
+  ],
+  J: [
+    [[0, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [1, 2]],
+    [[0, 1], [1, 1], [2, 1], [2, 2]],
+    [[1, 0], [1, 1], [0, 2], [1, 2]],
+  ],
+  L: [
+    [[2, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [1, 1], [1, 2], [2, 2]],
+    [[0, 1], [1, 1], [2, 1], [0, 2]],
+    [[0, 0], [1, 0], [1, 1], [1, 2]],
+  ],
+};
+
+function tetrisRandomType(): TetrisPieceType {
+  const types: TetrisPieceType[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+  return types[Math.floor(Math.random() * types.length)];
+}
+
+function tetrisSpawnPiece(): TetrisPiece {
+  return { type: tetrisRandomType(), rotation: 0, x: Math.floor(TETRIS_COLS / 2) - 2, y: 0 };
+}
+
+function tetrisCells(piece: TetrisPiece): number[][] {
+  return TETRIS_SHAPES[piece.type][piece.rotation].map(([dx, dy]) => [piece.x + dx, piece.y + dy]);
+}
+
+function tetrisCollides(board: (TetrisPieceType | null)[][], piece: TetrisPiece): boolean {
+  return tetrisCells(piece).some(([x, y]) => {
+    if (x < 0 || x >= TETRIS_COLS || y >= TETRIS_ROWS) return true;
+    if (y < 0) return false;
+    return !!board[y][x];
+  });
+}
+
+function tetrisEmptyBoard(): (TetrisPieceType | null)[][] {
+  return Array.from({ length: TETRIS_ROWS }, () => Array(TETRIS_COLS).fill(null));
+}
+
+function tetrisLevelForLines(lines: number): number {
+  return Math.floor(lines / 10) + 1;
+}
+
+function TetrisGame({ compact }: { compact: boolean }) {
+  const cellSize = compact ? 14 : 18;
+  const playW = cellSize * TETRIS_COLS;
+  const playH = cellSize * TETRIS_ROWS;
+
+  const boardRef = useRef<(TetrisPieceType | null)[][]>(tetrisEmptyBoard());
+  const pieceRef = useRef<TetrisPiece>(tetrisSpawnPiece());
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linesRef = useRef(0);
+
+  const [displayBoard, setDisplayBoard] = useState<(TetrisPieceType | null)[][]>(boardRef.current);
+  const [piece, setPiece] = useState<TetrisPiece>(pieceRef.current);
+  const [score, setScore] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [phase, setPhase] = useState<'ready' | 'playing' | 'gameover'>('ready');
+
+  const stopLoop = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  const lockAndAdvance = (): boolean => {
+    const board = boardRef.current;
+    for (const [x, y] of tetrisCells(pieceRef.current)) {
+      if (y >= 0 && y < TETRIS_ROWS && x >= 0 && x < TETRIS_COLS) board[y][x] = pieceRef.current.type;
+    }
+    let cleared = 0;
+    const kept = board.filter((row) => {
+      const full = row.every((cell) => cell !== null);
+      if (full) cleared += 1;
+      return !full;
+    });
+    while (kept.length < TETRIS_ROWS) kept.unshift(Array(TETRIS_COLS).fill(null));
+    boardRef.current = kept;
+    if (cleared > 0) {
+      linesRef.current += cleared;
+      const points = [0, 100, 300, 500, 800][cleared] * tetrisLevelForLines(linesRef.current - cleared);
+      setScore((s) => s + points);
+      setLevel(tetrisLevelForLines(linesRef.current));
+    }
+    const next = tetrisSpawnPiece();
+    pieceRef.current = next;
+    setDisplayBoard(boardRef.current.map((row) => [...row]));
+    setPiece(next);
+    if (tetrisCollides(boardRef.current, next)) {
+      setPhase('gameover');
+      stopLoop();
+      return true;
+    }
+    return false;
+  };
+
+  const scheduleNext = () => {
+    stopLoop();
+    const delay = Math.max(150, TETRIS_BASE_TICK_MS - (tetrisLevelForLines(linesRef.current) - 1) * 60);
+    timeoutRef.current = setTimeout(tick, delay);
+  };
+
+  const tick = () => {
+    const moved = { ...pieceRef.current, y: pieceRef.current.y + 1 };
+    let gameOver = false;
+    if (tetrisCollides(boardRef.current, moved)) {
+      gameOver = lockAndAdvance();
+    } else {
+      pieceRef.current = moved;
+      setPiece(moved);
+    }
+    if (!gameOver) scheduleNext();
+  };
+
+  const start = () => {
+    boardRef.current = tetrisEmptyBoard();
+    linesRef.current = 0;
+    const first = tetrisSpawnPiece();
+    pieceRef.current = first;
+    setDisplayBoard(boardRef.current.map((row) => [...row]));
+    setPiece(first);
+    setScore(0);
+    setLevel(1);
+    setPhase('playing');
+    scheduleNext();
+  };
+
+  const move = (dx: number) => {
+    if (phase !== 'playing') return;
+    const moved = { ...pieceRef.current, x: pieceRef.current.x + dx };
+    if (!tetrisCollides(boardRef.current, moved)) {
+      pieceRef.current = moved;
+      setPiece(moved);
+    }
+  };
+
+  const rotate = () => {
+    if (phase !== 'playing') return;
+    const base = { ...pieceRef.current, rotation: (pieceRef.current.rotation + 1) % 4 };
+    for (const kick of [0, -1, 1, -2, 2]) {
+      const kicked = { ...base, x: base.x + kick };
+      if (!tetrisCollides(boardRef.current, kicked)) {
+        pieceRef.current = kicked;
+        setPiece(kicked);
+        return;
+      }
+    }
+  };
+
+  const softDrop = () => {
+    if (phase !== 'playing') return;
+    tick();
+  };
+
+  useEffect(() => stopLoop, []);
+
+  const mergedGrid = useMemo(() => {
+    const grid = displayBoard.map((row) => [...row]);
+    if (phase === 'playing') {
+      for (const [x, y] of tetrisCells(piece)) {
+        if (y >= 0 && y < TETRIS_ROWS && x >= 0 && x < TETRIS_COLS) grid[y][x] = piece.type;
+      }
+    }
+    return grid;
+  }, [displayBoard, piece, phase]);
+
+  return (
+    <View style={styles.centerFill}>
+      <Text style={[styles.statusText, { fontSize: compact ? 11 : 13 }]}>
+        {phase === 'ready' ? 'Tap Start to play' : phase === 'gameover' ? `Game over — Score ${score}` : `Score ${score} · Lvl ${level}`}
+      </Text>
+      <View style={{ width: playW, height: playH, backgroundColor: '#0F172A', borderRadius: 6, overflow: 'hidden' }}>
+        {mergedGrid.map((row, ry) =>
+          row.map((cell, rx) => (
+            <View
+              key={`${ry}-${rx}`}
+              style={{
+                position: 'absolute',
+                left: rx * cellSize,
+                top: ry * cellSize,
+                width: cellSize - 1,
+                height: cellSize - 1,
+                backgroundColor: cell ? TETRIS_COLORS[cell] : '#1E293B',
+                borderRadius: 2,
+              }}
+            />
+          ))
+        )}
+      </View>
+      {phase === 'playing' ? (
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+          <Pressable style={styles.tetrisBtn} onPress={() => move(-1)}>
+            <Text style={styles.tetrisBtnText}>⬅</Text>
+          </Pressable>
+          <Pressable style={styles.tetrisBtn} onPress={rotate}>
+            <Text style={styles.tetrisBtnText}>⟳</Text>
+          </Pressable>
+          <Pressable style={styles.tetrisBtn} onPress={softDrop}>
+            <Text style={styles.tetrisBtnText}>⬇</Text>
+          </Pressable>
+          <Pressable style={styles.tetrisBtn} onPress={() => move(1)}>
+            <Text style={styles.tetrisBtnText}>➡</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable style={styles.smallResetBtn} onPress={start}>
+          <Text style={styles.smallResetBtnText}>{phase === 'gameover' ? 'Play Again' : 'Start'}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+const TARGETRANGE_ROUND_SECONDS = 20;
+const TARGETRANGE_DOT_SIZE = 34;
+
+// The in-app editor has no real WebGL/native-GL pipeline (that would need expo-gl, a new
+// native module requiring a fresh EAS build and carrying real App-Store-review risk), so this
+// is a simplified 2D tap-the-dot stand-in just for previewing inside the editor -- the real
+// Three.js 3D shooting range only renders once the site is published to a real browser.
+function TargetRange3DPreview({ compact }: { compact: boolean }) {
+  const playW = compact ? 160 : 220;
+  const playH = compact ? 160 : 200;
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [targetPos, setTargetPos] = useState({ x: playW / 2 - TARGETRANGE_DOT_SIZE / 2, y: playH / 2 - TARGETRANGE_DOT_SIZE / 2 });
+  const [score, setScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(TARGETRANGE_ROUND_SECONDS);
+  const [phase, setPhase] = useState<'ready' | 'playing' | 'gameover'>('ready');
+
+  const stopLoop = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  const randomizeTarget = () => {
+    setTargetPos({
+      x: Math.random() * (playW - TARGETRANGE_DOT_SIZE),
+      y: Math.random() * (playH - TARGETRANGE_DOT_SIZE),
+    });
+  };
+
+  const start = () => {
+    setScore(0);
+    setTimeLeft(TARGETRANGE_ROUND_SECONDS);
+    setPhase('playing');
+    randomizeTarget();
+    stopLoop();
+    intervalRef.current = setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          stopLoop();
+          setPhase('gameover');
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+  };
+
+  const hit = () => {
+    if (phase !== 'playing') return;
+    setScore((s) => s + 1);
+    randomizeTarget();
+  };
+
+  useEffect(() => stopLoop, []);
+
+  return (
+    <View style={styles.centerFill}>
+      <Text style={[styles.statusText, { fontSize: compact ? 11 : 13 }]}>
+        {phase === 'ready' ? 'Tap Start' : phase === 'gameover' ? `Time's up — Score ${score}` : `Score ${score} · ${timeLeft}s`}
+      </Text>
+      <View style={{ width: playW, height: playH, backgroundColor: '#1E293B', borderRadius: 8, overflow: 'hidden' }}>
+        {phase === 'playing' && (
+          <Pressable
+            onPress={hit}
+            style={{
+              position: 'absolute',
+              left: targetPos.x,
+              top: targetPos.y,
+              width: TARGETRANGE_DOT_SIZE,
+              height: TARGETRANGE_DOT_SIZE,
+              borderRadius: TARGETRANGE_DOT_SIZE / 2,
+              backgroundColor: '#EF4444',
+              borderWidth: 2,
+              borderColor: '#FCA5A5',
+            }}
+          />
+        )}
+      </View>
+      {phase !== 'playing' && (
+        <Pressable style={styles.smallResetBtn} onPress={start}>
+          <Text style={styles.smallResetBtnText}>{phase === 'gameover' ? 'Play Again' : 'Start'}</Text>
+        </Pressable>
+      )}
+      <Text style={{ fontSize: 9, color: '#94A3B8', textAlign: 'center', marginTop: 4, paddingHorizontal: 6 }}>
+        Simplified preview — the real 3D shooting range renders on your published site.
+      </Text>
+    </View>
+  );
+}
+
 const TWO_PLAYER_KINDS = new Set(['tictactoe', 'connect4', 'rps']);
 
 export default function GameView({ element, width, height }: { element: GameElement; width: number; height: number }) {
@@ -608,6 +1206,10 @@ export default function GameView({ element, width, height }: { element: GameElem
         {element.kind === 'clicker' && <ClickerGame label={element.clickerLabel} target={element.clickerTarget} compact={compact} />}
         {element.kind === 'memory' && <MemoryGame symbols={element.memorySymbols} compact={compact} />}
         {element.kind === 'trivia' && <TriviaGame questions={element.questions} compact={compact} />}
+        {element.kind === 'simon' && <SimonGame compact={compact} />}
+        {element.kind === 'flappy' && <FlappyBirdGame compact={compact} />}
+        {element.kind === 'tetris' && <TetrisGame compact={compact} />}
+        {element.kind === 'targetrange3d' && <TargetRange3DPreview compact={compact} />}
       </View>
     </View>
   );
@@ -633,4 +1235,6 @@ const styles = StyleSheet.create({
   smallResetBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
   triviaQuestion: { fontWeight: '700', color: '#0F172A', textAlign: 'center', marginBottom: 8, paddingHorizontal: 8 },
   triviaOption: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 6, backgroundColor: '#F8FAFC' },
+  tetrisBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
+  tetrisBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

@@ -141,7 +141,7 @@ export interface CollectionElement extends BaseElement {
   productIds: string[];
 }
 
-export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps';
+export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d';
 
 export interface TriviaQuestion {
   question: string;

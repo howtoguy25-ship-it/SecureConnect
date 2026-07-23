@@ -708,6 +708,416 @@ function triviaScript(bodyId: string, questions: GameElement['questions']): stri
 })();</script>`;
 }
 
+function simonScript(bodyId: string): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var COLORS = ['#16A34A','#DC2626','#EAB308','#2563EB'];
+  var sequence = [];
+  var playerIndex = 0;
+  var activePanel = null;
+  var phase = 'idle';
+  var level = 0;
+
+  function playSequence(){
+    phase = 'showing'; render();
+    var seq = sequence;
+    seq.forEach(function(panel, i){
+      setTimeout(function(){
+        activePanel = panel; render();
+        setTimeout(function(){ activePanel = null; render(); }, 350);
+      }, i * 650);
+    });
+    setTimeout(function(){ playerIndex = 0; phase = 'waiting'; render(); }, seq.length * 650);
+  }
+
+  function start(){
+    sequence = [Math.floor(Math.random()*4)];
+    playerIndex = 0; level = 1;
+    setTimeout(playSequence, 400);
+  }
+
+  function tapPanel(i){
+    if (phase !== 'waiting') return;
+    activePanel = i; render();
+    setTimeout(function(){ activePanel = null; render(); }, 200);
+    if (i === sequence[playerIndex]) {
+      playerIndex += 1;
+      if (playerIndex === sequence.length) {
+        sequence = sequence.concat([Math.floor(Math.random()*4)]);
+        level = sequence.length;
+        phase = 'showing';
+        setTimeout(playSequence, 500);
+      }
+    } else {
+      phase = 'gameover';
+      render();
+    }
+  }
+
+  function render(){
+    var html = '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px;">' +
+      (phase==='idle' ? 'Tap Start' : phase==='gameover' ? 'Game over — Level '+level : 'Level '+level) + '</div>';
+    if (phase==='showing' || phase==='waiting') {
+      html += '<div style="width:132px;height:132px;display:flex;flex-wrap:wrap;gap:6px;">';
+      COLORS.forEach(function(color, i){
+        html += '<div data-panel="'+i+'" style="width:63px;height:63px;background:'+color+';opacity:'+(activePanel===i?1:0.4)+';border-radius:8px;cursor:pointer;"></div>';
+      });
+      html += '</div>';
+    }
+    if (phase==='idle' || phase==='gameover') {
+      html += '<button data-start style="margin-top:10px;background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">'+(phase==='gameover'?'Play Again':'Start')+'</button>';
+    }
+    root.innerHTML = html;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-panel]'), function(panelEl){
+      panelEl.addEventListener('click', function(){ tapPanel(parseInt(panelEl.getAttribute('data-panel'),10)); });
+    });
+    var startBtn = root.querySelector('[data-start]');
+    if (startBtn) startBtn.addEventListener('click', start);
+  }
+  render();
+})();</script>`;
+}
+
+function flappyScript(bodyId: string): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var GRAVITY = 0.8, FLAP = -8, PIPE_GAP = 90, PIPE_WIDTH = 30, BIRD_SIZE = 16, TICK_MS = 40, PIPE_SPEED = 3, PIPE_SPACING = 130;
+  var playW = root.clientWidth || 220, playH = 200;
+  var birdX = Math.round(playW * 0.25);
+  var birdY = playH / 2, velocity = 0, pipes = [{ x: playW + 40, gapY: playH / 2, passed: false }];
+  var score = 0, phase = 'ready', timer = null;
+
+  function stopLoop(){ if (timer) { clearInterval(timer); timer = null; } }
+
+  function tick(){
+    velocity += GRAVITY;
+    birdY += velocity;
+
+    pipes = pipes.map(function(p){ return { x: p.x - PIPE_SPEED, gapY: p.gapY, passed: p.passed }; });
+    var last = pipes[pipes.length - 1];
+    if (!last || last.x < playW - PIPE_SPACING) {
+      var margin = 40;
+      var gapY = margin + Math.random() * (playH - margin * 2);
+      pipes.push({ x: playW, gapY: gapY, passed: false });
+    }
+    pipes = pipes.filter(function(p){ return p.x > -PIPE_WIDTH; });
+
+    pipes.forEach(function(p){
+      if (!p.passed && p.x + PIPE_WIDTH < birdX) { score += 1; p.passed = true; }
+    });
+
+    var dead = birdY < 0 || birdY + BIRD_SIZE > playH;
+    pipes.forEach(function(p){
+      var birdLeft = birdX, birdRight = birdX + BIRD_SIZE, pipeLeft = p.x, pipeRight = p.x + PIPE_WIDTH;
+      if (birdRight > pipeLeft && birdLeft < pipeRight) {
+        var gapTop = p.gapY - PIPE_GAP / 2, gapBottom = p.gapY + PIPE_GAP / 2;
+        if (birdY < gapTop || birdY + BIRD_SIZE > gapBottom) dead = true;
+      }
+    });
+
+    if (dead) { stopLoop(); phase = 'gameover'; render(); return; }
+    render();
+  }
+
+  function start(){
+    birdY = playH / 2; velocity = 0;
+    pipes = [{ x: playW + 40, gapY: playH / 2, passed: false }];
+    score = 0; phase = 'playing';
+    stopLoop();
+    timer = setInterval(tick, TICK_MS);
+    render();
+  }
+
+  function flap(){
+    if (phase === 'ready' || phase === 'gameover') { start(); return; }
+    velocity = FLAP;
+  }
+
+  function render(){
+    var statusText = phase==='ready' ? 'Tap to start' : phase==='gameover' ? 'Game over — Score '+score : 'Score: '+score;
+    var html = '<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:6px;text-align:center;">'+statusText+'</div>';
+    html += '<div style="position:relative;width:'+playW+'px;height:'+playH+'px;background:#BAE6FD;overflow:hidden;border-radius:8px;">';
+    html += '<div style="position:absolute;left:'+birdX+'px;top:'+birdY+'px;width:'+BIRD_SIZE+'px;height:'+BIRD_SIZE+'px;background:#EAB308;border-radius:'+(BIRD_SIZE/2)+'px;"></div>';
+    pipes.forEach(function(p){
+      var topH = Math.max(0, p.gapY - PIPE_GAP/2);
+      var botH = Math.max(0, playH - (p.gapY + PIPE_GAP/2));
+      html += '<div style="position:absolute;left:'+p.x+'px;top:0;width:'+PIPE_WIDTH+'px;height:'+topH+'px;background:#16A34A;"></div>';
+      html += '<div style="position:absolute;left:'+p.x+'px;top:'+(p.gapY+PIPE_GAP/2)+'px;width:'+PIPE_WIDTH+'px;height:'+botH+'px;background:#16A34A;"></div>';
+    });
+    html += '</div>';
+    root.innerHTML = html;
+  }
+  root.style.cursor = 'pointer';
+  root.addEventListener('click', flap);
+  render();
+})();</script>`;
+}
+
+function tetrisScript(bodyId: string): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var COLS = 8, ROWS = 14, BASE_TICK_MS = 700;
+  var cellSize = (root.clientWidth && root.clientWidth < 220) ? 14 : 18;
+  var playW = cellSize * COLS, playH = cellSize * ROWS;
+  var COLORS = { I:'#22D3EE', O:'#FACC15', T:'#A855F7', S:'#22C55E', Z:'#EF4444', J:'#3B82F6', L:'#F97316' };
+  var SHAPES = {
+    I: [[[0,1],[1,1],[2,1],[3,1]], [[2,0],[2,1],[2,2],[2,3]], [[0,2],[1,2],[2,2],[3,2]], [[1,0],[1,1],[1,2],[1,3]]],
+    O: [[[1,0],[2,0],[1,1],[2,1]], [[1,0],[2,0],[1,1],[2,1]], [[1,0],[2,0],[1,1],[2,1]], [[1,0],[2,0],[1,1],[2,1]]],
+    T: [[[1,0],[0,1],[1,1],[2,1]], [[1,0],[1,1],[2,1],[1,2]], [[0,1],[1,1],[2,1],[1,2]], [[1,0],[0,1],[1,1],[1,2]]],
+    S: [[[1,0],[2,0],[0,1],[1,1]], [[1,0],[1,1],[2,1],[2,2]], [[1,1],[2,1],[0,2],[1,2]], [[0,0],[0,1],[1,1],[1,2]]],
+    Z: [[[0,0],[1,0],[1,1],[2,1]], [[2,0],[1,1],[2,1],[1,2]], [[0,1],[1,1],[1,2],[2,2]], [[1,0],[0,1],[1,1],[0,2]]],
+    J: [[[0,0],[0,1],[1,1],[2,1]], [[1,0],[2,0],[1,1],[1,2]], [[0,1],[1,1],[2,1],[2,2]], [[1,0],[1,1],[0,2],[1,2]]],
+    L: [[[2,0],[0,1],[1,1],[2,1]], [[1,0],[1,1],[1,2],[2,2]], [[0,1],[1,1],[2,1],[0,2]], [[0,0],[1,0],[1,1],[1,2]]]
+  };
+  var TYPES = ['I','O','T','S','Z','J','L'];
+
+  function emptyBoard(){ var b=[]; for (var r=0;r<ROWS;r++){ b.push(new Array(COLS).fill(null)); } return b; }
+  function randomType(){ return TYPES[Math.floor(Math.random()*TYPES.length)]; }
+  function spawnPiece(){ return { type: randomType(), rotation: 0, x: Math.floor(COLS/2)-2, y: 0 }; }
+  function cellsFor(piece){ return SHAPES[piece.type][piece.rotation].map(function(d){ return [piece.x+d[0], piece.y+d[1]]; }); }
+  function collides(board, piece){
+    return cellsFor(piece).some(function(c){
+      var x=c[0], y=c[1];
+      if (x<0 || x>=COLS || y>=ROWS) return true;
+      if (y<0) return false;
+      return !!board[y][x];
+    });
+  }
+  function levelForLines(lines){ return Math.floor(lines/10)+1; }
+
+  var board = emptyBoard();
+  var piece = spawnPiece();
+  var lines = 0, score = 0, level = 1, phase = 'ready';
+  var timer = null;
+
+  function stopLoop(){ if (timer) { clearTimeout(timer); timer = null; } }
+
+  function lockAndAdvance(){
+    cellsFor(piece).forEach(function(c){
+      var x=c[0], y=c[1];
+      if (y>=0 && y<ROWS && x>=0 && x<COLS) board[y][x] = piece.type;
+    });
+    var cleared = 0;
+    var kept = board.filter(function(row){
+      var full = row.every(function(cell){ return cell !== null; });
+      if (full) cleared += 1;
+      return !full;
+    });
+    while (kept.length < ROWS) kept.unshift(new Array(COLS).fill(null));
+    board = kept;
+    if (cleared > 0) {
+      lines += cleared;
+      var points = [0,100,300,500,800][cleared] * levelForLines(lines - cleared);
+      score += points;
+      level = levelForLines(lines);
+    }
+    piece = spawnPiece();
+    if (collides(board, piece)) { phase = 'gameover'; stopLoop(); render(); return true; }
+    return false;
+  }
+
+  function scheduleNext(){
+    stopLoop();
+    var delay = Math.max(150, BASE_TICK_MS - (levelForLines(lines)-1)*60);
+    timer = setTimeout(tick, delay);
+  }
+
+  function tick(){
+    var moved = { type: piece.type, rotation: piece.rotation, x: piece.x, y: piece.y+1 };
+    var gameOver = false;
+    if (collides(board, moved)) { gameOver = lockAndAdvance(); }
+    else { piece = moved; }
+    render();
+    if (!gameOver) scheduleNext();
+  }
+
+  function start(){
+    board = emptyBoard(); lines = 0; score = 0; level = 1;
+    piece = spawnPiece();
+    phase = 'playing';
+    render();
+    scheduleNext();
+  }
+
+  function move(dx){
+    if (phase !== 'playing') return;
+    var moved = { type: piece.type, rotation: piece.rotation, x: piece.x+dx, y: piece.y };
+    if (!collides(board, moved)) { piece = moved; render(); }
+  }
+
+  function rotate(){
+    if (phase !== 'playing') return;
+    var base = { type: piece.type, rotation: (piece.rotation+1)%4, x: piece.x, y: piece.y };
+    var kicks = [0,-1,1,-2,2];
+    for (var i=0;i<kicks.length;i++){
+      var kicked = { type: base.type, rotation: base.rotation, x: base.x+kicks[i], y: base.y };
+      if (!collides(board, kicked)) { piece = kicked; render(); return; }
+    }
+  }
+
+  function softDrop(){ if (phase === 'playing') tick(); }
+
+  function render(){
+    var grid = board.map(function(row){ return row.slice(); });
+    if (phase === 'playing') {
+      cellsFor(piece).forEach(function(c){
+        var x=c[0], y=c[1];
+        if (y>=0 && y<ROWS && x>=0 && x<COLS) grid[y][x] = piece.type;
+      });
+    }
+    var statusText = phase==='ready' ? 'Tap Start to play' : phase==='gameover' ? 'Game over — Score '+score : 'Score '+score+' \\u00b7 Lvl '+level;
+    var html = '<div style="font-weight:700;font-size:12px;color:#334155;margin-bottom:6px;text-align:center;">'+statusText+'</div>';
+    html += '<div style="position:relative;width:'+playW+'px;height:'+playH+'px;background:#0F172A;border-radius:6px;overflow:hidden;">';
+    for (var ry=0; ry<ROWS; ry++){
+      for (var rx=0; rx<COLS; rx++){
+        var cell = grid[ry][rx];
+        html += '<div style="position:absolute;left:'+(rx*cellSize)+'px;top:'+(ry*cellSize)+'px;width:'+(cellSize-1)+'px;height:'+(cellSize-1)+'px;background:'+(cell?COLORS[cell]:'#1E293B')+';border-radius:2px;"></div>';
+      }
+    }
+    html += '</div>';
+    if (phase === 'playing') {
+      html += '<div style="display:flex;gap:6px;margin-top:6px;justify-content:center;">';
+      html += '<button data-left style="width:34px;height:34px;border-radius:8px;background:#1E293B;color:#fff;border:none;font-size:15px;font-weight:700;cursor:pointer;">\\u2b05</button>';
+      html += '<button data-rotate style="width:34px;height:34px;border-radius:8px;background:#1E293B;color:#fff;border:none;font-size:15px;font-weight:700;cursor:pointer;">\\u27f3</button>';
+      html += '<button data-down style="width:34px;height:34px;border-radius:8px;background:#1E293B;color:#fff;border:none;font-size:15px;font-weight:700;cursor:pointer;">\\u2b07</button>';
+      html += '<button data-right style="width:34px;height:34px;border-radius:8px;background:#1E293B;color:#fff;border:none;font-size:15px;font-weight:700;cursor:pointer;">\\u27a1</button>';
+      html += '</div>';
+    } else {
+      html += '<div style="text-align:center;margin-top:8px;"><button data-start style="background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;">'+(phase==='gameover'?'Play Again':'Start')+'</button></div>';
+    }
+    root.innerHTML = html;
+    var leftBtn = root.querySelector('[data-left]'); if (leftBtn) leftBtn.addEventListener('click', function(){ move(-1); });
+    var rightBtn = root.querySelector('[data-right]'); if (rightBtn) rightBtn.addEventListener('click', function(){ move(1); });
+    var rotateBtn = root.querySelector('[data-rotate]'); if (rotateBtn) rotateBtn.addEventListener('click', rotate);
+    var downBtn = root.querySelector('[data-down]'); if (downBtn) downBtn.addEventListener('click', softDrop);
+    var startBtn = root.querySelector('[data-start]'); if (startBtn) startBtn.addEventListener('click', start);
+  }
+  render();
+  })();</script>`;
+}
+
+// Real WebGL (Three.js, loaded via CDN in renderProjectHtml) -- published-site only. The
+// in-app editor has no native GL pipeline, so this game gets a simplified 2D fallback there
+// instead (see TargetRange3DPreview in GameView.tsx).
+function targetRange3DScript(bodyId: string): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var playW = root.clientWidth || 260, playH = 240;
+  var ROUND_SECONDS = 25;
+  var score = 0, timeLeft = ROUND_SECONDS, phase = 'ready';
+  var timer = null;
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'font-weight:700;font-size:12px;color:#334155;margin-bottom:6px;text-align:center;';
+  var canvasWrap = document.createElement('div');
+  canvasWrap.style.cssText = 'position:relative;width:'+playW+'px;height:'+playH+'px;border-radius:8px;overflow:hidden;background:#0F172A;';
+  var startWrap = document.createElement('div');
+  startWrap.style.cssText = 'text-align:center;margin-top:8px;';
+  var startBtn = document.createElement('button');
+  startBtn.textContent = 'Start';
+  startBtn.style.cssText = 'background:#111827;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:12px;cursor:pointer;';
+  startWrap.appendChild(startBtn);
+
+  root.innerHTML = '';
+  root.appendChild(overlay);
+  root.appendChild(canvasWrap);
+  root.appendChild(startWrap);
+
+  function setStatus(){
+    overlay.textContent = phase==='ready' ? 'Tap Start to shoot' : phase==='gameover' ? ("Time's up \\u2014 Score "+score) : ('Score '+score+' \\u00b7 '+timeLeft+'s');
+    startBtn.textContent = phase==='gameover' ? 'Play Again' : 'Start';
+    startWrap.style.display = phase==='playing' ? 'none' : 'block';
+  }
+
+  if (typeof THREE === 'undefined') {
+    overlay.textContent = '3D unavailable in this browser';
+    return;
+  }
+
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(60, playW / playH, 0.1, 100);
+  camera.position.z = 6;
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(playW, playH);
+  renderer.setClearColor(0x0F172A, 1);
+  canvasWrap.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  var dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(3, 4, 5);
+  scene.add(dirLight);
+
+  var targets = [];
+  var raycaster = new THREE.Raycaster();
+  var colors = [0xEF4444, 0xF97316, 0xEAB308, 0x22C55E, 0x3B82F6, 0xA855F7];
+
+  function spawnTarget(){
+    var geo = new THREE.SphereGeometry(0.45, 20, 20);
+    var mat = new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random()*colors.length)] });
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set((Math.random()-0.5)*5, (Math.random()-0.5)*2.6, -1 - Math.random()*5);
+    mesh.userData.bobOffset = Math.random()*Math.PI*2;
+    mesh.userData.baseY = mesh.position.y;
+    scene.add(mesh);
+    targets.push(mesh);
+  }
+
+  for (var i=0; i<4; i++) spawnTarget();
+
+  function onShoot(clientX, clientY){
+    if (phase !== 'playing') return;
+    var rect = renderer.domElement.getBoundingClientRect();
+    var ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    var ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+    var hits = raycaster.intersectObjects(targets);
+    if (hits.length > 0) {
+      var hitMesh = hits[0].object;
+      scene.remove(hitMesh);
+      hitMesh.geometry.dispose();
+      hitMesh.material.dispose();
+      targets = targets.filter(function(t){ return t !== hitMesh; });
+      score += 1;
+      setStatus();
+      spawnTarget();
+    }
+  }
+
+  renderer.domElement.style.cursor = 'crosshair';
+  renderer.domElement.addEventListener('click', function(e){ onShoot(e.clientX, e.clientY); });
+
+  function animate(){
+    var t = Date.now() / 1000;
+    targets.forEach(function(mesh){
+      mesh.position.y = mesh.userData.baseY + Math.sin(t*1.5 + mesh.userData.bobOffset) * 0.3;
+      mesh.rotation.y += 0.01;
+    });
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  function stopTimer(){ if (timer) { clearInterval(timer); timer = null; } }
+
+  function start(){
+    score = 0; timeLeft = ROUND_SECONDS; phase = 'playing';
+    setStatus();
+    stopTimer();
+    timer = setInterval(function(){
+      timeLeft -= 1;
+      if (timeLeft <= 0) {
+        timeLeft = 0; phase = 'gameover'; stopTimer(); setStatus();
+        return;
+      }
+      setStatus();
+    }, 1000);
+  }
+
+  startBtn.addEventListener('click', start);
+  setStatus();
+  })();</script>`;
+}
+
 function renderGameHtml(el: GameElement, base: string, slug: string): string {
   const bodyId = `game-${el.id}-body`;
   // Scopes real-time matchmaking to this exact game element on this exact published site --
@@ -735,6 +1145,18 @@ function renderGameHtml(el: GameElement, base: string, slug: string): string {
       break;
     case 'trivia':
       gameScript = triviaScript(bodyId, el.questions);
+      break;
+    case 'simon':
+      gameScript = simonScript(bodyId);
+      break;
+    case 'flappy':
+      gameScript = flappyScript(bodyId);
+      break;
+    case 'tetris':
+      gameScript = tetrisScript(bodyId);
+      break;
+    case 'targetrange3d':
+      gameScript = targetRange3DScript(bodyId);
       break;
   }
   return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:8px;display:flex;flex-direction:column;box-sizing:border-box;">
@@ -1457,6 +1879,7 @@ export function renderProjectHtml(
   const hasMultiplayerGame = project.elements.some(
     (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
   );
+  const hasTargetRange3D = project.elements.some((el) => el.type === 'game' && el.kind === 'targetrange3d');
   const usesMdi = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'MaterialCommunityIcons');
   const usesFa = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'FontAwesome5');
   const usesIon = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'Ionicons');
@@ -1523,6 +1946,7 @@ export function renderProjectHtml(
 </head>
 <body>
   ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
+  ${hasTargetRange3D ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
   ${renderMenuHtml(project.menu, project.pages)}
   ${navHtml}
   ${renderAnnouncementBars(project)}
