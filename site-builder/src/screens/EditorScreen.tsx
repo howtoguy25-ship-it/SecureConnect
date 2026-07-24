@@ -14,6 +14,7 @@ import LayersPanel from '@/components/elements/LayersPanel';
 import PageTabsBar, { PageTabsBarHandle } from '@/components/editor/PageTabsBar';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
+import ProductCatalogPickerModal from '@/components/editor/ProductCatalogPickerModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct } from '@/types';
@@ -77,6 +78,7 @@ function EditorInner({ navigation }: Props) {
     else setBgEditorOpen(true);
   };
   const [menuPoliciesOpen, setMenuPoliciesOpen] = useState(false);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
   // same touch underneath an active element drag, which is what made moving or resizing a
@@ -264,9 +266,35 @@ function EditorInner({ navigation }: Props) {
   // comment) -- inserting one here creates that catalog doc (same shape ProductEditScreen
   // starts a brand new product with) and then sends the seller straight into
   // ProductEditScreen to fill in name/price/photos, instead of leaving a nameless placeholder
-  // sitting on the canvas. Browsing/reusing an *existing* catalog product on insert (Phase 3)
-  // still needs its own picker UI -- this covers "create new" for now.
-  const addProduct = async () => {
+  // sitting on the canvas.
+  //
+  // Both paths place the new element stacked below whatever's already on the page (extending
+  // the canvas if needed) rather than dead-center, which is where every other addX function
+  // still drops things -- centering was fine when a product carried no real content yet, but
+  // it means a second product (or any element placed after one) lands directly on top of what
+  // came before. Products are the one element type a user is likely to insert several of in a
+  // row (browsing the catalog), so this is where the "messy/overlapping insert" fix lives.
+  const stackedProductPosition = (width: number, height: number) => {
+    const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
+    const gap = activeElements.length > 0 ? 24 : 32;
+    const y = lowestBottom + gap;
+    const requiredHeight = y + height + 40;
+    if (requiredHeight > project.canvasSize.height) {
+      updateProject({ canvasSize: { ...project.canvasSize, height: requiredHeight } });
+    }
+    return { x: (project.canvasSize.width - width) / 2, y };
+  };
+
+  const insertExistingProduct = (product: CatalogProduct) => {
+    const { x, y } = stackedProductPosition(180, 220);
+    const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
+    addElement(el);
+    select(el.id);
+    setPanel(null);
+    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  const createNewProductAndInsert = async () => {
     if (!user) return;
     const now = Date.now();
     const product: CatalogProduct = {
@@ -289,16 +317,8 @@ function EditorInner({ navigation }: Props) {
       updatedAt: now,
     };
     await productsStore.save(user.uid, product);
-    const el: ProductElement = {
-      id: generateId('el'),
-      type: 'product',
-      productId: product.id,
-      x: canvasCenterX - 90,
-      y: canvasCenterY - 100,
-      width: 180,
-      height: 220,
-      zIndex: 5,
-    };
+    const { x, y } = stackedProductPosition(180, 220);
+    const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
     addElement(el);
     select(el.id);
     setPanel(null);
@@ -630,7 +650,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
             {project.pageType === 'website' && (
               <>
-                <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} highlightColor="#16A34A" />
+                <TabButton icon="pricetag-outline" label="Product" active={false} onPress={() => setProductPickerOpen(true)} highlightColor="#16A34A" />
                 <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
               </>
             )}
@@ -652,6 +672,16 @@ function EditorInner({ navigation }: Props) {
         pages={pages}
         updateProject={updateProject}
       />
+
+      {user && (
+        <ProductCatalogPickerModal
+          visible={productPickerOpen}
+          onClose={() => setProductPickerOpen(false)}
+          uid={user.uid}
+          onInsert={insertExistingProduct}
+          onCreateNew={createNewProductAndInsert}
+        />
+      )}
 
       <Modal visible={bgEditorOpen} transparent animationType="fade" onRequestClose={() => setBgEditorOpen(false)}>
         <View style={styles.bgModalBackdrop}>
