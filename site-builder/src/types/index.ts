@@ -159,6 +159,11 @@ export interface VideoEmbedElement extends BaseElement {
 // seller sends it on from there) rather than automated hosting/download-link generation.
 export type ProductSaleType = 'product' | 'service' | 'digital' | 'custom';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
+// Which purchase button(s) the published site shows for this product. 'cart' (default)
+// matches every product created before this field existed -- adds to the persistent cart,
+// buyer checks out whenever they're ready. 'buyNow' skips the cart entirely and starts a real
+// Stripe Checkout session for just this one item immediately. 'both' shows them side by side.
+export type BuyButtonMode = 'cart' | 'buyNow' | 'both';
 
 // One buyer-facing choice axis, e.g. { name: "Size", values: ["S","M","L"] }. An empty
 // variantOptions array on ProductElement means "no variants" (simple product) -- same
@@ -208,6 +213,9 @@ export interface CatalogProduct {
   serviceDurationMinutes: number | null;
   variantOptions: ProductVariantOption[];
   variants: ProductVariant[];
+  // Optional -- absent on every product created before this field existed; always read as
+  // `product.buyButtonMode ?? 'cart'` so old products keep their exact existing behavior.
+  buyButtonMode?: BuyButtonMode;
   createdAt: number;
   updatedAt: number;
 }

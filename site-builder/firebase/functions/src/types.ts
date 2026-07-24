@@ -102,6 +102,8 @@ export interface VideoEmbedElement extends BaseElement {
 // order-notification email, so checkout treats it like a 'product' with no fulfillment step.
 export type ProductSaleType = 'product' | 'service' | 'digital' | 'custom';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
+// Mirrors the client's BuyButtonMode.
+export type BuyButtonMode = 'cart' | 'buyNow' | 'both';
 
 // Mirrors the client's ProductVariantOption/ProductVariant -- see that file's comments for
 // the full rationale (key stability, price/stock override semantics).
@@ -136,6 +138,7 @@ export interface CatalogProduct {
   serviceDurationMinutes: number | null;
   variantOptions: ProductVariantOption[];
   variants: ProductVariant[];
+  buyButtonMode?: BuyButtonMode;
   createdAt: number;
   updatedAt: number;
 }

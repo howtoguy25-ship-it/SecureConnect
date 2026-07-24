@@ -1,4 +1,4 @@
-import { CanvasElement, CatalogProduct, CustomWidgetElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
+import { BuyButtonMode, CanvasElement, CatalogProduct, CustomWidgetElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
 import { getFontOption } from './fonts';
 import { currencySymbol } from './currency';
 
@@ -2159,10 +2159,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const qtyId = `qty-${el.id}`;
       const stockId = `stock-${el.id}`;
       const addBtnId = `addbtn-${el.id}`;
+      const buyNowBtnId = `buynowbtn-${el.id}`;
       const priceId = `price-${el.id}`;
       const pickerId = `variantpicker-${el.id}`;
       const hasVariants = product.variantOptions.length > 0;
       const isCustom = product.saleType === 'custom';
+      const buyMode: BuyButtonMode = product.buyButtonMode ?? 'cart';
+      const showBuyNowBtn = buyMode === 'buyNow' || buyMode === 'both';
       const badge = isService
         ? `📅 Service booking${product.serviceDurationMinutes ? ` · ${product.serviceDurationMinutes} min` : ''}`
         : isDigital
@@ -2251,6 +2254,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   var stockEl = document.getElementById(${JSON.stringify(stockId)});
   var qtyEl = document.getElementById(${JSON.stringify(qtyId)});
   var btnEl = document.getElementById(${JSON.stringify(addBtnId)});
+  var buyNowBtnEl = document.getElementById(${JSON.stringify(buyNowBtnId)});
   var priceEl = document.getElementById(${JSON.stringify(priceId)});
   var pickerEl = document.getElementById(${JSON.stringify(pickerId)});
   var nameEl = document.getElementById(${JSON.stringify(nameId)});
@@ -2258,14 +2262,17 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   var selected = {};
   var liveTop = null; // { trackInventory, stockQuantity, inStock, variants, name, description, images }
 
-  function setState(text, color, disabled, btnText){
+  function setState(text, color, disabled, cartBtnText, buyNowBtnText){
     if (stockEl) { stockEl.textContent = text; stockEl.style.color = color; }
-    if (btnEl) {
-      btnEl.disabled = disabled;
-      btnEl.style.opacity = disabled ? '0.5' : '1';
-      btnEl.style.cursor = disabled ? 'not-allowed' : 'pointer';
-      btnEl.textContent = btnText;
+    function applyBtn(btn, label){
+      if (!btn) return;
+      btn.disabled = disabled;
+      btn.style.opacity = disabled ? '0.5' : '1';
+      btn.style.cursor = disabled ? 'not-allowed' : 'pointer';
+      btn.textContent = label;
     }
+    applyBtn(btnEl, cartBtnText);
+    applyBtn(buyNowBtnEl, buyNowBtnText);
   }
 
   // undefined = a required option still has no selection yet; null = a complete selection
@@ -2285,15 +2292,15 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     var effectivePrice = (variant && variant.priceUsd != null) ? variant.priceUsd : basePriceUsd;
     if (priceEl) priceEl.textContent = ${JSON.stringify(sym)} + effectivePrice.toFixed(2);
     if (!liveTop) return;
-    if (!liveTop.inStock) { setState('Out of stock', '#DC2626', true, '${isService ? 'Not Available' : 'Out of Stock'}'); return; }
-    if (variant === undefined) { setState('Select ${escapeHtml(product.variantOptions.map((o) => o.name).join(' & '))} to continue', '#94A3B8', true, 'Select Options'); return; }
+    if (!liveTop.inStock) { setState('Out of stock', '#DC2626', true, '${isService ? 'Not Available' : 'Out of Stock'}', '${isService ? 'Not Available' : 'Out of Stock'}'); return; }
+    if (variant === undefined) { setState('Select ${escapeHtml(product.variantOptions.map((o) => o.name).join(' & '))} to continue', '#94A3B8', true, 'Select Options', 'Select Options'); return; }
     var stockQuantity = variant ? variant.stockQuantity : liveTop.stockQuantity;
     if (liveTop.trackInventory && stockQuantity != null) {
-      if (stockQuantity <= 0) { setState('${isService ? 'Fully booked' : 'Sold out'}', '#DC2626', true, '${isService ? 'Fully Booked' : 'Sold Out'}'); return; }
-      setState(stockQuantity + ' ${isService ? 'bookings left' : 'available'}', '#64748B', false, '${isService ? 'Book Now' : 'Add to Cart'}');
+      if (stockQuantity <= 0) { setState('${isService ? 'Fully booked' : 'Sold out'}', '#DC2626', true, '${isService ? 'Fully Booked' : 'Sold Out'}', '${isService ? 'Fully Booked' : 'Sold Out'}'); return; }
+      setState(stockQuantity + ' ${isService ? 'bookings left' : 'available'}', '#64748B', false, '${isService ? 'Book Now' : 'Add to Cart'}', '${isService ? 'Book Now' : 'Buy Now'}');
       if (qtyEl) qtyEl.max = String(Math.max(1, stockQuantity));
     } else {
-      setState('${isService ? 'Available to book' : 'In stock'}', '#16A34A', false, '${isService ? 'Book Now' : 'Add to Cart'}');
+      setState('${isService ? 'Available to book' : 'In stock'}', '#16A34A', false, '${isService ? 'Book Now' : 'Add to Cart'}', '${isService ? 'Book Now' : 'Buy Now'}');
     }
   }
 
@@ -2321,6 +2328,17 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     });
   }
 
+  if (buyNowBtnEl) {
+    buyNowBtnEl.addEventListener('click', function(){
+      var variant = currentVariant();
+      var qty = qtyEl ? qtyEl.value : 1;
+      var effectivePrice = (variant && variant.priceUsd != null) ? variant.priceUsd : basePriceUsd;
+      var variantKey = variant ? variant.key : null;
+      var variantLabel = variant ? variantOptions.map(function(o, i){ return o.name + ': ' + variant.optionValues[i]; }).join(', ') : null;
+      siteSparkCart.buyNow(productId, baseName, effectivePrice, qty, ${JSON.stringify(product.saleType)}, variantKey, variantLabel);
+    });
+  }
+
   fetch(stockUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
     if (!data) return;
     liveTop = data;
@@ -2336,9 +2354,23 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
 })();</script>`
         : '';
 
-      const buyButton = isReady
-        ? `<button id="${addBtnId}" style="margin-top:${fullBleed ? 16 : 8}px;background:#4338CA;color:#fff;border:none;border-radius:${fullBleed ? 10 : 8}px;padding:${fullBleed ? '14px' : '8px'};font-weight:700;font-size:${fullBleed ? 16 : 13}px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
-        : `<button disabled style="margin-top:${fullBleed ? 16 : 8}px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:${fullBleed ? 10 : 8}px;padding:${fullBleed ? '14px' : '8px'};font-weight:700;font-size:${fullBleed ? 16 : 13}px;cursor:not-allowed;">Coming Soon</button>`;
+      const btnRadius = fullBleed ? 10 : 8;
+      const btnPad = fullBleed ? '14px' : '8px';
+      const btnFontSize = fullBleed ? 16 : 13;
+      const btnMarginTop = fullBleed ? 16 : 8;
+      const cartBtnHtml = `<button id="${addBtnId}" style="${
+        buyMode === 'both' ? 'flex:1;' : ''
+      }background:#4338CA;color:#fff;border:none;border-radius:${btnRadius}px;padding:${btnPad};font-weight:700;font-size:${btnFontSize}px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`;
+      const buyNowBtnHtml = `<button id="${buyNowBtnId}" style="${
+        buyMode === 'both' ? 'flex:1;' : ''
+      }background:#0F172A;color:#fff;border:none;border-radius:${btnRadius}px;padding:${btnPad};font-weight:700;font-size:${btnFontSize}px;cursor:pointer;">${isService ? 'Book Now' : 'Buy Now'}</button>`;
+      const buyButton = !isReady
+        ? `<button disabled style="margin-top:${btnMarginTop}px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:${btnRadius}px;padding:${btnPad};font-weight:700;font-size:${btnFontSize}px;cursor:not-allowed;">Coming Soon</button>`
+        : buyMode === 'both'
+          ? `<div style="margin-top:${btnMarginTop}px;display:flex;gap:8px;">${cartBtnHtml}${buyNowBtnHtml}</div>`
+          : showBuyNowBtn
+            ? `<div style="margin-top:${btnMarginTop}px;">${buyNowBtnHtml}</div>`
+            : `<div style="margin-top:${btnMarginTop}px;">${cartBtnHtml}</div>`;
 
       const nameFontOption = getFontOption(el.nameFontFamily);
       const nameFontCss = nameFontOption.id !== 'system' ? `font-family:'${nameFontOption.family}',sans-serif;` : '';
@@ -2592,6 +2624,29 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
   function remove(productId, variantKey){
     save(load().filter(function(i){ return !(i.productId === productId && (i.variantKey||null) === (variantKey||null)); }));
   }
+  // Skips the persistent cart entirely and starts a real Checkout session for just this one
+  // item, immediately -- the actual "Buy Now" experience. A service still needs a real
+  // date/time picked before it can be paid for, so for those this falls back to the same
+  // add-to-cart-and-open-panel behavior as "Book Now" (reusing its existing booking fields
+  // instead of inventing a second date/time UI just for this path).
+  function buyNow(productId, name, priceUsd, qtyRaw, saleType, variantKey, variantLabel){
+    if (saleType === 'service') { add(productId, name, priceUsd, qtyRaw, saleType, variantKey, variantLabel); return; }
+    var qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
+    fetch(CHECKOUT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slug: SLUG,
+        items: [{ productId: productId, quantity: qty, variantKey: variantKey || undefined }],
+      }),
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.checkoutUrl) { window.location.href = data.checkoutUrl; }
+        else { alert(data.error || 'Could not start checkout.'); }
+      })
+      .catch(function(){ alert('Could not start checkout.'); });
+  }
   // The cart panel (bottom-right) and track-order panel (bottom-left) are wide enough on a
   // real phone-width screen to overlap each other in the middle if both were ever open at
   // once -- mutually exclusive, so opening one always closes the other first.
@@ -2698,7 +2753,7 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
       .catch(function(){ alert('Could not start checkout.'); });
   }
   window.siteSparkCart = {
-    add: add, remove: remove, togglePanel: togglePanel, checkout: checkout, applyDiscount: applyDiscount,
+    add: add, remove: remove, buyNow: buyNow, togglePanel: togglePanel, checkout: checkout, applyDiscount: applyDiscount,
     toggleTrackPanel: toggleTrackPanel, checkOrderStatus: checkOrderStatus,
   };
   render();

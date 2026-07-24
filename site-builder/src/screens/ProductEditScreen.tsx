@@ -13,7 +13,7 @@ import { uploadLocalImage } from '@/services/uploads';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
 import { generateId } from '@/utils/id';
-import { CatalogProduct, ProductSaleType, ProductVariantOption, ProductVariant } from '@/types';
+import { CatalogProduct, ProductSaleType, ProductVariantOption, ProductVariant, BuyButtonMode } from '@/types';
 import SliderRow from '@/components/inspector/SliderRow';
 import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
 import { AppTheme } from '@/theme/appThemes';
@@ -40,6 +40,7 @@ function blankProduct(initialSaleType?: ProductSaleType): CatalogProduct {
     serviceDurationMinutes: null,
     variantOptions: [],
     variants: [],
+    buyButtonMode: 'cart',
     createdAt: now,
     updatedAt: now,
   };
@@ -298,6 +299,29 @@ export default function ProductEditScreen({ navigation, route }: Props) {
           <Ionicons name={product.inStock ? 'checkmark-circle' : 'close-circle'} size={16} color={product.inStock ? theme.accentText : '#DC2626'} />
           <Text style={[styles.toggleBtnText, { color: theme.text }, product.inStock && { color: theme.accentText }]}>In Stock {product.inStock ? 'On' : 'Off'}</Text>
         </Pressable>
+
+        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Buy button</Text>
+        <View style={styles.rowButtons}>
+          {(
+            [
+              ['cart', 'Add to Cart'],
+              ['buyNow', 'Buy Now'],
+              ['both', 'Both'],
+            ] as [BuyButtonMode, string][]
+          ).map(([mode, label]) => (
+            <Pressable
+              key={mode}
+              style={[styles.toggleBtn, { borderColor: theme.border }, (product.buyButtonMode ?? 'cart') === mode && { backgroundColor: theme.accent, borderColor: theme.accent }]}
+              onPress={() => patch({ buyButtonMode: mode })}
+            >
+              <Text style={[styles.toggleBtnText, { color: theme.text }, (product.buyButtonMode ?? 'cart') === mode && { color: theme.accentText }]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={[styles.helperText, { color: theme.textMuted }]}>
+          "Buy Now" skips the cart and takes a shopper straight to checkout for just this item. "Both" shows both buttons side by
+          side.
+        </Text>
 
         <Pressable style={[styles.saveBtn, { backgroundColor: theme.accent }, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
           {saving ? <ActivityIndicator color={theme.accentText} /> : <Text style={[styles.saveBtnText, { color: theme.accentText }]}>Save</Text>}
