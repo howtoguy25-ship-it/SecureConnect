@@ -6,6 +6,17 @@ const withGoogleMobileAds = require('./plugins/withGoogleMobileAds');
 // requires cleanly in plain Node before wiring it in this way.
 const SentryExpoPlugin = require('@sentry/react-native/app.plugin.js').default;
 
+// Only wire the Sentry Expo plugin's native build phases (Xcode "Upload Debug Symbols to
+// Sentry" + the source-map-upload wrapper around "Bundle React Native code and images") when
+// a real Sentry auth token exists. Without one, sentry-cli has no org/project to authenticate
+// against and its Xcode Run Script phase fails the archive outright -- gating this at
+// `expo prebuild` time (whether the phase gets added to the pbxproj at all) is more reliable
+// than gating it with SENTRY_DISABLE_AUTO_UPLOAD at Xcode-build time, since that only works if
+// the env var is actually present in the exact shell that runs the script. The Sentry JS SDK
+// itself (src/services/crashReporting.ts) and native pod linking are unaffected either way --
+// only the source-map/dSYM upload step depends on this.
+const hasSentryAuthToken = !!process.env.SENTRY_AUTH_TOKEN;
+
 module.exports = ({ config }) => ({
   ...config,
   name: 'SiteSpark',
@@ -97,18 +108,12 @@ module.exports = ({ config }) => ({
         androidAppId: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || 'ca-app-pub-3940256099942544~3347511713',
       },
     ],
-    [
-      // Real crash reporting (see src/services/crashReporting.ts) -- this plugin's only job
-      // is wiring up native source-map/debug-symbol upload during EAS builds so a crash
-      // report shows the actual file/line instead of a minified stack trace. Without a real
-      // Sentry org/project, sentry-cli's Xcode build phase fails the archive outright (not
-      // just a warning), so eas.json sets SENTRY_DISABLE_AUTO_UPLOAD=true on every profile to
-      // skip that upload step until real credentials exist -- once SENTRY_ORG, SENTRY_PROJECT,
-      // and SENTRY_AUTH_TOKEN are set as EAS secrets (`eas secret:create`), remove that env var
-      // from eas.json to re-enable the upload.
-      SentryExpoPlugin,
-      {},
-    ],
+    // Real crash reporting (see src/services/crashReporting.ts) -- this plugin's only job is
+    // wiring up native source-map/debug-symbol upload during EAS builds so a crash report shows
+    // the actual file/line instead of a minified stack trace. Only added once SENTRY_AUTH_TOKEN
+    // exists as an EAS secret (`eas secret:create --scope project --name SENTRY_AUTH_TOKEN
+    // --value ...`, alongside SENTRY_ORG/SENTRY_PROJECT) -- see hasSentryAuthToken above for why.
+    ...(hasSentryAuthToken ? [[SentryExpoPlugin, {}]] : []),
   ],
   extra: {
     supportPhone: process.env.SUPPORT_PHONE || '+61 408 680 813',
