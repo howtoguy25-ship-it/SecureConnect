@@ -186,6 +186,32 @@ export interface ProductVariant {
   sku: string | null;
 }
 
+// The account-level Products catalog -- a real product a seller owns independent of any one
+// project/page, created/edited from ProductsScreen/ProductEditScreen and stored at
+// users/{uid}/products/{id}. Every field here is exactly what ProductElement owns today
+// except the canvas layout fields (x/y/width/height/zIndex/locked) -- a deliberate 1:1 split
+// so a future ProductElement can shrink to a lightweight {productId, layout} reference into
+// this catalog (see ProductElement's own comment) without inventing new field semantics.
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  description: string;
+  priceUsd: number;
+  compareAtPriceUsd: number | null;
+  costUsd: number | null;
+  images: string[];
+  trackInventory: boolean;
+  initialStock: number | null;
+  inStock: boolean;
+  saleType: ProductSaleType;
+  fulfillment: ProductFulfillment;
+  serviceDurationMinutes: number | null;
+  variantOptions: ProductVariantOption[];
+  variants: ProductVariant[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 // A sellable product block -- positioned/resized like any other canvas element, and also
 // mirrored server-side into a StoreInventoryItem at publish time (see storeInventory in
 // firebase/functions), since checkout validates price/stock authoritatively there, not

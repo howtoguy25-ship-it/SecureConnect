@@ -88,6 +88,7 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
   };
 
   const handlePickDomain = (result: DomainSearchResult) => {
+    if (!result.available || result.priceUsd == null) return;
     setSelected(result);
     setStep('contact');
   };
@@ -159,19 +160,35 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
             ListEmptyComponent={
               !searching ? <Text style={styles.empty}>Search a name (or a full domain) to see real availability and pricing.</Text> : null
             }
-            renderItem={({ item }) => (
-              <Pressable style={styles.resultRow} onPress={() => handlePickDomain(item)}>
-                <Text style={styles.resultDomain}>{item.domain}</Text>
-                <Text style={styles.resultPrice}>${item.priceUsd.toFixed(2)}/yr</Text>
-              </Pressable>
-            )}
+            renderItem={({ item }) => {
+              const purchasable = item.available && item.priceUsd != null;
+              return (
+                <Pressable
+                  style={[styles.resultRow, !purchasable && styles.resultRowDisabled]}
+                  onPress={() => handlePickDomain(item)}
+                  disabled={!purchasable}
+                >
+                  <View>
+                    <Text style={[styles.resultDomain, !purchasable && styles.resultTextDisabled]}>{item.domain}</Text>
+                    {!item.available && <Text style={styles.resultUnavailable}>Not available</Text>}
+                  </View>
+                  {item.priceUsd != null ? (
+                    <Text style={[styles.resultPrice, !purchasable && [styles.resultTextDisabled, styles.resultPriceStruck]]}>
+                      ${item.priceUsd.toFixed(2)}/yr
+                    </Text>
+                  ) : (
+                    <Text style={[styles.resultPrice, styles.resultTextDisabled]}>Price unavailable</Text>
+                  )}
+                </Pressable>
+              );
+            }}
           />
         </View>
       )}
 
       {step === 'contact' && selected && (
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.label}>Registering {selected.domain} — ${selected.priceUsd.toFixed(2)}/yr</Text>
+          <Text style={styles.label}>Registering {selected.domain} — ${selected.priceUsd!.toFixed(2)}/yr</Text>
           <Text style={styles.helper}>
             Required by ICANN for every domain — this is who legally owns it. Free WHOIS privacy is included, so it
             won't be publicly visible.
@@ -327,6 +344,10 @@ const styles = StyleSheet.create({
   },
   resultDomain: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
   resultPrice: { fontSize: 13, fontWeight: '700', color: '#4338CA' },
+  resultRowDisabled: { opacity: 0.55 },
+  resultTextDisabled: { color: '#94A3B8' },
+  resultPriceStruck: { textDecorationLine: 'line-through' },
+  resultUnavailable: { fontSize: 11, fontWeight: '700', color: '#DC2626', marginTop: 2 },
   input: {
     borderWidth: 1,
     borderColor: '#E2E8F0',

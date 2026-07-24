@@ -32,7 +32,8 @@ export function subscribeDomainTransfers(uid: string, onChange: (transfers: Doma
 
 export interface DomainSearchResult {
   domain: string;
-  priceUsd: number;
+  available: boolean;
+  priceUsd: number | null;
 }
 
 export async function searchDomains(query: string): Promise<DomainSearchResult[]> {

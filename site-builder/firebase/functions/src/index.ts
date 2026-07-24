@@ -1401,16 +1401,22 @@ export const checkDomainAvailability = onCall(
     const candidates = base.includes('.') ? [base] : POPULAR_TLDS.map((tld) => `${base}.${tld}`);
 
     const availability = await checkAvailability(creds, candidates);
+    // Price every candidate, available or not -- pricing is per-TLD (or a real premium quote
+    // Namecheap already returned), never dependent on that exact domain being free, so an
+    // unavailable result can still show a real (crossed-out) price instead of being dropped
+    // silently. Only a genuinely un-priceable TLD falls back to priceUsd: null.
     const priced = await Promise.all(
-      availability
-        .filter((a) => a.available)
-        .map(async (a) => {
-          const basePrice = a.isPremium ? a.premiumPriceUsd : await getRegistrationPriceUsd(creds, a.domain);
-          return basePrice != null ? { domain: a.domain, priceUsd: Math.round((basePrice + DOMAIN_MARKUP_USD) * 100) / 100 } : null;
-        })
+      availability.map(async (a) => {
+        const basePrice = a.isPremium ? a.premiumPriceUsd : await getRegistrationPriceUsd(creds, a.domain);
+        return {
+          domain: a.domain,
+          available: a.available,
+          priceUsd: basePrice != null ? Math.round((basePrice + DOMAIN_MARKUP_USD) * 100) / 100 : null,
+        };
+      })
     );
 
-    return { results: priced.filter((r): r is { domain: string; priceUsd: number } => r != null) };
+    return { results: priced };
   })
 );
 

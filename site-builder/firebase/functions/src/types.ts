@@ -118,6 +118,28 @@ export interface ProductVariant {
   sku: string | null;
 }
 
+// Mirrors the client's CatalogProduct -- the account-level Products catalog
+// (users/{uid}/products/{id}), independent of any one project/page.
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  description: string;
+  priceUsd: number;
+  compareAtPriceUsd: number | null;
+  costUsd: number | null;
+  images: string[];
+  trackInventory: boolean;
+  initialStock: number | null;
+  inStock: boolean;
+  saleType: ProductSaleType;
+  fulfillment: ProductFulfillment;
+  serviceDurationMinutes: number | null;
+  variantOptions: ProductVariantOption[];
+  variants: ProductVariant[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 // A sellable product block -- part of the canvas like any other element (positioned,
 // resized), but also mirrored server-side into a StoreInventoryItem at publish time (see
 // storeInventory in index.ts) since checkout has to validate price/stock authoritatively,

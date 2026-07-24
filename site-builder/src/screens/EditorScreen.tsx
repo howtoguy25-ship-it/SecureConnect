@@ -437,9 +437,11 @@ function EditorInner({ navigation }: Props) {
               <Pressable onPress={openBackgroundEditor} hitSlop={8}>
                 <Ionicons name="color-palette-outline" size={22} color={theme.text} />
               </Pressable>
-              <Pressable onPress={() => setMenuPoliciesOpen(true)} hitSlop={8}>
-                <Ionicons name="menu-outline" size={22} color={theme.text} />
-              </Pressable>
+              {project.pageType === 'website' && (
+                <Pressable onPress={() => setMenuPoliciesOpen(true)} hitSlop={8}>
+                  <Ionicons name="menu-outline" size={22} color={theme.text} />
+                </Pressable>
+              )}
             </>
           )}
           {isGenerating ? (
@@ -614,8 +616,12 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="image-outline" label="Image" active={false} onPress={addImage} />
             <TabButton icon="images-outline" label="Slideshow" active={false} onPress={addSlideshow} />
             <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
-            <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} highlightColor="#16A34A" />
-            <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
+            {project.pageType === 'website' && (
+              <>
+                <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} highlightColor="#16A34A" />
+                <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
+              </>
+            )}
             <TabButton icon="game-controller-outline" label="Game" active={false} onPress={addGame} />
             <TabButton icon="time-outline" label="Widget" active={false} onPress={addWidget} />
             <TabButton icon="sparkles-outline" label="Custom" active={false} onPress={addCustomWidget} highlightColor="#7C3AED" />

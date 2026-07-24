@@ -21,6 +21,11 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    // Account-level Products catalog -- fully owned/edited by the client, same as projects.
+    match /users/{uid}/products/{productId} {
+      allow read, write: if isOwner(uid);
+    }
+
     // Other per-account meta docs are client-owned, EXCEPT unlockedThemes/sellerAccount
     // below, which must not be client-writable.
     match /users/{uid}/meta/{docId} {

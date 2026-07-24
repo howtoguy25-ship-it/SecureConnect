@@ -21,4 +21,6 @@ export type RootStackParamList = {
   Orders: undefined;
   DiscountCodes: undefined;
   Domains: undefined;
+  Products: undefined;
+  ProductEdit: { productId?: string };
 };
