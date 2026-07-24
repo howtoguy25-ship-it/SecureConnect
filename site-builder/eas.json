@@ -18,8 +18,7 @@
         "EXPO_PUBLIC_FIREBASE_APP_ID": "1:776375566908:web:1c7c75437bf1d3a415b939",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "776375566908-pv268kun8creegf7qb2og2vb1i0i4ltg.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "776375566908-ghkmtupqop73v4ei0ulvvfu5phen76ei.apps.googleusercontent.com",
-        "EXPO_PUBLIC_SENTRY_DSN": "https://02b6ed38bfa38c592279ede235714840@o4511788296437760.ingest.us.sentry.io/4511788324093952",
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "EXPO_PUBLIC_SENTRY_DSN": "https://02b6ed38bfa38c592279ede235714840@o4511788296437760.ingest.us.sentry.io/4511788324093952"
       }
     },
     "preview": {
@@ -35,8 +34,7 @@
         "EXPO_PUBLIC_FIREBASE_APP_ID": "1:776375566908:web:1c7c75437bf1d3a415b939",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "776375566908-pv268kun8creegf7qb2og2vb1i0i4ltg.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "776375566908-ghkmtupqop73v4ei0ulvvfu5phen76ei.apps.googleusercontent.com",
-        "EXPO_PUBLIC_SENTRY_DSN": "https://02b6ed38bfa38c592279ede235714840@o4511788296437760.ingest.us.sentry.io/4511788324093952",
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "EXPO_PUBLIC_SENTRY_DSN": "https://02b6ed38bfa38c592279ede235714840@o4511788296437760.ingest.us.sentry.io/4511788324093952"
       }
     },
     "production": {
@@ -52,8 +50,7 @@
         "EXPO_PUBLIC_FIREBASE_APP_ID": "1:776375566908:web:1c7c75437bf1d3a415b939",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "776375566908-pv268kun8creegf7qb2og2vb1i0i4ltg.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "776375566908-ghkmtupqop73v4ei0ulvvfu5phen76ei.apps.googleusercontent.com",
-        "EXPO_PUBLIC_SENTRY_DSN": "https://02b6ed38bfa38c592279ede235714840@o4511788296437760.ingest.us.sentry.io/4511788324093952",
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "EXPO_PUBLIC_SENTRY_DSN": "https://02b6ed38bfa38c592279ede235714840@o4511788296437760.ingest.us.sentry.io/4511788324093952"
       }
     }
   },
