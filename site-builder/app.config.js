@@ -100,11 +100,12 @@ module.exports = ({ config }) => ({
     [
       // Real crash reporting (see src/services/crashReporting.ts) -- this plugin's only job
       // is wiring up native source-map/debug-symbol upload during EAS builds so a crash
-      // report shows the actual file/line instead of a minified stack trace. It degrades
-      // gracefully (just a build-log warning, never a failure) when organization/project/
-      // authToken aren't set, so it's safe to leave in even before a real Sentry project
-      // exists -- set SENTRY_ORG, SENTRY_PROJECT, and SENTRY_AUTH_TOKEN as EAS secrets
-      // (`eas secret:create`) once one does, never committed here.
+      // report shows the actual file/line instead of a minified stack trace. Without a real
+      // Sentry org/project, sentry-cli's Xcode build phase fails the archive outright (not
+      // just a warning), so eas.json sets SENTRY_DISABLE_AUTO_UPLOAD=true on every profile to
+      // skip that upload step until real credentials exist -- once SENTRY_ORG, SENTRY_PROJECT,
+      // and SENTRY_AUTH_TOKEN are set as EAS secrets (`eas secret:create`), remove that env var
+      // from eas.json to re-enable the upload.
       SentryExpoPlugin,
       {},
     ],
