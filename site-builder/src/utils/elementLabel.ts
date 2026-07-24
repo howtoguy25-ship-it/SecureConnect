@@ -24,6 +24,10 @@ export function labelForElement(element: CanvasElement): string {
       return element.name || 'Collection';
     case 'game':
       return element.title || 'Game';
+    case 'widget':
+      return element.title || 'Widget';
+    case 'customWidget':
+      return element.title || 'Custom Feature';
     default:
       return 'Element';
   }
@@ -53,6 +57,10 @@ export function iconForElement(element: CanvasElement): keyof typeof import('@ex
       return 'albums-outline';
     case 'game':
       return 'game-controller-outline';
+    case 'widget':
+      return 'time-outline';
+    case 'customWidget':
+      return 'sparkles-outline';
     default:
       return 'square-outline';
   }

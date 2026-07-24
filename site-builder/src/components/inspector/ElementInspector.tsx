@@ -12,7 +12,8 @@ import { labelForElement } from '@/utils/elementLabel';
 import { FONT_OPTIONS, FontOption } from '@/data/fonts';
 import { useGoogleFont } from '@/utils/useGoogleFont';
 import { editImageBackground } from '@/services/uploads';
-import { BACKGROUND_EDIT_CREDIT_COST } from '@/data/pricing';
+import { generateCustomWidget } from '@/services/customWidget';
+import { BACKGROUND_EDIT_CREDIT_COST, CUSTOM_WIDGET_CREDIT_COST } from '@/data/pricing';
 import { updateProductStock } from '@/services/productStock';
 import { useAuth } from '@/context/AuthContext';
 import { sellerAccountStore } from '@/services/store';
@@ -33,6 +34,9 @@ interface Props {
   // element type ignores these.
   projectId?: string;
   publishSlug?: string | null;
+  // Only read by the 'customWidget' case, so the AI has real site context (rather than a
+  // generic default) to design the widget's look around.
+  siteName?: string;
 }
 
 // Pushes a product's in-stock switch + current quantity straight to the live storeInventory
@@ -191,7 +195,68 @@ function ImageBackgroundTools({ element, onChange }: { element: ImageElement; on
   );
 }
 
-export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug }: Props) {
+// Manual (non-AI-build) generation for a Custom Widget: the seller describes exactly what
+// they want and this calls the same real code-gen + image-placeholder pipeline the AI
+// builder uses for 'custom' sections, just for one element at a time. Keyed by element.id
+// where it's used below so switching to a different customWidget element always starts
+// this with fresh state, never stale busy/description left over from a previous one.
+function CustomWidgetGenerator({
+  element,
+  siteName,
+  onChange,
+}: {
+  element: Extract<CanvasElement, { type: 'customWidget' }>;
+  siteName?: string;
+  onChange: (patch: Partial<CanvasElement>) => void;
+}) {
+  const [description, setDescription] = useState(element.description);
+
+  const run = async () => {
+    if (!description.trim()) return;
+    onChange({ description: description.trim(), generating: true, error: null } as any);
+    try {
+      const code = await generateCustomWidget(description.trim(), siteName);
+      onChange({ code, generating: false, error: null } as any);
+    } catch (err: any) {
+      onChange({ generating: false, error: err?.message ?? 'Could not build that feature. Try again.' } as any);
+    }
+  };
+
+  return (
+    <>
+      <Text style={styles.fieldLabel}>Describe what you want built</Text>
+      <TextInput
+        style={styles.textInput}
+        value={description}
+        onChangeText={setDescription}
+        placeholder='e.g. "A tip calculator with a slider for tip percent and split-by-people"'
+        multiline
+        editable={!element.generating}
+      />
+      <Pressable
+        style={[styles.uploadBtn, (!description.trim() || element.generating) && { opacity: 0.5 }]}
+        onPress={run}
+        disabled={!description.trim() || element.generating}
+      >
+        {element.generating ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <>
+            <Ionicons name="sparkles-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.uploadBtnText}>{element.code ? 'Regenerate' : 'Generate'} ({CUSTOM_WIDGET_CREDIT_COST} credits)</Text>
+          </>
+        )}
+      </Pressable>
+      {!!element.error && <Text style={[styles.helperText, { color: '#DC2626' }]}>{element.error}</Text>}
+      <Text style={styles.helperText}>
+        Real, bespoke HTML/CSS/JS built for exactly what you describe -- a working game, calculator, or tool, not a
+        template. Runs in a sandboxed preview here and on your published site.
+      </Text>
+    </>
+  );
+}
+
+export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug, siteName }: Props) {
   const { user } = useAuth();
   const [sellerCurrency, setSellerCurrency] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -1090,6 +1155,14 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                 A real working length/weight/temperature/volume converter. No setup needed here.
               </Text>
             )}
+          </>
+        )}
+
+        {element.type === 'customWidget' && (
+          <>
+            <Text style={styles.fieldLabel}>Title</Text>
+            <TextInput style={styles.textInput} value={element.title} onChangeText={(title) => onChange({ title } as any)} />
+            <CustomWidgetGenerator element={element} siteName={siteName} onChange={onChange} />
           </>
         )}
       </ScrollView>

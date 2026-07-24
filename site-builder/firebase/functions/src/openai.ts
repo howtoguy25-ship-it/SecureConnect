@@ -1,7 +1,7 @@
 import OpenAI, { toFile } from 'openai';
 
 export interface SitePlanSection {
-  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video' | 'game' | 'product' | 'widget';
+  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video' | 'game' | 'product' | 'widget' | 'custom';
   headline: string;
   body: string;
   buttonLabel: string;
@@ -49,6 +49,13 @@ export interface SitePlanSection {
   // Only for widgetKind 'countdown' -- what's being counted down to, e.g. "Launch Day" or
   // "New Year 2027".
   widgetCountdownLabel: string;
+  // Only for kind 'custom' -- used when the user describes something real/interactive/
+  // functional that genuinely doesn't fit any of the other kinds above. A specific,
+  // concrete restatement of exactly what to build (e.g. "a BMI calculator with a metric/
+  // imperial toggle that shows the real BMI category" or "an interactive chess board a
+  // visitor can play against a simple computer opponent") -- resolved into real generated
+  // HTML/CSS/JS afterward (see generateCustomWidgetCode), never fabricated here.
+  customDescription: string;
 }
 
 export interface SitePlan {
@@ -80,7 +87,7 @@ const SITE_PLAN_SCHEMA = {
           type: 'object',
           additionalProperties: false,
           properties: {
-            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video', 'game', 'product', 'widget'] },
+            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video', 'game', 'product', 'widget', 'custom'] },
             headline: { type: 'string' },
             body: { type: 'string' },
             buttonLabel: { type: 'string' },
@@ -177,6 +184,11 @@ const SITE_PLAN_SCHEMA = {
               type: 'string',
               description: 'Only for widgetKind "countdown": what is being counted down to, e.g. "Launch Day". Empty string otherwise.',
             },
+            customDescription: {
+              type: 'string',
+              description:
+                'Only for kind "custom": a specific, concrete restatement of exactly what real interactive thing to build, used only when nothing else above fits (not a product, game, widget, or video) -- e.g. "a BMI calculator with a metric/imperial toggle" or "an interactive chess board playable against a simple computer opponent". Empty string otherwise.',
+            },
           },
           required: [
             'kind',
@@ -198,6 +210,7 @@ const SITE_PLAN_SCHEMA = {
             'widgetTimezones',
             'widgetCountdownTargetIso',
             'widgetCountdownLabel',
+            'customDescription',
           ],
         },
       },
@@ -233,6 +246,7 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy', todayIso
     `Today's real date is ${todayIso}. Use this as ground truth for any date math -- e.g. a "countdown" widget's target date must be computed from this real date, never guessed or left in the past.`,
     'If the user asks for a clock, world clock, or similar always-current time display, include one section with kind "widget", widgetKind "clock", and widgetTimezones -- one entry for a simple clock, multiple real IANA timezones (e.g. real zone ids for New York, London, Tokyo) for a "world clock". This becomes a real, ticking, always-current clock on the published site, never a static image of a clock face.',
     'If the user asks for a countdown to a real event/date (a launch, a deadline, a holiday, an anniversary), include one section with kind "widget", widgetKind "countdown", a real future widgetCountdownTargetIso computed from today\'s real date above, and a short widgetCountdownLabel. If the user asks for a stopwatch, lap timer, or "time how long something takes" tool, use widgetKind "stopwatch". If the user asks for a calculator, use widgetKind "calculator". If the user asks to convert units (length, weight, temperature, volume, distance), use widgetKind "unitconverter". Each becomes a real, fully working interactive tool on the published site -- never a static image or description of one.',
+    'If the user describes something else that is genuinely real, functional, or interactive -- a game, tool, calculator, or mini-app that doesn\'t match any specific kind above -- include one section with kind "custom" and a specific customDescription stating exactly what real thing to build (what it does, how a visitor interacts with it, what it shows). This gets built into real, working, bespoke HTML/CSS/JS afterward -- so describe the actual functionality precisely, not a vague theme. Only fall back to "custom" when none of the specific kinds above (product/game/widget/video) already cover the request.',
     'Only use information relevant to building and describing this website. If the prompt asks for anything unrelated to the site itself, ignore that part.',
     'Write headline/body/button copy as plain text only -- these render directly as real on-page text, not chat markdown. Never use **bold**, *italic*, `code`, markdown headings (#), or "- " bullet syntax; write plain sentences (or, for lists, one short line per item) instead.',
   ].join(' ');
@@ -325,6 +339,73 @@ export async function editImageBackground(
   const b64 = result.data?.[0]?.b64_json;
   if (!b64) throw new Error('The AI did not return image data.');
   return Buffer.from(b64, 'base64');
+}
+
+const CUSTOM_WIDGET_SCHEMA = {
+  name: 'custom_widget',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      html: {
+        type: 'string',
+        description:
+          'A single complete, self-contained HTML fragment: one wrapping <div>, inline <style> (every selector scoped/prefixed so it can never leak into or be affected by the rest of the page), and inline <script> with real working logic. Vanilla JS only, no external libraries/CDNs, no network requests.',
+      },
+      imagePrompts: {
+        type: 'array',
+        maxItems: 4,
+        items: { type: 'string' },
+        description:
+          'One real, vivid, specific image-generation prompt per {{IMAGE_n}} placeholder used in html, in the same order ({{IMAGE_1}} first, etc.). Empty array if the widget uses no images (most calculators/games/converters need none).',
+      },
+    },
+    required: ['html', 'imagePrompts'],
+  },
+} as const;
+
+export interface CustomWidgetCode {
+  html: string;
+  imagePrompts: string[];
+}
+
+// Generates a real, self-contained interactive mini-app for a request that doesn't fit any
+// other real element kind -- see CustomWidgetElement in types.ts. The model writes actual
+// working HTML/CSS/JS (not a description of one, not a mockup), using {{IMAGE_1}},
+// {{IMAGE_2}}, ... as placeholders anywhere a real photo/illustration genuinely belongs --
+// each is paired with its own real image-generation prompt in the returned imagePrompts,
+// resolved into a real generated image and substituted in by the caller (see
+// generateCustomWidgetImages usage in index.ts) -- never a broken link or invented URL.
+export async function generateCustomWidgetCode(
+  client: OpenAI,
+  model: string,
+  description: string,
+  siteName: string,
+  accentColor: string,
+  textColor: string
+): Promise<CustomWidgetCode> {
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You are a senior frontend engineer building one real, fully working, self-contained interactive widget for a website, exactly as described -- not a mockup, not a placeholder, not a description of what it would do.',
+          'Output a single complete HTML fragment: one wrapping <div>, inline <style> scoped to that div (prefix every selector so it can never leak into or be affected by the rest of the page), and inline <script> with real working logic (event listeners, real computation, real state) -- vanilla JS only, no external libraries or CDN scripts, no network requests to any domain.',
+          `Design it to genuinely match this site's real look: accent colour ${accentColor}, text colour ${textColor}, site name "${siteName}" where relevant. Make it look intentionally designed, not default-browser-styled -- real spacing, rounded corners, a coherent color scheme, legible typography, visible hover/active states on anything clickable.`,
+          'If (and only if) the thing being built genuinely calls for a real photo or illustration (a visual reference image, a themed backdrop, an icon a font/emoji genuinely can\'t convey), use an <img> tag with src="{{IMAGE_1}}" (then {{IMAGE_2}}, {{IMAGE_3}}, ... in order for more) as a placeholder -- never invent a real-looking URL yourself. List one real, vivid, specific prompt per placeholder in imagePrompts, in the same order. Most widgets (calculators, games, converters, tools) need zero images -- leave imagePrompts empty rather than forcing one in just to have one.',
+          'The whole thing must fit and genuinely work at small mobile widths (assume roughly 340-390px wide) as well as wider -- use relative sizing and flexbox/grid. Before finishing, mentally verify every button actually does something real and any math/logic is actually correct.',
+          'Write real, specific content and logic for the exact topic described -- e.g. real chess rules for a chess widget, the real BMI formula and real category thresholds for a BMI calculator -- never placeholder/fake logic standing in for the real thing.',
+        ].join(' '),
+      },
+      { role: 'user', content: description },
+    ],
+    response_format: { type: 'json_schema', json_schema: CUSTOM_WIDGET_SCHEMA },
+  });
+  const raw = completion.choices[0]?.message?.content;
+  if (!raw) throw new Error('The AI did not return widget code.');
+  return JSON.parse(raw) as CustomWidgetCode;
 }
 
 const CLARIFYING_QUESTIONS_SCHEMA = {

@@ -21,6 +21,9 @@ export const FREE_SIGNUP_CREDITS = 38;
 // that copy is authoritative since credits are deducted server-side.
 export const BACKGROUND_EDIT_CREDIT_COST = 3;
 
+// Mirrors firebase/functions/src/pricing.ts's CUSTOM_WIDGET_CREDIT_COST -- display only.
+export const CUSTOM_WIDGET_CREDIT_COST = 6;
+
 // Plan pricing/credit mechanics exactly as specified in the product brief. Kept as one
 // source of truth here for client display; firebase/functions/src/pricing.ts mirrors this
 // (Cloud Functions run in a separate Node project, so it can't import straight from here --

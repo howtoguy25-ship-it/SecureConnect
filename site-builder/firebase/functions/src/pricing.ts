@@ -10,6 +10,11 @@ export const FREE_SIGNUP_CREDITS = 38;
 // much cheaper than a full site build since it's a single image-edit call, not a whole plan.
 export const BACKGROUND_EDIT_CREDIT_COST = 3;
 
+// Manually generating one bespoke Custom Widget (generateCustomWidget in index.ts) --
+// a real LLM code-gen call plus up to a few generated images, so priced closer to a
+// multi-image product listing than a single background edit.
+export const CUSTOM_WIDGET_CREDIT_COST = 6;
+
 const BUILD_COST_RANGE: Record<Exclude<PlanId, 'free'>, [number, number]> = {
   beginner: [15, 30],
   middle: [25, 40],

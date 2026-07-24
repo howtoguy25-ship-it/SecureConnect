@@ -30,9 +30,9 @@ import {
   BookingDetails,
   PlanId,
 } from './types';
-import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
-import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
-import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo, SectionProductImages } from './layout';
+import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, CUSTOM_WIDGET_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
+import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, generateCustomWidgetCode, SitePlan, SitePlanSection } from './openai';
+import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo, SectionProductImages, SectionCustomWidget } from './layout';
 import { searchYouTubeVideo } from './youtube';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import { isValidCurrency } from './currency';
@@ -418,8 +418,14 @@ export const startGeneration = onCall(
     // subscribed to (via previewProjectId) -- called after the plan lands and again after
     // every generated image, so the AI build progress screen's live preview panel shows
     // real text and images appearing incrementally instead of a blank canvas until the end.
-    const pushPreview = async (currentPlan: SitePlan, images: SectionImage[], videos: SectionVideo[] = [], productImages: SectionProductImages[] = []) => {
-      const previewElements = layoutSitePlan(currentPlan, images, videos, productImages);
+    const pushPreview = async (
+      currentPlan: SitePlan,
+      images: SectionImage[],
+      videos: SectionVideo[] = [],
+      productImages: SectionProductImages[] = [],
+      customWidgets: SectionCustomWidget[] = []
+    ) => {
+      const previewElements = layoutSitePlan(currentPlan, images, videos, productImages, customWidgets);
       await projectRef.update({
         name: currentPlan.siteName,
         backgroundColor: currentPlan.backgroundColor,
@@ -453,6 +459,12 @@ export const startGeneration = onCall(
       // decorative hero image, so a "product" section becomes a real sellable listing.
       const sectionsNeedingProductImages = plan.sections.filter((s: SitePlanSection) => s.kind === 'product' && s.productImagePrompts?.length);
       const sectionProductImages: SectionProductImages[] = [];
+      // "custom" sections describe a real bespoke interactive widget (game/tool/calculator)
+      // the AI writes real HTML/CSS/JS for -- any {{IMAGE_n}} placeholders in that code get
+      // real generated images substituted in below, same "on point" quality bar as product
+      // photos, never a broken/mismatched stand-in.
+      const sectionsNeedingCustomWidget = plan.sections.filter((s: SitePlanSection) => s.kind === 'custom' && s.customDescription?.trim());
+      const sectionCustomWidgets: SectionCustomWidget[] = [];
 
       // Each image is its own slow OpenAI call (often 10-30s) -- generating them one at a
       // time in sequence was the single biggest reason a build could take minutes. Firing
@@ -465,6 +477,9 @@ export const startGeneration = onCall(
       // highlights), never a generated/fake stand-in.
       if (sectionsNeedingVideo.length > 0) {
         await sessionRef.update({ statusMessage: 'Finding real videos for your site...', updatedAt: Date.now() });
+      }
+      if (sectionsNeedingCustomWidget.length > 0) {
+        await sessionRef.update({ statusMessage: 'Building your custom interactive feature...', updatedAt: Date.now() });
       }
       await Promise.all([
         ...sectionsNeedingImages.map(async (section: SitePlanSection) => {
@@ -482,7 +497,7 @@ export const startGeneration = onCall(
             // section that already generated successfully.
             console.error(`Image generation failed for section "${section.kind}"`, err);
           }
-          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
         }),
         ...sectionsNeedingVideo.map(async (section: SitePlanSection) => {
           try {
@@ -494,7 +509,7 @@ export const startGeneration = onCall(
             console.error(`Video search failed for section "${section.kind}"`, err);
             sectionVideos.push({ section, videoId: null, title: null });
           }
-          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
         }),
         ...sectionsNeedingProductImages.map(async (section: SitePlanSection) => {
           // All of one product's angle-shots generate in parallel too (nested inside the
@@ -520,7 +535,52 @@ export const startGeneration = onCall(
             )
           ).filter((u): u is string => !!u);
           sectionProductImages.push({ section, urls });
-          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
+        }),
+        ...sectionsNeedingCustomWidget.map(async (section: SitePlanSection) => {
+          try {
+            const widget = await generateCustomWidgetCode(
+              client,
+              model,
+              section.customDescription,
+              plan.siteName,
+              plan.accentColor,
+              plan.textColor
+            );
+            // Same "fire every image off together" reasoning as product photos -- a widget
+            // with 2-3 image placeholders shouldn't take 2-3x as long to finish as one.
+            let code = widget.html;
+            const urls = await Promise.all(
+              widget.imagePrompts.map(async (imgPrompt, i) => {
+                try {
+                  const buffer = await generateImage(client, imgPrompt, 'high');
+                  const path = `users/${uid}/generated/${sessionId}/custom-${Date.now()}-${i}.png`;
+                  const file = bucket.file(path);
+                  await file.save(buffer, { contentType: 'image/png' });
+                  const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+                  return url;
+                } catch (err) {
+                  // One image placeholder failing must never sink the whole widget -- the
+                  // <img> tag is stripped below rather than left pointing at a fake/broken URL.
+                  console.error(`Custom widget image generation failed for "${section.customDescription}"`, err);
+                  return null;
+                }
+              })
+            );
+            urls.forEach((url, i) => {
+              const placeholder = `{{IMAGE_${i + 1}}}`;
+              // A failed image's placeholder is removed entirely (not left as a broken src)
+              // so the widget still renders clean without a missing-image icon.
+              code = url ? code.split(placeholder).join(url) : code.replace(new RegExp(`<img[^>]*src=["']${placeholder}["'][^>]*>`, 'g'), '');
+            });
+            sectionCustomWidgets.push({ section, code });
+          } catch (err) {
+            // A single custom widget failing to generate must never sink the whole build --
+            // layout.ts falls back to plain headline/body for that section when code is null.
+            console.error(`Custom widget generation failed for "${section.customDescription}"`, err);
+            sectionCustomWidgets.push({ section, code: null });
+          }
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
         }),
       ]);
 
@@ -530,11 +590,11 @@ export const startGeneration = onCall(
         // Second pause only adjusts copy at this point (images/videos are already resolved)
         // -- keeps the second pause fast rather than re-running that work too.
         plan = await generateSitePlan(client, model, prompt, complexity, injected2);
-        await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
+        await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
       }
 
       await sessionRef.update({ statusMessage: 'Assembling your site...', updatedAt: Date.now() });
-      await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
+      await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
 
       const minutesElapsed = Math.round(((Date.now() - startedAt) / 60000) * 10) / 10;
       await sessionRef.update({
@@ -786,6 +846,76 @@ export const editImageBackground = onCall({ secrets: [openaiApiKey], timeoutSeco
 
   return { url };
 });
+
+// Manual (non-AI-build) path for adding a Custom Widget: the seller types a description
+// directly in the inspector and this generates real, bespoke HTML/CSS/JS for it on demand --
+// same underlying generateCustomWidgetCode + image-placeholder pipeline startGeneration uses
+// for AI-builder "custom" sections, just triggered one widget at a time instead of as part
+// of a whole-site build.
+export const generateCustomWidget = onCall({ secrets: [openaiApiKey], timeoutSeconds: 180, memory: '512MiB', invoker: 'public' }, withCallableErrors('generateCustomWidget', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { description, siteName, accentColor, textColor } = request.data as {
+    description: string;
+    siteName?: string;
+    accentColor?: string;
+    textColor?: string;
+  };
+  if (!description?.trim()) throw new HttpsError('invalid-argument', 'Describe what you want built.');
+
+  const userRef = db.collection('users').doc(uid);
+  const account = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const acc = snap.data() as UserAccount | undefined;
+    if ((acc?.credits ?? 0) < CUSTOM_WIDGET_CREDIT_COST) {
+      throw new HttpsError('resource-exhausted', 'needs-subscription');
+    }
+    tx.update(userRef, { credits: FieldValue.increment(-CUSTOM_WIDGET_CREDIT_COST) });
+    return acc as UserAccount;
+  });
+
+  try {
+    const client = createOpenAIClient(openaiApiKey.value());
+    const model = MODEL_FOR_PLAN[account.plan];
+    const widget = await generateCustomWidgetCode(
+      client,
+      model,
+      description.trim(),
+      siteName || 'this site',
+      accentColor || '#2563EB',
+      textColor || '#0F172A'
+    );
+
+    let code = widget.html;
+    const bucket = getStorage().bucket();
+    const urls = await Promise.all(
+      widget.imagePrompts.map(async (imgPrompt, i) => {
+        try {
+          const buffer = await generateImage(client, imgPrompt, 'high');
+          const path = `users/${uid}/generated/manual-widget/${Date.now()}-${i}.png`;
+          const file = bucket.file(path);
+          await file.save(buffer, { contentType: 'image/png' });
+          const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+          return url;
+        } catch (err) {
+          console.error(`Custom widget image generation failed for "${description}"`, err);
+          return null;
+        }
+      })
+    );
+    urls.forEach((url, i) => {
+      const placeholder = `{{IMAGE_${i + 1}}}`;
+      code = url ? code.split(placeholder).join(url) : code.replace(new RegExp(`<img[^>]*src=["']${placeholder}["'][^>]*>`, 'g'), '');
+    });
+
+    return { code };
+  } catch (err) {
+    await userRef.update({ credits: FieldValue.increment(CUSTOM_WIDGET_CREDIT_COST) });
+    console.error('generateCustomWidget failed', err);
+    throw new HttpsError('internal', 'Could not build that feature. Try again.');
+  }
+}));
 
 // Video/audio clips are typically far too large for the base64-over-onCall approach
 // uploadProjectImage uses above (onCall request bodies are capped well below what even a

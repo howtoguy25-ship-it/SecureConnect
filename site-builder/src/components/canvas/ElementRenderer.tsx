@@ -10,6 +10,7 @@ import { useGoogleFont } from '@/utils/useGoogleFont';
 import { gradientStartEnd } from '@/utils/gradient';
 import GameView from '@/components/canvas/GameView';
 import WidgetView from '@/components/canvas/WidgetView';
+import CustomWidgetView from '@/components/canvas/CustomWidgetView';
 import { useAuth } from '@/context/AuthContext';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
@@ -587,6 +588,8 @@ export default function ElementRenderer({ element, allElements }: { element: Can
       return <GameView element={element} width={width} height={height} />;
     case 'widget':
       return <WidgetView element={element} width={width} height={height} />;
+    case 'customWidget':
+      return <CustomWidgetView element={element} width={width} height={height} />;
     default:
       return null;
   }

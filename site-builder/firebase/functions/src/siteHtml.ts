@@ -1,4 +1,4 @@
-import { CanvasElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
+import { CanvasElement, CustomWidgetElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
 import { getFontOption } from './fonts';
 import { currencySymbol } from './currency';
 
@@ -1929,6 +1929,38 @@ function renderUnitConverterWidgetHtml(el: WidgetElement, base: string): string 
 ${script}`;
 }
 
+// A genuinely bespoke, AI-written interactive widget -- real HTML/CSS/JS the model wrote
+// for exactly what the user described (a game, calculator, tool, whatever didn't fit any
+// of the hand-built element kinds above). Runs inside a sandboxed iframe via srcdoc rather
+// than being injected straight into the page: sandbox="allow-scripts allow-forms" grants
+// only what an interactive widget genuinely needs, while deliberately omitting
+// allow-same-origin/allow-top-navigation/allow-popups -- the generated code can never read
+// this page's cookies/localStorage, navigate the parent page away, or spawn popups. That's
+// the real safety boundary that makes "run whatever the AI wrote" safe to publish at all.
+function renderCustomWidgetHtml(el: CustomWidgetElement, base: string): string {
+  const accent = '#7C3AED';
+  const soft = '#EDE9FE';
+  const titleHtml = el.title
+    ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+  <div style="width:20px;height:20px;border-radius:10px;background:${accent};display:flex;align-items:center;justify-content:center;font-size:11px;">✨</div>
+  <div style="font-weight:800;font-size:14px;color:#0F172A;">${escapeHtml(el.title)}</div>
+</div>`
+    : '';
+  if (!el.code) {
+    // Generation failed for this section -- layout.ts already falls back to plain
+    // headline/body text for the AI-builder path, but a manually-added widget that was
+    // never successfully generated (or whose generation is still running) needs its own
+    // real placeholder rather than an empty gap in the page.
+    return `<div id="el-${el.id}" style="${base}background:linear-gradient(135deg,#F5F3FF,${soft});border-radius:16px;border:1px solid ${soft};display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;color:${accent};font-size:13px;font-weight:600;text-align:center;padding:12px;box-sizing:border-box;">${
+      el.generating ? 'Building your custom feature…' : 'This feature isn’t available right now'
+    }</div>`;
+  }
+  return `<div id="el-${el.id}" style="${base}background:linear-gradient(135deg,#F5F3FF,${soft});border-radius:16px;border:1px solid ${soft};overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;">
+  ${titleHtml}
+  <iframe srcdoc="${escapeAttr(el.code)}" sandbox="allow-scripts allow-forms" style="flex:1;width:100%;border:0;border-radius:10px;background:#FFFFFF;"></iframe>
+</div>`;
+}
+
 function renderWidgetHtml(el: WidgetElement, base: string): string {
   if (el.kind === 'countdown') return renderCountdownWidgetHtml(el, base);
   if (el.kind === 'stopwatch') return renderStopwatchWidgetHtml(el, base);
@@ -2336,6 +2368,8 @@ ${script}`;
       return renderGameHtml(el, base, slug);
     case 'widget':
       return renderWidgetHtml(el, base);
+    case 'customWidget':
+      return renderCustomWidgetHtml(el, base);
     default:
       return '';
   }

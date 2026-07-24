@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement } from './types';
+import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -107,6 +107,20 @@ function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' |
   };
 }
 
+function customWidgetEl(
+  partial: Partial<CustomWidgetElement> & Pick<CustomWidgetElement, 'y' | 'height' | 'title' | 'code'>
+): CustomWidgetElement {
+  return {
+    id: nextId('el'),
+    type: 'customWidget',
+    x: 0,
+    width: CANVAS_WIDTH,
+    zIndex: 1,
+    description: '',
+    ...partial,
+  };
+}
+
 function widgetEl(partial: Partial<WidgetElement> & Pick<WidgetElement, 'y' | 'height' | 'title'>): WidgetElement {
   return {
     id: nextId('el'),
@@ -181,11 +195,22 @@ export interface SectionProductImages {
   urls: string[];
 }
 
+// A custom widget's final html already has any {{IMAGE_n}} placeholders substituted with
+// real generated-image URLs by the time it reaches layout -- this just carries the finished
+// code string through, mirroring SectionVideo/SectionProductImages' "one entry per section
+// once its async generation settles" shape. code === null means generation failed for that
+// section (never block the rest of the build on one bad widget).
+export interface SectionCustomWidget {
+  section: SitePlanSection;
+  code: string | null;
+}
+
 export function layoutSitePlan(
   plan: SitePlan,
   sectionImages: SectionImage[],
   sectionVideos: SectionVideo[] = [],
-  sectionProductImages: SectionProductImages[] = []
+  sectionProductImages: SectionProductImages[] = [],
+  sectionCustomWidgets: SectionCustomWidget[] = []
 ): CanvasElement[] {
   idCounter = 0;
   const elements: CanvasElement[] = [];
@@ -194,6 +219,7 @@ export function layoutSitePlan(
   const imageFor = (section: SitePlanSection) => sectionImages.find((s) => s.section === section)?.url ?? null;
   const videoFor = (section: SitePlanSection) => sectionVideos.find((s) => s.section === section) ?? null;
   const productImagesFor = (section: SitePlanSection) => sectionProductImages.find((s) => s.section === section)?.urls ?? [];
+  const customWidgetFor = (section: SitePlanSection) => sectionCustomWidgets.find((s) => s.section === section) ?? null;
 
   plan.sections.forEach((section, index) => {
     const isHero = index === 0 && section.kind === 'hero';
@@ -318,12 +344,37 @@ export function layoutSitePlan(
       y += widgetHeight + 16;
     }
 
+    if (section.kind === 'custom') {
+      const custom = customWidgetFor(section);
+      if (custom?.code) {
+        // Height is a rough guess -- a bespoke AI-written widget's real content can't be
+        // measured ahead of time the way a fixed layout can, so this errs generous (enough
+        // for a small game/calculator-sized tool) rather than clipping real content; the
+        // iframe itself scrolls internally if a widget genuinely needs more room.
+        const widgetHeight = 360;
+        elements.push(
+          customWidgetEl({
+            y,
+            height: widgetHeight,
+            title: headline,
+            description: section.customDescription ? stripMarkdown(section.customDescription) : '',
+            code: custom.code,
+          })
+        );
+        y += widgetHeight + 16;
+      }
+    }
+
     // A product/widget card already shows its own name/title prominently -- a separate
     // headline pushed right above it (e.g. "Cozy Reading Lamp" text, then a card that also
     // says "Cozy Reading Lamp") would be redundant, so these two kinds skip the generic
-    // headline/body/button block below entirely. Every other kind (including "game", which
-    // does still benefit from its own intro copy) is unaffected.
-    if (section.kind !== 'product' && section.kind !== 'widget') {
+    // headline/body/button block below entirely. A custom section only skips it once its
+    // widget actually rendered -- if generation failed (customWidgetFor(section) has no
+    // code), falling through to plain headline/body means that section still shows
+    // something real instead of silently vanishing from the page. Every other kind
+    // (including "game", which does still benefit from its own intro copy) is unaffected.
+    const customFailed = section.kind === 'custom' && !customWidgetFor(section)?.code;
+    if (section.kind !== 'product' && section.kind !== 'widget' && (section.kind !== 'custom' || customFailed)) {
       const headlineSize = isHero ? 28 : 22;
       const headlineHeight = estimateTextHeight(headline, headlineSize);
       elements.push(

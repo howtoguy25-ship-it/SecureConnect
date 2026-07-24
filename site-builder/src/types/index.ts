@@ -54,7 +54,8 @@ export type ElementType =
   | 'product'
   | 'collection'
   | 'game'
-  | 'widget';
+  | 'widget'
+  | 'customWidget';
 
 interface BaseElement {
   id: string;
@@ -283,6 +284,25 @@ export interface WidgetElement extends BaseElement {
   countdownLabel: string;
 }
 
+// A real, AI-generated interactive mini-app for whatever a user asks for that doesn't fit
+// any other real element kind (product/game/widget/video/etc.) -- `code` is a complete,
+// self-contained HTML document (inline <style>/<script>, real generated <img> URLs already
+// substituted in, no external placeholders) that runs the actual thing, not a description of
+// it. Rendered inside a sandboxed WebView (editor, see CustomWidgetView.tsx) or a sandboxed
+// iframe (published site, see renderCustomWidgetHtml in firebase/functions/src/siteHtml.ts)
+// so whatever it does stays contained to itself -- no access to the rest of the page, its
+// cart, or cookies. `generating`/`error` track an in-progress or failed generation (the
+// manual "Generate" button in the inspector); a freshly-added element starts with empty
+// `code` and `generating: false`.
+export interface CustomWidgetElement extends BaseElement {
+  type: 'customWidget';
+  title: string;
+  description: string;
+  code: string;
+  generating?: boolean;
+  error?: string | null;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -295,7 +315,8 @@ export type CanvasElement =
   | ProductElement
   | CollectionElement
   | GameElement
-  | WidgetElement;
+  | WidgetElement
+  | CustomWidgetElement;
 
 export interface AnnouncementBarConfig {
   id: string;

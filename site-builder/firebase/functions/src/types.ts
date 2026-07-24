@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game' | 'widget';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game' | 'widget' | 'customWidget';
 
 // Mirrors the client's GradientFill -- `angle` is the CSS linear-gradient() angle (0deg =
 // bottom-to-top, 90deg = left-to-right), so siteHtml.ts can drop it straight into real CSS.
@@ -204,6 +204,23 @@ export interface WidgetElement extends BaseElement {
   countdownLabel: string;
 }
 
+// A real, AI-generated interactive mini-app for whatever a user asks for that doesn't fit
+// any other real element kind (product/game/widget/video/etc.) -- `code` is a complete,
+// self-contained HTML document (inline <style>/<script>, real generated <img> URLs already
+// substituted in, no external placeholders) that runs the actual thing, not a description of
+// it. Rendered inside a sandboxed iframe (see renderCustomWidgetHtml in siteHtml.ts) so
+// whatever it does stays contained to itself -- no access to the rest of the page, its cart,
+// or cookies. `generating`/`error` track an in-progress or failed generation (manual "Generate"
+// path in the editor); a freshly-added element starts with empty `code` and `generating: false`.
+export interface CustomWidgetElement extends BaseElement {
+  type: 'customWidget';
+  title: string;
+  description: string;
+  code: string;
+  generating?: boolean;
+  error?: string | null;
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -216,7 +233,8 @@ export type CanvasElement =
   | ProductElement
   | CollectionElement
   | GameElement
-  | WidgetElement;
+  | WidgetElement
+  | CustomWidgetElement;
 
 export interface CanvasSize {
   width: number;

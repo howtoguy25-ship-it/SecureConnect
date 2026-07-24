@@ -16,7 +16,7 @@ import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
@@ -358,6 +358,27 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
+  const addCustomWidget = () => {
+    // Added blank -- no code yet. The inspector's "Generate" flow (a description input +
+    // button) is what actually calls the AI to fill in real code, same as Game/Widget
+    // needing their own kind picked before they're a real complete element.
+    const el: CustomWidgetElement = {
+      id: generateId('el'),
+      type: 'customWidget',
+      title: 'Custom Feature',
+      description: '',
+      code: '',
+      x: canvasCenterX - 90,
+      y: canvasCenterY - 90,
+      width: 200,
+      height: 200,
+      zIndex: 5,
+    };
+    addElement(el);
+    select(el.id);
+    setPanel(null);
+  };
+
   const confirmDeleteId = (id: string) => {
     showAlert('Delete element?', undefined, [
       { text: 'Cancel', style: 'cancel' },
@@ -561,6 +582,7 @@ function EditorInner({ navigation }: Props) {
               onClose={() => setSheetHeight(MIN_SHEET_HEIGHT)}
               projectId={project.id}
               publishSlug={project.publishSlug}
+              siteName={project.name}
             />
           )}
         </View>
@@ -596,6 +618,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
             <TabButton icon="game-controller-outline" label="Game" active={false} onPress={addGame} />
             <TabButton icon="time-outline" label="Widget" active={false} onPress={addWidget} />
+            <TabButton icon="sparkles-outline" label="Custom" active={false} onPress={addCustomWidget} highlightColor="#7C3AED" />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
             <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
           </ScrollView>
