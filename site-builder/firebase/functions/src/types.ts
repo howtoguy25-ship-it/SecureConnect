@@ -178,26 +178,30 @@ export interface GameElement extends BaseElement {
   clickerTarget: number;
 }
 
-// One general kind today ('clock'), designed so future real, always-live utilities
-// (countdown timer, calculator, map embed) can add their own fields to this same flat
-// interface later -- same convention as GameElement covering every game kind.
-export type WidgetKind = 'clock';
+// Every kind is a real, always-live/interactive utility, never a static picture standing
+// in for one -- same flat-interface convention as GameElement covering every game kind.
+export type WidgetKind = 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter';
 
 export interface WidgetTimezone {
   label: string; // user-facing name, e.g. "New York" or "Tokyo Office"
   ianaTimezone: string; // a real IANA zone id, e.g. "America/New_York" -- never invented
 }
 
-// Mirrors the client's WidgetElement. Only meaningful for kind 'clock' today: one
-// `timezones` entry renders a simple local clock, 2+ renders a real world clock (each tick
-// computed live via Intl.DateTimeFormat, never a static render) -- see renderWidgetHtml in
-// siteHtml.ts for the published-site implementation.
+// Mirrors the client's WidgetElement. `timezones` is only meaningful for kind 'clock' (one
+// entry renders a simple local clock, 2+ renders a real world clock, each tick computed live
+// via Intl.DateTimeFormat, never a static render). `countdownTargetIso`/`countdownLabel` are
+// only for kind 'countdown' -- a real ISO timestamp it counts down to live, client-side.
+// 'stopwatch'/'calculator'/'unitconverter' need no extra fields -- purely interactive, built
+// entirely client-side -- see renderWidgetHtml in siteHtml.ts for the published-site
+// implementation of every kind.
 export interface WidgetElement extends BaseElement {
   type: 'widget';
   kind: WidgetKind;
   title: string;
   timezones: WidgetTimezone[];
   style: 'analog' | 'digital';
+  countdownTargetIso: string;
+  countdownLabel: string;
 }
 
 export type CanvasElement =

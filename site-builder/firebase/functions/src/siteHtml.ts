@@ -1436,12 +1436,19 @@ function renderGameHtml(el: GameElement, base: string, slug: string): string {
 ${gameScript}`;
 }
 
+const WIDGET_CARD_BASE =
+  'background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;box-sizing:border-box;';
+
+function widgetTitleHtml(title: string): string {
+  return title ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(title)}</div>` : '';
+}
+
 // A real, always-live utility -- ticks every second in the visitor's own browser via
 // setInterval + Intl.DateTimeFormat (correct per-timezone/DST handling for free, no manual
 // offset math), never a static image of a clock face. Purely client-side, no backend
 // dependency at all -- the simplest of the AI-generatable real elements to keep genuinely
 // live. Mirrors the editor's WidgetView.tsx (src/components/canvas/WidgetView.tsx).
-function renderWidgetHtml(el: WidgetElement, base: string): string {
+function renderClockWidgetHtml(el: WidgetElement, base: string): string {
   const timezones = el.timezones.length > 0 ? el.timezones : [{ label: 'Local Time', ianaTimezone: 'UTC' }];
   const titleHtml = el.title
     ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(el.title)}</div>`
@@ -1532,6 +1539,381 @@ ${script}`;
   </div>
 </div>
 ${digitalScript}`;
+}
+
+// A real, live countdown to a real ISO timestamp -- recomputed from Date.now() every
+// second in the visitor's browser, never a static "time remaining" snapshot baked in at
+// publish time. Mirrors CountdownWidget in WidgetView.tsx.
+function renderCountdownWidgetHtml(el: WidgetElement, base: string): string {
+  const activeId = `cd-${el.id}-active`;
+  const doneId = `cd-${el.id}-done`;
+  const unit = (id: string, label: string) => `<div style="display:flex;flex-direction:column;align-items:center;margin:0 8px;">
+  <div id="${id}" style="font-size:30px;font-weight:800;color:#0F172A;">00</div>
+  <div style="font-size:10px;color:#64748B;font-weight:600;">${label}</div>
+</div>`;
+
+  const script = `<script>(function(){
+  var target = new Date(${JSON.stringify(el.countdownTargetIso)}).getTime();
+  var activeEl = document.getElementById(${JSON.stringify(activeId)});
+  var doneEl = document.getElementById(${JSON.stringify(doneId)});
+  var daysEl = document.getElementById(${JSON.stringify(`cd-${el.id}-days`)});
+  var hoursEl = document.getElementById(${JSON.stringify(`cd-${el.id}-hours`)});
+  var minEl = document.getElementById(${JSON.stringify(`cd-${el.id}-min`)});
+  var secEl = document.getElementById(${JSON.stringify(`cd-${el.id}-sec`)});
+  function pad(n){ n = Math.max(0, n); return (n < 10 ? '0' : '') + n; }
+  function tick(){
+    var remaining = target - Date.now();
+    if (!isFinite(target) || remaining <= 0) {
+      if (activeEl) activeEl.style.display = 'none';
+      if (doneEl) doneEl.style.display = 'block';
+      return;
+    }
+    var totalSeconds = Math.floor(remaining / 1000);
+    var days = Math.floor(totalSeconds / 86400);
+    var hours = Math.floor((totalSeconds % 86400) / 3600);
+    var minutes = Math.floor((totalSeconds % 3600) / 60);
+    var seconds = totalSeconds % 60;
+    if (daysEl) daysEl.textContent = pad(days);
+    if (hoursEl) hoursEl.textContent = pad(hours);
+    if (minEl) minEl.textContent = pad(minutes);
+    if (secEl) secEl.textContent = pad(seconds);
+  }
+  tick();
+  setInterval(tick, 1000);
+})();</script>`;
+
+  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  ${widgetTitleHtml(el.title)}
+  ${el.countdownLabel ? `<div style="font-size:12px;color:#64748B;font-weight:600;margin-bottom:4px;">${escapeHtml(el.countdownLabel)}</div>` : ''}
+  <div id="${activeId}" style="display:flex;">
+    ${unit(`cd-${el.id}-days`, 'DAYS')}
+    ${unit(`cd-${el.id}-hours`, 'HRS')}
+    ${unit(`cd-${el.id}-min`, 'MIN')}
+    ${unit(`cd-${el.id}-sec`, 'SEC')}
+  </div>
+  <div id="${doneId}" style="display:none;font-size:20px;font-weight:800;color:#16A34A;">It's here!</div>
+</div>
+${script}`;
+}
+
+// A real interactive start/pause/lap/reset stopwatch -- elapsed time is computed from real
+// Date.now() deltas (correct even if the tab is backgrounded and timers throttle), not a
+// naive tick counter. Mirrors StopwatchWidget in WidgetView.tsx.
+function renderStopwatchWidgetHtml(el: WidgetElement, base: string): string {
+  const displayId = `sw-${el.id}-display`;
+  const toggleId = `sw-${el.id}-toggle`;
+  const lapId = `sw-${el.id}-lap`;
+  const resetId = `sw-${el.id}-reset`;
+  const lapsId = `sw-${el.id}-laps`;
+
+  const script = `<script>(function(){
+  var running = false, elapsedMs = 0, startTs = 0, laps = [], intervalId = null;
+  var displayEl = document.getElementById(${JSON.stringify(displayId)});
+  var toggleBtn = document.getElementById(${JSON.stringify(toggleId)});
+  var lapBtn = document.getElementById(${JSON.stringify(lapId)});
+  var resetBtn = document.getElementById(${JSON.stringify(resetId)});
+  var lapsEl = document.getElementById(${JSON.stringify(lapsId)});
+  function pad(n){ n = String(n); while (n.length < 2) n = '0' + n; return n; }
+  function fmt(ms){
+    var totalCs = Math.floor(ms / 10);
+    var cs = totalCs % 100;
+    var totalS = Math.floor(totalCs / 100);
+    var s = totalS % 60;
+    var m = Math.floor(totalS / 60);
+    return pad(m) + ':' + pad(s) + '.' + pad(cs);
+  }
+  function render(){ if (displayEl) displayEl.textContent = fmt(elapsedMs); }
+  function tick(){ elapsedMs = Date.now() - startTs; render(); }
+  function toggle(){
+    if (running) {
+      running = false;
+      if (intervalId) clearInterval(intervalId);
+      if (toggleBtn) { toggleBtn.textContent = 'Start'; toggleBtn.style.background = '#16A34A'; }
+    } else {
+      startTs = Date.now() - elapsedMs;
+      running = true;
+      intervalId = setInterval(tick, 50);
+      if (toggleBtn) { toggleBtn.textContent = 'Pause'; toggleBtn.style.background = '#DC2626'; }
+    }
+  }
+  function reset(){
+    running = false;
+    if (intervalId) clearInterval(intervalId);
+    elapsedMs = 0; laps = [];
+    render();
+    if (lapsEl) lapsEl.innerHTML = '';
+    if (toggleBtn) { toggleBtn.textContent = 'Start'; toggleBtn.style.background = '#16A34A'; }
+  }
+  function lap(){
+    if (!running) return;
+    laps.unshift(elapsedMs);
+    laps = laps.slice(0, 5);
+    if (lapsEl) lapsEl.innerHTML = laps.map(function(l, i){ return 'Lap ' + (laps.length - i) + ': ' + fmt(l); }).join('<br>');
+  }
+  if (toggleBtn) toggleBtn.addEventListener('click', toggle);
+  if (lapBtn) lapBtn.addEventListener('click', lap);
+  if (resetBtn) resetBtn.addEventListener('click', reset);
+  render();
+})();</script>`;
+
+  const btnStyle = 'padding:8px 14px;border-radius:8px;border:none;font-weight:700;font-size:14px;cursor:pointer;';
+  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  ${widgetTitleHtml(el.title)}
+  <div id="${displayId}" style="font-size:28px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums;">00:00.00</div>
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button id="${toggleId}" style="${btnStyle}background:#16A34A;color:#FFFFFF;">Start</button>
+    <button id="${lapId}" style="${btnStyle}background:#E2E8F0;color:#0F172A;">Lap</button>
+    <button id="${resetId}" style="${btnStyle}background:#E2E8F0;color:#0F172A;">Reset</button>
+  </div>
+  <div id="${lapsId}" style="margin-top:8px;font-size:11px;color:#64748B;text-align:center;"></div>
+</div>
+${script}`;
+}
+
+const WIDGET_CALC_ROWS: string[][] = [
+  ['C', '⌫', '±', '÷'],
+  ['7', '8', '9', '×'],
+  ['4', '5', '6', '-'],
+  ['1', '2', '3', '+'],
+  ['0', '.', '='],
+];
+
+// A real working four-function calculator -- genuine sequential arithmetic (7 + 3 × 2 = 20,
+// classic running-total chaining, not a full-expression parser), not a picture of a
+// calculator. Mirrors CalculatorWidget in WidgetView.tsx.
+function renderCalculatorWidgetHtml(el: WidgetElement, base: string): string {
+  const wrapId = `calc-wrap-${el.id}`;
+  const displayId = `calc-display-${el.id}`;
+
+  const rowsHtml = WIDGET_CALC_ROWS.map(
+    (row) => `<div style="display:flex;gap:6px;margin-bottom:6px;">
+    ${row
+      .map((label) => {
+        const isEquals = label === '=';
+        const isOperator = ['+', '-', '×', '÷'].includes(label);
+        const bg = isEquals ? '#111827' : isOperator ? '#E2E8F0' : '#F1F5F9';
+        const color = isEquals ? '#FFFFFF' : '#0F172A';
+        return `<button data-label="${escapeAttr(label)}" style="flex:1;height:34px;border-radius:8px;border:none;background:${bg};color:${color};font-weight:700;font-size:15px;cursor:pointer;">${escapeHtml(label)}</button>`;
+      })
+      .join('')}
+  </div>`
+  ).join('');
+
+  const script = `<script>(function(){
+  var display = '0', stored = null, operator = null, overwrite = false;
+  var displayEl = document.getElementById(${JSON.stringify(displayId)});
+  function render(){ if (displayEl) displayEl.textContent = display; }
+  function computeCalc(a, op, b){
+    if (op === '+') return a + b;
+    if (op === '-') return a - b;
+    if (op === '×') return a * b;
+    if (op === '÷') return b === 0 ? NaN : a / b;
+    return b;
+  }
+  function formatResult(n){
+    if (!isFinite(n)) return 'Error';
+    return String(Math.round(n * 1e8) / 1e8);
+  }
+  function press(label){
+    if (/^[0-9]$/.test(label)) {
+      display = (overwrite || display === '0') ? label : (display.length < 12 ? display + label : display);
+      overwrite = false;
+      render();
+      return;
+    }
+    if (label === '.') {
+      display = overwrite ? '0.' : (display.indexOf('.') === -1 ? display + '.' : display);
+      overwrite = false;
+      render();
+      return;
+    }
+    if (label === 'C') {
+      display = '0'; stored = null; operator = null; overwrite = false;
+      render();
+      return;
+    }
+    if (label === '⌫') {
+      display = display.length > 1 ? display.slice(0, -1) : '0';
+      render();
+      return;
+    }
+    if (label === '±') {
+      display = display.charAt(0) === '-' ? display.slice(1) : (display === '0' ? display : '-' + display);
+      render();
+      return;
+    }
+    if (label === '=') {
+      if (operator !== null && stored !== null) {
+        display = formatResult(computeCalc(stored, operator, Number(display)));
+        stored = null; operator = null; overwrite = true;
+      }
+      render();
+      return;
+    }
+    if (stored !== null && operator !== null) {
+      display = formatResult(computeCalc(stored, operator, Number(display)));
+    }
+    stored = Number(display);
+    operator = label;
+    overwrite = true;
+    render();
+  }
+  var buttons = document.querySelectorAll('#${wrapId} button');
+  for (var i = 0; i < buttons.length; i++) {
+    (function(btn){
+      btn.addEventListener('click', function(){ press(btn.getAttribute('data-label')); });
+    })(buttons[i]);
+  }
+})();</script>`;
+
+  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:stretch;justify-content:center;overflow-y:auto;">
+  ${widgetTitleHtml(el.title)}
+  <div id="${wrapId}">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;padding:0 4px;">
+      <div id="${displayId}" style="font-size:26px;font-weight:700;color:#0F172A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">0</div>
+    </div>
+    ${rowsHtml}
+  </div>
+</div>
+${script}`;
+}
+
+const WIDGET_UNIT_OPTIONS_JSON = JSON.stringify({
+  length: [
+    { key: 'mm', label: 'mm' },
+    { key: 'cm', label: 'cm' },
+    { key: 'm', label: 'm' },
+    { key: 'km', label: 'km' },
+    { key: 'in', label: 'in' },
+    { key: 'ft', label: 'ft' },
+    { key: 'yd', label: 'yd' },
+    { key: 'mi', label: 'mi' },
+  ],
+  weight: [
+    { key: 'mg', label: 'mg' },
+    { key: 'g', label: 'g' },
+    { key: 'kg', label: 'kg' },
+    { key: 'oz', label: 'oz' },
+    { key: 'lb', label: 'lb' },
+    { key: 'st', label: 'st' },
+  ],
+  volume: [
+    { key: 'ml', label: 'mL' },
+    { key: 'l', label: 'L' },
+    { key: 'tsp', label: 'tsp' },
+    { key: 'tbsp', label: 'tbsp' },
+    { key: 'floz', label: 'fl oz' },
+    { key: 'cup', label: 'cup' },
+    { key: 'qt', label: 'qt' },
+    { key: 'gal', label: 'gal' },
+  ],
+  temperature: [
+    { key: 'c', label: '°C' },
+    { key: 'f', label: '°F' },
+    { key: 'k', label: 'K' },
+  ],
+});
+
+// A real working unit converter (length/weight/temperature/volume) with live-recomputed
+// results as the visitor types or switches units -- real conversion factors (and real
+// affine Celsius/Fahrenheit/Kelvin formulas for temperature), not a static chart. Mirrors
+// UnitConverterWidget in WidgetView.tsx.
+function renderUnitConverterWidgetHtml(el: WidgetElement, base: string): string {
+  const catId = `uc-${el.id}-categories`;
+  const inputId = `uc-${el.id}-input`;
+  const fromId = `uc-${el.id}-from`;
+  const toId = `uc-${el.id}-to`;
+  const resultId = `uc-${el.id}-result`;
+  const swapId = `uc-${el.id}-swap`;
+
+  const script = `<script>(function(){
+  var UNIT_OPTIONS = ${WIDGET_UNIT_OPTIONS_JSON};
+  var LENGTH_FACTORS = { mm: 0.001, cm: 0.01, m: 1, km: 1000, in: 0.0254, ft: 0.3048, yd: 0.9144, mi: 1609.344 };
+  var WEIGHT_FACTORS = { mg: 0.000001, g: 0.001, kg: 1, oz: 0.028349523125, lb: 0.45359237, st: 6.35029318 };
+  var VOLUME_FACTORS = { ml: 0.001, l: 1, tsp: 0.00492892, tbsp: 0.0147868, floz: 0.0295735, cup: 0.236588, qt: 0.946353, gal: 3.78541 };
+  var CATEGORIES = [{ key: 'length', label: 'Length' }, { key: 'weight', label: 'Weight' }, { key: 'temperature', label: 'Temp' }, { key: 'volume', label: 'Volume' }];
+  function celsiusFrom(value, unit){ if (unit === 'f') return (value - 32) * 5 / 9; if (unit === 'k') return value - 273.15; return value; }
+  function celsiusTo(celsius, unit){ if (unit === 'f') return celsius * 9 / 5 + 32; if (unit === 'k') return celsius + 273.15; return celsius; }
+  function convert(category, value, fromKey, toKey){
+    if (category === 'temperature') return celsiusTo(celsiusFrom(value, fromKey), toKey);
+    var table = category === 'length' ? LENGTH_FACTORS : category === 'weight' ? WEIGHT_FACTORS : VOLUME_FACTORS;
+    var base = value * (table[fromKey] || 1);
+    return base / (table[toKey] || 1);
+  }
+  var category = 'length';
+  var fromUnit = UNIT_OPTIONS[category][0].key;
+  var toUnit = UNIT_OPTIONS[category][1] ? UNIT_OPTIONS[category][1].key : UNIT_OPTIONS[category][0].key;
+  var inputEl = document.getElementById(${JSON.stringify(inputId)});
+  var resultEl = document.getElementById(${JSON.stringify(resultId)});
+  var fromContainer = document.getElementById(${JSON.stringify(fromId)});
+  var toContainer = document.getElementById(${JSON.stringify(toId)});
+  var catContainer = document.getElementById(${JSON.stringify(catId)});
+  var swapBtn = document.getElementById(${JSON.stringify(swapId)});
+  function chipStyle(active){
+    return 'padding:5px 9px;border-radius:999px;background:' + (active ? '#111827' : '#F1F5F9') + ';color:' + (active ? '#FFFFFF' : '#0F172A') + ';font-weight:700;font-size:11px;margin:0 6px 6px 0;border:none;cursor:pointer;';
+  }
+  function renderChips(container, options, activeKey, onPick){
+    if (!container) return;
+    container.innerHTML = '';
+    options.forEach(function(opt){
+      var btn = document.createElement('button');
+      btn.textContent = opt.label;
+      btn.setAttribute('style', chipStyle(opt.key === activeKey));
+      btn.addEventListener('click', function(){ onPick(opt.key); });
+      container.appendChild(btn);
+    });
+  }
+  function renderCategoryChips(){
+    renderChips(catContainer, CATEGORIES, category, function(key){
+      category = key;
+      fromUnit = UNIT_OPTIONS[category][0].key;
+      toUnit = UNIT_OPTIONS[category][1] ? UNIT_OPTIONS[category][1].key : UNIT_OPTIONS[category][0].key;
+      renderCategoryChips();
+      renderUnitChips();
+      recompute();
+    });
+  }
+  function renderUnitChips(){
+    renderChips(fromContainer, UNIT_OPTIONS[category], fromUnit, function(key){ fromUnit = key; renderUnitChips(); recompute(); });
+    renderChips(toContainer, UNIT_OPTIONS[category], toUnit, function(key){ toUnit = key; renderUnitChips(); recompute(); });
+  }
+  function recompute(){
+    var value = parseFloat(inputEl ? inputEl.value : '');
+    if (!isFinite(value)) { if (resultEl) resultEl.textContent = '--'; return; }
+    var result = convert(category, value, fromUnit, toUnit);
+    if (resultEl) resultEl.textContent = isFinite(result) ? String(Math.round(result * 1e6) / 1e6) : '--';
+  }
+  if (inputEl) inputEl.addEventListener('input', recompute);
+  if (swapBtn) swapBtn.addEventListener('click', function(){ var tmp = fromUnit; fromUnit = toUnit; toUnit = tmp; renderUnitChips(); recompute(); });
+  renderCategoryChips();
+  renderUnitChips();
+  recompute();
+})();</script>`;
+
+  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:stretch;justify-content:center;overflow-y:auto;">
+  ${widgetTitleHtml(el.title)}
+  <div id="${catId}" style="display:flex;flex-wrap:wrap;"></div>
+  <div style="display:flex;align-items:center;margin-top:4px;gap:8px;">
+    <input id="${inputId}" type="number" value="1" style="flex:1;border:1px solid #E2E8F0;border-radius:8px;padding:8px 10px;font-size:15px;color:#0F172A;box-sizing:border-box;" />
+    <div id="${fromId}" style="display:flex;flex-wrap:wrap;flex:1;"></div>
+  </div>
+  <button id="${swapId}" style="align-self:center;background:none;border:none;cursor:pointer;display:block;margin:4px auto;font-size:16px;color:#64748B;">&#8645;</button>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <div style="flex:1;border:1px solid #E2E8F0;border-radius:8px;padding:8px 10px;background:#F8FAFC;box-sizing:border-box;">
+      <div id="${resultId}" style="font-size:15px;font-weight:700;color:#0F172A;">1</div>
+    </div>
+    <div id="${toId}" style="display:flex;flex-wrap:wrap;flex:1;"></div>
+  </div>
+</div>
+${script}`;
+}
+
+function renderWidgetHtml(el: WidgetElement, base: string): string {
+  if (el.kind === 'countdown') return renderCountdownWidgetHtml(el, base);
+  if (el.kind === 'stopwatch') return renderStopwatchWidgetHtml(el, base);
+  if (el.kind === 'calculator') return renderCalculatorWidgetHtml(el, base);
+  if (el.kind === 'unitconverter') return renderUnitConverterWidgetHtml(el, base);
+  return renderClockWidgetHtml(el, base);
 }
 
 function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], currency = 'usd'): string {

@@ -258,27 +258,29 @@ export interface GameElement extends BaseElement {
   clickerTarget: number;
 }
 
-// One general kind today ('clock'), deliberately designed so future real, always-live
-// utilities (a countdown timer, a calculator, a map embed) can add their own fields to this
-// same flat interface later, matching GameElement's one-type-covers-every-kind convention.
-export type WidgetKind = 'clock';
+// Every kind is a real, always-live/interactive utility -- never a static image standing in
+// for one -- matching GameElement's one-type-covers-every-kind convention.
+export type WidgetKind = 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter';
 
 export interface WidgetTimezone {
   label: string; // user-facing name, e.g. "New York" or "Tokyo Office"
   ianaTimezone: string; // a real IANA zone id, e.g. "America/New_York" -- never invented
 }
 
-// A real, always-live utility -- not a static image of a clock. Only meaningful for kind
-// 'clock' today: one `timezones` entry is a simple local clock, 2+ is a real world clock,
-// each computed live client-side (Intl.DateTimeFormat, ticking every second) rather than
-// rendered once at publish time -- see WidgetView.tsx (editor) and renderWidgetHtml in
-// firebase/functions/src/siteHtml.ts (published site).
+// `timezones` is only meaningful for kind 'clock' (one entry is a simple local clock, 2+ is
+// a real world clock, each computed live client-side via Intl.DateTimeFormat, ticking every
+// second). `countdownTargetIso`/`countdownLabel` are only for kind 'countdown' -- a real ISO
+// timestamp it counts down to live. 'stopwatch'/'calculator'/'unitconverter' need no extra
+// fields -- purely interactive, no data beyond what the visitor enters -- see WidgetView.tsx
+// (editor) and renderWidgetHtml in firebase/functions/src/siteHtml.ts (published site).
 export interface WidgetElement extends BaseElement {
   type: 'widget';
   kind: WidgetKind;
   title: string;
   timezones: WidgetTimezone[];
   style: 'analog' | 'digital';
+  countdownTargetIso: string;
+  countdownLabel: string;
 }
 
 export type CanvasElement =

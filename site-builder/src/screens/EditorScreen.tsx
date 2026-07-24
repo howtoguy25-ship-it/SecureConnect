@@ -345,6 +345,8 @@ function EditorInner({ navigation }: Props) {
       title: 'Clock',
       timezones: [],
       style: 'digital',
+      countdownTargetIso: '',
+      countdownLabel: '',
       x: canvasCenterX - 90,
       y: canvasCenterY - 60,
       width: 180,

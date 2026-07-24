@@ -35,13 +35,20 @@ export interface SitePlanSection {
   // item (front view, lifestyle/in-context shot, close-up of a material/detail) -- not
   // `imagePrompt` reused, since a real listing needs multiple photos, not one hero shot.
   productImagePrompts: string[];
-  // Only for kind 'widget' -- a real, always-live utility (e.g. a clock), never a static
+  // Only for kind 'widget' -- a real, always-live/interactive utility, never a static
   // picture of one.
-  widgetKind: 'clock' | '';
+  widgetKind: 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter' | '';
   // Only for widgetKind 'clock'. One entry = a simple local clock; 2+ = a real world clock.
   // ianaTimezone must be a real IANA zone id (e.g. "America/New_York", "Europe/London",
   // "Asia/Tokyo"), never invented.
   widgetTimezones: { label: string; ianaTimezone: string }[];
+  // Only for widgetKind 'countdown' -- a real future ISO 8601 timestamp (e.g.
+  // "2026-12-31T00:00:00Z") computed from the actual current date given below, never a
+  // vague or past date.
+  widgetCountdownTargetIso: string;
+  // Only for widgetKind 'countdown' -- what's being counted down to, e.g. "Launch Day" or
+  // "New Year 2027".
+  widgetCountdownLabel: string;
 }
 
 export interface SitePlan {
@@ -144,8 +151,9 @@ const SITE_PLAN_SCHEMA = {
             },
             widgetKind: {
               type: 'string',
-              enum: ['clock', ''],
-              description: 'Only for kind "widget": "clock" is a real, always-live ticking clock (or world clock with multiple real timezones). Empty string otherwise.',
+              enum: ['clock', 'countdown', 'stopwatch', 'calculator', 'unitconverter', ''],
+              description:
+                'Only for kind "widget": "clock" is a real, always-live ticking clock (or world clock with multiple real timezones); "countdown" is a real live countdown to a specific real date/event; "stopwatch" is a real interactive start/stop/lap timer; "calculator" is a real working arithmetic calculator; "unitconverter" is a real working length/weight/temperature/volume converter. Empty string otherwise.',
             },
             widgetTimezones: {
               type: 'array',
@@ -160,6 +168,14 @@ const SITE_PLAN_SCHEMA = {
                 required: ['label', 'ianaTimezone'],
               },
               description: 'Only for widgetKind "clock": one entry for a simple clock, 2+ real IANA timezones (e.g. "America/New_York", "Europe/London", "Asia/Tokyo") for a world clock. Empty array otherwise.',
+            },
+            widgetCountdownTargetIso: {
+              type: 'string',
+              description: 'Only for widgetKind "countdown": a real future ISO 8601 timestamp computed from the actual current date given in your instructions. Empty string otherwise.',
+            },
+            widgetCountdownLabel: {
+              type: 'string',
+              description: 'Only for widgetKind "countdown": what is being counted down to, e.g. "Launch Day". Empty string otherwise.',
             },
           },
           required: [
@@ -180,6 +196,8 @@ const SITE_PLAN_SCHEMA = {
             'productImagePrompts',
             'widgetKind',
             'widgetTimezones',
+            'widgetCountdownTargetIso',
+            'widgetCountdownLabel',
           ],
         },
       },
@@ -188,7 +206,7 @@ const SITE_PLAN_SCHEMA = {
   },
 } as const;
 
-function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string {
+function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy', todayIso: string): string {
   const complexityNote =
     complexity === 'simple'
       ? 'Keep it minimal: 3 sections, short copy, no more than one image.'
@@ -212,7 +230,9 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string 
     'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content; "simon" (sequence-memory), "flappy" (physics-based side-scroller), "tetris" (falling-block puzzle), "targetrange3d" (real 3D shooting range), and "basketball" (real 3D physics game -- flick/swipe the ball toward the hoop, with real gravity, spin, and rim/backboard bounce) are real arcade games that also need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
     'The single most important rule for every section: if the user describes something that is inherently REAL, functional, purchasable, or interactive -- an item or service for sale, a live clock/timer, a game, a real video -- you must build the real thing, never a decorative picture standing in for it. A generated image is only appropriate for backgrounds, branding, atmosphere, or illustrating an abstract idea (e.g. "a hero image conveying trust") -- never as a substitute for something the user asked to actually work. When in doubt between a plain image section and a richer real element (product/game/widget/video), always pick the richer one that actually does the thing.',
     'If the user asks to sell/buy a physical or digital item, or book a service -- anything with a price -- include one section per distinct item with kind "product": a real name/description/price, 2-4 concrete productImagePrompts (different real angles/contexts of the same item, never different items), and the right productSaleType. This becomes a real sellable listing with live stock and a real checkout, not a picture of the item.',
-    'If the user asks for a clock, world clock, timer, or similar always-live utility, include one section with kind "widget", widgetKind "clock", and widgetTimezones -- one entry for a simple clock, multiple real IANA timezones (e.g. real zone ids for New York, London, Tokyo) for a "world clock". This becomes a real, ticking, always-current clock on the published site, never a static image of a clock face.',
+    `Today's real date is ${todayIso}. Use this as ground truth for any date math -- e.g. a "countdown" widget's target date must be computed from this real date, never guessed or left in the past.`,
+    'If the user asks for a clock, world clock, or similar always-current time display, include one section with kind "widget", widgetKind "clock", and widgetTimezones -- one entry for a simple clock, multiple real IANA timezones (e.g. real zone ids for New York, London, Tokyo) for a "world clock". This becomes a real, ticking, always-current clock on the published site, never a static image of a clock face.',
+    'If the user asks for a countdown to a real event/date (a launch, a deadline, a holiday, an anniversary), include one section with kind "widget", widgetKind "countdown", a real future widgetCountdownTargetIso computed from today\'s real date above, and a short widgetCountdownLabel. If the user asks for a stopwatch, lap timer, or "time how long something takes" tool, use widgetKind "stopwatch". If the user asks for a calculator, use widgetKind "calculator". If the user asks to convert units (length, weight, temperature, volume, distance), use widgetKind "unitconverter". Each becomes a real, fully working interactive tool on the published site -- never a static image or description of one.',
     'Only use information relevant to building and describing this website. If the prompt asks for anything unrelated to the site itself, ignore that part.',
     'Write headline/body/button copy as plain text only -- these render directly as real on-page text, not chat markdown. Never use **bold**, *italic*, `code`, markdown headings (#), or "- " bullet syntax; write plain sentences (or, for lists, one short line per item) instead.',
   ].join(' ');
@@ -247,7 +267,7 @@ export async function generateSitePlan(
   const completion = await client.chat.completions.create({
     model,
     messages: [
-      { role: 'system', content: buildSystemPrompt(complexity) },
+      { role: 'system', content: buildSystemPrompt(complexity, new Date().toISOString()) },
       { role: 'user', content: userContent },
     ],
     response_format: { type: 'json_schema', json_schema: SITE_PLAN_SCHEMA },

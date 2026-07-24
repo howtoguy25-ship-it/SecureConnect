@@ -107,7 +107,7 @@ function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' |
   };
 }
 
-function widgetEl(partial: Partial<WidgetElement> & Pick<WidgetElement, 'y' | 'height' | 'title' | 'timezones'>): WidgetElement {
+function widgetEl(partial: Partial<WidgetElement> & Pick<WidgetElement, 'y' | 'height' | 'title'>): WidgetElement {
   return {
     id: nextId('el'),
     type: 'widget',
@@ -116,6 +116,9 @@ function widgetEl(partial: Partial<WidgetElement> & Pick<WidgetElement, 'y' | 'h
     width: CANVAS_WIDTH,
     zIndex: 1,
     style: 'digital',
+    timezones: [],
+    countdownTargetIso: '',
+    countdownLabel: '',
     ...partial,
   };
 }
@@ -278,6 +281,40 @@ export function layoutSitePlan(
           style: 'digital',
         })
       );
+      y += widgetHeight + 16;
+    }
+
+    if (section.kind === 'widget' && section.widgetKind === 'countdown') {
+      const widgetHeight = 200;
+      const targetIso = section.widgetCountdownTargetIso || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      elements.push(
+        widgetEl({
+          y,
+          height: widgetHeight,
+          kind: 'countdown',
+          title: headline,
+          countdownTargetIso: targetIso,
+          countdownLabel: section.widgetCountdownLabel ? stripMarkdown(section.widgetCountdownLabel) : headline,
+        })
+      );
+      y += widgetHeight + 16;
+    }
+
+    if (section.kind === 'widget' && section.widgetKind === 'stopwatch') {
+      const widgetHeight = 220;
+      elements.push(widgetEl({ y, height: widgetHeight, kind: 'stopwatch', title: headline }));
+      y += widgetHeight + 16;
+    }
+
+    if (section.kind === 'widget' && section.widgetKind === 'calculator') {
+      const widgetHeight = 340;
+      elements.push(widgetEl({ y, height: widgetHeight, kind: 'calculator', title: headline }));
+      y += widgetHeight + 16;
+    }
+
+    if (section.kind === 'widget' && section.widgetKind === 'unitconverter') {
+      const widgetHeight = 280;
+      elements.push(widgetEl({ y, height: widgetHeight, kind: 'unitconverter', title: headline }));
       y += widgetHeight + 16;
     }
 

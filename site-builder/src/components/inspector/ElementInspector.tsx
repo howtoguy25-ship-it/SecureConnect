@@ -3,7 +3,7 @@ import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndic
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement, ImageElement, ProductVariantOption, ProductVariant, WidgetTimezone } from '@/types';
+import { CanvasElement, ImageElement, ProductVariantOption, ProductVariant, WidgetKind, WidgetTimezone } from '@/types';
 import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
@@ -996,40 +996,100 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             <Text style={styles.fieldLabel}>Title</Text>
             <TextInput style={styles.textInput} value={element.title} onChangeText={(title) => onChange({ title } as any)} />
 
-            <Text style={styles.fieldLabel}>Style</Text>
+            <Text style={styles.fieldLabel}>Kind</Text>
             <View style={styles.rowButtons}>
-              {(['digital', 'analog'] as const).map((style) => (
+              {(
+                [
+                  ['clock', 'Clock'],
+                  ['countdown', 'Countdown'],
+                  ['stopwatch', 'Stopwatch'],
+                  ['calculator', 'Calculator'],
+                  ['unitconverter', 'Unit Converter'],
+                ] as [WidgetKind, string][]
+              ).map(([kind, label]) => (
                 <Pressable
-                  key={style}
-                  style={[styles.toggleBtn, element.style === style && styles.toggleBtnActive]}
-                  onPress={() => onChange({ style } as any)}
+                  key={kind}
+                  style={[styles.toggleBtn, element.kind === kind && styles.toggleBtnActive]}
+                  onPress={() => onChange({ kind } as any)}
                 >
-                  <Text style={styles.toggleBtnText}>{style === 'digital' ? 'Digital' : 'Analog'}</Text>
+                  <Text style={styles.toggleBtnText}>{label}</Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={styles.fieldLabel}>Timezones ({element.timezones.length === 0 ? 'shows your local time' : `${element.timezones.length} shown`})</Text>
-            <View style={styles.rowButtons}>
-              {element.timezones.map((tz, i) => (
-                <Pressable
-                  key={i}
-                  style={[styles.toggleBtn, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
-                  onPress={() => onChange({ timezones: element.timezones.filter((_, j) => j !== i) } as any)}
-                >
-                  <Text style={styles.toggleBtnText}>{tz.label}</Text>
-                  <Ionicons name="close" size={12} color="#64748B" />
-                </Pressable>
-              ))}
-            </View>
-            <WidgetTimezoneAdder
-              existing={element.timezones}
-              onAdd={(tz) => onChange({ timezones: [...element.timezones, tz] } as any)}
-            />
-            <Text style={styles.helperText}>
-              One timezone shows a simple clock; add 2 or more for a real world clock. This is a genuinely live, ticking clock on
-              your published site — never a static image.
-            </Text>
+            {element.kind === 'clock' && (
+              <>
+                <Text style={styles.fieldLabel}>Style</Text>
+                <View style={styles.rowButtons}>
+                  {(['digital', 'analog'] as const).map((style) => (
+                    <Pressable
+                      key={style}
+                      style={[styles.toggleBtn, element.style === style && styles.toggleBtnActive]}
+                      onPress={() => onChange({ style } as any)}
+                    >
+                      <Text style={styles.toggleBtnText}>{style === 'digital' ? 'Digital' : 'Analog'}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={styles.fieldLabel}>Timezones ({element.timezones.length === 0 ? 'shows your local time' : `${element.timezones.length} shown`})</Text>
+                <View style={styles.rowButtons}>
+                  {element.timezones.map((tz, i) => (
+                    <Pressable
+                      key={i}
+                      style={[styles.toggleBtn, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+                      onPress={() => onChange({ timezones: element.timezones.filter((_, j) => j !== i) } as any)}
+                    >
+                      <Text style={styles.toggleBtnText}>{tz.label}</Text>
+                      <Ionicons name="close" size={12} color="#64748B" />
+                    </Pressable>
+                  ))}
+                </View>
+                <WidgetTimezoneAdder
+                  existing={element.timezones}
+                  onAdd={(tz) => onChange({ timezones: [...element.timezones, tz] } as any)}
+                />
+                <Text style={styles.helperText}>
+                  One timezone shows a simple clock; add 2 or more for a real world clock. This is a genuinely live, ticking clock
+                  on your published site — never a static image.
+                </Text>
+              </>
+            )}
+
+            {element.kind === 'countdown' && (
+              <>
+                <Text style={styles.fieldLabel}>Counting down to (label)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={element.countdownLabel}
+                  onChangeText={(countdownLabel) => onChange({ countdownLabel } as any)}
+                  placeholder="e.g. Launch Day"
+                />
+                <CountdownTargetEditor
+                  targetIso={element.countdownTargetIso}
+                  onChange={(countdownTargetIso) => onChange({ countdownTargetIso } as any)}
+                />
+                <Text style={styles.helperText}>
+                  A real, live countdown that ticks down every second on your published site — never a static number.
+                </Text>
+              </>
+            )}
+
+            {element.kind === 'stopwatch' && (
+              <Text style={styles.helperText}>
+                A real interactive start/pause/lap/reset stopwatch. Visitors control it themselves — no setup needed here.
+              </Text>
+            )}
+
+            {element.kind === 'calculator' && (
+              <Text style={styles.helperText}>A real working four-function calculator. No setup needed here.</Text>
+            )}
+
+            {element.kind === 'unitconverter' && (
+              <Text style={styles.helperText}>
+                A real working length/weight/temperature/volume converter. No setup needed here.
+              </Text>
+            )}
           </>
         )}
       </ScrollView>
@@ -1133,6 +1193,62 @@ function WidgetTimezoneAdder({ existing, onAdd }: { existing: WidgetTimezone[]; 
           <Text style={{ fontSize: 13, color: '#0F172A' }}>{tz.label}</Text>
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+// "Days/hours from now" entry (same convention as DiscountCodesScreen's startsInDays/
+// expiresInDays fields) rather than a native date-picker dependency -- computes and stores a
+// real absolute ISO timestamp immediately, which is what actually drives the live countdown.
+function CountdownTargetEditor({ targetIso, onChange }: { targetIso: string; onChange: (iso: string) => void }) {
+  const target = Date.parse(targetIso || '');
+  const hasTarget = Number.isFinite(target);
+  const remainingMs = hasTarget ? target - Date.now() : 0;
+  const remainingDays = hasTarget ? Math.max(0, Math.floor(remainingMs / 86400000)) : 0;
+  const remainingHours = hasTarget ? Math.max(0, Math.floor((remainingMs % 86400000) / 3600000)) : 0;
+  const [days, setDays] = useState(String(remainingDays));
+  const [hours, setHours] = useState(String(remainingHours));
+
+  const apply = (nextDays: string, nextHours: string) => {
+    const d = parseInt(nextDays, 10);
+    const h = parseInt(nextHours, 10);
+    const totalMs = (Number.isFinite(d) ? d : 0) * 86400000 + (Number.isFinite(h) ? h : 0) * 3600000;
+    onChange(new Date(Date.now() + totalMs).toISOString());
+  };
+
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.helperText}>Days from now</Text>
+          <TextInput
+            style={styles.textInput}
+            value={days}
+            onChangeText={(v) => {
+              setDays(v);
+              apply(v, hours);
+            }}
+            keyboardType="number-pad"
+            placeholder="0"
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.helperText}>Hours from now</Text>
+          <TextInput
+            style={styles.textInput}
+            value={hours}
+            onChangeText={(v) => {
+              setHours(v);
+              apply(days, v);
+            }}
+            keyboardType="number-pad"
+            placeholder="0"
+          />
+        </View>
+      </View>
+      {hasTarget && (
+        <Text style={styles.helperText}>Ends: {new Date(target).toLocaleString()}</Text>
+      )}
     </View>
   );
 }
