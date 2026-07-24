@@ -284,7 +284,9 @@ export interface PolicyDoc {
 export type MenuItemTarget =
   | { type: 'page'; pageId: string }
   | { type: 'policy'; policyId: string }
-  | { type: 'url'; url: string };
+  | { type: 'url'; url: string }
+  | { type: 'product'; productId: string }
+  | { type: 'collection'; elementId: string };
 
 export interface MenuItem {
   id: string;

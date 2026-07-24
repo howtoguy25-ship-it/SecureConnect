@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Image, ActivityIndicator, Pressable, ScrollView, StyleSheet, Modal, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -6,9 +6,10 @@ import { showAlert } from '@/utils/alert';
 import { generateId } from '@/utils/id';
 import { templateForPolicy, POLICY_KIND_LABELS } from '@/utils/richText';
 import { uploadLocalImage } from '@/services/uploads';
+import { productsStore } from '@/storage/productsStore';
 import RichTextEditor from '@/components/policy/RichTextEditor';
 import SliderRow from '@/components/inspector/SliderRow';
-import { MenuItem, MenuItemTarget, PolicyDoc, PolicyKind, Project, SitePage } from '@/types';
+import { CatalogProduct, CollectionElement, MenuItem, MenuItemTarget, PolicyDoc, PolicyKind, Project, SitePage } from '@/types';
 
 const STANDARD_KINDS: PolicyKind[] = ['privacy', 'terms', 'shipping', 'refund', 'contact'];
 const DIVIDER_SWATCHES = ['#E2E8F0', '#CBD5E1', '#0F172A', '#4338CA', '#EA580C', '#D4AF37'];
@@ -21,18 +22,32 @@ export default function MenuPoliciesModal({
   project,
   pages,
   updateProject,
+  uid,
 }: {
   visible: boolean;
   onClose: () => void;
   project: Project;
   pages: SitePage[] | null;
   updateProject: (patch: Partial<Project>) => void;
+  uid: string;
 }) {
   const [tab, setTab] = useState<Tab>('menu');
   const [editingPolicyId, setEditingPolicyId] = useState<string | null>(null);
   const [addingMenuItem, setAddingMenuItem] = useState(false);
   const [editingMenuItemId, setEditingMenuItemId] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [products, setProducts] = useState<CatalogProduct[]>([]);
+
+  useEffect(() => {
+    return productsStore.subscribe(uid, setProducts);
+  }, [uid]);
+
+  // Every real CollectionElement already placed somewhere on the site -- a menu item can only
+  // link to a collection that actually exists on a page, same as it can only link to a real
+  // page/policy (see MenuItemTarget's comment).
+  const collectionElements: CollectionElement[] = (pages ? pages.flatMap((p) => p.elements) : project.elements).filter(
+    (el): el is CollectionElement => el.type === 'collection'
+  );
 
   const handlePickLogo = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -118,6 +133,8 @@ export default function MenuPoliciesModal({
   const describeTarget = (target: MenuItemTarget): string => {
     if (target.type === 'page') return pages?.find((p) => p.id === target.pageId)?.name ?? 'Unknown page';
     if (target.type === 'policy') return policies.find((p) => p.id === target.policyId)?.title ?? 'Unknown page';
+    if (target.type === 'product') return products.find((p) => p.id === target.productId)?.name || 'Untitled product';
+    if (target.type === 'collection') return collectionElements.find((el) => el.id === target.elementId)?.name || 'Untitled collection';
     return target.url;
   };
 
@@ -390,6 +407,8 @@ export default function MenuPoliciesModal({
           initial={editingMenuItemId ? menu.items.find((i) => i.id === editingMenuItemId) ?? null : null}
           pages={pages}
           policies={policies}
+          products={products}
+          collectionElements={collectionElements}
           onCancel={() => {
             setAddingMenuItem(false);
             setEditingMenuItemId(null);
@@ -406,6 +425,8 @@ function MenuItemFormModal({
   initial,
   pages,
   policies,
+  products,
+  collectionElements,
   onCancel,
   onSave,
 }: {
@@ -413,6 +434,8 @@ function MenuItemFormModal({
   initial: MenuItem | null;
   pages: SitePage[] | null;
   policies: PolicyDoc[];
+  products: CatalogProduct[];
+  collectionElements: CollectionElement[];
   onCancel: () => void;
   onSave: (item: MenuItem) => void;
 }) {
@@ -421,6 +444,10 @@ function MenuItemFormModal({
   const [pageId, setPageId] = useState(initial?.target.type === 'page' ? initial.target.pageId : pages?.[0]?.id ?? '');
   const [policyId, setPolicyId] = useState(initial?.target.type === 'policy' ? initial.target.policyId : policies[0]?.id ?? '');
   const [url, setUrl] = useState(initial?.target.type === 'url' ? initial.target.url : '');
+  const [productId, setProductId] = useState(initial?.target.type === 'product' ? initial.target.productId : products[0]?.id ?? '');
+  const [collectionElementId, setCollectionElementId] = useState(
+    initial?.target.type === 'collection' ? initial.target.elementId : collectionElements[0]?.id ?? ''
+  );
 
   React.useEffect(() => {
     if (!visible) return;
@@ -429,6 +456,8 @@ function MenuItemFormModal({
     setPageId(initial?.target.type === 'page' ? initial.target.pageId : pages?.[0]?.id ?? '');
     setPolicyId(initial?.target.type === 'policy' ? initial.target.policyId : policies[0]?.id ?? '');
     setUrl(initial?.target.type === 'url' ? initial.target.url : '');
+    setProductId(initial?.target.type === 'product' ? initial.target.productId : products[0]?.id ?? '');
+    setCollectionElementId(initial?.target.type === 'collection' ? initial.target.elementId : collectionElements[0]?.id ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, initial?.id]);
 
@@ -441,6 +470,12 @@ function MenuItemFormModal({
     } else if (targetType === 'policy') {
       if (!policyId) return;
       target = { type: 'policy', policyId };
+    } else if (targetType === 'product') {
+      if (!productId) return;
+      target = { type: 'product', productId };
+    } else if (targetType === 'collection') {
+      if (!collectionElementId) return;
+      target = { type: 'collection', elementId: collectionElementId };
     } else {
       if (!url.trim()) return;
       target = { type: 'url', url: url.trim() };
@@ -463,6 +498,12 @@ function MenuItemFormModal({
             </Pressable>
             <Pressable style={[styles.chip, targetType === 'policy' && styles.chipActive]} onPress={() => setTargetType('policy')}>
               <Text style={styles.chipText}>Policy</Text>
+            </Pressable>
+            <Pressable style={[styles.chip, targetType === 'product' && styles.chipActive]} onPress={() => setTargetType('product')}>
+              <Text style={styles.chipText}>Product</Text>
+            </Pressable>
+            <Pressable style={[styles.chip, targetType === 'collection' && styles.chipActive]} onPress={() => setTargetType('collection')}>
+              <Text style={styles.chipText}>Collection</Text>
             </Pressable>
             <Pressable style={[styles.chip, targetType === 'url' && styles.chipActive]} onPress={() => setTargetType('url')}>
               <Text style={styles.chipText}>URL</Text>
@@ -487,6 +528,32 @@ function MenuItemFormModal({
                 </Pressable>
               ))}
               {policies.length === 0 && <Text style={styles.helperText}>No policies created yet.</Text>}
+            </View>
+          )}
+          {targetType === 'product' && (
+            <View style={styles.chipRow}>
+              {products.map((p) => (
+                <Pressable key={p.id} style={[styles.chip, productId === p.id && styles.chipActive]} onPress={() => setProductId(p.id)}>
+                  <Text style={styles.chipText}>{p.name || 'Untitled product'}</Text>
+                </Pressable>
+              ))}
+              {products.length === 0 && <Text style={styles.helperText}>No products in your catalog yet -- create one in Products first.</Text>}
+            </View>
+          )}
+          {targetType === 'collection' && (
+            <View style={styles.chipRow}>
+              {collectionElements.map((el) => (
+                <Pressable
+                  key={el.id}
+                  style={[styles.chip, collectionElementId === el.id && styles.chipActive]}
+                  onPress={() => setCollectionElementId(el.id)}
+                >
+                  <Text style={styles.chipText}>{el.name || 'Untitled collection'}</Text>
+                </Pressable>
+              ))}
+              {collectionElements.length === 0 && (
+                <Text style={styles.helperText}>No collections placed on your site yet -- add a Collection element to a page first.</Text>
+              )}
             </View>
           )}
           {targetType === 'url' && (

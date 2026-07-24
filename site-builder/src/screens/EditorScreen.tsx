@@ -665,13 +665,16 @@ function EditorInner({ navigation }: Props) {
         </>
       )}
 
-      <MenuPoliciesModal
-        visible={menuPoliciesOpen}
-        onClose={() => setMenuPoliciesOpen(false)}
-        project={project}
-        pages={pages}
-        updateProject={updateProject}
-      />
+      {user && (
+        <MenuPoliciesModal
+          visible={menuPoliciesOpen}
+          onClose={() => setMenuPoliciesOpen(false)}
+          project={project}
+          pages={pages}
+          updateProject={updateProject}
+          uid={user.uid}
+        />
+      )}
 
       {user && (
         <ProductCatalogPickerModal

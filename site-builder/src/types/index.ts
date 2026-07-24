@@ -390,13 +390,18 @@ export interface PolicyDoc {
   updatedAt: number;
 }
 
-// Where a tap on a menu item goes -- another page of the same site, a policy page, or a
-// plain external URL/mailto/tel, mirroring the same three targets a button can already link
-// to (see ButtonElement's link/linkTargetElementId).
+// Where a tap on a menu item goes -- another page of the same site, a policy page, a plain
+// external URL/mailto/tel, a specific product from the account catalog, or a collection
+// already placed somewhere on the site. `product`/`collection` resolve to wherever that
+// productId/elementId is actually placed on a page at publish time (see resolveMenuTargetHref
+// in siteHtml.ts) -- a product that hasn't been inserted anywhere yet has nothing real to
+// link to.
 export type MenuItemTarget =
   | { type: 'page'; pageId: string }
   | { type: 'policy'; policyId: string }
-  | { type: 'url'; url: string };
+  | { type: 'url'; url: string }
+  | { type: 'product'; productId: string }
+  | { type: 'collection'; elementId: string };
 
 export interface MenuItem {
   id: string;

@@ -2887,12 +2887,28 @@ export function policyHref(policyId: string): string {
 
 export const POLICIES_INDEX_HREF = '/site-policies';
 
-function resolveMenuTargetHref(target: MenuItem['target'], pages: SitePage[] | undefined): string {
+// A product/collection menu target points at wherever that productId/elementId is actually
+// placed on the site -- a single-page project (no `pages`) is treated as one implicit page
+// (`rootElements`, href `/`) so this works the same regardless of whether the site has real
+// multi-page navigation. Falls back to `/` if the thing it's supposed to link to hasn't
+// actually been placed on any page yet (nothing real to link to otherwise).
+function findElementHref(pages: SitePage[] | undefined, rootElements: CanvasElement[], matches: (el: CanvasElement) => boolean): string {
+  const candidatePages = pages && pages.length > 0 ? pages : [{ slug: '', elements: rootElements } as SitePage];
+  for (const page of candidatePages) {
+    const el = page.elements.find(matches);
+    if (el) return `${page.slug ? `/${page.slug}` : '/'}#el-${el.id}`;
+  }
+  return '/';
+}
+
+function resolveMenuTargetHref(target: MenuItem['target'], pages: SitePage[] | undefined, rootElements: CanvasElement[]): string {
   if (target.type === 'page') {
     const page = pages?.find((p) => p.id === target.pageId);
     return page ? (page.slug ? `/${page.slug}` : '/') : '/';
   }
   if (target.type === 'policy') return policyHref(target.policyId);
+  if (target.type === 'product') return findElementHref(pages, rootElements, (el) => el.type === 'product' && el.productId === target.productId);
+  if (target.type === 'collection') return findElementHref(pages, rootElements, (el) => el.type === 'collection' && el.id === target.elementId);
   return safeUrl(target.url);
 }
 
@@ -2937,7 +2953,8 @@ function renderMenuHtml(
   menu: SiteMenu | undefined,
   pages: SitePage[] | undefined,
   trackOrderEnabled: boolean,
-  policies: PolicyDoc[] | undefined
+  policies: PolicyDoc[] | undefined,
+  rootElements: CanvasElement[] = []
 ): MenuHtml {
   const customItems = menu && menu.enabled ? menu.items : [];
   const linkStyle = 'display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;';
@@ -2965,7 +2982,7 @@ function renderMenuHtml(
   const customLinks = customItems
     .map(
       (item) =>
-        `<a href="${escapeAttr(resolveMenuTargetHref(item.target, pages))}" style="${linkStyle}">${escapeHtml(item.label)}</a>`
+        `<a href="${escapeAttr(resolveMenuTargetHref(item.target, pages, rootElements))}" style="${linkStyle}">${escapeHtml(item.label)}</a>`
     )
     .join('');
 
@@ -3080,10 +3097,11 @@ export function renderPolicyPageHtml(
   menu: SiteMenu | undefined,
   pages: SitePage[] | undefined,
   policies: PolicyDoc[] | undefined,
-  headerOpts?: Omit<HeaderBarOptions, 'siteName'>
+  headerOpts?: Omit<HeaderBarOptions, 'siteName'>,
+  rootElements: CanvasElement[] = []
 ): string {
   const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
-  const menuHtml = renderMenuHtml(menu, pages, false, policies);
+  const menuHtml = renderMenuHtml(menu, pages, false, policies, rootElements);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3116,7 +3134,8 @@ export function renderPoliciesIndexHtml(
   policies: PolicyDoc[],
   menu: SiteMenu | undefined,
   pages: SitePage[] | undefined,
-  headerOpts?: Omit<HeaderBarOptions, 'siteName'>
+  headerOpts?: Omit<HeaderBarOptions, 'siteName'>,
+  rootElements: CanvasElement[] = []
 ): string {
   const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
   const rows = policies
@@ -3125,7 +3144,7 @@ export function renderPoliciesIndexHtml(
         `<a href="${escapeAttr(policyHref(p.id))}" style="display:block;padding:14px 16px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;margin-bottom:10px;color:#0F172A;font-weight:700;text-decoration:none;">${escapeHtml(p.title)}</a>`
     )
     .join('');
-  const menuHtml = renderMenuHtml(menu, pages, false, policies);
+  const menuHtml = renderMenuHtml(menu, pages, false, policies, rootElements);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3221,7 +3240,7 @@ export function renderProjectHtml(
   products: Record<string, CatalogProduct> = {}
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
-  const menu = renderMenuHtml(project.menu, project.pages, hasProducts, project.policies);
+  const menu = renderMenuHtml(project.menu, project.pages, hasProducts, project.policies, project.elements);
   const hasMultiplayerGame = project.elements.some(
     (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
   );
