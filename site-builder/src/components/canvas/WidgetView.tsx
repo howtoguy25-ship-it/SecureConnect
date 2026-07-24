@@ -12,7 +12,7 @@ import { WidgetElement, WidgetKind } from '@/types';
 // Each widget kind gets its own real color identity (gradient card background, accent for
 // key numbers/buttons, an icon badge) instead of one flat white card for every kind --
 // mirrors the same theme applied in siteHtml.ts's renderWidgetHtml for the published site.
-const WIDGET_THEME: Record<WidgetKind, { accent: string; soft: string; gradient: [string, string]; icon: keyof typeof Ionicons.glyphMap }> = {
+export const WIDGET_THEME: Record<WidgetKind, { accent: string; soft: string; gradient: [string, string]; icon: keyof typeof Ionicons.glyphMap }> = {
   clock: { accent: '#4338CA', soft: '#E0E7FF', gradient: ['#EEF2FF', '#E0E7FF'], icon: 'time-outline' },
   countdown: { accent: '#EA580C', soft: '#FFEDD5', gradient: ['#FFF7ED', '#FFEDD5'], icon: 'hourglass-outline' },
   stopwatch: { accent: '#0D9488', soft: '#CCFBF1', gradient: ['#F0FDFA', '#CCFBF1'], icon: 'stopwatch-outline' },
@@ -67,7 +67,7 @@ function ClockHand({ faceSize, length, thickness, color, degrees }: { faceSize: 
   );
 }
 
-function AnalogClockFace({ tz, size, accent }: { tz: string; size: number; accent: string }) {
+export function AnalogClockFace({ tz, size, accent }: { tz: string; size: number; accent: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -84,7 +84,7 @@ function AnalogClockFace({ tz, size, accent }: { tz: string; size: number; accen
   );
 }
 
-function DigitalClockFace({ label, tz, compact, accent }: { label: string; tz: string; compact: boolean; accent: string }) {
+export function DigitalClockFace({ label, tz, compact, accent }: { label: string; tz: string; compact: boolean; accent: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);

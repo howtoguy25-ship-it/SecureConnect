@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { CanvasElement, ImageElement, ProductElement, WidgetKind, WidgetTimezone } from '@/types';
 import { useCatalogProduct } from '@/hooks/useCatalogProduct';
 import { resolveProductView } from '@/utils/resolveProduct';
+import { AnalogClockFace, DigitalClockFace, WIDGET_THEME } from '@/components/canvas/WidgetView';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import SliderRow from '@/components/inspector/SliderRow';
@@ -978,15 +979,48 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                 </View>
 
                 <Text style={styles.fieldLabel}>Timezones ({element.timezones.length === 0 ? 'shows your local time' : `${element.timezones.length} shown`})</Text>
-                <View style={styles.rowButtons}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
                   {element.timezones.map((tz, i) => (
                     <Pressable
                       key={i}
-                      style={[styles.toggleBtn, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+                      style={{ alignItems: 'center', width: 76 }}
                       onPress={() => onChange({ timezones: element.timezones.filter((_, j) => j !== i) } as any)}
                     >
-                      <Text style={styles.toggleBtnText}>{tz.label}</Text>
-                      <Ionicons name="close" size={12} color="#64748B" />
+                      <View>
+                        {element.style === 'analog' ? (
+                          <AnalogClockFace tz={tz.ianaTimezone} size={56} accent={WIDGET_THEME.clock.accent} />
+                        ) : (
+                          <View
+                            style={{
+                              width: 72,
+                              paddingVertical: 8,
+                              borderRadius: 10,
+                              backgroundColor: WIDGET_THEME.clock.soft,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <DigitalClockFace label="" tz={tz.ianaTimezone} compact accent={WIDGET_THEME.clock.accent} />
+                          </View>
+                        )}
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: -6,
+                            right: -6,
+                            width: 18,
+                            height: 18,
+                            borderRadius: 9,
+                            backgroundColor: '#0F172A',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Ionicons name="close" size={11} color="#FFFFFF" />
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#64748B', fontWeight: '600', marginTop: 4 }} numberOfLines={1}>
+                        {tz.label}
+                      </Text>
                     </Pressable>
                   ))}
                 </View>
@@ -1074,56 +1108,176 @@ function MemorySymbolAdder({ onAdd }: { onAdd: (symbol: string) => void }) {
   );
 }
 
-// Curated real city/IANA-zone pairs -- a free-text IANA input would be error-prone (most
-// people don't know "Europe/London"-style zone id syntax), so this is filtered by typed city
-// name instead. Not exhaustive, but covers every populated continent/major timezone offset.
-const COMMON_TIMEZONES: WidgetTimezone[] = [
-  { label: 'New York', ianaTimezone: 'America/New_York' },
-  { label: 'Los Angeles', ianaTimezone: 'America/Los_Angeles' },
-  { label: 'Chicago', ianaTimezone: 'America/Chicago' },
-  { label: 'Denver', ianaTimezone: 'America/Denver' },
-  { label: 'Toronto', ianaTimezone: 'America/Toronto' },
-  { label: 'Mexico City', ianaTimezone: 'America/Mexico_City' },
-  { label: 'São Paulo', ianaTimezone: 'America/Sao_Paulo' },
-  { label: 'Buenos Aires', ianaTimezone: 'America/Argentina/Buenos_Aires' },
-  { label: 'Honolulu', ianaTimezone: 'Pacific/Honolulu' },
-  { label: 'Anchorage', ianaTimezone: 'America/Anchorage' },
-  { label: 'London', ianaTimezone: 'Europe/London' },
-  { label: 'Paris', ianaTimezone: 'Europe/Paris' },
-  { label: 'Berlin', ianaTimezone: 'Europe/Berlin' },
-  { label: 'Madrid', ianaTimezone: 'Europe/Madrid' },
-  { label: 'Rome', ianaTimezone: 'Europe/Rome' },
-  { label: 'Amsterdam', ianaTimezone: 'Europe/Amsterdam' },
-  { label: 'Moscow', ianaTimezone: 'Europe/Moscow' },
-  { label: 'Istanbul', ianaTimezone: 'Europe/Istanbul' },
-  { label: 'Cairo', ianaTimezone: 'Africa/Cairo' },
-  { label: 'Lagos', ianaTimezone: 'Africa/Lagos' },
-  { label: 'Johannesburg', ianaTimezone: 'Africa/Johannesburg' },
-  { label: 'Nairobi', ianaTimezone: 'Africa/Nairobi' },
-  { label: 'Dubai', ianaTimezone: 'Asia/Dubai' },
-  { label: 'Karachi', ianaTimezone: 'Asia/Karachi' },
-  { label: 'Mumbai', ianaTimezone: 'Asia/Kolkata' },
-  { label: 'Dhaka', ianaTimezone: 'Asia/Dhaka' },
-  { label: 'Bangkok', ianaTimezone: 'Asia/Bangkok' },
-  { label: 'Jakarta', ianaTimezone: 'Asia/Jakarta' },
-  { label: 'Singapore', ianaTimezone: 'Asia/Singapore' },
-  { label: 'Hong Kong', ianaTimezone: 'Asia/Hong_Kong' },
-  { label: 'Shanghai', ianaTimezone: 'Asia/Shanghai' },
-  { label: 'Tokyo', ianaTimezone: 'Asia/Tokyo' },
-  { label: 'Seoul', ianaTimezone: 'Asia/Seoul' },
-  { label: 'Manila', ianaTimezone: 'Asia/Manila' },
-  { label: 'Sydney', ianaTimezone: 'Australia/Sydney' },
-  { label: 'Melbourne', ianaTimezone: 'Australia/Melbourne' },
-  { label: 'Perth', ianaTimezone: 'Australia/Perth' },
-  { label: 'Auckland', ianaTimezone: 'Pacific/Auckland' },
-  { label: 'UTC', ianaTimezone: 'UTC' },
+// Curated real city/IANA-zone pairs, each tagged with its real country -- a free-text IANA
+// input would be error-prone (most people don't know "Europe/London"-style zone id syntax),
+// so this is filtered by typed city OR country name instead (e.g. typing "Japan" surfaces
+// Tokyo). Every country from COUNTRY_DIAL_CODES (src/data/countryCodes.ts, the same list the
+// phone-code picker uses) has at least one real, correct IANA zone here.
+interface TimezoneOption extends WidgetTimezone {
+  country: string;
+}
+
+const COMMON_TIMEZONES: TimezoneOption[] = [
+  { label: 'New York', ianaTimezone: 'America/New_York', country: 'United States' },
+  { label: 'Los Angeles', ianaTimezone: 'America/Los_Angeles', country: 'United States' },
+  { label: 'Chicago', ianaTimezone: 'America/Chicago', country: 'United States' },
+  { label: 'Denver', ianaTimezone: 'America/Denver', country: 'United States' },
+  { label: 'Honolulu', ianaTimezone: 'Pacific/Honolulu', country: 'United States' },
+  { label: 'Anchorage', ianaTimezone: 'America/Anchorage', country: 'United States' },
+  { label: 'Toronto', ianaTimezone: 'America/Toronto', country: 'Canada' },
+  { label: 'Dublin', ianaTimezone: 'Europe/Dublin', country: 'Ireland' },
+  { label: 'London', ianaTimezone: 'Europe/London', country: 'United Kingdom' },
+  { label: 'Sydney', ianaTimezone: 'Australia/Sydney', country: 'Australia' },
+  { label: 'Melbourne', ianaTimezone: 'Australia/Melbourne', country: 'Australia' },
+  { label: 'Perth', ianaTimezone: 'Australia/Perth', country: 'Australia' },
+  { label: 'Auckland', ianaTimezone: 'Pacific/Auckland', country: 'New Zealand' },
+  { label: 'Mumbai', ianaTimezone: 'Asia/Kolkata', country: 'India' },
+  { label: 'Karachi', ianaTimezone: 'Asia/Karachi', country: 'Pakistan' },
+  { label: 'Dhaka', ianaTimezone: 'Asia/Dhaka', country: 'Bangladesh' },
+  { label: 'Colombo', ianaTimezone: 'Asia/Colombo', country: 'Sri Lanka' },
+  { label: 'Kathmandu', ianaTimezone: 'Asia/Kathmandu', country: 'Nepal' },
+  { label: 'Shanghai', ianaTimezone: 'Asia/Shanghai', country: 'China' },
+  { label: 'Tokyo', ianaTimezone: 'Asia/Tokyo', country: 'Japan' },
+  { label: 'Seoul', ianaTimezone: 'Asia/Seoul', country: 'South Korea' },
+  { label: 'Taipei', ianaTimezone: 'Asia/Taipei', country: 'Taiwan' },
+  { label: 'Hong Kong', ianaTimezone: 'Asia/Hong_Kong', country: 'Hong Kong' },
+  { label: 'Macau', ianaTimezone: 'Asia/Macau', country: 'Macau' },
+  { label: 'Singapore', ianaTimezone: 'Asia/Singapore', country: 'Singapore' },
+  { label: 'Kuala Lumpur', ianaTimezone: 'Asia/Kuala_Lumpur', country: 'Malaysia' },
+  { label: 'Jakarta', ianaTimezone: 'Asia/Jakarta', country: 'Indonesia' },
+  { label: 'Manila', ianaTimezone: 'Asia/Manila', country: 'Philippines' },
+  { label: 'Bangkok', ianaTimezone: 'Asia/Bangkok', country: 'Thailand' },
+  { label: 'Ho Chi Minh City', ianaTimezone: 'Asia/Ho_Chi_Minh', country: 'Vietnam' },
+  { label: 'Phnom Penh', ianaTimezone: 'Asia/Phnom_Penh', country: 'Cambodia' },
+  { label: 'Vientiane', ianaTimezone: 'Asia/Vientiane', country: 'Laos' },
+  { label: 'Yangon', ianaTimezone: 'Asia/Yangon', country: 'Myanmar' },
+  { label: 'Bandar Seri Begawan', ianaTimezone: 'Asia/Brunei', country: 'Brunei' },
+  { label: 'Ulaanbaatar', ianaTimezone: 'Asia/Ulaanbaatar', country: 'Mongolia' },
+  { label: 'Berlin', ianaTimezone: 'Europe/Berlin', country: 'Germany' },
+  { label: 'Paris', ianaTimezone: 'Europe/Paris', country: 'France' },
+  { label: 'Rome', ianaTimezone: 'Europe/Rome', country: 'Italy' },
+  { label: 'Madrid', ianaTimezone: 'Europe/Madrid', country: 'Spain' },
+  { label: 'Lisbon', ianaTimezone: 'Europe/Lisbon', country: 'Portugal' },
+  { label: 'Amsterdam', ianaTimezone: 'Europe/Amsterdam', country: 'Netherlands' },
+  { label: 'Brussels', ianaTimezone: 'Europe/Brussels', country: 'Belgium' },
+  { label: 'Luxembourg City', ianaTimezone: 'Europe/Luxembourg', country: 'Luxembourg' },
+  { label: 'Zurich', ianaTimezone: 'Europe/Zurich', country: 'Switzerland' },
+  { label: 'Vienna', ianaTimezone: 'Europe/Vienna', country: 'Austria' },
+  { label: 'Copenhagen', ianaTimezone: 'Europe/Copenhagen', country: 'Denmark' },
+  { label: 'Stockholm', ianaTimezone: 'Europe/Stockholm', country: 'Sweden' },
+  { label: 'Oslo', ianaTimezone: 'Europe/Oslo', country: 'Norway' },
+  { label: 'Helsinki', ianaTimezone: 'Europe/Helsinki', country: 'Finland' },
+  { label: 'Reykjavik', ianaTimezone: 'Atlantic/Reykjavik', country: 'Iceland' },
+  { label: 'Warsaw', ianaTimezone: 'Europe/Warsaw', country: 'Poland' },
+  { label: 'Prague', ianaTimezone: 'Europe/Prague', country: 'Czech Republic' },
+  { label: 'Bratislava', ianaTimezone: 'Europe/Bratislava', country: 'Slovakia' },
+  { label: 'Budapest', ianaTimezone: 'Europe/Budapest', country: 'Hungary' },
+  { label: 'Bucharest', ianaTimezone: 'Europe/Bucharest', country: 'Romania' },
+  { label: 'Sofia', ianaTimezone: 'Europe/Sofia', country: 'Bulgaria' },
+  { label: 'Athens', ianaTimezone: 'Europe/Athens', country: 'Greece' },
+  { label: 'Zagreb', ianaTimezone: 'Europe/Zagreb', country: 'Croatia' },
+  { label: 'Ljubljana', ianaTimezone: 'Europe/Ljubljana', country: 'Slovenia' },
+  { label: 'Belgrade', ianaTimezone: 'Europe/Belgrade', country: 'Serbia' },
+  { label: 'Sarajevo', ianaTimezone: 'Europe/Sarajevo', country: 'Bosnia and Herzegovina' },
+  { label: 'Skopje', ianaTimezone: 'Europe/Skopje', country: 'North Macedonia' },
+  { label: 'Podgorica', ianaTimezone: 'Europe/Podgorica', country: 'Montenegro' },
+  { label: 'Tirana', ianaTimezone: 'Europe/Tirane', country: 'Albania' },
+  { label: 'Tallinn', ianaTimezone: 'Europe/Tallinn', country: 'Estonia' },
+  { label: 'Riga', ianaTimezone: 'Europe/Riga', country: 'Latvia' },
+  { label: 'Vilnius', ianaTimezone: 'Europe/Vilnius', country: 'Lithuania' },
+  { label: 'Kyiv', ianaTimezone: 'Europe/Kyiv', country: 'Ukraine' },
+  { label: 'Minsk', ianaTimezone: 'Europe/Minsk', country: 'Belarus' },
+  { label: 'Chisinau', ianaTimezone: 'Europe/Chisinau', country: 'Moldova' },
+  { label: 'Moscow', ianaTimezone: 'Europe/Moscow', country: 'Russia' },
+  { label: 'Almaty', ianaTimezone: 'Asia/Almaty', country: 'Kazakhstan' },
+  { label: 'Tbilisi', ianaTimezone: 'Asia/Tbilisi', country: 'Georgia' },
+  { label: 'Yerevan', ianaTimezone: 'Asia/Yerevan', country: 'Armenia' },
+  { label: 'Baku', ianaTimezone: 'Asia/Baku', country: 'Azerbaijan' },
+  { label: 'Istanbul', ianaTimezone: 'Europe/Istanbul', country: 'Turkey' },
+  { label: 'Nicosia', ianaTimezone: 'Asia/Nicosia', country: 'Cyprus' },
+  { label: 'Valletta', ianaTimezone: 'Europe/Malta', country: 'Malta' },
+  { label: 'Jerusalem', ianaTimezone: 'Asia/Jerusalem', country: 'Israel' },
+  { label: 'Gaza', ianaTimezone: 'Asia/Gaza', country: 'Palestine' },
+  { label: 'Amman', ianaTimezone: 'Asia/Amman', country: 'Jordan' },
+  { label: 'Beirut', ianaTimezone: 'Asia/Beirut', country: 'Lebanon' },
+  { label: 'Damascus', ianaTimezone: 'Asia/Damascus', country: 'Syria' },
+  { label: 'Baghdad', ianaTimezone: 'Asia/Baghdad', country: 'Iraq' },
+  { label: 'Riyadh', ianaTimezone: 'Asia/Riyadh', country: 'Saudi Arabia' },
+  { label: 'Dubai', ianaTimezone: 'Asia/Dubai', country: 'United Arab Emirates' },
+  { label: 'Doha', ianaTimezone: 'Asia/Qatar', country: 'Qatar' },
+  { label: 'Manama', ianaTimezone: 'Asia/Bahrain', country: 'Bahrain' },
+  { label: 'Kuwait City', ianaTimezone: 'Asia/Kuwait', country: 'Kuwait' },
+  { label: 'Muscat', ianaTimezone: 'Asia/Muscat', country: 'Oman' },
+  { label: 'Sanaa', ianaTimezone: 'Asia/Aden', country: 'Yemen' },
+  { label: 'Tehran', ianaTimezone: 'Asia/Tehran', country: 'Iran' },
+  { label: 'Kabul', ianaTimezone: 'Asia/Kabul', country: 'Afghanistan' },
+  { label: 'Cairo', ianaTimezone: 'Africa/Cairo', country: 'Egypt' },
+  { label: 'Tripoli', ianaTimezone: 'Africa/Tripoli', country: 'Libya' },
+  { label: 'Tunis', ianaTimezone: 'Africa/Tunis', country: 'Tunisia' },
+  { label: 'Algiers', ianaTimezone: 'Africa/Algiers', country: 'Algeria' },
+  { label: 'Casablanca', ianaTimezone: 'Africa/Casablanca', country: 'Morocco' },
+  { label: 'Khartoum', ianaTimezone: 'Africa/Khartoum', country: 'Sudan' },
+  { label: 'Johannesburg', ianaTimezone: 'Africa/Johannesburg', country: 'South Africa' },
+  { label: 'Lagos', ianaTimezone: 'Africa/Lagos', country: 'Nigeria' },
+  { label: 'Accra', ianaTimezone: 'Africa/Accra', country: 'Ghana' },
+  { label: 'Nairobi', ianaTimezone: 'Africa/Nairobi', country: 'Kenya' },
+  { label: 'Dar es Salaam', ianaTimezone: 'Africa/Dar_es_Salaam', country: 'Tanzania' },
+  { label: 'Kampala', ianaTimezone: 'Africa/Kampala', country: 'Uganda' },
+  { label: 'Addis Ababa', ianaTimezone: 'Africa/Addis_Ababa', country: 'Ethiopia' },
+  { label: 'Mogadishu', ianaTimezone: 'Africa/Mogadishu', country: 'Somalia' },
+  { label: 'Kigali', ianaTimezone: 'Africa/Kigali', country: 'Rwanda' },
+  { label: 'Lusaka', ianaTimezone: 'Africa/Lusaka', country: 'Zambia' },
+  { label: 'Harare', ianaTimezone: 'Africa/Harare', country: 'Zimbabwe' },
+  { label: 'Gaborone', ianaTimezone: 'Africa/Gaborone', country: 'Botswana' },
+  { label: 'Windhoek', ianaTimezone: 'Africa/Windhoek', country: 'Namibia' },
+  { label: 'Maputo', ianaTimezone: 'Africa/Maputo', country: 'Mozambique' },
+  { label: 'Luanda', ianaTimezone: 'Africa/Luanda', country: 'Angola' },
+  { label: 'Douala', ianaTimezone: 'Africa/Douala', country: 'Cameroon' },
+  { label: 'Dakar', ianaTimezone: 'Africa/Dakar', country: 'Senegal' },
+  { label: 'Abidjan', ianaTimezone: 'Africa/Abidjan', country: 'Ivory Coast' },
+  { label: 'Kinshasa', ianaTimezone: 'Africa/Kinshasa', country: 'Democratic Republic of the Congo' },
+  { label: 'Mexico City', ianaTimezone: 'America/Mexico_City', country: 'Mexico' },
+  { label: 'Guatemala City', ianaTimezone: 'America/Guatemala', country: 'Guatemala' },
+  { label: 'Belize City', ianaTimezone: 'America/Belize', country: 'Belize' },
+  { label: 'Tegucigalpa', ianaTimezone: 'America/Tegucigalpa', country: 'Honduras' },
+  { label: 'San Salvador', ianaTimezone: 'America/El_Salvador', country: 'El Salvador' },
+  { label: 'Managua', ianaTimezone: 'America/Managua', country: 'Nicaragua' },
+  { label: 'San Jose', ianaTimezone: 'America/Costa_Rica', country: 'Costa Rica' },
+  { label: 'Panama City', ianaTimezone: 'America/Panama', country: 'Panama' },
+  { label: 'Havana', ianaTimezone: 'America/Havana', country: 'Cuba' },
+  { label: 'Kingston', ianaTimezone: 'America/Jamaica', country: 'Jamaica' },
+  { label: 'Port-au-Prince', ianaTimezone: 'America/Port-au-Prince', country: 'Haiti' },
+  { label: 'Santo Domingo', ianaTimezone: 'America/Santo_Domingo', country: 'Dominican Republic' },
+  { label: 'Port of Spain', ianaTimezone: 'America/Port_of_Spain', country: 'Trinidad and Tobago' },
+  { label: 'Nassau', ianaTimezone: 'America/Nassau', country: 'Bahamas' },
+  { label: 'Bridgetown', ianaTimezone: 'America/Barbados', country: 'Barbados' },
+  { label: 'Bogota', ianaTimezone: 'America/Bogota', country: 'Colombia' },
+  { label: 'Caracas', ianaTimezone: 'America/Caracas', country: 'Venezuela' },
+  { label: 'Quito', ianaTimezone: 'America/Guayaquil', country: 'Ecuador' },
+  { label: 'Lima', ianaTimezone: 'America/Lima', country: 'Peru' },
+  { label: 'La Paz', ianaTimezone: 'America/La_Paz', country: 'Bolivia' },
+  { label: 'Santiago', ianaTimezone: 'America/Santiago', country: 'Chile' },
+  { label: 'Buenos Aires', ianaTimezone: 'America/Argentina/Buenos_Aires', country: 'Argentina' },
+  { label: 'Montevideo', ianaTimezone: 'America/Montevideo', country: 'Uruguay' },
+  { label: 'Asuncion', ianaTimezone: 'America/Asuncion', country: 'Paraguay' },
+  { label: 'São Paulo', ianaTimezone: 'America/Sao_Paulo', country: 'Brazil' },
+  { label: 'Georgetown', ianaTimezone: 'America/Guyana', country: 'Guyana' },
+  { label: 'Paramaribo', ianaTimezone: 'America/Paramaribo', country: 'Suriname' },
+  { label: 'Suva', ianaTimezone: 'Pacific/Fiji', country: 'Fiji' },
+  { label: 'Port Moresby', ianaTimezone: 'Pacific/Port_Moresby', country: 'Papua New Guinea' },
+  { label: 'Apia', ianaTimezone: 'Pacific/Apia', country: 'Samoa' },
+  { label: "Nuku'alofa", ianaTimezone: 'Pacific/Tongatapu', country: 'Tonga' },
+  { label: 'UTC', ianaTimezone: 'UTC', country: 'UTC' },
 ];
 
 function WidgetTimezoneAdder({ existing, onAdd }: { existing: WidgetTimezone[]; onAdd: (tz: WidgetTimezone) => void }) {
   const [query, setQuery] = useState('');
   const existingZones = new Set(existing.map((tz) => tz.ianaTimezone));
-  const matches = query.trim()
-    ? COMMON_TIMEZONES.filter((tz) => !existingZones.has(tz.ianaTimezone) && tz.label.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 6)
+  const norm = query.trim().toLowerCase();
+  const matches = norm
+    ? COMMON_TIMEZONES.filter(
+        (tz) => !existingZones.has(tz.ianaTimezone) && (tz.label.toLowerCase().includes(norm) || tz.country.toLowerCase().includes(norm))
+      ).slice(0, 8)
     : [];
 
   return (
@@ -1132,18 +1286,19 @@ function WidgetTimezoneAdder({ existing, onAdd }: { existing: WidgetTimezone[]; 
         style={[styles.textInput, { marginBottom: matches.length ? 4 : 10 }]}
         value={query}
         onChangeText={setQuery}
-        placeholder="Search a city to add (e.g. Tokyo)"
+        placeholder="Search a city or country to add (e.g. Tokyo or Japan)"
       />
       {matches.map((tz) => (
         <Pressable
           key={tz.ianaTimezone}
-          style={{ paddingVertical: 8, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}
+          style={{ paddingVertical: 8, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
           onPress={() => {
-            onAdd(tz);
+            onAdd({ label: tz.label, ianaTimezone: tz.ianaTimezone });
             setQuery('');
           }}
         >
-          <Text style={{ fontSize: 13, color: '#0F172A' }}>{tz.label}</Text>
+          <Text style={{ fontSize: 13, color: '#0F172A', fontWeight: '600' }}>{tz.label}</Text>
+          {tz.country !== tz.label && <Text style={{ fontSize: 12, color: '#64748B' }}>{tz.country}</Text>}
         </Pressable>
       ))}
     </View>
