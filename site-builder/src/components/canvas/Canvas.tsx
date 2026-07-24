@@ -157,6 +157,10 @@ interface Props {
   forceLocked?: boolean;
   // See DraggableElement's onOpenLink comment.
   onOpenLink?: (link: string) => void;
+  // Fires when a locked button links to another element on this page (a Product/Collection)
+  // -- lets the caller reveal it (e.g. scroll it into view) without necessarily also opening
+  // it for editing the way a normal onSelect would. Falls back to onSelect if omitted.
+  onNavigateToElement?: (id: string) => void;
   // Fires (in addition to deselecting) when the empty canvas background itself is tapped --
   // lets a tap on the page background double as a shortcut into the background color/gradient
   // editor, instead of requiring the header's palette icon every time.
@@ -181,6 +185,7 @@ export default function Canvas({
   onInteractionChange,
   forceLocked,
   onOpenLink,
+  onNavigateToElement,
   onBackgroundTap,
   isLastPage = true,
   onExtend,
@@ -217,7 +222,7 @@ export default function Canvas({
           canvasSize={project.canvasSize}
           onInteractionChange={onInteractionChange}
           forceLocked={forceLocked}
-          onNavigateToElement={onSelect}
+          onNavigateToElement={onNavigateToElement ?? onSelect}
           onOpenLink={onOpenLink}
         />
       ))}

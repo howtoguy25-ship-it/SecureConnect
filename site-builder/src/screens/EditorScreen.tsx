@@ -79,6 +79,11 @@ function EditorInner({ navigation }: Props) {
   };
   const [menuPoliciesOpen, setMenuPoliciesOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
+  // Replaces the old horizontal-scrolling tab strip -- a real full-width grid sheet instead
+  // of a thin scrollable row sitting right at the screen's bottom edge, which fought with
+  // iOS's own edge-swipe-to-exit gesture and made it easy to background the app or mis-tap
+  // by accident while just trying to scroll the strip.
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
   // same touch underneath an active element drag, which is what made moving or resizing a
@@ -161,6 +166,16 @@ function EditorInner({ navigation }: Props) {
 
   const canvasCenterX = project.canvasSize.width / 2;
   const canvasCenterY = project.canvasSize.height / 2;
+
+  // A locked button linking to a Product/Collection on this page should behave the way it
+  // really does on the published site -- scroll that card into view -- not select it for
+  // editing. Selecting would swap the whole bottom UI into the edit inspector, which defeats
+  // the entire point of locking the page to preview it read-only.
+  const navigateToElementOnLockedTap = (id: string) => {
+    const target = activeElements.find((el) => el.id === id);
+    if (!target) return;
+    canvasScrollRef.current?.scrollTo({ y: Math.max(0, target.y - 40), animated: true });
+  };
 
   // "+" at the bottom of the canvas -- gives the page more real, empty room to build into
   // (rather than just cramming new elements into whatever space is already there) and opens
@@ -579,6 +594,7 @@ function EditorInner({ navigation }: Props) {
             onInteractionChange={setCanvasInteracting}
             forceLocked={pageLocked}
             onOpenLink={openLinkInEditor}
+            onNavigateToElement={navigateToElementOnLockedTap}
             onBackgroundTap={openBackgroundEditor}
             isLastPage={!pages || pages[pages.length - 1]?.id === activePageId}
             onExtend={extendCanvas}
@@ -637,31 +653,47 @@ function EditorInner({ navigation }: Props) {
               )}
             </View>
           )}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={[styles.tabBar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}
-            contentContainerStyle={styles.tabBarContent}
-          >
-            <TabButton icon="shapes-outline" label="Elements" active={panel === 'elements'} onPress={() => setPanel(panel === 'elements' ? null : 'elements')} />
-            <TabButton icon="text-outline" label="Text" active={false} onPress={addTextBox} />
-            <TabButton icon="image-outline" label="Image" active={false} onPress={addImage} />
-            <TabButton icon="images-outline" label="Slideshow" active={false} onPress={addSlideshow} />
-            <TabButton icon="videocam-outline" label="Video" active={false} onPress={addVideo} />
-            {project.pageType === 'website' && (
-              <>
-                <TabButton icon="pricetag-outline" label="Product" active={false} onPress={() => setProductPickerOpen(true)} highlightColor="#16A34A" />
-                <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
-              </>
-            )}
-            <TabButton icon="game-controller-outline" label="Game" active={false} onPress={addGame} />
-            <TabButton icon="time-outline" label="Widget" active={false} onPress={addWidget} />
-            <TabButton icon="sparkles-outline" label="Custom" active={false} onPress={addCustomWidget} highlightColor="#7C3AED" />
-            <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
-            <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
-          </ScrollView>
+          <View style={[styles.addBar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
+            <Pressable style={[styles.addBarBtn, { backgroundColor: theme.accent }]} onPress={() => setAddMenuOpen(true)}>
+              <Ionicons name="add-circle" size={22} color={theme.accentText} />
+              <Text style={[styles.addBarBtnText, { color: theme.accentText }]}>Add to page</Text>
+            </Pressable>
+            <Pressable style={styles.addBarLayersBtn} onPress={() => setShowLayers((v) => !v)}>
+              <Ionicons name="layers-outline" size={22} color={showLayers ? theme.accent : theme.textMuted} />
+              <Text style={[styles.addBarLayersLabel, { color: showLayers ? theme.accent : theme.textMuted }]}>Layers</Text>
+            </Pressable>
+          </View>
         </>
       )}
+
+      <Modal visible={addMenuOpen} transparent animationType="slide" onRequestClose={() => setAddMenuOpen(false)}>
+        <Pressable style={styles.addMenuBackdrop} onPress={() => setAddMenuOpen(false)}>
+          <Pressable style={[styles.addMenuSheet, { backgroundColor: theme.surface }]} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <Text style={[styles.addMenuTitle, { color: theme.text }]}>Add to page</Text>
+            <View style={styles.addMenuGrid}>
+              <AddMenuTile icon="shapes-outline" label="Elements" onPress={() => { setAddMenuOpen(false); setPanel('elements'); }} />
+              <AddMenuTile icon="text-outline" label="Text" onPress={() => { setAddMenuOpen(false); addTextBox(); }} />
+              <AddMenuTile icon="image-outline" label="Image" onPress={() => { setAddMenuOpen(false); addImage(); }} />
+              <AddMenuTile icon="images-outline" label="Slideshow" onPress={() => { setAddMenuOpen(false); addSlideshow(); }} />
+              <AddMenuTile icon="videocam-outline" label="Video" onPress={() => { setAddMenuOpen(false); addVideo(); }} />
+              {project.pageType === 'website' && (
+                <>
+                  <AddMenuTile icon="pricetag-outline" label="Product" highlightColor="#16A34A" onPress={() => { setAddMenuOpen(false); setProductPickerOpen(true); }} />
+                  <AddMenuTile icon="albums-outline" label="Collection" onPress={() => { setAddMenuOpen(false); addCollection(); }} />
+                </>
+              )}
+              <AddMenuTile icon="game-controller-outline" label="Game" onPress={() => { setAddMenuOpen(false); addGame(); }} />
+              <AddMenuTile icon="time-outline" label="Widget" onPress={() => { setAddMenuOpen(false); addWidget(); }} />
+              <AddMenuTile icon="sparkles-outline" label="Custom" highlightColor="#7C3AED" onPress={() => { setAddMenuOpen(false); addCustomWidget(); }} />
+              <AddMenuTile icon="megaphone-outline" label="Bar" onPress={() => { setAddMenuOpen(false); setPanel('bar'); }} />
+            </View>
+            <Pressable style={[styles.addMenuCancel, { borderColor: theme.border }]} onPress={() => setAddMenuOpen(false)}>
+              <Text style={[styles.addMenuCancelText, { color: theme.text }]}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
         </>
       )}
 
@@ -707,33 +739,27 @@ function EditorInner({ navigation }: Props) {
   );
 }
 
-function TabButton({
+// Large, always-visible grid tile used inside the "Add to page" sheet -- deliberately much
+// bigger than the old tab-bar icons so every option is a single confident tap, no scrolling
+// or precision-tapping on a tiny target required.
+function AddMenuTile({
   icon,
   label,
-  active,
   onPress,
   highlightColor,
 }: {
   icon: string;
   label: string;
-  active: boolean;
   onPress: () => void;
-  // Makes this entry read as a distinct, prominent action (like Shopify's "Add product")
-  // instead of blending into the row of otherwise-identical gray design-tool icons -- always
-  // tinted, not just when active, so it's easy to spot at a glance while scanning the strip.
   highlightColor?: string;
 }) {
   const { theme } = useAppTheme();
-  const color = highlightColor ?? (active ? theme.accent : theme.textMuted);
   return (
-    <Pressable style={styles.tabButton} onPress={onPress}>
-      <Ionicons name={icon as any} size={20} color={active ? theme.accent : color} />
-      <Text
-        style={[styles.tabButtonLabel, { color }, active && { color: theme.accent }]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.8}
-      >
+    <Pressable style={styles.addMenuTile} onPress={onPress}>
+      <View style={[styles.addMenuTileIcon, { backgroundColor: theme.background }]}>
+        <Ionicons name={icon as any} size={26} color={highlightColor ?? theme.accent} />
+      </View>
+      <Text style={[styles.addMenuTileLabel, { color: theme.text }]} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -814,11 +840,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  tabBar: {
-    flexGrow: 0,
+  addBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 14,
     shadowColor: '#000',
@@ -826,9 +855,19 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: -2 },
   },
-  tabBarContent: { paddingHorizontal: 8, gap: 4 },
-  tabButton: { alignItems: 'center', gap: 4, width: 64, paddingHorizontal: 2 },
-  tabButtonLabel: { fontSize: 10, color: '#334155', fontWeight: '600', textAlign: 'center' },
+  addBarBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, paddingVertical: 12 },
+  addBarBtnText: { fontSize: 15, fontWeight: '700' },
+  addBarLayersBtn: { alignItems: 'center', gap: 2, paddingHorizontal: 6, minWidth: 56 },
+  addBarLayersLabel: { fontSize: 10, fontWeight: '600' },
+  addMenuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  addMenuSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 32, alignItems: 'center' },
+  addMenuTitle: { fontSize: 15, fontWeight: '700', marginTop: 4, marginBottom: 14 },
+  addMenuGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12, width: '100%' },
+  addMenuTile: { width: 84, alignItems: 'center', gap: 6, paddingVertical: 6 },
+  addMenuTileIcon: { width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  addMenuTileLabel: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  addMenuCancel: { marginTop: 18, width: '100%', borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  addMenuCancelText: { fontSize: 14, fontWeight: '700' },
   panel: {
     height: 240,
     backgroundColor: '#FFFFFF',
