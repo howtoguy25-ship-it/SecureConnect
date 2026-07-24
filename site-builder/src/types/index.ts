@@ -657,7 +657,16 @@ export type AssistantActionType =
   | 'startBuildFlow'
   | 'startAIBuild'
   | 'openSubscription'
-  | 'openAccount';
+  | 'openAccount'
+  // Real cross-project actions (Phase 8) -- each mutates a specific project (or the account
+  // catalog) rather than just navigating. `projectId` is a real id copied from the project
+  // list the assistant was given in context, or null when it can't tell which project the
+  // user means -- the client then asks the user to pick one via a chip list before executing.
+  | 'createProduct'
+  | 'editProduct'
+  | 'insertProductOnPage'
+  | 'publishProject'
+  | 'addMenuItem';
 
 export type AssistantNavigateScreen =
   | 'Projects'
@@ -677,6 +686,19 @@ export interface AssistantAction {
   prompt: string | null;
   // Only used when screen is 'Policy'.
   policyType: 'privacy' | 'returns' | null;
+  // Which project this action applies to -- a real id from the project list given in
+  // context, or null when the assistant couldn't determine it (client disambiguates).
+  projectId: string | null;
+  // createProduct: name for the new product. editProduct/insertProductOnPage: name used to
+  // find an existing catalog product (fuzzy match).
+  productName: string | null;
+  // createProduct only.
+  priceUsd: number | null;
+  // addMenuItem only: the menu item's label.
+  menuLabel: string | null;
+  // insertProductOnPage/addMenuItem: which page, by name (fuzzy match); null means "the
+  // project's home/only page".
+  pageName: string | null;
 }
 
 // -- Buying a new domain (Phase 7b) --

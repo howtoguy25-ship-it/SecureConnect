@@ -16,12 +16,29 @@ export type AssistantNavigateScreen =
   | 'TransferDomain'
   | 'Policy';
 
+export type AssistantActionType =
+  | 'navigate'
+  | 'startBuildFlow'
+  | 'startAIBuild'
+  | 'openSubscription'
+  | 'openAccount'
+  | 'createProduct'
+  | 'editProduct'
+  | 'insertProductOnPage'
+  | 'publishProject'
+  | 'addMenuItem';
+
 export interface AssistantAction {
-  type: 'navigate' | 'startBuildFlow' | 'startAIBuild' | 'openSubscription' | 'openAccount';
+  type: AssistantActionType;
   screen: AssistantNavigateScreen | null;
   pageType: 'website' | 'video' | 'social' | 'logo' | null;
   prompt: string | null;
   policyType: 'privacy' | 'returns' | null;
+  projectId: string | null;
+  productName: string | null;
+  priceUsd: number | null;
+  menuLabel: string | null;
+  pageName: string | null;
 }
 
 export interface AssistantResponse {
@@ -46,7 +63,18 @@ const ASSISTANT_SCHEMA = {
           properties: {
             type: {
               type: 'string',
-              enum: ['navigate', 'startBuildFlow', 'startAIBuild', 'openSubscription', 'openAccount'],
+              enum: [
+                'navigate',
+                'startBuildFlow',
+                'startAIBuild',
+                'openSubscription',
+                'openAccount',
+                'createProduct',
+                'editProduct',
+                'insertProductOnPage',
+                'publishProject',
+                'addMenuItem',
+              ],
             },
             screen: {
               type: ['string', 'null'],
@@ -66,8 +94,24 @@ const ASSISTANT_SCHEMA = {
             pageType: { type: ['string', 'null'], enum: ['website', 'video', 'social', 'logo', null] },
             prompt: { type: ['string', 'null'] },
             policyType: { type: ['string', 'null'], enum: ['privacy', 'returns', null] },
+            projectId: { type: ['string', 'null'] },
+            productName: { type: ['string', 'null'] },
+            priceUsd: { type: ['number', 'null'] },
+            menuLabel: { type: ['string', 'null'] },
+            pageName: { type: ['string', 'null'] },
           },
-          required: ['type', 'screen', 'pageType', 'prompt', 'policyType'],
+          required: [
+            'type',
+            'screen',
+            'pageType',
+            'prompt',
+            'policyType',
+            'projectId',
+            'productName',
+            'priceUsd',
+            'menuLabel',
+            'pageName',
+          ],
         },
       },
     },
@@ -82,15 +126,27 @@ export interface ActiveBuildInfo {
   minutesElapsed: number;
 }
 
+export interface AssistantProjectInfo {
+  id: string;
+  name: string;
+  pageType: string;
+}
+
 interface AssistantContext {
   screen: string;
   credits: number;
   plan: string;
-  projectCount: number;
   // Real, live generationSessions data (not guessed) -- lets Spark answer "is my build
   // still running?" truthfully instead of assuming, since the assistant has no other way
   // to see backend state on its own.
   activeBuilds: ActiveBuildInfo[];
+  // Real id+name (+pageType) for every one of the user's projects -- lets the assistant
+  // resolve which project a cross-project action (createProduct, publishProject, etc.)
+  // applies to by matching what the user said against a real name, and copy the matching
+  // project's real id into that action's `projectId` field. Left out of an action (null)
+  // when it can't tell -- the client then asks the user to pick from a chip list instead of
+  // guessing wrong and mutating the wrong site.
+  projects: AssistantProjectInfo[];
 }
 
 function buildSystemPrompt(context: AssistantContext): string {
@@ -106,9 +162,19 @@ function buildSystemPrompt(context: AssistantContext): string {
     '- startBuildFlow: open the build-method picker (AI vs. manual) for a given pageType ("website", "video", "social", or "logo") — use this when the user wants to start a new project and you know what kind.',
     '- startAIBuild: open the AI Site Builder prompt screen pre-filled with a written prompt and pageType — use this when the user describes a site/page they want built with AI. Base the prompt closely on what the user actually described, written as a real site-builder prompt, specific and vivid rather than generic. This only opens the screen for the user to review and tap Generate themselves — it never spends credits or starts a build on its own.',
     '- openSubscription / openAccount: shortcuts to those screens.',
-    "Only include an action when the user's message actually calls for one — most replies should have an empty actions array. Set unused fields on an action (including policyType, unless screen is Policy) to null.",
+    '- createProduct: create a new product in the user\'s account-level catalog. Set productName (default to something reasonable if they didn\'t give an exact name) and priceUsd (a sensible guess if unstated, e.g. 10). Does not require a project.',
+    '- editProduct: open an existing catalog product for editing. Set productName to what the user called it (fuzzy-matched server-side) and projectId to null (this one is account-wide, not project-specific).',
+    '- insertProductOnPage: place an existing catalog product onto one of the user\'s projects. Set projectId (see below), productName (which product), and pageName (which page of that project, or null for its home/only page).',
+    '- publishProject: publish one of the user\'s projects live. Set projectId (see below).',
+    '- addMenuItem: add a navigation menu item to one of the user\'s projects. Set projectId (see below), menuLabel (the link text), and pageName (which page it should point to).',
+    "Only include an action when the user's message actually calls for one — most replies should have an empty actions array. Set every field not used by that specific action type to null (including policyType, projectId, productName, priceUsd, menuLabel, pageName when not applicable).",
+    'For createProduct/editProduct/insertProductOnPage/publishProject/addMenuItem: these are real actions that actually change the user\'s account or a live project — they are NOT a substitute for full free-form site editing via chat (you cannot rearrange a canvas, change colors, write copy into a page, etc. through chat; for anything beyond these five specific actions, tell the user to do it in the editor). When one of these needs a project and the user referred to one by name, match it against the real "Existing projects" list below (case-insensitive, partial match is fine) and copy that project\'s exact id into projectId. If you cannot tell which project they mean (they didn\'t say, or nothing matches), set projectId to null — the app will ask the user to pick one, so never guess.',
     'The user can attach up to 5 photos to a message (e.g. a screenshot of an error, a confusing screen, or something that looks wrong) — when photos are attached, look at what they actually show and respond to that directly rather than asking them to describe it in words.',
-    `Current screen: ${context.screen}. Credits remaining: ${context.credits}. Plan: ${context.plan}. Existing projects: ${context.projectCount}.`,
+    `Current screen: ${context.screen}. Credits remaining: ${context.credits}. Plan: ${context.plan}. Existing projects: ${
+      context.projects.length > 0
+        ? context.projects.map((p) => `"${p.name}" (id: ${p.id}, type: ${p.pageType})`).join(', ')
+        : 'none yet'
+    }.`,
     context.activeBuilds.length > 0
       ? `Real, live build status (this is ground truth, not a guess): the user has ${context.activeBuilds.length} AI build(s) currently in progress: ${context.activeBuilds
           .map((b) => `a ${b.pageType} build (${b.status}: "${b.statusMessage}", ${b.minutesElapsed.toFixed(1)} min elapsed so far)`)

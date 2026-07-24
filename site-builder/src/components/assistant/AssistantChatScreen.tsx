@@ -18,11 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/context/AuthContext';
 import { assistantMessagesStore } from '@/storage/assistantMessagesStore';
-import { sendAssistantMessage } from '@/services/assistant';
+import { sendAssistantMessage, executeAssistantAction } from '@/services/assistant';
 import { uploadLocalImage } from '@/services/uploads';
 import { navigateTo, currentScreenName } from '@/navigation/navigationRef';
 import { generateId } from '@/utils/id';
-import { AssistantAction, AssistantMessage, PageType } from '@/types';
+import { projectsStore } from '@/storage/projectsStore';
+import { AssistantAction, AssistantMessage, PageType, Project } from '@/types';
 
 interface Props {
   onClose: () => void;
@@ -30,7 +31,18 @@ interface Props {
 
 const HISTORY_FOR_MODEL = 20;
 
-function runAction(action: AssistantAction, onClose: () => void) {
+// Action types that mutate a real project or the account catalog (Phase 8) -- everything
+// else is the original navigate-only behavior. `editProduct` needs no project (it resolves
+// an account-wide catalog product by name), the rest need a concrete `projectId`.
+const CROSS_PROJECT_ACTION_TYPES: AssistantAction['type'][] = [
+  'createProduct',
+  'editProduct',
+  'insertProductOnPage',
+  'publishProject',
+  'addMenuItem',
+];
+
+function navigateAction(action: AssistantAction, onClose: () => void) {
   const pageType: PageType = action.pageType ?? 'website';
   switch (action.type) {
     case 'navigate':
@@ -76,6 +88,11 @@ export default function AssistantChatScreen({ onClose }: Props) {
   const [sending, setSending] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const listRef = useRef<FlatList<AssistantMessage>>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  // Keyed by the assistant message id that produced it -- an ambiguous cross-project action
+  // (projectId null, 2+ real projects to choose from) waits here for the user to pick one via
+  // the chip row rendered under that message, rather than guessing which project it meant.
+  const [pendingActions, setPendingActions] = useState<Record<string, AssistantAction>>({});
 
   // This screen is presented inside a `pageSheet` Modal (see AssistantLauncher) --
   // KeyboardAvoidingView's automatic frame measurement is unreliable in that presentation
@@ -100,6 +117,95 @@ export default function AssistantChatScreen({ onClose }: Props) {
       setLoading(false);
     });
   }, [uid]);
+
+  useEffect(() => {
+    projectsStore.list(uid).then(setProjects);
+  }, [uid]);
+
+  const appendConfirmation = (content: string) => {
+    const confirmMessage: AssistantMessage = { id: generateId('msg'), role: 'assistant', content, createdAt: Date.now() };
+    setMessages((prev) => [...prev, confirmMessage]);
+    assistantMessagesStore.add(uid, confirmMessage).catch(() => {});
+  };
+
+  // Runs one of the five real cross-project actions once `action.projectId` is settled --
+  // either the assistant matched it confidently, or the user just picked one from the chip
+  // row. createProduct/editProduct navigate straight into ProductEdit since the natural next
+  // step is filling the product in; the other three are "background" actions (per the plan)
+  // that just confirm what happened in chat text, since they already fully completed.
+  const runCrossProjectAction = async (action: AssistantAction) => {
+    try {
+      const result = await executeAssistantAction({
+        type: action.type,
+        projectId: action.projectId,
+        productName: action.productName,
+        priceUsd: action.priceUsd,
+        menuLabel: action.menuLabel,
+        pageName: action.pageName,
+      });
+      switch (action.type) {
+        case 'createProduct':
+          appendConfirmation(`✅ Created "${action.productName?.trim() || 'New product'}" in your catalog — opening it now so you can finish it up.`);
+          navigateTo('ProductEdit', { productId: result.productId });
+          onClose();
+          break;
+        case 'editProduct':
+          appendConfirmation(`Found it — opening "${action.productName}" for editing.`);
+          navigateTo('ProductEdit', { productId: result.productId });
+          onClose();
+          break;
+        case 'insertProductOnPage':
+          appendConfirmation(`✅ Added "${action.productName}" to your site. Open the editor to see it and finish placing it.`);
+          break;
+        case 'publishProject':
+          appendConfirmation(`✅ Published! Your site is live at ${result.url}.`);
+          break;
+        case 'addMenuItem':
+          appendConfirmation(`✅ Added "${action.menuLabel}" to your site's menu.`);
+          break;
+      }
+    } catch (err: any) {
+      appendConfirmation(`I couldn't do that: ${err?.message ?? 'something went wrong. Try again in a moment.'}`);
+    }
+  };
+
+  // Dispatches one action from the assistant's reply -- either the original navigate-only
+  // behavior, or (Phase 8) a real cross-project action. `messageId` is the assistant message
+  // this action came from, used to key the disambiguation chip row if the project is
+  // ambiguous.
+  const dispatchAction = (action: AssistantAction, messageId: string) => {
+    if (!CROSS_PROJECT_ACTION_TYPES.includes(action.type)) {
+      navigateAction(action, onClose);
+      return;
+    }
+    // createProduct/editProduct are account-wide (a new catalog product, or finding an
+    // existing one by name) -- only the other three actually mutate a specific project.
+    const needsProject = action.type !== 'editProduct' && action.type !== 'createProduct';
+    if (needsProject && !action.projectId) {
+      if (projects.length === 0) {
+        appendConfirmation("You don't have any projects yet — create one first, then ask me again.");
+        return;
+      }
+      if (projects.length === 1) {
+        runCrossProjectAction({ ...action, projectId: projects[0].id });
+        return;
+      }
+      setPendingActions((prev) => ({ ...prev, [messageId]: action }));
+      return;
+    }
+    runCrossProjectAction(action);
+  };
+
+  const pickProjectForPendingAction = (messageId: string, projectId: string) => {
+    const action = pendingActions[messageId];
+    if (!action) return;
+    setPendingActions((prev) => {
+      const next = { ...prev };
+      delete next[messageId];
+      return next;
+    });
+    runCrossProjectAction({ ...action, projectId });
+  };
 
   const pickImage = async () => {
     if (pendingImages.length >= MAX_CHAT_IMAGES) return;
@@ -159,7 +265,7 @@ export default function AssistantChatScreen({ onClose }: Props) {
       };
       setMessages((prev) => [...prev, assistantMessage]);
       assistantMessagesStore.add(uid, assistantMessage).catch(() => {});
-      actions.forEach((action) => runAction(action, onClose));
+      actions.forEach((action) => dispatchAction(action, assistantMessage.id));
     } catch (err: any) {
       showAlert('Spark couldn’t reply', err?.message ?? 'Something went wrong. Try again.');
     } finally {
@@ -201,19 +307,40 @@ export default function AssistantChatScreen({ onClose }: Props) {
             }
             renderItem={({ item }) => {
               const images = item.images;
+              const pendingAction = pendingActions[item.id];
               return (
                 <View style={[styles.bubbleRow, item.role === 'user' ? styles.bubbleRowUser : styles.bubbleRowAssistant]}>
-                  <View style={[styles.bubble, item.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
-                    {images && images.length > 0 && (
-                      <View style={styles.bubbleImages}>
-                        {images.map((uri, index) => (
-                          <Image key={index} source={{ uri }} style={styles.bubbleImage} />
-                        ))}
+                  <View style={{ maxWidth: '90%' }}>
+                    <View style={[styles.bubble, item.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
+                      {images && images.length > 0 && (
+                        <View style={styles.bubbleImages}>
+                          {images.map((uri, index) => (
+                            <Image key={index} source={{ uri }} style={styles.bubbleImage} />
+                          ))}
+                        </View>
+                      )}
+                      <Text style={item.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
+                        {item.content}
+                      </Text>
+                    </View>
+                    {pendingAction && (
+                      <View style={styles.projectChipRow}>
+                        <Text style={styles.projectChipPrompt}>Which project?</Text>
+                        <View style={styles.projectChipWrap}>
+                          {projects.map((p) => (
+                            <Pressable
+                              key={p.id}
+                              style={styles.projectChip}
+                              onPress={() => pickProjectForPendingAction(item.id, p.id)}
+                            >
+                              <Text style={styles.projectChipText} numberOfLines={1}>
+                                {p.name}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
                       </View>
                     )}
-                    <Text style={item.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
-                      {item.content}
-                    </Text>
                   </View>
                 </View>
               );
@@ -297,6 +424,19 @@ const styles = StyleSheet.create({
   bubbleUser: { backgroundColor: '#4338CA', borderBottomRightRadius: 4 },
   bubbleAssistant: { backgroundColor: '#F1F5F9', borderBottomLeftRadius: 4 },
   bubbleTextUser: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+  projectChipRow: { marginTop: 6, paddingHorizontal: 2 },
+  projectChipPrompt: { fontSize: 12, color: '#64748B', marginBottom: 6 },
+  projectChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  projectChip: {
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    maxWidth: 220,
+  },
+  projectChipText: { color: '#4338CA', fontSize: 13, fontWeight: '700' },
   bubbleTextAssistant: { color: '#0F172A', fontSize: 14, lineHeight: 20 },
   bubbleImages: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
   bubbleImage: { width: 90, height: 90, borderRadius: 10, backgroundColor: '#E2E8F0' },

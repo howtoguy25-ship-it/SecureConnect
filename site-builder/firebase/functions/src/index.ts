@@ -29,12 +29,14 @@ import {
   OrderNotice,
   BookingDetails,
   PlanId,
+  MenuItem,
+  MenuItemTarget,
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, CUSTOM_WIDGET_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, generateCustomWidgetCode, SitePlan, SitePlanSection } from './openai';
 import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo, SectionProductImages, SectionCustomWidget } from './layout';
 import { searchYouTubeVideo } from './youtube';
-import { chatWithAssistant, AssistantChatMessage } from './assistant';
+import { chatWithAssistant, AssistantChatMessage, AssistantActionType } from './assistant';
 import { isValidCurrency } from './currency';
 import {
   renderProjectHtml,
@@ -755,15 +757,19 @@ export const assistantChat = onCall({ secrets: [openaiApiKey], invoker: 'public'
   // "is my build still running" from actual Firestore state instead of assuming, since a
   // build keeps generating server-side even after the user has navigated away from the
   // progress screen.
-  const [userSnap, projectsCount, activeSessionsSnap] = await Promise.all([
+  const [userSnap, projectsSnap, activeSessionsSnap] = await Promise.all([
     userRef.get(),
-    userRef.collection('projects').count().get(),
+    userRef.collection('projects').orderBy('updatedAt', 'desc').get(),
     userRef.collection('generationSessions').where('status', 'in', ['starting', 'generating', 'paused']).get(),
   ]);
   const account = userSnap.data() as UserAccount | undefined;
   const activeBuilds = activeSessionsSnap.docs.map((d) => {
     const s = d.data() as GenerationSession;
     return { pageType: s.pageType, status: s.status, statusMessage: s.statusMessage, minutesElapsed: s.minutesElapsed };
+  });
+  const projects = projectsSnap.docs.map((d) => {
+    const p = d.data() as Project;
+    return { id: p.id, name: p.name, pageType: p.pageType };
   });
 
   const client = createOpenAIClient(openaiApiKey.value());
@@ -779,11 +785,151 @@ export const assistantChat = onCall({ secrets: [openaiApiKey], invoker: 'public'
       screen: screen || 'Projects',
       credits: account?.credits ?? 0,
       plan: account?.plan ?? 'free',
-      projectCount: projectsCount.data().count,
       activeBuilds,
+      projects,
     },
     images
   );
+}));
+
+// Mirrors the client's generateId (src/utils/id.ts) for the rare server-created ids
+// (assistantExecuteAction creates elements/menu items directly, without a client round-trip).
+function randomId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Real cross-project actions Spark can take on the user's behalf (Phase 8) -- deliberately a
+// small, fixed set, not free-form site editing via chat. By the time this is called, projectId
+// (where relevant) is already a concrete id: either the assistant matched it confidently from
+// the project list in its context, or the client asked the user to pick one via a chip picker
+// after a null/ambiguous match. createProduct/editProduct are account-wide (no project
+// needed) -- editProduct only resolves which product the user means and hands its id back,
+// since actually rewriting a product's fields from a chat prompt without the seller seeing the
+// before/after first is exactly the kind of blind mutation this feature deliberately avoids.
+export const assistantExecuteAction = onCall({ invoker: 'public' }, withCallableErrors('assistantExecuteAction', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { type, projectId, productName, priceUsd, menuLabel, pageName } = request.data as {
+    type: AssistantActionType;
+    projectId?: string | null;
+    productName?: string | null;
+    priceUsd?: number | null;
+    menuLabel?: string | null;
+    pageName?: string | null;
+  };
+
+  const productsRef = db.collection('users').doc(uid).collection('products');
+
+  if (type === 'createProduct') {
+    const now = Date.now();
+    const product: CatalogProduct = {
+      id: productsRef.doc().id,
+      name: (productName ?? '').trim() || 'New product',
+      description: '',
+      priceUsd: priceUsd && priceUsd > 0 ? priceUsd : 10,
+      compareAtPriceUsd: null,
+      costUsd: null,
+      images: [],
+      trackInventory: false,
+      initialStock: null,
+      inStock: true,
+      saleType: 'product',
+      fulfillment: 'pickup',
+      serviceDurationMinutes: null,
+      variantOptions: [],
+      variants: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await productsRef.doc(product.id).set(product);
+    return { ok: true, productId: product.id };
+  }
+
+  if (type === 'editProduct') {
+    if (!productName?.trim()) throw new HttpsError('invalid-argument', 'Missing productName.');
+    const needle = productName.trim().toLowerCase();
+    const snap = await productsRef.get();
+    const match = snap.docs.map((d) => d.data() as CatalogProduct).find((p) => p.name.toLowerCase().includes(needle));
+    if (!match) throw new HttpsError('not-found', `Couldn't find a product matching "${productName}".`);
+    return { ok: true, productId: match.id };
+  }
+
+  // Every remaining action type mutates a specific project.
+  if (!projectId) throw new HttpsError('invalid-argument', 'Missing projectId.');
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const projectSnap = await projectRef.get();
+  if (!projectSnap.exists) throw new HttpsError('not-found', 'Project not found.');
+  const project = projectSnap.data() as Project;
+
+  if (type === 'publishProject') {
+    return doPublishProject(uid, projectId);
+  }
+
+  if (type === 'insertProductOnPage') {
+    if (!productName?.trim()) throw new HttpsError('invalid-argument', 'Missing productName.');
+    const needle = productName.trim().toLowerCase();
+    const productsSnap = await productsRef.get();
+    const product = productsSnap.docs.map((d) => d.data() as CatalogProduct).find((p) => p.name.toLowerCase().includes(needle));
+    if (!product) throw new HttpsError('not-found', `Couldn't find a product matching "${productName}".`);
+
+    // Same "stack below the lowest existing element, extending canvas height if needed"
+    // placement as the editor's own catalog-insert flow (EditorScreen.tsx) -- so an assistant-
+    // inserted product never lands on top of what's already on the page.
+    const place = (elements: { x: number; y: number; width: number; height: number }[]) => {
+      const width = 180;
+      const height = 220;
+      const lowestBottom = elements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
+      const y = lowestBottom + (elements.length > 0 ? 24 : 32);
+      return { width, height, y, requiredHeight: y + height + 40 };
+    };
+
+    if (project.pages && project.pages.length > 0) {
+      const pageNeedle = pageName?.trim().toLowerCase();
+      const targetPage = (pageNeedle ? project.pages.find((p) => p.name.toLowerCase().includes(pageNeedle)) : null) ?? project.pages[0];
+      const { width, height, y, requiredHeight } = place(targetPage.elements);
+      const newEl: ProductElement = { id: randomId('el'), type: 'product', productId: product.id, x: (project.canvasSize.width - width) / 2, y, width, height, zIndex: 5 };
+      const pages = project.pages.map((p) => (p.id === targetPage.id ? { ...p, elements: [...p.elements, newEl] } : p));
+      await projectRef.update({
+        pages,
+        elements: pages[0].elements,
+        backgroundColor: pages[0].backgroundColor,
+        backgroundGradient: pages[0].backgroundGradient ?? null,
+        canvasSize: requiredHeight > project.canvasSize.height ? { ...project.canvasSize, height: requiredHeight } : project.canvasSize,
+        updatedAt: Date.now(),
+      });
+    } else {
+      const { width, height, y, requiredHeight } = place(project.elements);
+      const newEl: ProductElement = { id: randomId('el'), type: 'product', productId: product.id, x: (project.canvasSize.width - width) / 2, y, width, height, zIndex: 5 };
+      await projectRef.update({
+        elements: [...project.elements, newEl],
+        canvasSize: requiredHeight > project.canvasSize.height ? { ...project.canvasSize, height: requiredHeight } : project.canvasSize,
+        updatedAt: Date.now(),
+      });
+    }
+    return { ok: true, projectId, productId: product.id };
+  }
+
+  if (type === 'addMenuItem') {
+    if (!menuLabel?.trim()) throw new HttpsError('invalid-argument', 'Missing menuLabel.');
+    const menu = project.menu ?? { enabled: true, items: [] };
+    const pageNeedle = pageName?.trim().toLowerCase();
+
+    let target: MenuItemTarget;
+    if (project.pages && project.pages.length > 0) {
+      const page = (pageNeedle ? project.pages.find((p) => p.name.toLowerCase().includes(pageNeedle)) : null) ?? project.pages[0];
+      target = { type: 'page', pageId: page.id };
+    } else {
+      const policy = (project.policies ?? []).find((p) => pageNeedle && p.title.toLowerCase().includes(pageNeedle));
+      target = policy ? { type: 'policy', policyId: policy.id } : { type: 'url', url: '/' };
+    }
+
+    const item: MenuItem = { id: randomId('menu'), label: menuLabel.trim(), target };
+    await projectRef.update({ menu: { ...menu, items: [...menu.items, item] }, updatedAt: Date.now() });
+    return { ok: true, projectId };
+  }
+
+  throw new HttpsError('invalid-argument', 'Unknown action type.');
 }));
 
 // Moves a locally-picked photo (only readable by the device, via a file:// URI) into
@@ -955,16 +1101,10 @@ export const createUploadUrl = onCall({ invoker: 'public' }, withCallableErrors(
   return { uploadUrl, readUrl };
 }));
 
-// Publishes a project as a real, publicly-reachable static page -- servePublishedSite
-// below answers for it at https://{slug}.buildsitespark.com by default (and at any
-// custom domain connected via connectDomain).
-export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('publishProject', async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
-
-  const { projectId } = request.data as { projectId: string };
-  if (!projectId) throw new HttpsError('invalid-argument', 'Missing projectId.');
-
+// The real publish logic, factored out so both the publishProject callable and
+// assistantExecuteAction's publishProject action (Spark Assistant real actions) share the
+// exact same code path instead of the assistant reimplementing/duplicating it.
+async function doPublishProject(uid: string, projectId: string): Promise<{ slug: string; url: string }> {
   const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
   const snap = await projectRef.get();
   if (!snap.exists) throw new HttpsError('not-found', 'Project not found.');
@@ -1061,6 +1201,19 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
     ? `https://${project.customDomain}`
     : `https://${slug}.${PRODUCT_DOMAIN}`;
   return { slug, url };
+}
+
+// Publishes a project as a real, publicly-reachable static page -- servePublishedSite
+// below answers for it at https://{slug}.buildsitespark.com by default (and at any
+// custom domain connected via connectDomain).
+export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('publishProject', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const { projectId } = request.data as { projectId: string };
+  if (!projectId) throw new HttpsError('invalid-argument', 'Missing projectId.');
+
+  return doPublishProject(uid, projectId);
 }));
 
 // Mirrors a project's ProductElements into storeInventory/{slug}/products/{productId} --
