@@ -26,6 +26,10 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    match /users/{uid}/collections/{collectionId} {
+      allow read, write: if isOwner(uid);
+    }
+
     // Other per-account meta docs are client-owned, EXCEPT unlockedThemes/sellerAccount
     // below, which must not be client-writable.
     match /users/{uid}/meta/{docId} {

@@ -22,5 +22,6 @@ export type RootStackParamList = {
   DiscountCodes: undefined;
   Domains: undefined;
   Products: undefined;
-  ProductEdit: { productId?: string };
+  ProductEdit: { productId?: string; initialSaleType?: 'product' | 'digital' | 'service' | 'custom' };
+  CollectionEdit: { collectionId?: string };
 };

@@ -100,7 +100,7 @@ export interface VideoEmbedElement extends BaseElement {
 // booking handling in index.ts. 'digital': a downloadable/electronically-delivered good --
 // no shipping and no booking; the seller sends the file/link on manually after the existing
 // order-notification email, so checkout treats it like a 'product' with no fulfillment step.
-export type ProductSaleType = 'product' | 'service' | 'digital';
+export type ProductSaleType = 'product' | 'service' | 'digital' | 'custom';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
 
 // Mirrors the client's ProductVariantOption/ProductVariant -- see that file's comments for
@@ -147,6 +147,10 @@ export interface CatalogProduct {
 export interface ProductElement extends BaseElement {
   type: 'product';
   productId: string;
+  nameFontFamily?: string;
+  nameFontSize?: number;
+  priceFontFamily?: string;
+  priceFontSize?: number;
 }
 
 // Mirrors the client's CollectionElement -- see that file's comment for why productIds
@@ -155,6 +159,22 @@ export interface CollectionElement extends BaseElement {
   type: 'collection';
   name: string;
   productIds: string[];
+  nameFontFamily?: string;
+  nameFontSize?: number;
+  priceFontFamily?: string;
+  priceFontSize?: number;
+}
+
+// Mirrors the client's CatalogCollection -- the account-level Collections catalog
+// (users/{uid}/collections/{id}), independent of any one project/page.
+export interface CatalogCollection {
+  id: string;
+  name: string;
+  description: string;
+  coverImage: string | null;
+  productIds: string[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d' | 'basketball';

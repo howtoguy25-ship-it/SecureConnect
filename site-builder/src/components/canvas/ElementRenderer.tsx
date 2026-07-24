@@ -211,6 +211,7 @@ function productBadge(product: CatalogProduct): string {
     return `Service${product.serviceDurationMinutes ? ` · ${product.serviceDurationMinutes}m` : ''}`;
   }
   if (product.saleType === 'digital') return 'Digital download';
+  if (product.saleType === 'custom') return 'Custom item';
   return product.fulfillment === 'delivery' ? 'Delivery' : product.fulfillment === 'both' ? 'Delivery/Pickup' : 'Pickup';
 }
 
@@ -315,6 +316,8 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
   const imageHeight = showImage ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
   const compact = width < 110;
   const sym = useSellerCurrencySymbol();
+  const nameFont = useGoogleFont(element.nameFontFamily);
+  const priceFont = useGoogleFont(element.priceFontFamily);
 
   if (catalogProduct === undefined) {
     return (
@@ -339,11 +342,29 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         <Text numberOfLines={1} style={{ fontSize: compact ? 8 : 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
           {productBadge(product)}
         </Text>
-        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: compact ? 11 : 13, color: '#0F172A', marginTop: 1 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontWeight: '700',
+            fontSize: element.nameFontSize ?? (compact ? 11 : 13),
+            color: '#0F172A',
+            marginTop: 1,
+            ...(nameFont ? { fontFamily: nameFont } : null),
+          }}
+        >
           {product.name || 'Untitled product'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-          <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700' }}>{sym}{product.priceUsd.toFixed(2)}</Text>
+          <Text
+            style={{
+              fontSize: element.priceFontSize ?? (compact ? 11 : 13),
+              color: '#4338CA',
+              fontWeight: '700',
+              ...(priceFont ? { fontFamily: priceFont } : null),
+            }}
+          >
+            {sym}{product.priceUsd.toFixed(2)}
+          </Text>
           {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && !compact && (
             <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
               {sym}{product.compareAtPriceUsd.toFixed(2)}
@@ -414,6 +435,8 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
 function ProductPageView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
   const catalogProduct = useCatalogProduct(element.productId);
   const sym = useSellerCurrencySymbol();
+  const nameFont = useGoogleFont(element.nameFontFamily);
+  const priceFont = useGoogleFont(element.priceFontFamily);
 
   if (catalogProduct === undefined) {
     return (
@@ -431,9 +454,25 @@ function ProductPageView({ element, width, height }: { element: ProductElement; 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
         <ProductImageCarousel images={product.images} height={Math.min(height * 0.5, 420)} />
         <Text style={styles.pdpBadge}>{productBadge(product)}</Text>
-        <Text style={styles.pdpName}>{product.name || 'Untitled product'}</Text>
+        <Text
+          style={[
+            styles.pdpName,
+            element.nameFontSize ? { fontSize: element.nameFontSize } : null,
+            nameFont ? { fontFamily: nameFont } : null,
+          ]}
+        >
+          {product.name || 'Untitled product'}
+        </Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 6 }}>
-          <Text style={styles.pdpPrice}>{sym}{product.priceUsd.toFixed(2)}</Text>
+          <Text
+            style={[
+              styles.pdpPrice,
+              element.priceFontSize ? { fontSize: element.priceFontSize } : null,
+              priceFont ? { fontFamily: priceFont } : null,
+            ]}
+          >
+            {sym}{product.priceUsd.toFixed(2)}
+          </Text>
           {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
             <Text style={{ fontSize: 16, color: '#94A3B8', textDecorationLine: 'line-through' }}>
               {sym}{product.compareAtPriceUsd.toFixed(2)}
@@ -480,6 +519,8 @@ function CollectionThumb({ productElement, width, height, iconSize }: { productE
 
 function CollectionDetailRow({ productElement, sym }: { productElement: ProductElement; sym: string }) {
   const catalogProduct = useCatalogProduct(productElement.productId);
+  const nameFont = useGoogleFont(productElement.nameFontFamily);
+  const priceFont = useGoogleFont(productElement.priceFontFamily);
   const product = resolveProductView(productElement, catalogProduct ?? null);
   return (
     <View
@@ -500,7 +541,15 @@ function CollectionDetailRow({ productElement, sym }: { productElement: ProductE
         </View>
       )}
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 14, color: '#0F172A' }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            fontWeight: '700',
+            fontSize: productElement.nameFontSize ?? 14,
+            color: '#0F172A',
+            ...(nameFont ? { fontFamily: nameFont } : null),
+          }}
+        >
           {product.name || 'Untitled product'}
         </Text>
         {!!product.description && (
@@ -509,7 +558,16 @@ function CollectionDetailRow({ productElement, sym }: { productElement: ProductE
           </Text>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-          <Text style={{ fontSize: 13, color: '#4338CA', fontWeight: '700' }}>{sym}{product.priceUsd.toFixed(2)}</Text>
+          <Text
+            style={{
+              fontSize: productElement.priceFontSize ?? 13,
+              color: '#4338CA',
+              fontWeight: '700',
+              ...(priceFont ? { fontFamily: priceFont } : null),
+            }}
+          >
+            {sym}{product.priceUsd.toFixed(2)}
+          </Text>
           {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
             <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
               {sym}{product.compareAtPriceUsd.toFixed(2)}

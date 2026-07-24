@@ -22,7 +22,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ProductEdit'>;
 
 const MAX_PRODUCT_IMAGES = 7;
 
-function blankProduct(): CatalogProduct {
+function blankProduct(initialSaleType?: ProductSaleType): CatalogProduct {
   const now = Date.now();
   return {
     id: generateId('prod'),
@@ -35,7 +35,7 @@ function blankProduct(): CatalogProduct {
     trackInventory: false,
     initialStock: null,
     inStock: true,
-    saleType: 'product',
+    saleType: initialSaleType ?? 'product',
     fulfillment: 'pickup',
     serviceDurationMinutes: null,
     variantOptions: [],
@@ -58,8 +58,9 @@ export default function ProductEditScreen({ navigation, route }: Props) {
   const uid = user!.uid;
   const { theme } = useAppTheme();
   const productId = route.params?.productId;
+  const initialSaleType = route.params?.initialSaleType;
 
-  const [product, setProduct] = useState<CatalogProduct | null>(productId ? null : blankProduct());
+  const [product, setProduct] = useState<CatalogProduct | null>(productId ? null : blankProduct(initialSaleType));
   const [loading, setLoading] = useState(!!productId);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -126,7 +127,9 @@ export default function ProductEditScreen({ navigation, route }: Props) {
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Ionicons name="chevron-back" size={26} color={theme.text} />
         </Pressable>
-        <Text style={[styles.title, { color: theme.text }]}>{productId ? 'Edit Product' : 'New Product'}</Text>
+        <Text style={[styles.title, { color: theme.text }]}>
+          {productId ? 'Edit Product' : initialSaleType === 'custom' ? 'New Custom Item' : 'New Product'}
+        </Text>
         <View style={{ width: 26 }} />
       </View>
 
@@ -138,6 +141,7 @@ export default function ProductEditScreen({ navigation, route }: Props) {
               ['product', '🛍️ Physical product'],
               ['digital', '💾 Digital product'],
               ['service', '📅 Real-life service'],
+              ['custom', '✨ Custom item'],
             ] as [ProductSaleType, string][]
           ).map(([kind, label]) => (
             <Pressable

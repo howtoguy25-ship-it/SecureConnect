@@ -157,7 +157,7 @@ export interface VideoEmbedElement extends BaseElement {
 // no booking, so it skips both the fulfillment and service-duration fields. Delivery of the
 // actual file/link to the buyer piggybacks on the existing order-notification email (the
 // seller sends it on from there) rather than automated hosting/download-link generation.
-export type ProductSaleType = 'product' | 'service' | 'digital';
+export type ProductSaleType = 'product' | 'service' | 'digital' | 'custom';
 export type ProductFulfillment = 'pickup' | 'delivery' | 'both';
 
 // One buyer-facing choice axis, e.g. { name: "Size", values: ["S","M","L"] }. An empty
@@ -225,6 +225,14 @@ export interface CatalogProduct {
 export interface ProductElement extends BaseElement {
   type: 'product';
   productId: string;
+  // Optional per-element typography override for the name/price text this card renders --
+  // undefined means "use the card's normal default styling" (same undefined-is-default
+  // convention as TextElement.fontFamily). `*FontFamily` is a FontOption id from
+  // src/data/fonts.ts.
+  nameFontFamily?: string;
+  nameFontSize?: number;
+  priceFontFamily?: string;
+  priceFontSize?: number;
 }
 
 // Groups 2+ existing Product elements from the same page under one named, browsable card --
@@ -237,6 +245,25 @@ export interface CollectionElement extends BaseElement {
   type: 'collection';
   name: string;
   productIds: string[];
+  nameFontFamily?: string;
+  nameFontSize?: number;
+  priceFontFamily?: string;
+  priceFontSize?: number;
+}
+
+// The account-level Collections catalog -- a named, reusable group of existing CatalogProducts
+// a seller owns independent of any one project/page, created/edited from CollectionEditScreen
+// and stored at users/{uid}/collections/{id}. Distinct from CollectionElement above (which
+// groups page-local ProductElement siblings on one specific page) -- this is the Products-catalog
+// equivalent for collections: manage once from Account, browse/insert from any site.
+export interface CatalogCollection {
+  id: string;
+  name: string;
+  description: string;
+  coverImage: string | null;
+  productIds: string[]; // CatalogProduct ids (users/{uid}/products/{id}), not page-local element ids
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d' | 'basketball';

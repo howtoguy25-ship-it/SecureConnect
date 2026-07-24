@@ -33,6 +33,7 @@ import DiscountCodesScreen from '@/screens/DiscountCodesScreen';
 import DomainsScreen from '@/screens/DomainsScreen';
 import ProductsScreen from '@/screens/ProductsScreen';
 import ProductEditScreen from '@/screens/ProductEditScreen';
+import CollectionEditScreen from '@/screens/CollectionEditScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -59,7 +60,8 @@ function AppStack() {
       <Stack.Screen name="DiscountCodes" component={DiscountCodesScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Domains" component={DomainsScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Products" component={ProductsScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="ProductEdit" component={ProductEditScreen} />
+      <Stack.Screen name="ProductEdit" component={ProductEditScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CollectionEdit" component={CollectionEditScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }

@@ -140,7 +140,8 @@ export default function ProductCatalogPickerModal({
                       </Text>
                       <Text style={styles.itemSub}>
                         {sym}
-                        {product.priceUsd.toFixed(2)} · {product.saleType === 'product' ? 'Physical' : product.saleType === 'digital' ? 'Digital' : 'Service'}
+                        {product.priceUsd.toFixed(2)} ·{' '}
+                        {product.saleType === 'product' ? 'Physical' : product.saleType === 'digital' ? 'Digital' : product.saleType === 'service' ? 'Service' : 'Custom'}
                       </Text>
                     </View>
                     <Ionicons name="eye-outline" size={20} color="#94A3B8" />

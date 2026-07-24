@@ -184,7 +184,7 @@ function ProductInspectorSection({
           <Text style={styles.productSummaryPrice}>
             {sym}
             {product.priceUsd.toFixed(2)}
-            {product.saleType === 'service' ? ' · Service' : product.saleType === 'digital' ? ' · Digital' : ''}
+            {product.saleType === 'service' ? ' · Service' : product.saleType === 'digital' ? ' · Digital' : product.saleType === 'custom' ? ' · Custom' : ''}
           </Text>
         </View>
       </View>
@@ -223,6 +223,54 @@ function FontChip({ option, selected, onPress }: { option: FontOption; selected:
         {option.label}
       </Text>
     </Pressable>
+  );
+}
+
+// Shared by ProductElement and CollectionElement -- lets a seller override the font/size of
+// just the name and price text this specific card renders, independent of the catalog data
+// itself (the same product can be styled differently on different pages/sites). Undefined
+// fields fall back to each card's normal default styling (see ElementRenderer.tsx/siteHtml.ts).
+function CardTextStyleEditor({
+  nameFontFamily,
+  nameFontSize,
+  priceFontFamily,
+  priceFontSize,
+  onChange,
+}: {
+  nameFontFamily?: string;
+  nameFontSize?: number;
+  priceFontFamily?: string;
+  priceFontSize?: number;
+  onChange: (patch: { nameFontFamily?: string; nameFontSize?: number; priceFontFamily?: string; priceFontSize?: number }) => void;
+}) {
+  return (
+    <View>
+      <Text style={styles.fieldLabel}>Name text style</Text>
+      <View style={styles.rowButtons}>
+        {FONT_OPTIONS.map((option) => (
+          <FontChip
+            key={option.id}
+            option={option}
+            selected={(nameFontFamily ?? 'system') === option.id}
+            onPress={() => onChange({ nameFontFamily: option.id })}
+          />
+        ))}
+      </View>
+      <SliderRow label="Name size" value={nameFontSize ?? 15} min={10} max={36} onChange={(v) => onChange({ nameFontSize: v })} />
+
+      <Text style={[styles.fieldLabel, { marginTop: 12 }]}>Price text style</Text>
+      <View style={styles.rowButtons}>
+        {FONT_OPTIONS.map((option) => (
+          <FontChip
+            key={option.id}
+            option={option}
+            selected={(priceFontFamily ?? 'system') === option.id}
+            onPress={() => onChange({ priceFontFamily: option.id })}
+          />
+        ))}
+      </View>
+      <SliderRow label="Price size" value={priceFontSize ?? 14} min={10} max={36} onChange={(v) => onChange({ priceFontSize: v })} />
+    </View>
   );
 }
 
@@ -698,7 +746,16 @@ export default function ElementInspector({ element, allElements, onChange, onDel
           </>
         )}
         {element.type === 'product' && (
-          <ProductInspectorSection element={element} projectId={projectId} publishSlug={publishSlug} sym={sym} />
+          <>
+            <ProductInspectorSection element={element} projectId={projectId} publishSlug={publishSlug} sym={sym} />
+            <CardTextStyleEditor
+              nameFontFamily={element.nameFontFamily}
+              nameFontSize={element.nameFontSize}
+              priceFontFamily={element.priceFontFamily}
+              priceFontSize={element.priceFontSize}
+              onChange={(patch) => onChange(patch as any)}
+            />
+          </>
         )}
 
         {element.type === 'collection' && (
@@ -739,6 +796,13 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             <Text style={styles.helperText}>
               Pick 2 or more products built on this page to group them into one browsable collection card on your published site.
             </Text>
+            <CardTextStyleEditor
+              nameFontFamily={element.nameFontFamily}
+              nameFontSize={element.nameFontSize}
+              priceFontFamily={element.priceFontFamily}
+              priceFontSize={element.priceFontSize}
+              onChange={(patch) => onChange(patch as any)}
+            />
           </>
         )}
 

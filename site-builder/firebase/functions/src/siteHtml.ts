@@ -2162,15 +2162,18 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const priceId = `price-${el.id}`;
       const pickerId = `variantpicker-${el.id}`;
       const hasVariants = product.variantOptions.length > 0;
+      const isCustom = product.saleType === 'custom';
       const badge = isService
         ? `📅 Service booking${product.serviceDurationMinutes ? ` · ${product.serviceDurationMinutes} min` : ''}`
         : isDigital
           ? '💾 Instant download'
-          : product.fulfillment === 'delivery'
-            ? '📦 Delivery'
-            : product.fulfillment === 'both'
-              ? '📦 Delivery or pickup'
-              : '🏬 Pickup';
+          : isCustom
+            ? '✨ Custom item'
+            : product.fulfillment === 'delivery'
+              ? '📦 Delivery'
+              : product.fulfillment === 'both'
+                ? '📦 Delivery or pickup'
+                : '🏬 Pickup';
 
       // Photo count is capped to 7 in the editor (see MAX_PRODUCT_IMAGES in
       // ElementInspector.tsx) -- the main card above only ever shows images[0], this
@@ -2337,17 +2340,22 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         ? `<button id="${addBtnId}" style="margin-top:${fullBleed ? 16 : 8}px;background:#4338CA;color:#fff;border:none;border-radius:${fullBleed ? 10 : 8}px;padding:${fullBleed ? '14px' : '8px'};font-weight:700;font-size:${fullBleed ? 16 : 13}px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
         : `<button disabled style="margin-top:${fullBleed ? 16 : 8}px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:${fullBleed ? 10 : 8}px;padding:${fullBleed ? '14px' : '8px'};font-weight:700;font-size:${fullBleed ? 16 : 13}px;cursor:not-allowed;">Coming Soon</button>`;
 
+      const nameFontOption = getFontOption(el.nameFontFamily);
+      const nameFontCss = nameFontOption.id !== 'system' ? `font-family:'${nameFontOption.family}',sans-serif;` : '';
+      const priceFontOption = getFontOption(el.priceFontFamily);
+      const priceFontCss = priceFontOption.id !== 'system' ? `font-family:'${priceFontOption.family}',sans-serif;` : '';
+
       return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;${fullBleed ? '' : 'border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);'}overflow:${fullBleed ? 'auto' : 'hidden'};display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:${fullBleed ? '20px' : '10px'};flex:1;display:flex;flex-direction:column;">
     <div style="font-size:${fullBleed ? 12 : 10}px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
-    <div id="${nameId}" style="font-weight:800;font-size:${fullBleed ? 26 : 14}px;color:#0F172A;margin-top:${fullBleed ? 6 : 2}px;">${escapeHtml(product.name)}</div>
+    <div id="${nameId}" style="font-weight:800;font-size:${el.nameFontSize ?? (fullBleed ? 26 : 14)}px;color:#0F172A;margin-top:${fullBleed ? 6 : 2}px;${nameFontCss}">${escapeHtml(product.name)}</div>
     <div id="${descId}" style="font-size:${fullBleed ? 15 : 12}px;color:#64748B;margin-top:${fullBleed ? 10 : 2}px;${fullBleed ? 'line-height:22px;' : 'max-height:54px;overflow-y:auto;'}">${escapeHtml(product.description)}</div>
     ${variantPicker}
     ${isReady ? `<div id="${stockId}" style="font-size:${fullBleed ? 13 : 11}px;color:#94A3B8;margin-top:${fullBleed ? 8 : 2}px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:${fullBleed ? 14 : 8}px;gap:6px;">
       <div style="display:flex;align-items:baseline;gap:8px;">
-        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:${fullBleed ? 22 : 14}px;">${sym}${product.priceUsd.toFixed(2)}</div>
+        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:${el.priceFontSize ?? (fullBleed ? 22 : 14)}px;${priceFontCss}">${sym}${product.priceUsd.toFixed(2)}</div>
         ${
           product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd
             ? `<div style="font-size:${fullBleed ? 15 : 12}px;color:#94A3B8;text-decoration:line-through;">${sym}${product.compareAtPriceUsd.toFixed(2)}</div>`
@@ -2558,7 +2566,7 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     var list = document.getElementById('sitespark-cart-items');
     if (items.length === 0) { list.innerHTML = '<div style="color:#94A3B8;font-size:13px;">Cart is empty</div>'; return; }
     list.innerHTML = items.map(function(i){
-      var badge = i.saleType === 'service' ? '📅 ' : i.saleType === 'digital' ? '💾 ' : '';
+      var badge = i.saleType === 'service' ? '📅 ' : i.saleType === 'digital' ? '💾 ' : i.saleType === 'custom' ? '✨ ' : '';
       var label = i.variantLabel ? ' (' + i.variantLabel + ')' : '';
       return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:6px;">'
         + '<span>'+badge+i.quantity+'&times; '+i.name+label+'</span>'
@@ -3279,11 +3287,14 @@ export function renderProjectHtml(
       : '',
   ].join('\n  ');
 
-  const usedFontIds = new Set(
-    project.elements
-      .filter((el): el is Extract<CanvasElement, { type: 'text' }> => el.type === 'text' && !!el.fontFamily && el.fontFamily !== 'system')
-      .map((el) => el.fontFamily as string)
-  );
+  const usedFontIds = new Set<string>();
+  for (const el of project.elements) {
+    if (el.type === 'text' && el.fontFamily && el.fontFamily !== 'system') usedFontIds.add(el.fontFamily);
+    if ((el.type === 'product' || el.type === 'collection')) {
+      if (el.nameFontFamily && el.nameFontFamily !== 'system') usedFontIds.add(el.nameFontFamily);
+      if (el.priceFontFamily && el.priceFontFamily !== 'system') usedFontIds.add(el.priceFontFamily);
+    }
+  }
   const fontQueries = [...usedFontIds]
     .map((id) => getFontOption(id).googleFontsQuery)
     .filter((q): q is string => !!q);
