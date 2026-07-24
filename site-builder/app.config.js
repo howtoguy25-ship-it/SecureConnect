@@ -70,6 +70,7 @@ module.exports = ({ config }) => ({
     'expo-web-browser',
     'expo-video',
     'expo-audio',
+    'expo-sharing',
     'expo-iap',
     'expo-localization',
     [

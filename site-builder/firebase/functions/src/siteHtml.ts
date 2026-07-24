@@ -1130,10 +1130,10 @@ function basketballScript(bodyId: string): string {
   var score = 0;
 
   var overlay = document.createElement('div');
-  overlay.style.cssText = 'font-weight:700;font-size:12px;color:#334155;margin-bottom:6px;text-align:center;';
+  overlay.style.cssText = 'font-weight:800;font-size:12px;color:#fff;background:linear-gradient(135deg,#F97316,#EA580C);margin-bottom:6px;padding:4px 12px;border-radius:999px;text-align:center;display:inline-block;align-self:center;box-shadow:0 2px 6px rgba(234,88,12,0.35);';
   overlay.textContent = 'Swipe up to shoot!';
   var canvasWrap = document.createElement('div');
-  canvasWrap.style.cssText = 'position:relative;width:'+playW+'px;height:'+playH+'px;border-radius:8px;overflow:hidden;background:#1E293B;';
+  canvasWrap.style.cssText = 'position:relative;width:'+playW+'px;height:'+playH+'px;border-radius:8px;overflow:hidden;background:#1E293B;box-shadow:0 4px 14px rgba(15,23,42,0.25);';
 
   root.innerHTML = '';
   root.appendChild(overlay);
@@ -1436,11 +1436,29 @@ function renderGameHtml(el: GameElement, base: string, slug: string): string {
 ${gameScript}`;
 }
 
-const WIDGET_CARD_BASE =
-  'background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;box-sizing:border-box;';
+// Each widget kind gets its own real color identity (gradient card background, accent for
+// key numbers/buttons, an emoji badge) instead of one flat white card for every kind --
+// mirrors the same WIDGET_THEME applied in the editor's WidgetView.tsx.
+const WIDGET_THEME: Record<WidgetElement['kind'], { accent: string; soft: string; gradientFrom: string; gradientTo: string; emoji: string }> = {
+  clock: { accent: '#4338CA', soft: '#E0E7FF', gradientFrom: '#EEF2FF', gradientTo: '#E0E7FF', emoji: '🕐' },
+  countdown: { accent: '#EA580C', soft: '#FFEDD5', gradientFrom: '#FFF7ED', gradientTo: '#FFEDD5', emoji: '⏳' },
+  stopwatch: { accent: '#0D9488', soft: '#CCFBF1', gradientFrom: '#F0FDFA', gradientTo: '#CCFBF1', emoji: '⏱️' },
+  calculator: { accent: '#7C3AED', soft: '#EDE9FE', gradientFrom: '#F5F3FF', gradientTo: '#EDE9FE', emoji: '🧮' },
+  unitconverter: { accent: '#0284C7', soft: '#E0F2FE', gradientFrom: '#F0F9FF', gradientTo: '#E0F2FE', emoji: '🔄' },
+};
 
-function widgetTitleHtml(title: string): string {
-  return title ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(title)}</div>` : '';
+function widgetCardStyle(kind: WidgetElement['kind']): string {
+  const t = WIDGET_THEME[kind];
+  return `background:linear-gradient(135deg, ${t.gradientFrom}, ${t.gradientTo});border-radius:16px;border:1px solid ${t.soft};overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;box-sizing:border-box;`;
+}
+
+function widgetTitleHtml(title: string, kind: WidgetElement['kind']): string {
+  if (!title) return '';
+  const t = WIDGET_THEME[kind];
+  return `<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:6px;">
+  <div style="width:20px;height:20px;border-radius:10px;background:${t.accent};display:flex;align-items:center;justify-content:center;font-size:11px;">${t.emoji}</div>
+  <div style="font-weight:800;font-size:14px;color:#0F172A;">${escapeHtml(title)}</div>
+</div>`;
 }
 
 // A real, always-live utility -- ticks every second in the visitor's own browser via
@@ -1450,9 +1468,8 @@ function widgetTitleHtml(title: string): string {
 // live. Mirrors the editor's WidgetView.tsx (src/components/canvas/WidgetView.tsx).
 function renderClockWidgetHtml(el: WidgetElement, base: string): string {
   const timezones = el.timezones.length > 0 ? el.timezones : [{ label: 'Local Time', ianaTimezone: 'UTC' }];
-  const titleHtml = el.title
-    ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(el.title)}</div>`
-    : '';
+  const titleHtml = widgetTitleHtml(el.title, 'clock');
+  const accent = WIDGET_THEME.clock.accent;
 
   if (el.style === 'analog') {
     const size = timezones.length > 1 ? 64 : 84;
@@ -1463,11 +1480,11 @@ function renderClockWidgetHtml(el: WidgetElement, base: string): string {
       .map((tz, i) => {
         const faceId = `clock-face-${el.id}-${i}`;
         return `<div style="display:flex;flex-direction:column;align-items:center;">
-  <div style="position:relative;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:2px solid #0F172A;background:#fff;">
-    <div id="${faceId}-hour" style="position:absolute;left:${size / 2 - 1.5}px;top:${size / 2 - hourLen}px;width:3px;height:${hourLen}px;background:#0F172A;border-radius:2px;transform-origin:1.5px ${hourLen}px;"></div>
-    <div id="${faceId}-min" style="position:absolute;left:${size / 2 - 1}px;top:${size / 2 - minLen}px;width:2px;height:${minLen}px;background:#0F172A;border-radius:2px;transform-origin:1px ${minLen}px;"></div>
+  <div style="position:relative;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:2px solid ${accent};background:#fff;">
+    <div id="${faceId}-hour" style="position:absolute;left:${size / 2 - 1.5}px;top:${size / 2 - hourLen}px;width:3px;height:${hourLen}px;background:${accent};border-radius:2px;transform-origin:1.5px ${hourLen}px;"></div>
+    <div id="${faceId}-min" style="position:absolute;left:${size / 2 - 1}px;top:${size / 2 - minLen}px;width:2px;height:${minLen}px;background:${accent};border-radius:2px;transform-origin:1px ${minLen}px;"></div>
     <div id="${faceId}-sec" style="position:absolute;left:${size / 2 - 0.5}px;top:${size / 2 - secLen}px;width:1px;height:${secLen}px;background:#DC2626;transform-origin:0.5px ${secLen}px;"></div>
-    <div style="position:absolute;left:${size / 2 - 3}px;top:${size / 2 - 3}px;width:6px;height:6px;border-radius:3px;background:#0F172A;"></div>
+    <div style="position:absolute;left:${size / 2 - 3}px;top:${size / 2 - 3}px;width:6px;height:6px;border-radius:3px;background:${accent};"></div>
   </div>
   <div style="font-size:10px;color:#64748B;font-weight:600;margin-top:4px;">${escapeHtml(tz.label)}</div>
 </div>`;
@@ -1497,7 +1514,7 @@ function renderClockWidgetHtml(el: WidgetElement, base: string): string {
   setInterval(tick, 1000);
 })();</script>`;
 
-    return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;">
+    return `<div id="el-${el.id}" style="${base}${widgetCardStyle('clock')}display:flex;flex-direction:column;align-items:center;justify-content:center;">
   ${titleHtml}
   <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;align-items:center;">
     ${facesHtml}
@@ -1510,7 +1527,7 @@ ${script}`;
     .map(
       (tz, i) => `<div style="text-align:center;">
   <div style="font-size:11px;color:#64748B;font-weight:600;">${escapeHtml(tz.label)}</div>
-  <div id="clock-readout-${el.id}-${i}" style="font-size:18px;color:#0F172A;font-weight:800;">--:--:--</div>
+  <div id="clock-readout-${el.id}-${i}" style="font-size:18px;color:${accent};font-weight:800;">--:--:--</div>
 </div>`
     )
     .join('');
@@ -1532,7 +1549,7 @@ ${script}`;
   setInterval(tick, 1000);
 })();</script>`;
 
-  return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;">
+  return `<div id="el-${el.id}" style="${base}${widgetCardStyle('clock')}display:flex;flex-direction:column;align-items:center;justify-content:center;">
   ${titleHtml}
   <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:center;align-items:center;">
     ${digitalRows}
@@ -1545,11 +1562,12 @@ ${digitalScript}`;
 // second in the visitor's browser, never a static "time remaining" snapshot baked in at
 // publish time. Mirrors CountdownWidget in WidgetView.tsx.
 function renderCountdownWidgetHtml(el: WidgetElement, base: string): string {
+  const theme = WIDGET_THEME.countdown;
   const activeId = `cd-${el.id}-active`;
   const doneId = `cd-${el.id}-done`;
-  const unit = (id: string, label: string) => `<div style="display:flex;flex-direction:column;align-items:center;margin:0 8px;">
-  <div id="${id}" style="font-size:30px;font-weight:800;color:#0F172A;">00</div>
-  <div style="font-size:10px;color:#64748B;font-weight:600;">${label}</div>
+  const unit = (id: string, label: string) => `<div style="display:flex;flex-direction:column;align-items:center;margin:0 5px;">
+  <div id="${id}" style="font-size:26px;font-weight:800;color:#fff;background:${theme.accent};border-radius:8px;padding:2px 10px;">00</div>
+  <div style="font-size:10px;color:${theme.accent};font-weight:700;margin-top:3px;">${label}</div>
 </div>`;
 
   const script = `<script>(function(){
@@ -1582,8 +1600,8 @@ function renderCountdownWidgetHtml(el: WidgetElement, base: string): string {
   setInterval(tick, 1000);
 })();</script>`;
 
-  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:center;justify-content:center;">
-  ${widgetTitleHtml(el.title)}
+  return `<div id="el-${el.id}" style="${base}${widgetCardStyle('countdown')}display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  ${widgetTitleHtml(el.title, 'countdown')}
   ${el.countdownLabel ? `<div style="font-size:12px;color:#64748B;font-weight:600;margin-bottom:4px;">${escapeHtml(el.countdownLabel)}</div>` : ''}
   <div id="${activeId}" style="display:flex;">
     ${unit(`cd-${el.id}-days`, 'DAYS')}
@@ -1656,14 +1674,15 @@ function renderStopwatchWidgetHtml(el: WidgetElement, base: string): string {
   render();
 })();</script>`;
 
+  const theme = WIDGET_THEME.stopwatch;
   const btnStyle = 'padding:8px 14px;border-radius:8px;border:none;font-weight:700;font-size:14px;cursor:pointer;';
-  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:center;justify-content:center;">
-  ${widgetTitleHtml(el.title)}
-  <div id="${displayId}" style="font-size:28px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums;">00:00.00</div>
+  return `<div id="el-${el.id}" style="${base}${widgetCardStyle('stopwatch')}display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  ${widgetTitleHtml(el.title, 'stopwatch')}
+  <div id="${displayId}" style="font-size:28px;font-weight:800;color:${theme.accent};font-variant-numeric:tabular-nums;">00:00.00</div>
   <div style="display:flex;gap:8px;margin-top:8px;">
     <button id="${toggleId}" style="${btnStyle}background:#16A34A;color:#FFFFFF;">Start</button>
-    <button id="${lapId}" style="${btnStyle}background:#E2E8F0;color:#0F172A;">Lap</button>
-    <button id="${resetId}" style="${btnStyle}background:#E2E8F0;color:#0F172A;">Reset</button>
+    <button id="${lapId}" style="${btnStyle}background:${theme.soft};color:${theme.accent};">Lap</button>
+    <button id="${resetId}" style="${btnStyle}background:${theme.soft};color:${theme.accent};">Reset</button>
   </div>
   <div id="${lapsId}" style="margin-top:8px;font-size:11px;color:#64748B;text-align:center;"></div>
 </div>
@@ -1682,6 +1701,7 @@ const WIDGET_CALC_ROWS: string[][] = [
 // classic running-total chaining, not a full-expression parser), not a picture of a
 // calculator. Mirrors CalculatorWidget in WidgetView.tsx.
 function renderCalculatorWidgetHtml(el: WidgetElement, base: string): string {
+  const theme = WIDGET_THEME.calculator;
   const wrapId = `calc-wrap-${el.id}`;
   const displayId = `calc-display-${el.id}`;
 
@@ -1691,8 +1711,8 @@ function renderCalculatorWidgetHtml(el: WidgetElement, base: string): string {
       .map((label) => {
         const isEquals = label === '=';
         const isOperator = ['+', '-', '×', '÷'].includes(label);
-        const bg = isEquals ? '#111827' : isOperator ? '#E2E8F0' : '#F1F5F9';
-        const color = isEquals ? '#FFFFFF' : '#0F172A';
+        const bg = isEquals ? theme.accent : isOperator ? theme.soft : '#F1F5F9';
+        const color = isEquals ? '#FFFFFF' : isOperator ? theme.accent : '#0F172A';
         return `<button data-label="${escapeAttr(label)}" style="flex:1;height:34px;border-radius:8px;border:none;background:${bg};color:${color};font-weight:700;font-size:15px;cursor:pointer;">${escapeHtml(label)}</button>`;
       })
       .join('')}
@@ -1766,11 +1786,11 @@ function renderCalculatorWidgetHtml(el: WidgetElement, base: string): string {
   }
 })();</script>`;
 
-  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:stretch;justify-content:center;overflow-y:auto;">
-  ${widgetTitleHtml(el.title)}
+  return `<div id="el-${el.id}" style="${base}${widgetCardStyle('calculator')}display:flex;flex-direction:column;align-items:stretch;justify-content:center;overflow-y:auto;">
+  ${widgetTitleHtml(el.title, 'calculator')}
   <div id="${wrapId}">
     <div style="display:flex;justify-content:flex-end;margin-bottom:8px;padding:0 4px;">
-      <div id="${displayId}" style="font-size:26px;font-weight:700;color:#0F172A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">0</div>
+      <div id="${displayId}" style="font-size:26px;font-weight:700;color:${theme.accent};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">0</div>
     </div>
     ${rowsHtml}
   </div>
@@ -1819,6 +1839,7 @@ const WIDGET_UNIT_OPTIONS_JSON = JSON.stringify({
 // affine Celsius/Fahrenheit/Kelvin formulas for temperature), not a static chart. Mirrors
 // UnitConverterWidget in WidgetView.tsx.
 function renderUnitConverterWidgetHtml(el: WidgetElement, base: string): string {
+  const theme = WIDGET_THEME.unitconverter;
   const catId = `uc-${el.id}-categories`;
   const inputId = `uc-${el.id}-input`;
   const fromId = `uc-${el.id}-from`;
@@ -1850,7 +1871,7 @@ function renderUnitConverterWidgetHtml(el: WidgetElement, base: string): string 
   var catContainer = document.getElementById(${JSON.stringify(catId)});
   var swapBtn = document.getElementById(${JSON.stringify(swapId)});
   function chipStyle(active){
-    return 'padding:5px 9px;border-radius:999px;background:' + (active ? '#111827' : '#F1F5F9') + ';color:' + (active ? '#FFFFFF' : '#0F172A') + ';font-weight:700;font-size:11px;margin:0 6px 6px 0;border:none;cursor:pointer;';
+    return 'padding:5px 9px;border-radius:999px;background:' + (active ? ${JSON.stringify(theme.accent)} : '#F1F5F9') + ';color:' + (active ? '#FFFFFF' : '#0F172A') + ';font-weight:700;font-size:11px;margin:0 6px 6px 0;border:none;cursor:pointer;';
   }
   function renderChips(container, options, activeKey, onPick){
     if (!container) return;
@@ -1890,17 +1911,17 @@ function renderUnitConverterWidgetHtml(el: WidgetElement, base: string): string 
   recompute();
 })();</script>`;
 
-  return `<div id="el-${el.id}" style="${base}${WIDGET_CARD_BASE}display:flex;flex-direction:column;align-items:stretch;justify-content:center;overflow-y:auto;">
-  ${widgetTitleHtml(el.title)}
+  return `<div id="el-${el.id}" style="${base}${widgetCardStyle('unitconverter')}display:flex;flex-direction:column;align-items:stretch;justify-content:center;overflow-y:auto;">
+  ${widgetTitleHtml(el.title, 'unitconverter')}
   <div id="${catId}" style="display:flex;flex-wrap:wrap;"></div>
   <div style="display:flex;align-items:center;margin-top:4px;gap:8px;">
-    <input id="${inputId}" type="number" value="1" style="flex:1;border:1px solid #E2E8F0;border-radius:8px;padding:8px 10px;font-size:15px;color:#0F172A;box-sizing:border-box;" />
+    <input id="${inputId}" type="number" value="1" style="flex:1;border:1px solid ${theme.soft};border-radius:8px;padding:8px 10px;font-size:15px;color:#0F172A;box-sizing:border-box;" />
     <div id="${fromId}" style="display:flex;flex-wrap:wrap;flex:1;"></div>
   </div>
-  <button id="${swapId}" style="align-self:center;background:none;border:none;cursor:pointer;display:block;margin:4px auto;font-size:16px;color:#64748B;">&#8645;</button>
+  <button id="${swapId}" style="align-self:center;background:none;border:none;cursor:pointer;display:block;margin:4px auto;font-size:16px;color:${theme.accent};">&#8645;</button>
   <div style="display:flex;align-items:center;gap:8px;">
-    <div style="flex:1;border:1px solid #E2E8F0;border-radius:8px;padding:8px 10px;background:#F8FAFC;box-sizing:border-box;">
-      <div id="${resultId}" style="font-size:15px;font-weight:700;color:#0F172A;">1</div>
+    <div style="flex:1;border:1px solid ${theme.soft};border-radius:8px;padding:8px 10px;background:${theme.soft};box-sizing:border-box;">
+      <div id="${resultId}" style="font-size:15px;font-weight:800;color:${theme.accent};">1</div>
     </div>
     <div id="${toId}" style="display:flex;flex-wrap:wrap;flex:1;"></div>
   </div>

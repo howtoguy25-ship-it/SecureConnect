@@ -1,12 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput } from 'react-native';
+import { View, Text, Pressable, TextInput, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { WidgetElement } from '@/types';
+import { LinearGradient } from 'expo-linear-gradient';
+import { WidgetElement, WidgetKind } from '@/types';
 
 // A real, always-live/interactive utility -- never a static image. Each kind below ticks or
 // responds off the visitor's (or seller's, in the editor) own device with no backend
 // dependency, matching the exact same logic implemented in plain JS for the published site
 // (see renderWidgetHtml in firebase/functions/src/siteHtml.ts).
+
+// Each widget kind gets its own real color identity (gradient card background, accent for
+// key numbers/buttons, an icon badge) instead of one flat white card for every kind --
+// mirrors the same theme applied in siteHtml.ts's renderWidgetHtml for the published site.
+const WIDGET_THEME: Record<WidgetKind, { accent: string; soft: string; gradient: [string, string]; icon: keyof typeof Ionicons.glyphMap }> = {
+  clock: { accent: '#4338CA', soft: '#E0E7FF', gradient: ['#EEF2FF', '#E0E7FF'], icon: 'time-outline' },
+  countdown: { accent: '#EA580C', soft: '#FFEDD5', gradient: ['#FFF7ED', '#FFEDD5'], icon: 'hourglass-outline' },
+  stopwatch: { accent: '#0D9488', soft: '#CCFBF1', gradient: ['#F0FDFA', '#CCFBF1'], icon: 'stopwatch-outline' },
+  calculator: { accent: '#7C3AED', soft: '#EDE9FE', gradient: ['#F5F3FF', '#EDE9FE'], icon: 'calculator-outline' },
+  unitconverter: { accent: '#0284C7', soft: '#E0F2FE', gradient: ['#F0F9FF', '#E0F2FE'], icon: 'swap-horizontal-outline' },
+};
 
 function formatDigital(date: Date, tz: string): string {
   try {
@@ -55,7 +67,7 @@ function ClockHand({ faceSize, length, thickness, color, degrees }: { faceSize: 
   );
 }
 
-function AnalogClockFace({ tz, size }: { tz: string; size: number }) {
+function AnalogClockFace({ tz, size, accent }: { tz: string; size: number; accent: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -63,16 +75,16 @@ function AnalogClockFace({ tz, size }: { tz: string; size: number }) {
   }, []);
   const { hour, minute, second } = getHandDegrees(now, tz);
   return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: '#0F172A', backgroundColor: '#FFFFFF' }}>
-      <ClockHand faceSize={size} length={size * 0.26} thickness={3} color="#0F172A" degrees={hour} />
-      <ClockHand faceSize={size} length={size * 0.36} thickness={2} color="#0F172A" degrees={minute} />
+    <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: accent, backgroundColor: '#FFFFFF' }}>
+      <ClockHand faceSize={size} length={size * 0.26} thickness={3} color={accent} degrees={hour} />
+      <ClockHand faceSize={size} length={size * 0.36} thickness={2} color={accent} degrees={minute} />
       <ClockHand faceSize={size} length={size * 0.4} thickness={1} color="#DC2626" degrees={second} />
-      <View style={{ position: 'absolute', width: 6, height: 6, borderRadius: 3, backgroundColor: '#0F172A', left: size / 2 - 3, top: size / 2 - 3 }} />
+      <View style={{ position: 'absolute', width: 6, height: 6, borderRadius: 3, backgroundColor: accent, left: size / 2 - 3, top: size / 2 - 3 }} />
     </View>
   );
 }
 
-function DigitalClockFace({ label, tz, compact }: { label: string; tz: string; compact: boolean }) {
+function DigitalClockFace({ label, tz, compact, accent }: { label: string; tz: string; compact: boolean; accent: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -83,25 +95,26 @@ function DigitalClockFace({ label, tz, compact }: { label: string; tz: string; c
       <Text style={{ fontSize: compact ? 9 : 11, color: '#64748B', fontWeight: '600' }} numberOfLines={1}>
         {label}
       </Text>
-      <Text style={{ fontSize: compact ? 14 : 18, color: '#0F172A', fontWeight: '800' }}>{formatDigital(now, tz)}</Text>
+      <Text style={{ fontSize: compact ? 14 : 18, color: accent, fontWeight: '800' }}>{formatDigital(now, tz)}</Text>
     </View>
   );
 }
 
 function ClockWidget({ element, compact }: { element: WidgetElement; compact: boolean }) {
+  const accent = WIDGET_THEME.clock.accent;
   const timezones = element.timezones.length > 0 ? element.timezones : [{ label: 'Local Time', ianaTimezone: 'UTC' }];
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center', alignItems: 'center' }}>
       {timezones.map((tz, i) =>
         element.style === 'analog' ? (
           <View key={i} style={{ alignItems: 'center' }}>
-            <AnalogClockFace tz={tz.ianaTimezone} size={compact ? 56 : 76} />
+            <AnalogClockFace tz={tz.ianaTimezone} size={compact ? 56 : 76} accent={accent} />
             <Text style={{ fontSize: compact ? 9 : 11, color: '#64748B', fontWeight: '600', marginTop: 4 }} numberOfLines={1}>
               {tz.label}
             </Text>
           </View>
         ) : (
-          <DigitalClockFace key={i} label={tz.label} tz={tz.ianaTimezone} compact={compact} />
+          <DigitalClockFace key={i} label={tz.label} tz={tz.ianaTimezone} compact={compact} accent={accent} />
         )
       )}
     </View>
@@ -129,11 +142,14 @@ function CountdownWidget({ element, compact }: { element: WidgetElement; compact
   const remaining = Number.isFinite(target) ? target - now : 0;
   const reached = Number.isFinite(target) && remaining <= 0;
   const { days, hours, minutes, seconds } = splitCountdown(remaining);
-  const unitSize = compact ? 22 : 30;
+  const unitSize = compact ? 20 : 26;
+  const theme = WIDGET_THEME.countdown;
   const box = (value: number, label: string) => (
-    <View key={label} style={{ alignItems: 'center', marginHorizontal: compact ? 4 : 8 }}>
-      <Text style={{ fontSize: unitSize, fontWeight: '800', color: '#0F172A' }}>{String(value).padStart(2, '0')}</Text>
-      <Text style={{ fontSize: compact ? 8 : 10, color: '#64748B', fontWeight: '600' }}>{label}</Text>
+    <View key={label} style={{ alignItems: 'center', marginHorizontal: compact ? 3 : 5 }}>
+      <View style={{ backgroundColor: theme.accent, borderRadius: 8, paddingHorizontal: compact ? 6 : 10, paddingVertical: compact ? 2 : 4 }}>
+        <Text style={{ fontSize: unitSize, fontWeight: '800', color: '#FFFFFF' }}>{String(value).padStart(2, '0')}</Text>
+      </View>
+      <Text style={{ fontSize: compact ? 8 : 10, color: theme.accent, fontWeight: '700', marginTop: 3 }}>{label}</Text>
     </View>
   );
   return (
@@ -195,9 +211,10 @@ function StopwatchWidget({ compact }: { compact: boolean }) {
     if (running) setLaps((prev) => [elapsedMs, ...prev].slice(0, 5));
   };
 
+  const theme = WIDGET_THEME.stopwatch;
   return (
     <View style={{ alignItems: 'center', width: '100%' }}>
-      <Text style={{ fontSize: compact ? 22 : 32, fontWeight: '800', color: '#0F172A', fontVariant: ['tabular-nums'] }}>{formatStopwatch(elapsedMs)}</Text>
+      <Text style={{ fontSize: compact ? 22 : 32, fontWeight: '800', color: theme.accent, fontVariant: ['tabular-nums'] }}>{formatStopwatch(elapsedMs)}</Text>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
         <Pressable
           onPress={toggle}
@@ -205,11 +222,11 @@ function StopwatchWidget({ compact }: { compact: boolean }) {
         >
           <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: compact ? 12 : 14 }}>{running ? 'Pause' : 'Start'}</Text>
         </Pressable>
-        <Pressable onPress={lap} disabled={!running} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: running ? '#E2E8F0' : '#F1F5F9' }}>
-          <Text style={{ color: running ? '#0F172A' : '#94A3B8', fontWeight: '700', fontSize: compact ? 12 : 14 }}>Lap</Text>
+        <Pressable onPress={lap} disabled={!running} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: running ? theme.soft : '#F1F5F9' }}>
+          <Text style={{ color: running ? theme.accent : '#94A3B8', fontWeight: '700', fontSize: compact ? 12 : 14 }}>Lap</Text>
         </Pressable>
-        <Pressable onPress={reset} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: '#E2E8F0' }}>
-          <Text style={{ color: '#0F172A', fontWeight: '700', fontSize: compact ? 12 : 14 }}>Reset</Text>
+        <Pressable onPress={reset} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: theme.soft }}>
+          <Text style={{ color: theme.accent, fontWeight: '700', fontSize: compact ? 12 : 14 }}>Reset</Text>
         </Pressable>
       </View>
       {!compact && laps.length > 0 && (
@@ -312,10 +329,11 @@ function CalculatorWidget({ compact }: { compact: boolean }) {
   };
 
   const btnSize = compact ? 26 : 34;
+  const theme = WIDGET_THEME.calculator;
   return (
     <View style={{ width: '100%' }}>
       <View style={{ alignItems: 'flex-end', marginBottom: 8, paddingHorizontal: 4 }}>
-        <Text numberOfLines={1} style={{ fontSize: compact ? 20 : 28, fontWeight: '700', color: '#0F172A' }}>
+        <Text numberOfLines={1} style={{ fontSize: compact ? 20 : 28, fontWeight: '700', color: theme.accent }}>
           {display}
         </Text>
       </View>
@@ -331,10 +349,10 @@ function CalculatorWidget({ compact }: { compact: boolean }) {
                 borderRadius: 8,
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: label === '=' ? '#111827' : ['+', '-', '×', '÷'].includes(label) ? '#E2E8F0' : '#F1F5F9',
+                backgroundColor: label === '=' ? theme.accent : ['+', '-', '×', '÷'].includes(label) ? theme.soft : '#F1F5F9',
               }}
             >
-              <Text style={{ fontSize: compact ? 12 : 15, fontWeight: '700', color: label === '=' ? '#FFFFFF' : '#0F172A' }}>{label}</Text>
+              <Text style={{ fontSize: compact ? 12 : 15, fontWeight: '700', color: label === '=' ? '#FFFFFF' : label.match(/[+\-×÷]/) ? theme.accent : '#0F172A' }}>{label}</Text>
             </Pressable>
           ))}
         </View>
@@ -410,7 +428,7 @@ const CATEGORY_LABELS: { key: UnitCategory; label: string }[] = [
   { key: 'volume', label: 'Volume' },
 ];
 
-function Chip({ label, active, onPress, compact }: { label: string; active: boolean; onPress: () => void; compact: boolean }) {
+function Chip({ label, active, onPress, compact, accent }: { label: string; active: boolean; onPress: () => void; compact: boolean; accent: string }) {
   return (
     <Pressable
       onPress={onPress}
@@ -418,7 +436,7 @@ function Chip({ label, active, onPress, compact }: { label: string; active: bool
         paddingHorizontal: compact ? 8 : 10,
         paddingVertical: compact ? 4 : 6,
         borderRadius: 999,
-        backgroundColor: active ? '#111827' : '#F1F5F9',
+        backgroundColor: active ? accent : '#F1F5F9',
         marginRight: 6,
         marginBottom: 6,
       }}
@@ -449,12 +467,13 @@ function UnitConverterWidget({ compact }: { compact: boolean }) {
   const numeric = Number(input);
   const result = Number.isFinite(numeric) ? convertUnit(category, numeric, fromUnit, toUnit) : NaN;
   const resultText = Number.isFinite(result) ? String(Math.round(result * 1e6) / 1e6) : '--';
+  const theme = WIDGET_THEME.unitconverter;
 
   return (
     <View style={{ width: '100%' }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {CATEGORY_LABELS.map((c) => (
-          <Chip key={c.key} label={c.label} active={category === c.key} onPress={() => changeCategory(c.key)} compact={compact} />
+          <Chip key={c.key} label={c.label} active={category === c.key} onPress={() => changeCategory(c.key)} compact={compact} accent={theme.accent} />
         ))}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
@@ -465,7 +484,7 @@ function UnitConverterWidget({ compact }: { compact: boolean }) {
           style={{
             flex: 1,
             borderWidth: 1,
-            borderColor: '#E2E8F0',
+            borderColor: theme.soft,
             borderRadius: 8,
             paddingHorizontal: 10,
             paddingVertical: compact ? 4 : 8,
@@ -475,32 +494,32 @@ function UnitConverterWidget({ compact }: { compact: boolean }) {
         />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginLeft: 8 }}>
           {options.map((u) => (
-            <Chip key={u.key} label={u.label} active={fromUnit === u.key} onPress={() => setFromUnit(u.key)} compact={compact} />
+            <Chip key={u.key} label={u.label} active={fromUnit === u.key} onPress={() => setFromUnit(u.key)} compact={compact} accent={theme.accent} />
           ))}
         </View>
       </View>
       <Pressable onPress={swap} style={{ alignSelf: 'center', marginVertical: 4, padding: 4 }}>
-        <Ionicons name="swap-vertical" size={compact ? 16 : 20} color="#64748B" />
+        <Ionicons name="swap-vertical" size={compact ? 16 : 20} color={theme.accent} />
       </Pressable>
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <View
           style={{
             flex: 1,
             borderWidth: 1,
-            borderColor: '#E2E8F0',
+            borderColor: theme.soft,
             borderRadius: 8,
             paddingHorizontal: 10,
             paddingVertical: compact ? 4 : 8,
-            backgroundColor: '#F8FAFC',
+            backgroundColor: theme.soft,
           }}
         >
-          <Text numberOfLines={1} style={{ fontSize: compact ? 13 : 16, color: '#0F172A', fontWeight: '700' }}>
+          <Text numberOfLines={1} style={{ fontSize: compact ? 13 : 16, color: theme.accent, fontWeight: '800' }}>
             {resultText}
           </Text>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginLeft: 8 }}>
           {options.map((u) => (
-            <Chip key={u.key} label={u.label} active={toUnit === u.key} onPress={() => setToUnit(u.key)} compact={compact} />
+            <Chip key={u.key} label={u.label} active={toUnit === u.key} onPress={() => setToUnit(u.key)} compact={compact} accent={theme.accent} />
           ))}
         </View>
       </View>
@@ -510,38 +529,43 @@ function UnitConverterWidget({ compact }: { compact: boolean }) {
 
 export default function WidgetView({ element, width, height }: { element: WidgetElement; width: number; height: number }) {
   const compact = width < 220 || height < 140;
+  const theme = WIDGET_THEME[element.kind] ?? WIDGET_THEME.clock;
 
   return (
     <View
       style={{
         width,
         height,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 12,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: theme.soft,
         overflow: 'hidden',
-        padding: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
       }}
     >
-      {!!element.title && (
-        <Text style={{ fontSize: compact ? 12 : 15, fontWeight: '700', color: '#0F172A', marginBottom: 6 }} numberOfLines={1}>
-          {element.title}
-        </Text>
-      )}
-      {element.kind === 'countdown' ? (
-        <CountdownWidget element={element} compact={compact} />
-      ) : element.kind === 'stopwatch' ? (
-        <StopwatchWidget compact={compact} />
-      ) : element.kind === 'calculator' ? (
-        <CalculatorWidget compact={compact} />
-      ) : element.kind === 'unitconverter' ? (
-        <UnitConverterWidget compact={compact} />
-      ) : (
-        <ClockWidget element={element} compact={compact} />
-      )}
+      <LinearGradient colors={theme.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <View style={{ flex: 1, padding: 8, alignItems: 'center', justifyContent: 'center' }}>
+        {!!element.title && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+            <View style={{ width: compact ? 16 : 20, height: compact ? 16 : 20, borderRadius: compact ? 8 : 10, backgroundColor: theme.accent, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name={theme.icon} size={compact ? 10 : 12} color="#FFFFFF" />
+            </View>
+            <Text style={{ fontSize: compact ? 12 : 15, fontWeight: '700', color: '#0F172A' }} numberOfLines={1}>
+              {element.title}
+            </Text>
+          </View>
+        )}
+        {element.kind === 'countdown' ? (
+          <CountdownWidget element={element} compact={compact} />
+        ) : element.kind === 'stopwatch' ? (
+          <StopwatchWidget compact={compact} />
+        ) : element.kind === 'calculator' ? (
+          <CalculatorWidget compact={compact} />
+        ) : element.kind === 'unitconverter' ? (
+          <UnitConverterWidget compact={compact} />
+        ) : (
+          <ClockWidget element={element} compact={compact} />
+        )}
+      </View>
     </View>
   );
 }

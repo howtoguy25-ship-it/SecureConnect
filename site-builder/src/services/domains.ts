@@ -1,7 +1,34 @@
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/services/firebase';
+import { collection, getDocs, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { functions, db } from '@/services/firebase';
 import { requireFunctions } from '@/services/requireFunctions';
-import { RegistrantContact, DomainTransfer } from '@/types';
+import { requireDb } from '@/services/requireDb';
+import { RegistrantContact, DomainTransfer, DomainPurchase } from '@/types';
+
+// Real domains this account owns -- every completed purchase (via createDomainCheckout +
+// the Stripe webhook) and every inbound transfer, for a persistent "Domains" tab rather
+// than only ever seeing DNS setup once, during the one-shot buy/transfer flow.
+export async function listDomainPurchases(uid: string): Promise<DomainPurchase[]> {
+  const snapshot = await getDocs(query(collection(requireDb(db), 'users', uid, 'domainPurchases'), orderBy('createdAt', 'desc')));
+  return snapshot.docs.map((d) => d.data() as DomainPurchase);
+}
+
+export function subscribeDomainPurchases(uid: string, onChange: (purchases: DomainPurchase[]) => void): () => void {
+  return onSnapshot(query(collection(requireDb(db), 'users', uid, 'domainPurchases'), orderBy('createdAt', 'desc')), (snap) => {
+    onChange(snap.docs.map((d) => d.data() as DomainPurchase));
+  });
+}
+
+export async function listDomainTransfers(uid: string): Promise<DomainTransfer[]> {
+  const snapshot = await getDocs(query(collection(requireDb(db), 'users', uid, 'domainTransfers'), orderBy('createdAt', 'desc')));
+  return snapshot.docs.map((d) => d.data() as DomainTransfer);
+}
+
+export function subscribeDomainTransfers(uid: string, onChange: (transfers: DomainTransfer[]) => void): () => void {
+  return onSnapshot(query(collection(requireDb(db), 'users', uid, 'domainTransfers'), orderBy('createdAt', 'desc')), (snap) => {
+    onChange(snap.docs.map((d) => d.data() as DomainTransfer));
+  });
+}
 
 export interface DomainSearchResult {
   domain: string;

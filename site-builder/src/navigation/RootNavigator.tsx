@@ -30,6 +30,7 @@ import AccountScreen from '@/screens/AccountScreen';
 import SellerAccountScreen from '@/screens/SellerAccountScreen';
 import OrdersScreen from '@/screens/OrdersScreen';
 import DiscountCodesScreen from '@/screens/DiscountCodesScreen';
+import DomainsScreen from '@/screens/DomainsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -54,6 +55,7 @@ function AppStack() {
       <Stack.Screen name="SellerAccount" component={SellerAccountScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Orders" component={OrdersScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="DiscountCodes" component={DiscountCodesScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Domains" component={DomainsScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }

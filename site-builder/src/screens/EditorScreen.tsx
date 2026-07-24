@@ -424,26 +424,22 @@ function EditorInner({ navigation }: Props) {
           {isGenerating ? (
             <View style={{ width: 24 }} />
           ) : (
-            <Pressable
-              onPress={() => navigation.navigate('Publish', { projectId: project.id })}
-              hitSlop={8}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-            >
+            <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
               {publishStatus === 'publishing' ? (
-                <>
-                  <ActivityIndicator size="small" color={theme.text} />
-                  <Text style={[styles.publishStatusText, { color: theme.text }]}>Publishing…</Text>
-                </>
+                <View style={[styles.publishStatusPill, { backgroundColor: '#E0E7FF' }]}>
+                  <ActivityIndicator size="small" color="#4338CA" />
+                  <Text style={[styles.publishStatusText, { color: '#4338CA' }]}>Publishing…</Text>
+                </View>
               ) : publishStatus === 'live' ? (
-                <>
+                <View style={[styles.publishStatusPill, { backgroundColor: '#DCFCE7' }]}>
                   <View style={styles.publishStatusDot} />
-                  <Text style={[styles.publishStatusText, { color: theme.text }]}>Live</Text>
-                </>
+                  <Text style={[styles.publishStatusText, { color: '#15803D' }]}>Live</Text>
+                </View>
               ) : publishStatus === 'blocked' ? (
-                <>
-                  <Ionicons name="warning" size={18} color="#B45309" />
+                <View style={[styles.publishStatusPill, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="warning" size={14} color="#B45309" />
                   <Text style={[styles.publishStatusText, { color: '#B45309' }]}>Not live</Text>
-                </>
+                </View>
               ) : (
                 <Ionicons name="cloud-upload-outline" size={24} color={theme.text} />
               )}
@@ -691,6 +687,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1, textAlign: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  publishStatusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   publishStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#16A34A' },
   publishStatusText: { fontSize: 12, fontWeight: '700' },
   layersOverlay: {

@@ -992,6 +992,32 @@ export const unpublishProject = onCall({ invoker: 'public' }, withCallableErrors
   return { ok: true };
 }));
 
+// Real HTML files for a "download your whole build" ZIP export -- publishedSites is
+// Admin-SDK-only (see firestore.rules), so the client can't read it directly even for its
+// own project; this callable is the one sanctioned way to hand that content back to its
+// owner. Only ever returns a project's OWN rendered output, and only once it's actually
+// published (an unpublished project has no rendered HTML to hand back yet).
+export const getPublishedSiteExport = onCall({ invoker: 'public' }, withCallableErrors('getPublishedSiteExport', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { projectId } = request.data as { projectId: string };
+  if (!projectId) throw new HttpsError('invalid-argument', 'Missing projectId.');
+
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const project = (await projectRef.get()).data() as Project | undefined;
+  if (!project) throw new HttpsError('not-found', 'Project not found.');
+  if (!project.publishSlug) throw new HttpsError('failed-precondition', 'Publish this site before downloading it.');
+
+  const siteDoc = await db.collection('publishedSites').doc(project.publishSlug).get();
+  const site = siteDoc.data() as PublishedSite | undefined;
+  if (!site) throw new HttpsError('not-found', 'Published site content not found -- try republishing.');
+
+  const pages: Record<string, string> = site.pages ? { ...site.pages } : {};
+  if (!pages['']) pages[''] = site.html;
+
+  return { siteName: project.name, slug: project.publishSlug, pages };
+}));
+
 // Real, immediate stock/availability update for a product element -- separate from just
 // editing it in the inspector (which only ever changes the *draft*, applied on next
 // republish). This writes the draft element AND, if the site is already published, the live

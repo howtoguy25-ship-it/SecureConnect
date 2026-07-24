@@ -7,6 +7,7 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +24,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
 import RewardedAdCard from '@/components/RewardedAdCard';
 import AdBanner from '@/components/AdBanner';
+import { downloadProjectZip, shareProjectZip } from '@/services/projectExport';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Projects'>;
 
@@ -38,6 +40,8 @@ export default function ProjectsScreen({ navigation }: Props) {
   // route back to the AI build progress screen instead of opening an empty Editor, since
   // the build itself keeps running server-side even after leaving that screen.
   const [activeSessionsByProjectId, setActiveSessionsByProjectId] = useState<Record<string, GenerationSession>>({});
+  const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState<'download' | 'share' | null>(null);
 
   const load = useCallback(async () => {
     const [list, activeSessions] = await Promise.all([projectsStore.list(uid), generationSessionStore.listActive(uid)]);
@@ -77,6 +81,32 @@ export default function ProjectsScreen({ navigation }: Props) {
     }
     setRenamingId(null);
     load();
+  };
+
+  const menuProject = projects.find((p) => p.id === menuProjectId) ?? null;
+
+  const handleDownloadZip = async (project: Project) => {
+    setExportBusy('download');
+    try {
+      await downloadProjectZip(project);
+      setMenuProjectId(null);
+    } catch (err: any) {
+      showAlert('Could not download', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
+  const handleShareZip = async (project: Project) => {
+    setExportBusy('share');
+    try {
+      await shareProjectZip(project);
+      setMenuProjectId(null);
+    } catch (err: any) {
+      showAlert('Could not share', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setExportBusy(null);
+    }
   };
 
   return (
@@ -193,7 +223,10 @@ export default function ProjectsScreen({ navigation }: Props) {
                     )}
                   </View>
                 </View>
-                <Pressable hitSlop={8} onPress={() => confirmDelete(item)}>
+                <Pressable hitSlop={8} onPress={() => setMenuProjectId(item.id)} style={styles.cardIconBtn}>
+                  <Ionicons name="ellipsis-vertical" size={18} color={theme.textMuted} />
+                </Pressable>
+                <Pressable hitSlop={8} onPress={() => confirmDelete(item)} style={styles.cardIconBtn}>
                   <Ionicons name="trash-outline" size={20} color={theme.textMuted} />
                 </Pressable>
               </Pressable>
@@ -201,6 +234,51 @@ export default function ProjectsScreen({ navigation }: Props) {
           }}
         />
       )}
+
+      <Modal visible={!!menuProject} transparent animationType="fade" onRequestClose={() => setMenuProjectId(null)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuProjectId(null)}>
+          <Pressable style={[styles.menuSheet, { backgroundColor: theme.surface }]} onPress={() => {}}>
+            <Text style={[styles.menuTitle, { color: theme.text }]} numberOfLines={1}>
+              {menuProject?.name}
+            </Text>
+            {menuProject?.publishSlug ? (
+              <>
+                <Pressable
+                  style={styles.menuRow}
+                  onPress={() => menuProject && handleDownloadZip(menuProject)}
+                  disabled={!!exportBusy}
+                >
+                  {exportBusy === 'download' ? (
+                    <ActivityIndicator size="small" color={theme.accent} />
+                  ) : (
+                    <Ionicons name="download-outline" size={20} color={theme.text} />
+                  )}
+                  <Text style={[styles.menuRowText, { color: theme.text }]}>Download ZIP</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.menuRow}
+                  onPress={() => menuProject && handleShareZip(menuProject)}
+                  disabled={!!exportBusy}
+                >
+                  {exportBusy === 'share' ? (
+                    <ActivityIndicator size="small" color={theme.accent} />
+                  ) : (
+                    <Ionicons name="share-outline" size={20} color={theme.text} />
+                  )}
+                  <Text style={[styles.menuRowText, { color: theme.text }]}>Share Files</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Text style={[styles.menuHelper, { color: theme.textMuted }]}>
+                Publish this site first to download or share its files as a ZIP.
+              </Text>
+            )}
+            <Pressable style={styles.menuCancel} onPress={() => setMenuProjectId(null)}>
+              <Text style={[styles.menuCancelText, { color: theme.textMuted }]}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <AdBanner />
     </SafeAreaView>
@@ -297,4 +375,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#CBD5E1',
   },
+  cardIconBtn: { padding: 4 },
+  menuBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'flex-end' },
+  menuSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 32 },
+  menuTitle: { fontSize: 15, fontWeight: '700', marginBottom: 12, textAlign: 'center' },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  menuRowText: { fontSize: 15, fontWeight: '600' },
+  menuHelper: { fontSize: 13, textAlign: 'center', lineHeight: 19, paddingVertical: 10 },
+  menuCancel: { marginTop: 8, alignItems: 'center', paddingVertical: 12 },
+  menuCancelText: { fontSize: 14, fontWeight: '700' },
 });
