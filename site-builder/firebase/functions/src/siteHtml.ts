@@ -1,4 +1,4 @@
-import { CanvasElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage } from './types';
+import { CanvasElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
 import { getFontOption } from './fonts';
 import { currencySymbol } from './currency';
 
@@ -1119,6 +1119,272 @@ function targetRange3DScript(bodyId: string): string {
   })();</script>`;
 }
 
+// Real WebGL (Three.js, same CDN load as targetRange3DScript) with real gravity, a rolling
+// pointer-velocity buffer so a flick's *final* motion (not the whole gesture's average) sets
+// launch power/direction, cosmetic spin, and approximate rim/backboard collision -- the
+// in-editor version is a simplified 2D stand-in (see BasketballGamePreview in GameView.tsx).
+function basketballScript(bodyId: string): string {
+  return `<script>(function(){
+  var root = document.getElementById(${JSON.stringify(bodyId)});
+  var playW = root.clientWidth || 260, playH = 300;
+  var score = 0;
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'font-weight:700;font-size:12px;color:#334155;margin-bottom:6px;text-align:center;';
+  overlay.textContent = 'Swipe up to shoot!';
+  var canvasWrap = document.createElement('div');
+  canvasWrap.style.cssText = 'position:relative;width:'+playW+'px;height:'+playH+'px;border-radius:8px;overflow:hidden;background:#1E293B;';
+
+  root.innerHTML = '';
+  root.appendChild(overlay);
+  root.appendChild(canvasWrap);
+
+  if (typeof THREE === 'undefined') {
+    overlay.textContent = '3D unavailable in this browser';
+    return;
+  }
+
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(55, playW / playH, 0.1, 100);
+  camera.position.set(0, 2.1, 6.2);
+  camera.lookAt(0, 2.6, -2);
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(playW, playH);
+  renderer.setClearColor(0x1E293B, 1);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.domElement.style.touchAction = 'none';
+  canvasWrap.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  var dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+  dirLight.position.set(2, 6, 3);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(1024, 1024);
+  dirLight.shadow.camera.left = -6; dirLight.shadow.camera.right = 6;
+  dirLight.shadow.camera.top = 6; dirLight.shadow.camera.bottom = -6;
+  scene.add(dirLight);
+
+  var floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshStandardMaterial({ color: 0x92400E }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  var hoopHeight = 3.05, hoopZ = -2.4;
+  var backboard = new THREE.Mesh(
+    new THREE.BoxGeometry(1.8, 1.05, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0xF8FAFC, transparent: true, opacity: 0.85 })
+  );
+  backboard.position.set(0, hoopHeight + 0.35, hoopZ - 0.15);
+  backboard.castShadow = true;
+  backboard.receiveShadow = true;
+  scene.add(backboard);
+
+  var rimRadius = 0.45;
+  var rim = new THREE.Mesh(new THREE.TorusGeometry(rimRadius, 0.03, 12, 24), new THREE.MeshStandardMaterial({ color: 0xF97316 }));
+  rim.rotation.x = Math.PI / 2;
+  rim.position.set(0, hoopHeight, hoopZ);
+  rim.castShadow = true;
+  scene.add(rim);
+
+  // Net -- a handful of hanging line segments, purely visual, wobble-animated on a make.
+  var netGroup = new THREE.Group();
+  netGroup.position.set(0, hoopHeight, hoopZ);
+  var netSegments = 10;
+  for (var n = 0; n < netSegments; n++) {
+    var angle = (n / netSegments) * Math.PI * 2;
+    var x0 = Math.cos(angle) * rimRadius, z0 = Math.sin(angle) * rimRadius;
+    var netGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x0, 0, z0),
+      new THREE.Vector3(x0 * 0.5, -0.45, z0 * 0.5),
+    ]);
+    netGroup.add(new THREE.Line(netGeo, new THREE.LineBasicMaterial({ color: 0xF1F5F9 })));
+  }
+  scene.add(netGroup);
+
+  var ballRadius = 0.28;
+  var ball = new THREE.Mesh(new THREE.SphereGeometry(ballRadius, 20, 20), new THREE.MeshStandardMaterial({ color: 0xEA580C, roughness: 0.6 }));
+  ball.castShadow = true;
+  var seamMat = new THREE.MeshStandardMaterial({ color: 0x7C2D12 });
+  for (var s = 0; s < 2; s++) {
+    var seam = new THREE.Mesh(new THREE.TorusGeometry(ballRadius, 0.012, 6, 24), seamMat);
+    seam.rotation.y = s * Math.PI / 2;
+    ball.add(seam);
+  }
+  var restPos = new THREE.Vector3(0, 1.1, 2.4);
+  ball.position.copy(restPos);
+  scene.add(ball);
+
+  // Aim trail -- a visible affordance for how the flick will play out while it's held.
+  var trailPoints = [];
+  var trailGeo = new THREE.BufferGeometry();
+  var trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.6 }));
+  scene.add(trailLine);
+  function updateTrail(){
+    if (trailPoints.length < 2) { trailLine.visible = false; return; }
+    trailLine.visible = true;
+    trailGeo.setFromPoints(trailPoints);
+  }
+
+  var velocity = new THREE.Vector3(0, 0, 0);
+  var spinAxis = new THREE.Vector3(1, 0, 0);
+  var spinSpeed = 0;
+  var phase = 'ready'; // ready | dragging | flying | reset
+  var scored = false;
+  var prevY = ball.position.y;
+  var GRAVITY = 9.0;
+  var wobbleT = 0;
+
+  // Rolling buffer of recent pointer samples -- a flick's *final* motion (the last few
+  // samples before release), not the whole gesture's average, sets launch velocity, so a
+  // slow drag ending in a fast flick reads as a real fast flick.
+  var samples = [];
+  function pushSample(x, y){
+    samples.push({ x: x, y: y, t: Date.now() });
+    while (samples.length > 8) samples.shift();
+  }
+
+  function resetBall(){
+    ball.position.copy(restPos);
+    velocity.set(0, 0, 0);
+    spinSpeed = 0;
+    scored = false;
+    prevY = ball.position.y;
+    trailPoints = [];
+    updateTrail();
+    phase = 'ready';
+    overlay.textContent = score > 0 ? ('Score: ' + score) : 'Swipe up to shoot!';
+  }
+
+  function onDown(x, y){
+    if (phase === 'flying') return;
+    phase = 'dragging';
+    samples = [];
+    pushSample(x, y);
+  }
+
+  function onMove(x, y){
+    if (phase !== 'dragging') return;
+    pushSample(x, y);
+    var start = samples[0];
+    var dx = (x - start.x) / renderer.domElement.clientWidth;
+    var dy = (y - start.y) / renderer.domElement.clientHeight;
+    // Small aiming envelope around the resting position -- real pre-release visual feedback.
+    ball.position.x = restPos.x + dx * 1.4;
+    ball.position.y = Math.max(0.4, restPos.y - dy * 1.4);
+    trailPoints.push(ball.position.clone());
+    if (trailPoints.length > 12) trailPoints.shift();
+    updateTrail();
+  }
+
+  function onUp(){
+    if (phase !== 'dragging') return;
+    trailPoints = [];
+    updateTrail();
+    if (samples.length < 2) { phase = 'ready'; ball.position.copy(restPos); return; }
+    var last = samples[samples.length - 1];
+    var ref = samples[Math.max(0, samples.length - 4)];
+    var dt = Math.max(1, last.t - ref.t);
+    var vx = (last.x - ref.x) / dt;
+    var vy = (last.y - ref.y) / dt;
+    var speed = Math.sqrt(vx * vx + vy * vy);
+    // Below a minimum speed (or not a real upward swipe), treat it as "no real flick" and
+    // snap back rather than a weak, mushy lob.
+    if (speed < 0.15 || vy > -0.02) {
+      phase = 'ready';
+      ball.position.copy(restPos);
+      overlay.textContent = 'Swipe up to shoot!';
+      return;
+    }
+    var power = Math.min(speed * 22, 10);
+    velocity.set(vx * 18, -vy * 22, -power);
+    spinAxis.set(-vy, 0, vx);
+    if (spinAxis.lengthSq() < 0.0001) spinAxis.set(1, 0, 0); else spinAxis.normalize();
+    spinSpeed = Math.min(speed * 14, 18);
+    scored = false;
+    phase = 'flying';
+    overlay.textContent = 'Shooting...';
+  }
+
+  renderer.domElement.addEventListener('pointerdown', function(e){ onDown(e.clientX, e.clientY); e.preventDefault(); });
+  renderer.domElement.addEventListener('pointermove', function(e){ onMove(e.clientX, e.clientY); });
+  window.addEventListener('pointerup', onUp);
+
+  // Approximate ring-collision: the ball touching the rim's tube (not cleanly inside or
+  // outside it) reflects its horizontal velocity outward/inward -- a real "rattles off the
+  // rim" feel without full torus-sphere physics.
+  function checkRimCollision(){
+    var dx = ball.position.x - rim.position.x, dz = ball.position.z - rim.position.z;
+    var dist = Math.sqrt(dx * dx + dz * dz);
+    if (Math.abs(ball.position.y - hoopHeight) < 0.18 && dist > rimRadius - ballRadius * 0.6 && dist < rimRadius + ballRadius * 0.6) {
+      var nx = dx / (dist || 1), nz = dz / (dist || 1);
+      var vn = velocity.x * nx + velocity.z * nz;
+      velocity.x -= 2 * vn * nx * 0.6;
+      velocity.z -= 2 * vn * nz * 0.6;
+      velocity.y *= 0.7;
+    }
+  }
+
+  function checkBackboardCollision(){
+    var boardZ = backboard.position.z + 0.03;
+    if (velocity.z < 0 && ball.position.z <= boardZ && ball.position.z > boardZ - 0.3 &&
+        Math.abs(ball.position.x) < 0.85 && Math.abs(ball.position.y - backboard.position.y) < 0.5) {
+      velocity.z *= -0.45;
+      ball.position.z = boardZ + 0.05;
+    }
+  }
+
+  // Scoring: the ball must cross the rim's y-plane while descending AND pass within the
+  // net's (smaller than the rim's) radius -- through it, not just near it.
+  function checkScore(){
+    if (scored) return;
+    var dx = ball.position.x - rim.position.x, dz = ball.position.z - rim.position.z;
+    var dist = Math.sqrt(dx * dx + dz * dz);
+    if (prevY > hoopHeight && ball.position.y <= hoopHeight && dist < rimRadius - ballRadius * 0.4 && velocity.y < 0) {
+      scored = true;
+      score += 1;
+      overlay.textContent = 'Score: ' + score;
+      wobbleT = 1;
+    }
+  }
+
+  var lastTime = performance.now();
+  function animate(now){
+    var dt = Math.min(0.032, (now - lastTime) / 1000);
+    lastTime = now;
+
+    if (phase === 'flying') {
+      prevY = ball.position.y;
+      velocity.y -= GRAVITY * dt;
+      ball.position.x += velocity.x * dt;
+      ball.position.y += velocity.y * dt;
+      ball.position.z += velocity.z * dt;
+      ball.rotateOnWorldAxis(spinAxis, spinSpeed * dt);
+
+      checkBackboardCollision();
+      checkRimCollision();
+      checkScore();
+
+      if (ball.position.y < ballRadius || ball.position.z > 6 || Math.abs(ball.position.x) > 5) {
+        phase = 'reset';
+        setTimeout(resetBall, scored ? 550 : 250);
+      }
+    }
+
+    if (wobbleT > 0) {
+      wobbleT = Math.max(0, wobbleT - dt * 2);
+      netGroup.scale.set(1 + wobbleT * 0.15, 1 - wobbleT * 0.1, 1 + wobbleT * 0.15);
+    } else {
+      netGroup.scale.set(1, 1, 1);
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+  })();</script>`;
+}
+
 function renderGameHtml(el: GameElement, base: string, slug: string): string {
   const bodyId = `game-${el.id}-body`;
   // Scopes real-time matchmaking to this exact game element on this exact published site --
@@ -1159,12 +1425,113 @@ function renderGameHtml(el: GameElement, base: string, slug: string): string {
     case 'targetrange3d':
       gameScript = targetRange3DScript(bodyId);
       break;
+    case 'basketball':
+      gameScript = basketballScript(bodyId);
+      break;
   }
   return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:8px;display:flex;flex-direction:column;box-sizing:border-box;">
   ${titleHtml}
   <div id="${bodyId}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;overflow:auto;"></div>
 </div>
 ${gameScript}`;
+}
+
+// A real, always-live utility -- ticks every second in the visitor's own browser via
+// setInterval + Intl.DateTimeFormat (correct per-timezone/DST handling for free, no manual
+// offset math), never a static image of a clock face. Purely client-side, no backend
+// dependency at all -- the simplest of the AI-generatable real elements to keep genuinely
+// live. Mirrors the editor's WidgetView.tsx (src/components/canvas/WidgetView.tsx).
+function renderWidgetHtml(el: WidgetElement, base: string): string {
+  const timezones = el.timezones.length > 0 ? el.timezones : [{ label: 'Local Time', ianaTimezone: 'UTC' }];
+  const titleHtml = el.title
+    ? `<div style="font-weight:800;font-size:14px;color:#0F172A;text-align:center;margin-bottom:6px;">${escapeHtml(el.title)}</div>`
+    : '';
+
+  if (el.style === 'analog') {
+    const size = timezones.length > 1 ? 64 : 84;
+    const hourLen = size * 0.26;
+    const minLen = size * 0.36;
+    const secLen = size * 0.4;
+    const facesHtml = timezones
+      .map((tz, i) => {
+        const faceId = `clock-face-${el.id}-${i}`;
+        return `<div style="display:flex;flex-direction:column;align-items:center;">
+  <div style="position:relative;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:2px solid #0F172A;background:#fff;">
+    <div id="${faceId}-hour" style="position:absolute;left:${size / 2 - 1.5}px;top:${size / 2 - hourLen}px;width:3px;height:${hourLen}px;background:#0F172A;border-radius:2px;transform-origin:1.5px ${hourLen}px;"></div>
+    <div id="${faceId}-min" style="position:absolute;left:${size / 2 - 1}px;top:${size / 2 - minLen}px;width:2px;height:${minLen}px;background:#0F172A;border-radius:2px;transform-origin:1px ${minLen}px;"></div>
+    <div id="${faceId}-sec" style="position:absolute;left:${size / 2 - 0.5}px;top:${size / 2 - secLen}px;width:1px;height:${secLen}px;background:#DC2626;transform-origin:0.5px ${secLen}px;"></div>
+    <div style="position:absolute;left:${size / 2 - 3}px;top:${size / 2 - 3}px;width:6px;height:6px;border-radius:3px;background:#0F172A;"></div>
+  </div>
+  <div style="font-size:10px;color:#64748B;font-weight:600;margin-top:4px;">${escapeHtml(tz.label)}</div>
+</div>`;
+      })
+      .join('');
+
+    const script = `<script>(function(){
+  var zones = ${JSON.stringify(timezones.map((tz) => tz.ianaTimezone))};
+  var ids = ${JSON.stringify(timezones.map((_, i) => `clock-face-${el.id}-${i}`))};
+  function tick(){
+    var now = new Date();
+    ids.forEach(function(id, i){
+      try {
+        var parts = new Intl.DateTimeFormat('en-US', { timeZone: zones[i], hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false }).formatToParts(now);
+        var get = function(t){ var found = parts.filter(function(x){ return x.type === t; })[0]; return found ? parseInt(found.value, 10) : 0; };
+        var h = get('hour') % 12, m = get('minute'), s = get('second');
+        var hourEl = document.getElementById(id + '-hour');
+        var minEl = document.getElementById(id + '-min');
+        var secEl = document.getElementById(id + '-sec');
+        if (hourEl) hourEl.style.transform = 'rotate(' + ((h + m / 60) * 30) + 'deg)';
+        if (minEl) minEl.style.transform = 'rotate(' + ((m + s / 60) * 6) + 'deg)';
+        if (secEl) secEl.style.transform = 'rotate(' + (s * 6) + 'deg)';
+      } catch (e) {}
+    });
+  }
+  tick();
+  setInterval(tick, 1000);
+})();</script>`;
+
+    return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;">
+  ${titleHtml}
+  <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;align-items:center;">
+    ${facesHtml}
+  </div>
+</div>
+${script}`;
+  }
+
+  const digitalRows = timezones
+    .map(
+      (tz, i) => `<div style="text-align:center;">
+  <div style="font-size:11px;color:#64748B;font-weight:600;">${escapeHtml(tz.label)}</div>
+  <div id="clock-readout-${el.id}-${i}" style="font-size:18px;color:#0F172A;font-weight:800;">--:--:--</div>
+</div>`
+    )
+    .join('');
+
+  const digitalScript = `<script>(function(){
+  var zones = ${JSON.stringify(timezones.map((tz) => tz.ianaTimezone))};
+  var ids = ${JSON.stringify(timezones.map((_, i) => `clock-readout-${el.id}-${i}`))};
+  function tick(){
+    var now = new Date();
+    ids.forEach(function(id, i){
+      var target = document.getElementById(id);
+      if (!target) return;
+      try {
+        target.textContent = new Intl.DateTimeFormat('en-US', { timeZone: zones[i], hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(now);
+      } catch (e) { target.textContent = '--:--:--'; }
+    });
+  }
+  tick();
+  setInterval(tick, 1000);
+})();</script>`;
+
+  return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;border:1px solid #E2E8F0;overflow:hidden;font-family:-apple-system,sans-serif;padding:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;">
+  ${titleHtml}
+  <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:center;align-items:center;">
+    ${digitalRows}
+  </div>
+</div>
+${digitalScript}`;
 }
 
 function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], currency = 'usd'): string {
@@ -1268,11 +1635,52 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const isReady = !!el.name?.trim() && el.priceUsd > 0 && el.images.length > 0;
       const hasMultiplePhotos = el.images.length > 1;
       const lightboxVar = `siteSparkLightbox_${el.id}`;
-      const imgTag = el.images[0]
-        ? `<img src="${escapeAttr(el.images[0])}" style="width:100%;height:55%;object-fit:cover;display:block;${
+      const galleryVar = `siteSparkGallery_${el.id}`;
+      const galleryTrackId = `gallery-track-${el.id}`;
+      const galleryWrapId = `gallery-wrap-${el.id}`;
+      // A real, always-visible swipeable gallery on the card face itself -- not gated
+      // behind a tap-to-open lightbox -- since a buyer should be able to see every angle of
+      // the item without an extra step. Tapping any photo still opens the lightbox (below)
+      // for a bigger view, starting at whichever photo was showing, not always the first.
+      const imgTag =
+        el.images.length > 0
+          ? `<div id="${galleryWrapId}" style="position:relative;width:100%;height:55%;overflow:hidden;">
+  <div id="${galleryTrackId}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:100%;">
+    ${el.images
+      .map(
+        (uri, i) =>
+          `<img src="${escapeAttr(uri)}" style="flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center;${
             hasMultiplePhotos ? 'cursor:pointer;' : ''
-          }" ${hasMultiplePhotos ? `onclick="${lightboxVar}.open()"` : ''} />`
-        : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
+          }" ${hasMultiplePhotos ? `onclick="${lightboxVar}.open(${i})"` : ''} />`
+      )
+      .join('')}
+  </div>
+  ${
+    hasMultiplePhotos
+      ? `<button aria-label="Previous photo" onclick="${galleryVar}.prev()" style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8249;</button>
+  <button aria-label="Next photo" onclick="${galleryVar}.next()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8250;</button>
+  <div style="position:absolute;bottom:6px;left:0;right:0;display:flex;justify-content:center;gap:5px;">
+    ${el.images.map((_, i) => `<div data-gallery-dot style="width:6px;height:6px;border-radius:3px;background:${i === 0 ? '#fff' : '#ffffff80'};"></div>`).join('')}
+  </div>`
+      : ''
+  }
+</div>`
+          : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
+      const galleryScript = hasMultiplePhotos
+        ? `<script>(function(){
+  var track=document.getElementById(${JSON.stringify(galleryTrackId)});
+  var dots=document.querySelectorAll('#${galleryWrapId} [data-gallery-dot]');
+  var count=${el.images.length};
+  var i=0;
+  function paint(){ Array.prototype.forEach.call(dots, function(d,idx){ d.style.background = idx===i ? '#fff' : '#ffffff80'; }); }
+  function go(idx){ i=(idx+count)%count; track.scrollTo({ left: track.clientWidth*i, behavior:'smooth' }); paint(); }
+  window[${JSON.stringify(galleryVar)}] = { prev: function(){ go(i-1); }, next: function(){ go(i+1); }, current: function(){ return i; } };
+  track.addEventListener('scroll', function(){
+    var idx = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+    if (idx !== i) { i = idx; paint(); }
+  });
+})();</script>`
+        : '';
       const qtyId = `qty-${el.id}`;
       const stockId = `stock-${el.id}`;
       const addBtnId = `addbtn-${el.id}`;
@@ -1320,7 +1728,9 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   function paint(){ dots.forEach(function(d,idx){ d.style.background = idx===i ? '#fff' : '#6B7280'; }); }
   function go(idx){ i=(idx+count)%count; track.scrollTo({ left: track.clientWidth*i, behavior:'smooth' }); paint(); }
   window[${JSON.stringify(lightboxVar)}] = {
-    open: function(){ el.style.display='flex'; i=0; track.scrollTo({left:0}); paint(); },
+    // startAt lets the lightbox open on whichever photo the inline gallery was already
+    // showing when tapped, instead of always jumping back to the first photo.
+    open: function(startAt){ el.style.display='flex'; i = typeof startAt === 'number' ? (startAt+count)%count : 0; track.scrollTo({left: track.clientWidth*i}); paint(); },
     close: function(){ el.style.display='none'; },
     prev: function(){ go(i-1); },
     next: function(){ go(i+1); },
@@ -1448,7 +1858,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
     <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name)}</div>
-    <div style="font-size:12px;color:#64748B;margin-top:2px;flex:1;">${escapeHtml(el.description)}</div>
+    <div style="font-size:12px;color:#64748B;margin-top:2px;max-height:54px;overflow-y:auto;">${escapeHtml(el.description)}</div>
     ${variantPicker}
     ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
@@ -1468,6 +1878,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   </div>
 </div>
 ${lightbox}
+${galleryScript}
 ${script}`;
     }
     case 'collection': {
@@ -1520,6 +1931,8 @@ ${script}`;
     }
     case 'game':
       return renderGameHtml(el, base, slug);
+    case 'widget':
+      return renderWidgetHtml(el, base);
     default:
       return '';
   }
@@ -2242,7 +2655,9 @@ export function renderProjectHtml(
   const hasMultiplayerGame = project.elements.some(
     (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
   );
-  const hasTargetRange3D = project.elements.some((el) => el.type === 'game' && el.kind === 'targetrange3d');
+  // Shared by every Three.js-based game kind so they all load the same one CDN script,
+  // rather than each kind gating its own separate include.
+  const needsThreeJs = project.elements.some((el) => el.type === 'game' && (el.kind === 'targetrange3d' || el.kind === 'basketball'));
   const usesMdi = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'MaterialCommunityIcons');
   const usesFa = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'FontAwesome5');
   const usesIon = project.elements.some((el) => el.type === 'icon' && el.iconSet === 'Ionicons');
@@ -2309,7 +2724,7 @@ export function renderProjectHtml(
 </head>
 <body>
   ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
-  ${hasTargetRange3D ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
+  ${needsThreeJs ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
   ${renderMenuHtml(project.menu, project.pages, hasProducts, project.policies)}
   ${navHtml}
   ${hasProducts ? renderDiscountAnnouncementScript(slug, discountAnnouncementUrl) : ''}

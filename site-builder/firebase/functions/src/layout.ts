@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement, GameElement } from './types';
+import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -83,6 +83,43 @@ function gameEl(partial: Partial<GameElement> & Pick<GameElement, 'y' | 'height'
   };
 }
 
+function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' | 'height' | 'name' | 'priceUsd'>): ProductElement {
+  return {
+    id: nextId('el'),
+    type: 'product',
+    productId: nextId('prod'),
+    x: 0,
+    width: CANVAS_WIDTH,
+    zIndex: 1,
+    description: '',
+    compareAtPriceUsd: null,
+    costUsd: null,
+    images: [],
+    trackInventory: false,
+    initialStock: null,
+    inStock: true,
+    saleType: 'product',
+    fulfillment: 'pickup',
+    serviceDurationMinutes: null,
+    variantOptions: [],
+    variants: [],
+    ...partial,
+  };
+}
+
+function widgetEl(partial: Partial<WidgetElement> & Pick<WidgetElement, 'y' | 'height' | 'title' | 'timezones'>): WidgetElement {
+  return {
+    id: nextId('el'),
+    type: 'widget',
+    kind: 'clock',
+    x: 0,
+    width: CANVAS_WIDTH,
+    zIndex: 1,
+    style: 'digital',
+    ...partial,
+  };
+}
+
 // Estimates how tall a text block needs to be for the canvas's fixed width, so the next
 // section stacked below it never starts inside space this one's real wrapped text still
 // needs -- undercounting here is exactly what causes headline/body/button text to visibly
@@ -133,13 +170,27 @@ export interface SectionVideo {
   title: string | null;
 }
 
-export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], sectionVideos: SectionVideo[] = []): CanvasElement[] {
+// A product section needs several real angle-photos of the same item, not one hero shot --
+// a parallel array (mirroring SectionVideo) rather than widening SectionImage.url to a union
+// type that would mean two different things depending on which kind read it.
+export interface SectionProductImages {
+  section: SitePlanSection;
+  urls: string[];
+}
+
+export function layoutSitePlan(
+  plan: SitePlan,
+  sectionImages: SectionImage[],
+  sectionVideos: SectionVideo[] = [],
+  sectionProductImages: SectionProductImages[] = []
+): CanvasElement[] {
   idCounter = 0;
   const elements: CanvasElement[] = [];
   let y = 32;
 
   const imageFor = (section: SitePlanSection) => sectionImages.find((s) => s.section === section)?.url ?? null;
   const videoFor = (section: SitePlanSection) => sectionVideos.find((s) => s.section === section) ?? null;
+  const productImagesFor = (section: SitePlanSection) => sectionProductImages.find((s) => s.section === section)?.urls ?? [];
 
   plan.sections.forEach((section, index) => {
     const isHero = index === 0 && section.kind === 'hero';
@@ -167,14 +218,16 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
 
     if (section.kind === 'game' && section.gameKind) {
       // Taller for trivia/memory (need room for a question + 4 options, or a card grid) and
-      // tetris/targetrange3d (need room for a grid/canvas plus on-screen controls) than
-      // tic-tac-toe/clicker, which are compact by nature.
+      // tetris/targetrange3d/basketball (need room for a grid/canvas plus on-screen controls
+      // or a real 3D scene) than tic-tac-toe/clicker, which are compact by nature.
       const gameHeight =
         section.gameKind === 'trivia' || section.gameKind === 'memory'
           ? 340
-          : section.gameKind === 'connect4' || section.gameKind === 'tetris' || section.gameKind === 'targetrange3d'
-            ? 300
-            : 260;
+          : section.gameKind === 'basketball'
+            ? 320
+            : section.gameKind === 'connect4' || section.gameKind === 'tetris' || section.gameKind === 'targetrange3d'
+              ? 300
+              : 260;
       elements.push(
         gameEl({
           y,
@@ -189,40 +242,86 @@ export function layoutSitePlan(plan: SitePlan, sectionImages: SectionImage[], se
       y += gameHeight + 16;
     }
 
-    const headlineSize = isHero ? 28 : 22;
-    const headlineHeight = estimateTextHeight(headline, headlineSize);
-    elements.push(
-      textEl({
-        text: headline,
-        y,
-        fontSize: headlineSize,
-        fontWeight: 'bold',
-        color: plan.textColor,
-        height: headlineHeight,
-        align: section.kind === 'cta' ? 'center' : 'left',
-      })
-    );
-    y += headlineHeight + 6;
+    if (section.kind === 'product') {
+      const urls = productImagesFor(section);
+      const name = stripMarkdown(section.productName || headline);
+      const description = section.productDescription ? stripMarkdown(section.productDescription) : '';
+      // Room for an inline swipeable gallery plus name/description/price/qty/buy button --
+      // taller than a plain image section since a real product card needs more vertical
+      // space than a decorative picture would.
+      const productHeight = 340;
+      elements.push(
+        productEl({
+          y,
+          height: productHeight,
+          name,
+          description,
+          priceUsd: section.productPriceUsd || 0,
+          saleType: section.productSaleType || 'product',
+          images: urls,
+        })
+      );
+      y += productHeight + 16;
+    }
 
-    if (body) {
-      const bodyHeight = estimateTextHeight(body, 15);
+    if (section.kind === 'widget' && section.widgetKind === 'clock') {
+      const timezones = section.widgetTimezones.map((tz) => ({ label: stripMarkdown(tz.label), ianaTimezone: tz.ianaTimezone }));
+      // Scales with how many timezones a real world clock needs room to lay out side by side.
+      const widgetHeight = 160 + Math.max(0, timezones.length - 1) * 40;
+      elements.push(
+        widgetEl({
+          y,
+          height: widgetHeight,
+          kind: 'clock',
+          title: headline,
+          timezones: timezones.length > 0 ? timezones : [{ label: 'Local Time', ianaTimezone: 'UTC' }],
+          style: 'digital',
+        })
+      );
+      y += widgetHeight + 16;
+    }
+
+    // A product/widget card already shows its own name/title prominently -- a separate
+    // headline pushed right above it (e.g. "Cozy Reading Lamp" text, then a card that also
+    // says "Cozy Reading Lamp") would be redundant, so these two kinds skip the generic
+    // headline/body/button block below entirely. Every other kind (including "game", which
+    // does still benefit from its own intro copy) is unaffected.
+    if (section.kind !== 'product' && section.kind !== 'widget') {
+      const headlineSize = isHero ? 28 : 22;
+      const headlineHeight = estimateTextHeight(headline, headlineSize);
       elements.push(
         textEl({
-          text: body,
+          text: headline,
           y,
-          fontSize: 15,
-          color: '#475569',
-          height: bodyHeight,
+          fontSize: headlineSize,
+          fontWeight: 'bold',
+          color: plan.textColor,
+          height: headlineHeight,
           align: section.kind === 'cta' ? 'center' : 'left',
         })
       );
-      y += bodyHeight + 10;
-    }
+      y += headlineHeight + 6;
 
-    if (buttonLabel && (section.kind === 'hero' || section.kind === 'cta')) {
-      const buttonX = section.kind === 'cta' ? (CANVAS_WIDTH - 160) / 2 : MARGIN;
-      elements.push(buttonEl({ label: buttonLabel, y, x: buttonX, backgroundColor: plan.accentColor }));
-      y += 48 + 16;
+      if (body) {
+        const bodyHeight = estimateTextHeight(body, 15);
+        elements.push(
+          textEl({
+            text: body,
+            y,
+            fontSize: 15,
+            color: '#475569',
+            height: bodyHeight,
+            align: section.kind === 'cta' ? 'center' : 'left',
+          })
+        );
+        y += bodyHeight + 10;
+      }
+
+      if (buttonLabel && (section.kind === 'hero' || section.kind === 'cta')) {
+        const buttonX = section.kind === 'cta' ? (CANVAS_WIDTH - 160) / 2 : MARGIN;
+        elements.push(buttonEl({ label: buttonLabel, y, x: buttonX, backgroundColor: plan.accentColor }));
+        y += 48 + 16;
+      }
     }
 
     y += 24; // gap between sections

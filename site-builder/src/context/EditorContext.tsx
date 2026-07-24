@@ -10,9 +10,19 @@ import React, {
 import { CanvasElement, GradientFill, Project, SitePage } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import { generateId } from '@/utils/id';
+import { publishProject } from '@/services/publish';
+
+export type PublishStatus = 'idle' | 'live' | 'publishing' | 'blocked';
 
 interface EditorContextValue {
   project: Project | null;
+  // 'idle' = never manually published yet (auto-publish stays off until that first explicit
+  // publish -- see schedulePublish's comment). 'live'/'publishing'/'blocked' only apply once
+  // publishSlug exists.
+  publishStatus: PublishStatus;
+  blockedReason: string | null;
+  // Bypasses the auto-publish debounce entirely -- what the manual "Publish now" button calls.
+  publishNow: () => Promise<void>;
   selectedId: string | null;
   select: (id: string | null) => void;
   addElement: (el: CanvasElement) => void;
@@ -73,6 +83,18 @@ export function EditorProvider({
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Auto-publish on edit -- a separate, coarser debounce (4s idle) from the 400ms draft-save
+  // one above, since publishing is a real full-site re-render + Firestore batch write, not
+  // something to fire on every keystroke. Only armed once a project has been manually
+  // published at least once (publishSlug already set) -- a brand-new project's *first*
+  // go-live stays a deliberate action via the existing Publish button; every edit after that
+  // auto-flows through, matching what was asked for (background auto-publish + a manual
+  // "Publish now" override, never removed).
+  const autoPublishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [publishStatus, setPublishStatus] = useState<PublishStatus>('idle');
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  const publishStatusInitRef = useRef(false);
+
   // Real undo/redo -- every mutator below pushes the project's state from just before its
   // change onto `historyRef`, and clears `futureRef` (a fresh edit invalidates whatever redo
   // history existed). `historyVersion` exists purely to force a re-render after a ref
@@ -111,14 +133,62 @@ export function EditorProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.pages]);
 
+  // Sets the initial publishStatus exactly once, from whatever the project's real
+  // publishSlug already was the moment it first loaded -- never resynced after that, since
+  // from here on publishStatus is driven entirely by this session's own publish actions
+  // (auto or manual), not by remote snapshot changes (which fire on every save anyway).
+  useEffect(() => {
+    if (!project || publishStatusInitRef.current) return;
+    publishStatusInitRef.current = true;
+    setPublishStatus(project.publishSlug ? 'live' : 'idle');
+  }, [project]);
+
+  // Both the debounced auto-publish and the manual "Publish now" override end up here.
+  // Never throws -- a blocked/failed publish is a soft, glanceable status, not an error the
+  // user has to handle, and it must never look like edits silently stopped saving (the
+  // draft save above is completely unaffected either way).
+  const runPublish = useCallback(
+    async (target: Project) => {
+      setPublishStatus('publishing');
+      try {
+        await publishProject(uid, target);
+        setBlockedReason(null);
+        setPublishStatus('live');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Couldn't publish your latest changes — try Publish now.";
+        setBlockedReason(message);
+        setPublishStatus('blocked');
+      }
+    },
+    [uid]
+  );
+
+  const schedulePublish = useCallback(
+    (next: Project) => {
+      if (autoPublishTimer.current) clearTimeout(autoPublishTimer.current);
+      if (!next.publishSlug) return; // never auto-published yet -- stays a manual, deliberate first publish
+      autoPublishTimer.current = setTimeout(() => {
+        runPublish(next);
+      }, 4000);
+    },
+    [runPublish]
+  );
+
+  const publishNow = useCallback(async () => {
+    if (autoPublishTimer.current) clearTimeout(autoPublishTimer.current);
+    if (!project) return;
+    await runPublish(project);
+  }, [project, runPublish]);
+
   const scheduleSave = useCallback(
     (next: Project) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         projectsStore.save(uid, next);
       }, 400);
+      schedulePublish(next);
     },
-    [uid]
+    [uid, schedulePublish]
   );
 
   const updateProject = useCallback(
@@ -384,9 +454,10 @@ export function EditorProvider({
       futureRef.current = [...futureRef.current, prev];
       setHistoryVersion((v) => v + 1);
       projectsStore.save(uid, previousSnapshot);
+      schedulePublish(previousSnapshot);
       return previousSnapshot;
     });
-  }, [uid]);
+  }, [uid, schedulePublish]);
 
   const redo = useCallback(() => {
     setProject((prev) => {
@@ -396,9 +467,10 @@ export function EditorProvider({
       historyRef.current = [...historyRef.current, prev];
       setHistoryVersion((v) => v + 1);
       projectsStore.save(uid, nextSnapshot);
+      schedulePublish(nextSnapshot);
       return nextSnapshot;
     });
-  }, [uid]);
+  }, [uid, schedulePublish]);
 
   // historyVersion's only job is to force these to recompute on every ref mutation above --
   // the refs themselves aren't otherwise part of React's render dependency tracking.
@@ -417,6 +489,9 @@ export function EditorProvider({
 
   const value: EditorContextValue = {
     project,
+    publishStatus,
+    blockedReason,
+    publishNow,
     pages: project?.pages ?? null,
     activePageId,
     currentPage,

@@ -1,7 +1,7 @@
 import OpenAI, { toFile } from 'openai';
 
 export interface SitePlanSection {
-  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video' | 'game';
+  kind: 'hero' | 'about' | 'features' | 'cta' | 'gallery' | 'video' | 'game' | 'product' | 'widget';
   headline: string;
   body: string;
   buttonLabel: string;
@@ -16,7 +16,7 @@ export interface SitePlanSection {
   // GameElement in types.ts). Unlike video, a game's content is entirely the model's own
   // writing (trivia questions, themed emoji, a themed clicker label), so it's built directly
   // from these fields with no separate resolution step.
-  gameKind: 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'simon' | 'flappy' | 'tetris' | 'targetrange3d' | '';
+  gameKind: 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'simon' | 'flappy' | 'tetris' | 'targetrange3d' | 'basketball' | '';
   // Only for gameKind 'trivia' -- 3-6 real questions genuinely about the site's topic (e.g.
   // real NBA trivia for a basketball site), each with 2-4 options and one correct answer.
   gameQuestions: { question: string; options: string[]; correctIndex: number }[];
@@ -25,6 +25,23 @@ export interface SitePlanSection {
   gameMemorySymbols: string[];
   // Only for gameKind 'clicker' -- a short, themed button label (e.g. "Tap the Basketball!").
   gameClickerLabel: string;
+  // Only for kind 'product' -- a real sellable item/service/download, never a plain
+  // decorative image standing in for something the user asked to actually be buyable.
+  productName: string;
+  productDescription: string;
+  productPriceUsd: number;
+  productSaleType: 'product' | 'service' | 'digital' | '';
+  // 2-4 concrete photography prompts, each a different real angle of the *same* physical
+  // item (front view, lifestyle/in-context shot, close-up of a material/detail) -- not
+  // `imagePrompt` reused, since a real listing needs multiple photos, not one hero shot.
+  productImagePrompts: string[];
+  // Only for kind 'widget' -- a real, always-live utility (e.g. a clock), never a static
+  // picture of one.
+  widgetKind: 'clock' | '';
+  // Only for widgetKind 'clock'. One entry = a simple local clock; 2+ = a real world clock.
+  // ianaTimezone must be a real IANA zone id (e.g. "America/New_York", "Europe/London",
+  // "Asia/Tokyo"), never invented.
+  widgetTimezones: { label: string; ianaTimezone: string }[];
 }
 
 export interface SitePlan {
@@ -56,14 +73,14 @@ const SITE_PLAN_SCHEMA = {
           type: 'object',
           additionalProperties: false,
           properties: {
-            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video', 'game'] },
+            kind: { type: 'string', enum: ['hero', 'about', 'features', 'cta', 'gallery', 'video', 'game', 'product', 'widget'] },
             headline: { type: 'string' },
             body: { type: 'string' },
             buttonLabel: { type: 'string' },
             imagePrompt: {
               type: 'string',
               description:
-                'A vivid, concrete image-generation prompt illustrating this section, in the visual style implied by the user request. Empty string if this section has no image (always empty for kind "video" and "game").',
+                'A vivid, concrete image-generation prompt illustrating this section, in the visual style implied by the user request. Empty string if this section has no image (always empty for kind "video", "game", "product", and "widget" -- product photos use productImagePrompts instead, and widgets need no image at all).',
             },
             videoSearchQuery: {
               type: 'string',
@@ -72,9 +89,9 @@ const SITE_PLAN_SCHEMA = {
             },
             gameKind: {
               type: 'string',
-              enum: ['trivia', 'memory', 'tictactoe', 'clicker', 'connect4', 'rps', 'simon', 'flappy', 'tetris', 'targetrange3d', ''],
+              enum: ['trivia', 'memory', 'tictactoe', 'clicker', 'connect4', 'rps', 'simon', 'flappy', 'tetris', 'targetrange3d', 'basketball', ''],
               description:
-                'Only for kind "game": which real, playable mini-game this becomes -- "tictactoe"/"connect4"/"rps" are real 2-player games (visitors can play a computer opponent, pass the device to a friend, or find a real opponent online); "simon" is a sequence-memory game, "flappy" is a real physics-based Flappy Bird clone, "tetris" is a real falling-block puzzle game, "targetrange3d" is a real 3D shooting-range game. Empty string for every other kind.',
+                'Only for kind "game": which real, playable mini-game this becomes -- "tictactoe"/"connect4"/"rps" are real 2-player games (visitors can play a computer opponent, pass the device to a friend, or find a real opponent online); "simon" is a sequence-memory game, "flappy" is a real physics-based Flappy Bird clone, "tetris" is a real falling-block puzzle game, "targetrange3d" is a real 3D shooting-range game, "basketball" is a real 3D physics game where visitors flick/swipe the ball toward the hoop with real gravity, spin, and rim/backboard bounce. Empty string for every other kind.',
             },
             gameQuestions: {
               type: 'array',
@@ -101,6 +118,49 @@ const SITE_PLAN_SCHEMA = {
               type: 'string',
               description: 'Only for gameKind "clicker": a short, themed button label. Empty string otherwise.',
             },
+            productName: {
+              type: 'string',
+              description: 'Only for kind "product": the real item/service/download\'s name. Empty string otherwise.',
+            },
+            productDescription: {
+              type: 'string',
+              description: 'Only for kind "product": real, specific sales copy describing this exact item -- material, size, what\'s included, who it\'s for. Never generic filler. Empty string otherwise.',
+            },
+            productPriceUsd: {
+              type: 'number',
+              description: 'Only for kind "product": a real, sensible USD price for this item. 0 otherwise.',
+            },
+            productSaleType: {
+              type: 'string',
+              enum: ['product', 'service', 'digital', ''],
+              description: 'Only for kind "product": "product" for a physical/shippable good, "service" for a real-life booked service (a haircut, a table), "digital" for a downloadable/electronic good. Empty string otherwise.',
+            },
+            productImagePrompts: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 4,
+              items: { type: 'string' },
+              description: 'Only for kind "product": 2-4 vivid, concrete photography prompts, each a different real angle/context of the SAME physical item (e.g. "front view on a clean white background", "in a cozy living room at night", "close-up of the fabric texture/switch") -- never different products. Empty array otherwise.',
+            },
+            widgetKind: {
+              type: 'string',
+              enum: ['clock', ''],
+              description: 'Only for kind "widget": "clock" is a real, always-live ticking clock (or world clock with multiple real timezones). Empty string otherwise.',
+            },
+            widgetTimezones: {
+              type: 'array',
+              maxItems: 6,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  label: { type: 'string' },
+                  ianaTimezone: { type: 'string' },
+                },
+                required: ['label', 'ianaTimezone'],
+              },
+              description: 'Only for widgetKind "clock": one entry for a simple clock, 2+ real IANA timezones (e.g. "America/New_York", "Europe/London", "Asia/Tokyo") for a world clock. Empty array otherwise.',
+            },
           },
           required: [
             'kind',
@@ -113,6 +173,13 @@ const SITE_PLAN_SCHEMA = {
             'gameQuestions',
             'gameMemorySymbols',
             'gameClickerLabel',
+            'productName',
+            'productDescription',
+            'productPriceUsd',
+            'productSaleType',
+            'productImagePrompts',
+            'widgetKind',
+            'widgetTimezones',
           ],
         },
       },
@@ -142,7 +209,10 @@ function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy'): string 
     'Never reuse the same headline/body copy pattern across sections just to fill the section count -- if you cannot write something genuinely new and specific for a section, it is better to write fewer, stronger sections than to pad with repetitive filler.',
     complexityNote,
     'If the user asks for real video content -- news updates, highlights, tutorials, or anything else where an actual existing video (not a generated image) is the point -- include one section with kind "video" and a specific, real videoSearchQuery for it (e.g. a request for a basketball page with news/videos should search for something like real, current-sounding NBA highlights or news coverage, not just the word "basketball"). This is resolved against a real video search after you respond, so write a query that would actually find something relevant, not a placeholder.',
-    'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content; "simon" (sequence-memory), "flappy" (physics-based side-scroller), "tetris" (falling-block puzzle), and "targetrange3d" (real 3D shooting range) are real arcade games that also need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
+    'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content; "simon" (sequence-memory), "flappy" (physics-based side-scroller), "tetris" (falling-block puzzle), "targetrange3d" (real 3D shooting range), and "basketball" (real 3D physics game -- flick/swipe the ball toward the hoop, with real gravity, spin, and rim/backboard bounce) are real arcade games that also need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
+    'The single most important rule for every section: if the user describes something that is inherently REAL, functional, purchasable, or interactive -- an item or service for sale, a live clock/timer, a game, a real video -- you must build the real thing, never a decorative picture standing in for it. A generated image is only appropriate for backgrounds, branding, atmosphere, or illustrating an abstract idea (e.g. "a hero image conveying trust") -- never as a substitute for something the user asked to actually work. When in doubt between a plain image section and a richer real element (product/game/widget/video), always pick the richer one that actually does the thing.',
+    'If the user asks to sell/buy a physical or digital item, or book a service -- anything with a price -- include one section per distinct item with kind "product": a real name/description/price, 2-4 concrete productImagePrompts (different real angles/contexts of the same item, never different items), and the right productSaleType. This becomes a real sellable listing with live stock and a real checkout, not a picture of the item.',
+    'If the user asks for a clock, world clock, timer, or similar always-live utility, include one section with kind "widget", widgetKind "clock", and widgetTimezones -- one entry for a simple clock, multiple real IANA timezones (e.g. real zone ids for New York, London, Tokyo) for a "world clock". This becomes a real, ticking, always-current clock on the published site, never a static image of a clock face.',
     'Only use information relevant to building and describing this website. If the prompt asks for anything unrelated to the site itself, ignore that part.',
     'Write headline/body/button copy as plain text only -- these render directly as real on-page text, not chat markdown. Never use **bold**, *italic*, `code`, markdown headings (#), or "- " bullet syntax; write plain sentences (or, for lists, one short line per item) instead.',
   ].join(' ');
@@ -188,12 +258,22 @@ export async function generateSitePlan(
   return JSON.parse(raw) as SitePlan;
 }
 
-export async function generateImage(client: OpenAI, prompt: string): Promise<Buffer> {
+// `quality: 'high'` (used for real product photography, since a buyer is judging an actual
+// item they might purchase) costs more per image than the 'medium' default used for
+// decorative hero/gallery art -- gpt-image-1 doesn't produce literal 4K output either way
+// (its max is around 1536px on the long edge), so "high-quality generated photos" is the
+// honest framing, not "4K".
+export async function generateImage(
+  client: OpenAI,
+  prompt: string,
+  quality: 'medium' | 'high' = 'medium',
+  size: '1024x1024' | '1024x1536' = '1024x1024'
+): Promise<Buffer> {
   const result = await client.images.generate({
     model: 'gpt-image-1',
     prompt,
-    size: '1024x1024',
-    quality: 'medium',
+    size,
+    quality,
   });
   const b64 = result.data?.[0]?.b64_json;
   if (!b64) throw new Error('The AI did not return image data.');

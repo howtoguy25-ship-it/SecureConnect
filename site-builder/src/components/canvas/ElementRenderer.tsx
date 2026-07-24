@@ -9,6 +9,7 @@ import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement, Collect
 import { useGoogleFont } from '@/utils/useGoogleFont';
 import { gradientStartEnd } from '@/utils/gradient';
 import GameView from '@/components/canvas/GameView';
+import WidgetView from '@/components/canvas/WidgetView';
 import { useAuth } from '@/context/AuthContext';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
@@ -261,6 +262,48 @@ function ProductImageCarousel({ images, height }: { images: string[]; height: nu
   );
 }
 
+// Compact swipeable gallery for the product card face itself -- mirrors the published
+// site's always-visible inline gallery (siteHtml.ts's product case) instead of only showing
+// images[0] with the full carousel gated behind the "i" info modal, so what a seller sees
+// while editing resembles what a visitor actually gets. Dots overlay the image (no extra
+// height) since the card's already-tight text-area budget has no room to spare.
+function ProductCardGallery({ images, width, height, compact }: { images: string[]; width: number; height: number; compact: boolean }) {
+  const [page, setPage] = useState(0);
+
+  if (images.length === 0) {
+    return (
+      <View style={[styles.placeholder, { width, height, borderRadius: 0 }]}>
+        <Ionicons name="pricetag-outline" size={compact ? 16 : 24} color="#94A3B8" />
+      </View>
+    );
+  }
+  if (images.length === 1) {
+    return <Image source={{ uri: images[0] }} style={{ width, height }} resizeMode="cover" />;
+  }
+  return (
+    <View style={{ width, height }}>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
+      >
+        {images.map((uri, idx) => (
+          <Image key={uri + idx} source={{ uri }} style={{ width, height }} resizeMode="cover" />
+        ))}
+      </ScrollView>
+      <View style={{ position: 'absolute', bottom: 4, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 }}>
+        {images.map((_, idx) => (
+          <View
+            key={idx}
+            style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: idx === page ? '#fff' : 'rgba(255,255,255,0.55)' }}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
   const [showDetail, setShowDetail] = useState(false);
   const MIN_TEXT_AREA = 62;
@@ -272,14 +315,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
 
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
-      {showImage &&
-        (element.images[0] ? (
-          <Image source={{ uri: element.images[0] }} style={{ width, height: imageHeight }} resizeMode="cover" />
-        ) : (
-          <View style={[styles.placeholder, { width, height: imageHeight, borderRadius: 0 }]}>
-            <Ionicons name="pricetag-outline" size={compact ? 16 : 24} color="#94A3B8" />
-          </View>
-        ))}
+      {showImage && <ProductCardGallery images={element.images} width={width} height={imageHeight} compact={compact} />}
       {!inStock && (
         <View style={styles.outOfStockBadge}>
           <Text style={styles.outOfStockBadgeText}>Out of stock</Text>
@@ -549,6 +585,8 @@ export default function ElementRenderer({ element, allElements }: { element: Can
       return <CollectionView element={element} allElements={allElements} width={width} height={height} />;
     case 'game':
       return <GameView element={element} width={width} height={height} />;
+    case 'widget':
+      return <WidgetView element={element} width={width} height={height} />;
     default:
       return null;
   }

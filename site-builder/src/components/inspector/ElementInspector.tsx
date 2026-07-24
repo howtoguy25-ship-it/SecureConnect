@@ -3,7 +3,7 @@ import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndic
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement, ImageElement, ProductVariantOption, ProductVariant } from '@/types';
+import { CanvasElement, ImageElement, ProductVariantOption, ProductVariant, WidgetTimezone } from '@/types';
 import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
@@ -812,6 +812,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                   ['flappy', 'Flappy Bird'],
                   ['tetris', 'Tetris'],
                   ['targetrange3d', 'Target Range 3D'],
+                  ['basketball', 'Basketball'],
                 ] as const
               ).map(([kind, label]) => (
                 <Pressable
@@ -837,6 +838,13 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             {element.kind === 'targetrange3d' && (
               <Text style={styles.helperText}>
                 This preview is a simplified 2D stand-in — your published site renders a real interactive 3D shooting range.
+              </Text>
+            )}
+
+            {element.kind === 'basketball' && (
+              <Text style={styles.helperText}>
+                This preview is a simplified 2D stand-in — your published site renders a real 3D basketball game with physics-based
+                flicking, spin, and rim/backboard collision.
               </Text>
             )}
 
@@ -982,6 +990,48 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             )}
           </>
         )}
+
+        {element.type === 'widget' && (
+          <>
+            <Text style={styles.fieldLabel}>Title</Text>
+            <TextInput style={styles.textInput} value={element.title} onChangeText={(title) => onChange({ title } as any)} />
+
+            <Text style={styles.fieldLabel}>Style</Text>
+            <View style={styles.rowButtons}>
+              {(['digital', 'analog'] as const).map((style) => (
+                <Pressable
+                  key={style}
+                  style={[styles.toggleBtn, element.style === style && styles.toggleBtnActive]}
+                  onPress={() => onChange({ style } as any)}
+                >
+                  <Text style={styles.toggleBtnText}>{style === 'digital' ? 'Digital' : 'Analog'}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Timezones ({element.timezones.length === 0 ? 'shows your local time' : `${element.timezones.length} shown`})</Text>
+            <View style={styles.rowButtons}>
+              {element.timezones.map((tz, i) => (
+                <Pressable
+                  key={i}
+                  style={[styles.toggleBtn, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+                  onPress={() => onChange({ timezones: element.timezones.filter((_, j) => j !== i) } as any)}
+                >
+                  <Text style={styles.toggleBtnText}>{tz.label}</Text>
+                  <Ionicons name="close" size={12} color="#64748B" />
+                </Pressable>
+              ))}
+            </View>
+            <WidgetTimezoneAdder
+              existing={element.timezones}
+              onAdd={(tz) => onChange({ timezones: [...element.timezones, tz] } as any)}
+            />
+            <Text style={styles.helperText}>
+              One timezone shows a simple clock; add 2 or more for a real world clock. This is a genuinely live, ticking clock on
+              your published site — never a static image.
+            </Text>
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -1007,6 +1057,82 @@ function MemorySymbolAdder({ onAdd }: { onAdd: (symbol: string) => void }) {
       >
         <Text style={styles.smallAddBtnText}>Add</Text>
       </Pressable>
+    </View>
+  );
+}
+
+// Curated real city/IANA-zone pairs -- a free-text IANA input would be error-prone (most
+// people don't know "Europe/London"-style zone id syntax), so this is filtered by typed city
+// name instead. Not exhaustive, but covers every populated continent/major timezone offset.
+const COMMON_TIMEZONES: WidgetTimezone[] = [
+  { label: 'New York', ianaTimezone: 'America/New_York' },
+  { label: 'Los Angeles', ianaTimezone: 'America/Los_Angeles' },
+  { label: 'Chicago', ianaTimezone: 'America/Chicago' },
+  { label: 'Denver', ianaTimezone: 'America/Denver' },
+  { label: 'Toronto', ianaTimezone: 'America/Toronto' },
+  { label: 'Mexico City', ianaTimezone: 'America/Mexico_City' },
+  { label: 'São Paulo', ianaTimezone: 'America/Sao_Paulo' },
+  { label: 'Buenos Aires', ianaTimezone: 'America/Argentina/Buenos_Aires' },
+  { label: 'Honolulu', ianaTimezone: 'Pacific/Honolulu' },
+  { label: 'Anchorage', ianaTimezone: 'America/Anchorage' },
+  { label: 'London', ianaTimezone: 'Europe/London' },
+  { label: 'Paris', ianaTimezone: 'Europe/Paris' },
+  { label: 'Berlin', ianaTimezone: 'Europe/Berlin' },
+  { label: 'Madrid', ianaTimezone: 'Europe/Madrid' },
+  { label: 'Rome', ianaTimezone: 'Europe/Rome' },
+  { label: 'Amsterdam', ianaTimezone: 'Europe/Amsterdam' },
+  { label: 'Moscow', ianaTimezone: 'Europe/Moscow' },
+  { label: 'Istanbul', ianaTimezone: 'Europe/Istanbul' },
+  { label: 'Cairo', ianaTimezone: 'Africa/Cairo' },
+  { label: 'Lagos', ianaTimezone: 'Africa/Lagos' },
+  { label: 'Johannesburg', ianaTimezone: 'Africa/Johannesburg' },
+  { label: 'Nairobi', ianaTimezone: 'Africa/Nairobi' },
+  { label: 'Dubai', ianaTimezone: 'Asia/Dubai' },
+  { label: 'Karachi', ianaTimezone: 'Asia/Karachi' },
+  { label: 'Mumbai', ianaTimezone: 'Asia/Kolkata' },
+  { label: 'Dhaka', ianaTimezone: 'Asia/Dhaka' },
+  { label: 'Bangkok', ianaTimezone: 'Asia/Bangkok' },
+  { label: 'Jakarta', ianaTimezone: 'Asia/Jakarta' },
+  { label: 'Singapore', ianaTimezone: 'Asia/Singapore' },
+  { label: 'Hong Kong', ianaTimezone: 'Asia/Hong_Kong' },
+  { label: 'Shanghai', ianaTimezone: 'Asia/Shanghai' },
+  { label: 'Tokyo', ianaTimezone: 'Asia/Tokyo' },
+  { label: 'Seoul', ianaTimezone: 'Asia/Seoul' },
+  { label: 'Manila', ianaTimezone: 'Asia/Manila' },
+  { label: 'Sydney', ianaTimezone: 'Australia/Sydney' },
+  { label: 'Melbourne', ianaTimezone: 'Australia/Melbourne' },
+  { label: 'Perth', ianaTimezone: 'Australia/Perth' },
+  { label: 'Auckland', ianaTimezone: 'Pacific/Auckland' },
+  { label: 'UTC', ianaTimezone: 'UTC' },
+];
+
+function WidgetTimezoneAdder({ existing, onAdd }: { existing: WidgetTimezone[]; onAdd: (tz: WidgetTimezone) => void }) {
+  const [query, setQuery] = useState('');
+  const existingZones = new Set(existing.map((tz) => tz.ianaTimezone));
+  const matches = query.trim()
+    ? COMMON_TIMEZONES.filter((tz) => !existingZones.has(tz.ianaTimezone) && tz.label.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 6)
+    : [];
+
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <TextInput
+        style={[styles.textInput, { marginBottom: matches.length ? 4 : 10 }]}
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search a city to add (e.g. Tokyo)"
+      />
+      {matches.map((tz) => (
+        <Pressable
+          key={tz.ianaTimezone}
+          style={{ paddingVertical: 8, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}
+          onPress={() => {
+            onAdd(tz);
+            setQuery('');
+          }}
+        >
+          <Text style={{ fontSize: 13, color: '#0F172A' }}>{tz.label}</Text>
+        </Pressable>
+      ))}
     </View>
   );
 }

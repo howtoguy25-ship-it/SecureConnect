@@ -53,7 +53,8 @@ export type ElementType =
   | 'videoEmbed'
   | 'product'
   | 'collection'
-  | 'game';
+  | 'game'
+  | 'widget';
 
 interface BaseElement {
   id: string;
@@ -231,7 +232,7 @@ export interface CollectionElement extends BaseElement {
   productIds: string[];
 }
 
-export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d';
+export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d' | 'basketball';
 
 export interface TriviaQuestion {
   question: string;
@@ -257,6 +258,29 @@ export interface GameElement extends BaseElement {
   clickerTarget: number;
 }
 
+// One general kind today ('clock'), deliberately designed so future real, always-live
+// utilities (a countdown timer, a calculator, a map embed) can add their own fields to this
+// same flat interface later, matching GameElement's one-type-covers-every-kind convention.
+export type WidgetKind = 'clock';
+
+export interface WidgetTimezone {
+  label: string; // user-facing name, e.g. "New York" or "Tokyo Office"
+  ianaTimezone: string; // a real IANA zone id, e.g. "America/New_York" -- never invented
+}
+
+// A real, always-live utility -- not a static image of a clock. Only meaningful for kind
+// 'clock' today: one `timezones` entry is a simple local clock, 2+ is a real world clock,
+// each computed live client-side (Intl.DateTimeFormat, ticking every second) rather than
+// rendered once at publish time -- see WidgetView.tsx (editor) and renderWidgetHtml in
+// firebase/functions/src/siteHtml.ts (published site).
+export interface WidgetElement extends BaseElement {
+  type: 'widget';
+  kind: WidgetKind;
+  title: string;
+  timezones: WidgetTimezone[];
+  style: 'analog' | 'digital';
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -268,7 +292,8 @@ export type CanvasElement =
   | VideoEmbedElement
   | ProductElement
   | CollectionElement
-  | GameElement;
+  | GameElement
+  | WidgetElement;
 
 export interface AnnouncementBarConfig {
   id: string;

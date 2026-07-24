@@ -16,7 +16,7 @@ import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
@@ -52,6 +52,7 @@ function EditorInner({ navigation }: Props) {
     redo,
     canUndo,
     canRedo,
+    publishStatus,
   } = useEditor();
   const { theme } = useAppTheme();
   const [panel, setPanel] = useState<PanelTab>(null);
@@ -333,6 +334,28 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
+  const addWidget = () => {
+    // Defaults to a simple digital local-time clock -- real and complete with zero setup;
+    // adding more timezones (a real world clock) or switching to analog happens via the
+    // inspector.
+    const el: WidgetElement = {
+      id: generateId('el'),
+      type: 'widget',
+      kind: 'clock',
+      title: 'Clock',
+      timezones: [],
+      style: 'digital',
+      x: canvasCenterX - 90,
+      y: canvasCenterY - 60,
+      width: 180,
+      height: 120,
+      zIndex: 5,
+    };
+    addElement(el);
+    select(el.id);
+    setPanel(null);
+  };
+
   const confirmDeleteId = (id: string) => {
     showAlert('Delete element?', undefined, [
       { text: 'Cancel', style: 'cancel' },
@@ -399,8 +422,29 @@ function EditorInner({ navigation }: Props) {
           {isGenerating ? (
             <View style={{ width: 24 }} />
           ) : (
-            <Pressable onPress={() => navigation.navigate('Publish', { projectId: project.id })} hitSlop={8}>
-              <Ionicons name="cloud-upload-outline" size={24} color={theme.text} />
+            <Pressable
+              onPress={() => navigation.navigate('Publish', { projectId: project.id })}
+              hitSlop={8}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            >
+              {publishStatus === 'publishing' ? (
+                <>
+                  <ActivityIndicator size="small" color={theme.text} />
+                  <Text style={[styles.publishStatusText, { color: theme.text }]}>Publishing…</Text>
+                </>
+              ) : publishStatus === 'live' ? (
+                <>
+                  <View style={styles.publishStatusDot} />
+                  <Text style={[styles.publishStatusText, { color: theme.text }]}>Live</Text>
+                </>
+              ) : publishStatus === 'blocked' ? (
+                <>
+                  <Ionicons name="warning" size={18} color="#B45309" />
+                  <Text style={[styles.publishStatusText, { color: '#B45309' }]}>Not live</Text>
+                </>
+              ) : (
+                <Ionicons name="cloud-upload-outline" size={24} color={theme.text} />
+              )}
             </Pressable>
           )}
         </View>
@@ -553,6 +597,7 @@ function EditorInner({ navigation }: Props) {
             <TabButton icon="pricetag-outline" label="Product" active={false} onPress={addProduct} highlightColor="#16A34A" />
             <TabButton icon="albums-outline" label="Collection" active={false} onPress={addCollection} />
             <TabButton icon="game-controller-outline" label="Game" active={false} onPress={addGame} />
+            <TabButton icon="time-outline" label="Widget" active={false} onPress={addWidget} />
             <TabButton icon="megaphone-outline" label="Bar" active={panel === 'bar'} onPress={() => setPanel(panel === 'bar' ? null : 'bar')} />
             <TabButton icon="layers-outline" label="Layers" active={showLayers} onPress={() => setShowLayers((v) => !v)} />
           </ScrollView>
@@ -644,6 +689,8 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1, textAlign: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  publishStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#16A34A' },
+  publishStatusText: { fontSize: 12, fontWeight: '700' },
   layersOverlay: {
     position: 'absolute',
     top: 56,

@@ -228,8 +228,8 @@ export default function PublishScreen({ navigation, route }: Props) {
 
           {isPublished && (
             <Text style={styles.cardBody}>
-              Something wrong, or want to change it? Edit it below, then tap "Republish latest changes" to push your
-              edits live -- your published link stays the same the whole time.
+              Edits you make are published live automatically a few seconds after you stop typing. Tap "Publish now"
+              if you want to force an immediate republish -- your published link stays the same the whole time.
             </Text>
           )}
 
@@ -242,7 +242,7 @@ export default function PublishScreen({ navigation, route }: Props) {
             {publishing ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.primaryButtonText}>{isPublished ? 'Republish latest changes' : 'Publish'}</Text>
+              <Text style={styles.primaryButtonText}>{isPublished ? 'Publish now' : 'Publish'}</Text>
             )}
           </Pressable>
 

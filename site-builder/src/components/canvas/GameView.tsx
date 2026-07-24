@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, PanResponder } from 'react-native';
 import { GameElement } from '@/types';
 
 // Real, playable mini-games -- not mockups. Each works standalone off just the GameElement's
@@ -1175,6 +1175,173 @@ function TargetRange3DPreview({ compact }: { compact: boolean }) {
   );
 }
 
+const BB_GRAVITY = 0.35;
+const BB_TICK_MS = 16;
+
+// Same "simplified 2D stand-in, real game on the published site" pattern as
+// TargetRange3DPreview above -- the real 3D physics/gravity/spin/rim-collision game only
+// renders once published (see basketballScript in siteHtml.ts). Here, RN's own PanResponder
+// already computes a real recent-velocity estimate for the release gesture
+// (gestureState.vx/vy), so no custom velocity-sampling buffer is needed for this preview.
+function BasketballGamePreview({ compact }: { compact: boolean }) {
+  const playW = compact ? 160 : 220;
+  const playH = compact ? 210 : 260;
+  const ballSize = compact ? 18 : 22;
+  const hoopY = compact ? 28 : 34;
+  const hoopX = playW / 2;
+  const rimWidth = compact ? 34 : 42;
+  const restX = playW / 2 - ballSize / 2;
+  const restY = playH - ballSize - 8;
+
+  const posRef = useRef({ x: restX, y: restY });
+  const velRef = useRef({ x: 0, y: 0 });
+  const prevYRef = useRef(restY);
+  const scoredRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const phaseRef = useRef<'ready' | 'dragging' | 'flying' | 'reset'>('ready');
+
+  const [pos, setPos] = useState(posRef.current);
+  const [score, setScore] = useState(0);
+  const [phase, setPhase] = useState<'ready' | 'dragging' | 'flying' | 'reset'>('ready');
+
+  const setPhaseBoth = (p: typeof phase) => {
+    phaseRef.current = p;
+    setPhase(p);
+  };
+
+  const stopLoop = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  const resetBall = () => {
+    stopLoop();
+    posRef.current = { x: restX, y: restY };
+    velRef.current = { x: 0, y: 0 };
+    prevYRef.current = restY;
+    scoredRef.current = false;
+    setPos(posRef.current);
+    setPhaseBoth('ready');
+  };
+
+  const tick = () => {
+    velRef.current.y += BB_GRAVITY;
+    prevYRef.current = posRef.current.y;
+    posRef.current = { x: posRef.current.x + velRef.current.x, y: posRef.current.y + velRef.current.y };
+
+    // Simplified rim/score check: the ball's center crossing the hoop's y-plane while
+    // descending, within the rim's x-range -- a stand-in for the real ring/backboard physics
+    // the published site's Three.js scene computes.
+    const ballCenterX = posRef.current.x + ballSize / 2;
+    const ballCenterY = posRef.current.y + ballSize / 2;
+    if (
+      !scoredRef.current &&
+      prevYRef.current + ballSize / 2 <= hoopY &&
+      ballCenterY > hoopY &&
+      Math.abs(ballCenterX - hoopX) < rimWidth / 2 - 4
+    ) {
+      scoredRef.current = true;
+      setScore((s) => s + 1);
+    }
+
+    setPos({ ...posRef.current });
+
+    if (posRef.current.y > playH || posRef.current.x < -40 || posRef.current.x > playW + 40) {
+      stopLoop();
+      setPhaseBoth('reset');
+      setTimeout(resetBall, 700);
+    }
+  };
+
+  const launch = (vx: number, vy: number) => {
+    // Below a minimum speed, treat it as "no real flick" and snap back rather than a weak,
+    // mushy lob -- matches the real accuracy affordance asked for on the published site.
+    if (Math.hypot(vx, vy) < 2) {
+      resetBall();
+      return;
+    }
+    velRef.current = { x: vx, y: vy };
+    scoredRef.current = false;
+    setPhaseBoth('flying');
+    stopLoop();
+    intervalRef.current = setInterval(tick, BB_TICK_MS);
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => phaseRef.current !== 'flying',
+      onPanResponderGrant: () => setPhaseBoth('dragging'),
+      onPanResponderMove: (_evt, gesture) => {
+        // Keeps the drag within a small aiming envelope around the resting position -- real
+        // pre-release visual feedback while held, same spirit as the published site's
+        // drag-to-aim before release.
+        const nx = Math.max(0, Math.min(playW - ballSize, restX + gesture.dx * 0.5));
+        const ny = Math.max(0, Math.min(playH - ballSize, restY + gesture.dy * 0.5));
+        posRef.current = { x: nx, y: ny };
+        setPos(posRef.current);
+      },
+      onPanResponderRelease: (_evt, gesture) => {
+        // gesture.vx/vy is RN's own real recent-velocity estimate (px/ms) -- an upward swipe
+        // (negative vy) launches the ball up toward the hoop, scaled for this tick rate.
+        launch(gesture.vx * 14, gesture.vy * 14);
+      },
+    })
+  ).current;
+
+  useEffect(() => stopLoop, []);
+
+  return (
+    <View style={styles.centerFill}>
+      <Text style={[styles.statusText, { fontSize: compact ? 11 : 13 }]}>
+        {phase === 'ready' ? 'Swipe up to shoot!' : `Score: ${score}`}
+      </Text>
+      <View style={{ width: playW, height: playH, backgroundColor: '#1E293B', borderRadius: 8, overflow: 'hidden' }}>
+        <View
+          style={{
+            position: 'absolute',
+            left: hoopX - rimWidth / 2 - 4,
+            top: hoopY - 18,
+            width: rimWidth + 8,
+            height: 14,
+            backgroundColor: '#E2E8F0',
+            borderRadius: 2,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: hoopX - rimWidth / 2,
+            top: hoopY,
+            width: rimWidth,
+            height: 4,
+            backgroundColor: '#F97316',
+            borderRadius: 2,
+          }}
+        />
+        <View
+          {...panResponder.panHandlers}
+          style={{
+            position: 'absolute',
+            left: pos.x,
+            top: pos.y,
+            width: ballSize,
+            height: ballSize,
+            borderRadius: ballSize / 2,
+            backgroundColor: '#EA580C',
+            borderWidth: 1,
+            borderColor: '#7C2D12',
+          }}
+        />
+      </View>
+      <Text style={{ fontSize: 9, color: '#94A3B8', textAlign: 'center', marginTop: 4, paddingHorizontal: 6 }}>
+        Simplified preview — the real 3D basketball game with flick physics, spin, and rim collision renders on your published site.
+      </Text>
+    </View>
+  );
+}
+
 const TWO_PLAYER_KINDS = new Set(['tictactoe', 'connect4', 'rps']);
 
 export default function GameView({ element, width, height }: { element: GameElement; width: number; height: number }) {
@@ -1210,6 +1377,7 @@ export default function GameView({ element, width, height }: { element: GameElem
         {element.kind === 'flappy' && <FlappyBirdGame compact={compact} />}
         {element.kind === 'tetris' && <TetrisGame compact={compact} />}
         {element.kind === 'targetrange3d' && <TargetRange3DPreview compact={compact} />}
+        {element.kind === 'basketball' && <BasketballGamePreview compact={compact} />}
       </View>
     </View>
   );

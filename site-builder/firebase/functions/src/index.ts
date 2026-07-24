@@ -32,7 +32,7 @@ import {
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, SitePlan, SitePlanSection } from './openai';
-import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo } from './layout';
+import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo, SectionProductImages } from './layout';
 import { searchYouTubeVideo } from './youtube';
 import { chatWithAssistant, AssistantChatMessage } from './assistant';
 import { isValidCurrency } from './currency';
@@ -418,8 +418,8 @@ export const startGeneration = onCall(
     // subscribed to (via previewProjectId) -- called after the plan lands and again after
     // every generated image, so the AI build progress screen's live preview panel shows
     // real text and images appearing incrementally instead of a blank canvas until the end.
-    const pushPreview = async (currentPlan: SitePlan, images: SectionImage[], videos: SectionVideo[] = []) => {
-      const previewElements = layoutSitePlan(currentPlan, images, videos);
+    const pushPreview = async (currentPlan: SitePlan, images: SectionImage[], videos: SectionVideo[] = [], productImages: SectionProductImages[] = []) => {
+      const previewElements = layoutSitePlan(currentPlan, images, videos, productImages);
       await projectRef.update({
         name: currentPlan.siteName,
         backgroundColor: currentPlan.backgroundColor,
@@ -449,6 +449,10 @@ export const startGeneration = onCall(
       const bucket = getStorage().bucket();
       const sectionsNeedingVideo = plan.sections.filter((s: SitePlanSection) => s.kind === 'video' && s.videoSearchQuery?.trim());
       const sectionVideos: SectionVideo[] = [];
+      // Real product photos -- 2-4 high-quality angle shots of the same item, not one
+      // decorative hero image, so a "product" section becomes a real sellable listing.
+      const sectionsNeedingProductImages = plan.sections.filter((s: SitePlanSection) => s.kind === 'product' && s.productImagePrompts?.length);
+      const sectionProductImages: SectionProductImages[] = [];
 
       // Each image is its own slow OpenAI call (often 10-30s) -- generating them one at a
       // time in sequence was the single biggest reason a build could take minutes. Firing
@@ -478,7 +482,7 @@ export const startGeneration = onCall(
             // section that already generated successfully.
             console.error(`Image generation failed for section "${section.kind}"`, err);
           }
-          await pushPreview(plan, sectionImages, sectionVideos);
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
         }),
         ...sectionsNeedingVideo.map(async (section: SitePlanSection) => {
           try {
@@ -490,7 +494,33 @@ export const startGeneration = onCall(
             console.error(`Video search failed for section "${section.kind}"`, err);
             sectionVideos.push({ section, videoId: null, title: null });
           }
-          await pushPreview(plan, sectionImages, sectionVideos);
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
+        }),
+        ...sectionsNeedingProductImages.map(async (section: SitePlanSection) => {
+          // All of one product's angle-shots generate in parallel too (nested inside the
+          // outer per-section Promise.all), same "fire everything off together" reasoning as
+          // decorative images -- a 3-photo product listing shouldn't take 3x as long as one.
+          const urls = (
+            await Promise.all(
+              section.productImagePrompts.map(async (prompt, i) => {
+                try {
+                  const buffer = await generateImage(client, prompt, 'high', '1024x1536');
+                  const path = `users/${uid}/generated/${sessionId}/product-${Date.now()}-${i}.png`;
+                  const file = bucket.file(path);
+                  await file.save(buffer, { contentType: 'image/png' });
+                  const [url] = await file.getSignedUrl({ action: 'read', expires: '01-01-2100' });
+                  return url;
+                } catch (err) {
+                  // One angle-shot failing must never sink the whole product (or build) --
+                  // the listing still finishes with whichever photos did generate.
+                  console.error(`Product image generation failed for "${section.productName}"`, err);
+                  return null;
+                }
+              })
+            )
+          ).filter((u): u is string => !!u);
+          sectionProductImages.push({ section, urls });
+          await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
         }),
       ]);
 
@@ -500,11 +530,11 @@ export const startGeneration = onCall(
         // Second pause only adjusts copy at this point (images/videos are already resolved)
         // -- keeps the second pause fast rather than re-running that work too.
         plan = await generateSitePlan(client, model, prompt, complexity, injected2);
-        await pushPreview(plan, sectionImages, sectionVideos);
+        await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
       }
 
       await sessionRef.update({ statusMessage: 'Assembling your site...', updatedAt: Date.now() });
-      await pushPreview(plan, sectionImages, sectionVideos);
+      await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages);
 
       const minutesElapsed = Math.round(((Date.now() - startedAt) / 60000) * 10) / 10;
       await sessionRef.update({

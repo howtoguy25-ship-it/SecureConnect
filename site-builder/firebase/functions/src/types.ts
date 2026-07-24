@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game' | 'widget';
 
 // Mirrors the client's GradientFill -- `angle` is the CSS linear-gradient() angle (0deg =
 // bottom-to-top, 90deg = left-to-right), so siteHtml.ts can drop it straight into real CSS.
@@ -158,7 +158,7 @@ export interface CollectionElement extends BaseElement {
   productIds: string[];
 }
 
-export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d';
+export type GameKind = 'trivia' | 'memory' | 'tictactoe' | 'clicker' | 'connect4' | 'rps' | 'flappy' | 'tetris' | 'simon' | 'targetrange3d' | 'basketball';
 
 export interface TriviaQuestion {
   question: string;
@@ -178,6 +178,28 @@ export interface GameElement extends BaseElement {
   clickerTarget: number;
 }
 
+// One general kind today ('clock'), designed so future real, always-live utilities
+// (countdown timer, calculator, map embed) can add their own fields to this same flat
+// interface later -- same convention as GameElement covering every game kind.
+export type WidgetKind = 'clock';
+
+export interface WidgetTimezone {
+  label: string; // user-facing name, e.g. "New York" or "Tokyo Office"
+  ianaTimezone: string; // a real IANA zone id, e.g. "America/New_York" -- never invented
+}
+
+// Mirrors the client's WidgetElement. Only meaningful for kind 'clock' today: one
+// `timezones` entry renders a simple local clock, 2+ renders a real world clock (each tick
+// computed live via Intl.DateTimeFormat, never a static render) -- see renderWidgetHtml in
+// siteHtml.ts for the published-site implementation.
+export interface WidgetElement extends BaseElement {
+  type: 'widget';
+  kind: WidgetKind;
+  title: string;
+  timezones: WidgetTimezone[];
+  style: 'analog' | 'digital';
+}
+
 export type CanvasElement =
   | TextElement
   | ImageElement
@@ -189,7 +211,8 @@ export type CanvasElement =
   | VideoEmbedElement
   | ProductElement
   | CollectionElement
-  | GameElement;
+  | GameElement
+  | WidgetElement;
 
 export interface CanvasSize {
   width: number;
