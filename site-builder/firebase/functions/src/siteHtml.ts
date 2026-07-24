@@ -2000,7 +2000,7 @@ function renderWidgetHtml(el: WidgetElement, base: string): string {
   return renderClockWidgetHtml(el, base);
 }
 
-function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], products: Record<string, CatalogProduct>, currency = 'usd'): string {
+function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], products: Record<string, CatalogProduct>, currency = 'usd', isSingleProductPage = false): string {
   const sym = currencySymbol(currency);
   const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
   switch (el.type) {
@@ -2092,6 +2092,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     }
     case 'product': {
       const product = resolveProduct(el, products);
+      // A page whose only element is this product IS the product page -- a real Shopify-PDP
+      // style full layout (bigger gallery, bigger type, untruncated description) instead of
+      // the small catalog-grid card every other product still renders as. Mirrors the
+      // editor's ProductPageView (ElementRenderer.tsx) so what a seller designs matches what
+      // publishes. Still just scales up the same card, in whatever box the element itself
+      // already occupies (see `base` above) -- not a new positioning system.
+      const fullBleed = isSingleProductPage;
       const isService = product.saleType === 'service';
       const isDigital = product.saleType === 'digital';
       // A buyer must never land on a real checkout for a half-finished listing -- only
@@ -2109,9 +2116,10 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // behind a tap-to-open lightbox -- since a buyer should be able to see every angle of
       // the item without an extra step. Tapping any photo still opens the lightbox (below)
       // for a bigger view, starting at whichever photo was showing, not always the first.
+      const galleryHeightPct = fullBleed ? '65%' : '55%';
       const imgTag =
         product.images.length > 0
-          ? `<div id="${galleryWrapId}" style="position:relative;width:100%;height:55%;overflow:hidden;">
+          ? `<div id="${galleryWrapId}" style="position:relative;width:100%;height:${galleryHeightPct};overflow:hidden;">
   <div id="${galleryTrackId}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:100%;">
     ${product.images
       .map(
@@ -2132,7 +2140,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       : ''
   }
 </div>`
-          : `<div style="width:100%;height:55%;background:#F1F5F9;"></div>`;
+          : `<div style="width:100%;height:${galleryHeightPct};background:#F1F5F9;"></div>`;
       const galleryScript = hasMultiplePhotos
         ? `<script>(function(){
   var track=document.getElementById(${JSON.stringify(galleryTrackId)});
@@ -2326,31 +2334,31 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         : '';
 
       const buyButton = isReady
-        ? `<button id="${addBtnId}" style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
-        : `<button disabled style="margin-top:8px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:not-allowed;">Coming Soon</button>`;
+        ? `<button id="${addBtnId}" style="margin-top:${fullBleed ? 16 : 8}px;background:#4338CA;color:#fff;border:none;border-radius:${fullBleed ? 10 : 8}px;padding:${fullBleed ? '14px' : '8px'};font-weight:700;font-size:${fullBleed ? 16 : 13}px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
+        : `<button disabled style="margin-top:${fullBleed ? 16 : 8}px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:${fullBleed ? 10 : 8}px;padding:${fullBleed ? '14px' : '8px'};font-weight:700;font-size:${fullBleed ? 16 : 13}px;cursor:not-allowed;">Coming Soon</button>`;
 
-      return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
+      return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;${fullBleed ? '' : 'border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);'}overflow:${fullBleed ? 'auto' : 'hidden'};display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
-  <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
-    <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
-    <div id="${nameId}" style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(product.name)}</div>
-    <div id="${descId}" style="font-size:12px;color:#64748B;margin-top:2px;max-height:54px;overflow-y:auto;">${escapeHtml(product.description)}</div>
+  <div style="padding:${fullBleed ? '20px' : '10px'};flex:1;display:flex;flex-direction:column;">
+    <div style="font-size:${fullBleed ? 12 : 10}px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
+    <div id="${nameId}" style="font-weight:800;font-size:${fullBleed ? 26 : 14}px;color:#0F172A;margin-top:${fullBleed ? 6 : 2}px;">${escapeHtml(product.name)}</div>
+    <div id="${descId}" style="font-size:${fullBleed ? 15 : 12}px;color:#64748B;margin-top:${fullBleed ? 10 : 2}px;${fullBleed ? 'line-height:22px;' : 'max-height:54px;overflow-y:auto;'}">${escapeHtml(product.description)}</div>
     ${variantPicker}
-    ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
-      <div style="display:flex;align-items:baseline;gap:6px;">
-        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:14px;">${sym}${product.priceUsd.toFixed(2)}</div>
+    ${isReady ? `<div id="${stockId}" style="font-size:${fullBleed ? 13 : 11}px;color:#94A3B8;margin-top:${fullBleed ? 8 : 2}px;">Checking availability…</div>` : ''}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:${fullBleed ? 14 : 8}px;gap:6px;">
+      <div style="display:flex;align-items:baseline;gap:8px;">
+        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:${fullBleed ? 22 : 14}px;">${sym}${product.priceUsd.toFixed(2)}</div>
         ${
           product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd
-            ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">${sym}${product.compareAtPriceUsd.toFixed(2)}</div>`
+            ? `<div style="font-size:${fullBleed ? 15 : 12}px;color:#94A3B8;text-decoration:line-through;">${sym}${product.compareAtPriceUsd.toFixed(2)}</div>`
             : ''
         }
       </div>
-      ${isReady ? `<input id="${qtyId}" type="number" min="1" value="1" style="width:44px;padding:4px;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;" />` : ''}
+      ${isReady ? `<input id="${qtyId}" type="number" min="1" value="1" style="width:${fullBleed ? 56 : 44}px;padding:${fullBleed ? 8 : 4}px;border:1px solid #E2E8F0;border-radius:6px;font-size:${fullBleed ? 14 : 12}px;" />` : ''}
     </div>
     ${buyButton}
-    ${isService ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">One-time payment for a real reservation — not a recurring charge.</div>' : ''}
-    ${isDigital ? '<div style="font-size:10px;color:#94A3B8;margin-top:6px;">Delivered by the seller after purchase — no shipping.</div>' : ''}
+    ${isService ? `<div style="font-size:${fullBleed ? 12 : 10}px;color:#94A3B8;margin-top:6px;">One-time payment for a real reservation — not a recurring charge.</div>` : ''}
+    ${isDigital ? `<div style="font-size:${fullBleed ? 12 : 10}px;color:#94A3B8;margin-top:6px;">Delivered by the seller after purchase — no shipping.</div>` : ''}
   </div>
 </div>
 ${lightbox}
@@ -2371,18 +2379,27 @@ ${script}`;
             : `<div style="width:50%;height:50%;background:#F1F5F9;"></div>`
         )
         .join('');
+      // Bigger thumb + a description snippet (not just name/price) so a collection's member
+      // list reads as real product previews rather than a scrunched, uninformative row --
+      // still links out to that product's own full card (or full PDP, if it's alone on its
+      // own page) via its #el-{id} anchor rather than duplicating a whole PDP in this modal.
       const rows = members.length
         ? members
             .map(
-              ({ id, product: p }) => `<a href="#el-${id}" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
+              ({ id, product: p }) => `<a href="#el-${id}" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
   ${
     p.images[0]
-      ? `<img src="${escapeAttr(p.images[0])}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" />`
-      : `<div style="width:44px;height:44px;border-radius:8px;background:#F1F5F9;flex-shrink:0;"></div>`
+      ? `<img src="${escapeAttr(p.images[0])}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;" />`
+      : `<div style="width:64px;height:64px;border-radius:10px;background:#F1F5F9;flex-shrink:0;"></div>`
   }
   <div style="flex:1;min-width:0;">
-    <div style="font-weight:700;font-size:13px;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name || 'Untitled product')}</div>
-    <div style="font-size:12px;color:#4338CA;font-weight:700;">${sym}${p.priceUsd.toFixed(2)}</div>
+    <div style="font-weight:700;font-size:14px;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name || 'Untitled product')}</div>
+    ${p.description ? `<div style="font-size:12px;color:#64748B;margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(p.description)}</div>` : ''}
+    <div style="font-size:13px;color:#4338CA;font-weight:700;margin-top:2px;">${sym}${p.priceUsd.toFixed(2)}${
+      p.compareAtPriceUsd != null && p.compareAtPriceUsd > p.priceUsd
+        ? ` <span style="font-size:11px;color:#94A3B8;font-weight:400;text-decoration:line-through;">${sym}${p.compareAtPriceUsd.toFixed(2)}</span>`
+        : ''
+    }</div>
   </div>
 </a>`
             )
@@ -3240,6 +3257,9 @@ export function renderProjectHtml(
   products: Record<string, CatalogProduct> = {}
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
+  // This page's only real content is one product -- render it Shopify-PDP-style (see the
+  // product case's `fullBleed` handling below) instead of the small catalog-grid card.
+  const isSingleProductPage = project.elements.length === 1 && project.elements[0].type === 'product';
   const menu = renderMenuHtml(project.menu, project.pages, hasProducts, project.policies, project.elements);
   const hasMultiplayerGame = project.elements.some(
     (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
@@ -3277,7 +3297,7 @@ export function renderProjectHtml(
   const elementsHtml = project.elements
     .slice()
     .sort((a, b) => a.zIndex - b.zIndex)
-    .map((el) => renderElement(el, slug, productStockUrl, project.elements, products, currency))
+    .map((el) => renderElement(el, slug, productStockUrl, project.elements, products, currency, isSingleProductPage))
     .join('\n');
 
   const { width, height } = project.canvasSize;

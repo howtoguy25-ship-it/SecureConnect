@@ -403,6 +403,58 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
   );
 }
 
+// When a product is the only element on a page, that page IS the product page -- a
+// Shopify-style full single-product layout (big gallery, full name/price/description) reads
+// far better than the small ~180x220 card everyone else on the page would otherwise be
+// scrunched next to. Whatever size the element itself has been resized to (the only element
+// on the page, so sellers typically stretch it to fill the canvas) is what this fills, same
+// as ProductCardView does for the compact case. Purely a richer *content* layout, same as
+// tapping the "i" info button already shows in ProductCardView's modal -- not a real
+// storefront (no buy button here; that only exists on the published site).
+function ProductPageView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
+  const catalogProduct = useCatalogProduct(element.productId);
+  const sym = useSellerCurrencySymbol();
+
+  if (catalogProduct === undefined) {
+    return (
+      <View style={[styles.placeholder, { width, height, borderRadius: 0 }]}>
+        <ActivityIndicator size="small" color="#94A3B8" />
+      </View>
+    );
+  }
+
+  const product = resolveProductView(element, catalogProduct);
+  const inStock = product.inStock !== false;
+
+  return (
+    <View style={{ width, height, backgroundColor: '#FFFFFF' }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
+        <ProductImageCarousel images={product.images} height={Math.min(height * 0.5, 420)} />
+        <Text style={styles.pdpBadge}>{productBadge(product)}</Text>
+        <Text style={styles.pdpName}>{product.name || 'Untitled product'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 6 }}>
+          <Text style={styles.pdpPrice}>{sym}{product.priceUsd.toFixed(2)}</Text>
+          {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
+            <Text style={{ fontSize: 16, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+              {sym}{product.compareAtPriceUsd.toFixed(2)}
+            </Text>
+          )}
+        </View>
+        {!!product.description && <Text style={styles.pdpDescription}>{product.description}</Text>}
+        <Text style={[styles.pdpStock, { color: inStock ? '#16A34A' : '#DC2626' }]}>
+          {inStock
+            ? product.trackInventory
+              ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings available' : 'available'}`
+              : product.saleType === 'service'
+                ? 'Available to book'
+                : 'In stock'
+            : 'Out of stock'}
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
 // Each grid thumbnail/detail row resolves its own catalog product independently -- a real
 // React component per item (not a loop of hook calls inside one component), so calling
 // useCatalogProduct here is safe even though CollectionView itself renders a variable number
@@ -434,24 +486,36 @@ function CollectionDetailRow({ productElement, sym }: { productElement: ProductE
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        paddingVertical: 8,
+        gap: 12,
+        paddingVertical: 10,
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: '#E2E8F0',
       }}
     >
       {product.images[0] ? (
-        <Image source={{ uri: product.images[0] }} style={{ width: 44, height: 44, borderRadius: 8 }} resizeMode="cover" />
+        <Image source={{ uri: product.images[0] }} style={{ width: 64, height: 64, borderRadius: 10 }} resizeMode="cover" />
       ) : (
-        <View style={[styles.placeholder, { width: 44, height: 44 }]}>
-          <Ionicons name="pricetag-outline" size={14} color="#94A3B8" />
+        <View style={[styles.placeholder, { width: 64, height: 64 }]}>
+          <Ionicons name="pricetag-outline" size={20} color="#94A3B8" />
         </View>
       )}
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
+        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 14, color: '#0F172A' }}>
           {product.name || 'Untitled product'}
         </Text>
-        <Text style={{ fontSize: 12, color: '#4338CA', fontWeight: '700' }}>{sym}{product.priceUsd.toFixed(2)}</Text>
+        {!!product.description && (
+          <Text numberOfLines={2} style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+            {product.description}
+          </Text>
+        )}
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+          <Text style={{ fontSize: 13, color: '#4338CA', fontWeight: '700' }}>{sym}{product.priceUsd.toFixed(2)}</Text>
+          {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
+            <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+              {sym}{product.compareAtPriceUsd.toFixed(2)}
+            </Text>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -616,7 +680,11 @@ export default function ElementRenderer({ element, allElements }: { element: Can
     case 'videoEmbed':
       return <VideoEmbedView element={element} width={width} height={height} />;
     case 'product':
-      return <ProductCardView element={element} width={width} height={height} />;
+      return allElements.length === 1 ? (
+        <ProductPageView element={element} width={width} height={height} />
+      ) : (
+        <ProductCardView element={element} width={width} height={height} />
+      );
     case 'collection':
       return <CollectionView element={element} allElements={allElements} width={width} height={height} />;
     case 'game':
@@ -679,6 +747,11 @@ const styles = StyleSheet.create({
   detailStock: { fontSize: 13, color: '#94A3B8', marginTop: 10 },
   detailCloseBtn: { marginTop: 14, backgroundColor: '#111827', borderRadius: 10, height: 46, alignItems: 'center', justifyContent: 'center' },
   detailCloseBtnText: { color: '#FFFFFF', fontWeight: '700' },
+  pdpBadge: { fontSize: 12, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase', marginTop: 16 },
+  pdpName: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginTop: 4 },
+  pdpPrice: { fontSize: 22, fontWeight: '800', color: '#4338CA' },
+  pdpDescription: { fontSize: 15, color: '#475569', lineHeight: 22, marginTop: 12 },
+  pdpStock: { fontSize: 13, fontWeight: '700', marginTop: 12 },
   outOfStockBadge: {
     position: 'absolute',
     top: 6,
