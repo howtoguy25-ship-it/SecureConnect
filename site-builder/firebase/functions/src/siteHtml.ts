@@ -1,4 +1,4 @@
-import { CanvasElement, CustomWidgetElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
+import { CanvasElement, CatalogProduct, CustomWidgetElement, GameElement, GradientFill, MenuItem, PolicyDoc, Project, RichTextRun, SiteMenu, SitePage, WidgetElement } from './types';
 import { getFontOption } from './fonts';
 import { currencySymbol } from './currency';
 
@@ -45,6 +45,37 @@ function safeUrl(value: string): string {
   if (!trimmed) return '#';
   if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('#')) return trimmed;
   return `https://${trimmed}`;
+}
+
+// Publish-time snapshot of a ProductElement's real content -- mirrors the client's
+// resolveProductView (src/utils/resolveProduct.ts) and index.ts's resolveCatalogProduct: a
+// ProductElement only stores a productId now, so its real name/price/images/etc. are looked
+// up in the `products` map the caller pre-fetched from the catalog (see renderProjectHtml's
+// new `products` param), falling back to whatever inline fields might still be sitting on the
+// element for data stored before the catalog existed.
+function resolveProduct(el: Extract<CanvasElement, { type: 'product' }>, products: Record<string, CatalogProduct>): CatalogProduct {
+  const found = products[el.productId];
+  if (found) return found;
+  const legacy = el as unknown as Partial<CatalogProduct>;
+  return {
+    id: el.productId,
+    name: legacy.name ?? 'Untitled product',
+    description: legacy.description ?? '',
+    priceUsd: legacy.priceUsd ?? 0,
+    compareAtPriceUsd: legacy.compareAtPriceUsd ?? null,
+    costUsd: legacy.costUsd ?? null,
+    images: legacy.images ?? [],
+    trackInventory: legacy.trackInventory ?? false,
+    initialStock: legacy.initialStock ?? null,
+    inStock: legacy.inStock ?? true,
+    saleType: legacy.saleType ?? 'product',
+    fulfillment: legacy.fulfillment ?? 'pickup',
+    serviceDurationMinutes: legacy.serviceDurationMinutes ?? null,
+    variantOptions: legacy.variantOptions ?? [],
+    variants: legacy.variants ?? [],
+    createdAt: legacy.createdAt ?? 0,
+    updatedAt: legacy.updatedAt ?? 0,
+  };
 }
 
 function renderIcon(el: Extract<CanvasElement, { type: 'icon' }>): string {
@@ -1969,7 +2000,7 @@ function renderWidgetHtml(el: WidgetElement, base: string): string {
   return renderClockWidgetHtml(el, base);
 }
 
-function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], currency = 'usd'): string {
+function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], products: Record<string, CatalogProduct>, currency = 'usd'): string {
   const sym = currencySymbol(currency);
   const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
   switch (el.type) {
@@ -2060,15 +2091,16 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       return `<iframe src="${escapeAttr(src)}" title="${escapeAttr(el.title || 'Video')}" style="${base}border:0;background:#000;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
     }
     case 'product': {
-      const isService = el.saleType === 'service';
-      const isDigital = el.saleType === 'digital';
+      const product = resolveProduct(el, products);
+      const isService = product.saleType === 'service';
+      const isDigital = product.saleType === 'digital';
       // A buyer must never land on a real checkout for a half-finished listing -- only
       // show a working buy button once the seller has actually filled in a name, a real
       // price, and at least one photo. Anything short of that renders the card (so the
       // seller can see it taking shape) but with the buy action disabled, and it updates
       // live the moment the missing pieces are filled in and republished.
-      const isReady = !!el.name?.trim() && el.priceUsd > 0 && el.images.length > 0;
-      const hasMultiplePhotos = el.images.length > 1;
+      const isReady = !!product.name?.trim() && product.priceUsd > 0 && product.images.length > 0;
+      const hasMultiplePhotos = product.images.length > 1;
       const lightboxVar = `siteSparkLightbox_${el.id}`;
       const galleryVar = `siteSparkGallery_${el.id}`;
       const galleryTrackId = `gallery-track-${el.id}`;
@@ -2078,10 +2110,10 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // the item without an extra step. Tapping any photo still opens the lightbox (below)
       // for a bigger view, starting at whichever photo was showing, not always the first.
       const imgTag =
-        el.images.length > 0
+        product.images.length > 0
           ? `<div id="${galleryWrapId}" style="position:relative;width:100%;height:55%;overflow:hidden;">
   <div id="${galleryTrackId}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:100%;">
-    ${el.images
+    ${product.images
       .map(
         (uri, i) =>
           `<img src="${escapeAttr(uri)}" style="flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center;${
@@ -2095,7 +2127,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       ? `<button aria-label="Previous photo" onclick="${galleryVar}.prev()" style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8249;</button>
   <button aria-label="Next photo" onclick="${galleryVar}.next()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8250;</button>
   <div style="position:absolute;bottom:6px;left:0;right:0;display:flex;justify-content:center;gap:5px;">
-    ${el.images.map((_, i) => `<div data-gallery-dot style="width:6px;height:6px;border-radius:3px;background:${i === 0 ? '#fff' : '#ffffff80'};"></div>`).join('')}
+    ${product.images.map((_, i) => `<div data-gallery-dot style="width:6px;height:6px;border-radius:3px;background:${i === 0 ? '#fff' : '#ffffff80'};"></div>`).join('')}
   </div>`
       : ''
   }
@@ -2105,7 +2137,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         ? `<script>(function(){
   var track=document.getElementById(${JSON.stringify(galleryTrackId)});
   var dots=document.querySelectorAll('#${galleryWrapId} [data-gallery-dot]');
-  var count=${el.images.length};
+  var count=${product.images.length};
   var i=0;
   function paint(){ Array.prototype.forEach.call(dots, function(d,idx){ d.style.background = idx===i ? '#fff' : '#ffffff80'; }); }
   function go(idx){ i=(idx+count)%count; track.scrollTo({ left: track.clientWidth*i, behavior:'smooth' }); paint(); }
@@ -2121,14 +2153,14 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const addBtnId = `addbtn-${el.id}`;
       const priceId = `price-${el.id}`;
       const pickerId = `variantpicker-${el.id}`;
-      const hasVariants = el.variantOptions.length > 0;
+      const hasVariants = product.variantOptions.length > 0;
       const badge = isService
-        ? `📅 Service booking${el.serviceDurationMinutes ? ` · ${el.serviceDurationMinutes} min` : ''}`
+        ? `📅 Service booking${product.serviceDurationMinutes ? ` · ${product.serviceDurationMinutes} min` : ''}`
         : isDigital
           ? '💾 Instant download'
-          : el.fulfillment === 'delivery'
+          : product.fulfillment === 'delivery'
             ? '📦 Delivery'
-            : el.fulfillment === 'both'
+            : product.fulfillment === 'both'
               ? '📦 Delivery or pickup'
               : '🏬 Pickup';
 
@@ -2140,7 +2172,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   <button aria-label="Close" onclick="${lightboxVar}.close()" style="position:absolute;top:16px;right:16px;z-index:2;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;">&times;</button>
   <div style="position:relative;width:100%;max-width:520px;z-index:1;">
     <div id="lightbox-track-${el.id}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">
-      ${el.images
+      ${product.images
         .map(
           (uri) =>
             `<img src="${escapeAttr(uri)}" style="flex:0 0 100%;width:100%;max-height:70vh;object-fit:contain;scroll-snap-align:center;" />`
@@ -2151,14 +2183,14 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     <button aria-label="Next photo" onclick="${lightboxVar}.next()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8250;</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:14px;">
-    ${el.images.map((_, i) => `<div data-dot style="width:7px;height:7px;border-radius:4px;background:${i === 0 ? '#fff' : '#6B7280'};"></div>`).join('')}
+    ${product.images.map((_, i) => `<div data-dot style="width:7px;height:7px;border-radius:4px;background:${i === 0 ? '#fff' : '#6B7280'};"></div>`).join('')}
   </div>
 </div>
 <script>(function(){
   var el=document.getElementById('lightbox-${el.id}');
   var track=document.getElementById('lightbox-track-${el.id}');
   var dots=el.querySelectorAll('[data-dot]');
-  var count=${el.images.length};
+  var count=${product.images.length};
   var i=0;
   function paint(){ dots.forEach(function(d,idx){ d.style.background = idx===i ? '#fff' : '#6B7280'; }); }
   function go(idx){ i=(idx+count)%count; track.scrollTo({ left: track.clientWidth*i, behavior:'smooth' }); paint(); }
@@ -2178,7 +2210,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // hand-built inline JS string -- the same convention used by the arcade games' buttons.
       const variantPicker = hasVariants
         ? `<div id="${pickerId}" style="margin-top:6px;">
-  ${el.variantOptions
+  ${product.variantOptions
     .map(
       (opt) => `<div style="margin-bottom:6px;">
     <div style="font-size:10px;font-weight:700;color:#64748B;margin-bottom:4px;">${escapeHtml(opt.name)}</div>
@@ -2196,20 +2228,24 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
 </div>`
         : '';
 
+      const nameId = `name-${el.id}`;
+      const descId = `desc-${el.id}`;
       const script = isReady
         ? `<script>(function(){
   var productId = ${JSON.stringify(el.productId)};
-  var baseName = ${JSON.stringify(el.name)};
-  var basePriceUsd = ${el.priceUsd};
-  var variantOptions = ${JSON.stringify(el.variantOptions)};
+  var baseName = ${JSON.stringify(product.name)};
+  var basePriceUsd = ${product.priceUsd};
+  var variantOptions = ${JSON.stringify(product.variantOptions)};
   var stockUrl = ${JSON.stringify(productStockUrl)} + '?slug=' + encodeURIComponent(${JSON.stringify(slug)}) + '&productId=' + encodeURIComponent(productId);
   var stockEl = document.getElementById(${JSON.stringify(stockId)});
   var qtyEl = document.getElementById(${JSON.stringify(qtyId)});
   var btnEl = document.getElementById(${JSON.stringify(addBtnId)});
   var priceEl = document.getElementById(${JSON.stringify(priceId)});
   var pickerEl = document.getElementById(${JSON.stringify(pickerId)});
+  var nameEl = document.getElementById(${JSON.stringify(nameId)});
+  var descEl = document.getElementById(${JSON.stringify(descId)});
   var selected = {};
-  var liveTop = null; // { trackInventory, stockQuantity, inStock, variants }
+  var liveTop = null; // { trackInventory, stockQuantity, inStock, variants, name, description, images }
 
   function setState(text, color, disabled, btnText){
     if (stockEl) { stockEl.textContent = text; stockEl.style.color = color; }
@@ -2239,7 +2275,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     if (priceEl) priceEl.textContent = ${JSON.stringify(sym)} + effectivePrice.toFixed(2);
     if (!liveTop) return;
     if (!liveTop.inStock) { setState('Out of stock', '#DC2626', true, '${isService ? 'Not Available' : 'Out of Stock'}'); return; }
-    if (variant === undefined) { setState('Select ${escapeHtml(el.variantOptions.map((o) => o.name).join(' & '))} to continue', '#94A3B8', true, 'Select Options'); return; }
+    if (variant === undefined) { setState('Select ${escapeHtml(product.variantOptions.map((o) => o.name).join(' & '))} to continue', '#94A3B8', true, 'Select Options'); return; }
     var stockQuantity = variant ? variant.stockQuantity : liveTop.stockQuantity;
     if (liveTop.trackInventory && stockQuantity != null) {
       if (stockQuantity <= 0) { setState('${isService ? 'Fully booked' : 'Sold out'}', '#DC2626', true, '${isService ? 'Fully Booked' : 'Sold Out'}'); return; }
@@ -2270,13 +2306,18 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       var effectivePrice = (variant && variant.priceUsd != null) ? variant.priceUsd : basePriceUsd;
       var variantKey = variant ? variant.key : null;
       var variantLabel = variant ? variantOptions.map(function(o, i){ return o.name + ': ' + variant.optionValues[i]; }).join(', ') : null;
-      siteSparkCart.add(productId, baseName, effectivePrice, qty, ${JSON.stringify(el.saleType)}, variantKey, variantLabel);
+      siteSparkCart.add(productId, baseName, effectivePrice, qty, ${JSON.stringify(product.saleType)}, variantKey, variantLabel);
     });
   }
 
   fetch(stockUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
     if (!data) return;
     liveTop = data;
+    // Cosmetic fields only (name/description) -- refreshed live from the seller's catalog so
+    // an edit made in the standalone Products screen shows up here without a republish. Price
+    // stays sourced from basePriceUsd/variant data above, which is this same live payload.
+    if (data.name) { baseName = data.name; if (nameEl) nameEl.textContent = data.name; }
+    if (typeof data.description === 'string' && descEl) descEl.textContent = data.description;
     refresh();
   }).catch(function(){});
 
@@ -2288,20 +2329,20 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         ? `<button id="${addBtnId}" style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
         : `<button disabled style="margin-top:8px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:not-allowed;">Coming Soon</button>`;
 
-      return `<div id="el-${el.id}" data-product-name="${escapeAttr(el.name.toLowerCase())}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
+      return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
-    <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name)}</div>
-    <div style="font-size:12px;color:#64748B;margin-top:2px;max-height:54px;overflow-y:auto;">${escapeHtml(el.description)}</div>
+    <div id="${nameId}" style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(product.name)}</div>
+    <div id="${descId}" style="font-size:12px;color:#64748B;margin-top:2px;max-height:54px;overflow-y:auto;">${escapeHtml(product.description)}</div>
     ${variantPicker}
     ${isReady ? `<div id="${stockId}" style="font-size:11px;color:#94A3B8;margin-top:2px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;">
       <div style="display:flex;align-items:baseline;gap:6px;">
-        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:14px;">${sym}${el.priceUsd.toFixed(2)}</div>
+        <div id="${priceId}" style="font-weight:800;color:#4338CA;font-size:14px;">${sym}${product.priceUsd.toFixed(2)}</div>
         ${
-          el.compareAtPriceUsd != null && el.compareAtPriceUsd > el.priceUsd
-            ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">${sym}${el.compareAtPriceUsd.toFixed(2)}</div>`
+          product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd
+            ? `<div style="font-size:12px;color:#94A3B8;text-decoration:line-through;">${sym}${product.compareAtPriceUsd.toFixed(2)}</div>`
             : ''
         }
       </div>
@@ -2317,22 +2358,23 @@ ${galleryScript}
 ${script}`;
     }
     case 'collection': {
-      const products = el.productIds
+      const memberElements = el.productIds
         .map((id) => allElements.find((sib) => sib.id === id))
         .filter((sib): sib is Extract<CanvasElement, { type: 'product' }> => !!sib && sib.type === 'product');
+      const members = memberElements.map((p) => ({ id: p.id, product: resolveProduct(p, products) }));
       const modalId = `collection-modal-${el.id}`;
-      const thumbs = products
+      const thumbs = members
         .slice(0, 4)
-        .map((p) =>
+        .map(({ product: p }) =>
           p.images[0]
             ? `<img src="${escapeAttr(p.images[0])}" style="width:50%;height:50%;object-fit:cover;display:block;" />`
             : `<div style="width:50%;height:50%;background:#F1F5F9;"></div>`
         )
         .join('');
-      const rows = products.length
-        ? products
+      const rows = members.length
+        ? members
             .map(
-              (p) => `<a href="#el-${p.id}" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
+              ({ id, product: p }) => `<a href="#el-${id}" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
   ${
     p.images[0]
       ? `<img src="${escapeAttr(p.images[0])}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" />`
@@ -2352,7 +2394,7 @@ ${script}`;
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">Collection</div>
     <div style="font-weight:700;font-size:14px;color:#0F172A;margin-top:2px;">${escapeHtml(el.name || 'Untitled collection')}</div>
-    <div style="font-size:12px;color:#64748B;margin-top:2px;">${products.length} ${products.length === 1 ? 'item' : 'items'}</div>
+    <div style="font-size:12px;color:#64748B;margin-top:2px;">${members.length} ${members.length === 1 ? 'item' : 'items'}</div>
   </div>
 </div>
 <div id="${modalId}" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000AA;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;" onclick="if(event.target===this)this.style.display='none';">
@@ -3171,7 +3213,12 @@ export function renderProjectHtml(
   isLastPage = true,
   // Lowercase ISO 4217 code, e.g. "usd" -- the seller's own SellerAccount.currency at publish
   // time (see currency.ts). Defaults to 'usd' for any project with no seller/products.
-  currency = 'usd'
+  currency = 'usd',
+  // Real content for every ProductElement on this page/project, pre-fetched by the caller
+  // (publishProject in index.ts) from the seller's catalog (users/{uid}/products), keyed by
+  // productId -- see resolveProduct's comment for the legacy-element fallback when an id has
+  // no catalog doc.
+  products: Record<string, CatalogProduct> = {}
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
   const menu = renderMenuHtml(project.menu, project.pages, hasProducts, project.policies);
@@ -3211,7 +3258,7 @@ export function renderProjectHtml(
   const elementsHtml = project.elements
     .slice()
     .sort((a, b) => a.zIndex - b.zIndex)
-    .map((el) => renderElement(el, slug, productStockUrl, project.elements, currency))
+    .map((el) => renderElement(el, slug, productStockUrl, project.elements, products, currency))
     .join('\n');
 
   const { width, height } = project.canvasSize;

@@ -3,8 +3,9 @@ import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndic
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement, ImageElement, ProductVariantOption, ProductVariant, WidgetKind, WidgetTimezone } from '@/types';
-import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
+import { CanvasElement, ImageElement, ProductElement, WidgetKind, WidgetTimezone } from '@/types';
+import { useCatalogProduct } from '@/hooks/useCatalogProduct';
+import { resolveProductView } from '@/utils/resolveProduct';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import SliderRow from '@/components/inspector/SliderRow';
@@ -18,8 +19,7 @@ import { updateProductStock } from '@/services/productStock';
 import { useAuth } from '@/context/AuthContext';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
-
-const MAX_PRODUCT_IMAGES = 7;
+import { navigateTo } from '@/navigation/navigationRef';
 
 interface Props {
   element: CanvasElement;
@@ -85,6 +85,127 @@ function ProductLiveStockSave({
         </>
       )}
     </Pressable>
+  );
+}
+
+// A Button element's "link to a product/collection on this page" chip -- a product's real
+// name lives in the catalog now (see ProductElement's comment), so this resolves it via
+// useCatalogProduct instead of reading a field that no longer exists on the element. Its own
+// component (not inline in a .map()) because hooks can't be called inside a loop.
+function LinkTargetChip({
+  target,
+  selected,
+  onToggle,
+}: {
+  target: Extract<CanvasElement, { type: 'product' | 'collection' }>;
+  selected: boolean;
+  onToggle: (selected: boolean) => void;
+}) {
+  const catalogProduct = useCatalogProduct(target.type === 'product' ? target.productId : '');
+  const label =
+    target.type === 'product'
+      ? resolveProductView(target, catalogProduct ?? null).name || 'Untitled product'
+      : target.name || 'Untitled collection';
+  return (
+    <Pressable style={[styles.toggleBtn, selected && styles.toggleBtnActive]} onPress={() => onToggle(selected)}>
+      <Text style={styles.toggleBtnText}>
+        {target.type === 'product' ? '🛍️ ' : '📦 '}
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+// A Collection element's product picker row -- same live-name-resolution need as
+// LinkTargetChip above, its own component for the same hooks-in-a-loop reason.
+function CollectionProductPickerRow({
+  productElement,
+  selected,
+  onToggle,
+}: {
+  productElement: ProductElement;
+  selected: boolean;
+  onToggle: (selected: boolean) => void;
+}) {
+  const catalogProduct = useCatalogProduct(productElement.productId);
+  const product = resolveProductView(productElement, catalogProduct ?? null);
+  return (
+    <Pressable
+      style={[styles.collectionProductRow, selected && styles.collectionProductRowActive]}
+      onPress={() => onToggle(selected)}
+    >
+      <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={26} color={selected ? '#2563EB' : '#94A3B8'} />
+      <Text style={styles.collectionProductRowText} numberOfLines={1}>
+        {product.name || 'Untitled product'}
+      </Text>
+    </Pressable>
+  );
+}
+
+// The product inspector no longer edits product content inline -- a ProductElement only ever
+// references a real catalog product (see the type's own comment), so full editing (name,
+// price, photos, variants, etc.) lives in ProductEditScreen, one place shared by every site
+// that uses this product. This shows a live-resolved summary plus a deep link there, and keeps
+// only the one thing that's genuinely still worth a quick, no-navigation toggle here: flipping
+// in-stock/quantity straight to the live storeInventory doc without opening the full editor.
+function ProductInspectorSection({
+  element,
+  projectId,
+  publishSlug,
+  sym,
+}: {
+  element: ProductElement;
+  projectId?: string;
+  publishSlug?: string | null;
+  sym: string;
+}) {
+  const catalogProduct = useCatalogProduct(element.productId);
+  if (catalogProduct === undefined) {
+    return <ActivityIndicator color="#4338CA" style={{ marginTop: 12 }} />;
+  }
+  const product = resolveProductView(element, catalogProduct);
+  return (
+    <>
+      <View style={styles.productSummaryCard}>
+        {product.images[0] ? (
+          <View style={styles.productSummaryThumb}>
+            <Ionicons name="image" size={20} color="#CBD5E1" />
+          </View>
+        ) : (
+          <View style={[styles.productSummaryThumb, { alignItems: 'center', justifyContent: 'center' }]}>
+            <Ionicons name="pricetag-outline" size={20} color="#94A3B8" />
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.productSummaryName} numberOfLines={1}>
+            {product.name || 'Untitled product'}
+          </Text>
+          <Text style={styles.productSummaryPrice}>
+            {sym}
+            {product.priceUsd.toFixed(2)}
+            {product.saleType === 'service' ? ' · Service' : product.saleType === 'digital' ? ' · Digital' : ''}
+          </Text>
+        </View>
+      </View>
+
+      <Pressable style={styles.uploadBtn} onPress={() => navigateTo('ProductEdit', { productId: element.productId })}>
+        <Ionicons name="create-outline" size={18} color="#FFFFFF" />
+        <Text style={styles.uploadBtnText}>Edit Product</Text>
+      </Pressable>
+      <Text style={styles.helperText}>
+        Editing this product updates it everywhere it's used across your sites -- not just this one.
+      </Text>
+
+      {projectId && product.variantOptions.length === 0 ? (
+        <ProductLiveStockSave
+          projectId={projectId}
+          elementId={element.id}
+          inStock={product.inStock !== false}
+          stockQuantity={product.trackInventory ? product.initialStock ?? 0 : null}
+          published={!!publishSlug}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -381,22 +502,14 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               }
               return (
                 <View style={styles.rowButtons}>
-                  {targets.map((t) => {
-                    const selected = element.linkTargetElementId === t.id;
-                    const label = t.type === 'product' ? t.name || 'Untitled product' : t.name || 'Untitled collection';
-                    return (
-                      <Pressable
-                        key={t.id}
-                        style={[styles.toggleBtn, selected && styles.toggleBtnActive]}
-                        onPress={() => onChange({ linkTargetElementId: selected ? null : t.id, link: selected ? element.link : null } as any)}
-                      >
-                        <Text style={styles.toggleBtnText}>
-                          {t.type === 'product' ? '🛍️ ' : '📦 '}
-                          {label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                  {targets.map((t) => (
+                    <LinkTargetChip
+                      key={t.id}
+                      target={t}
+                      selected={element.linkTargetElementId === t.id}
+                      onToggle={(selected) => onChange({ linkTargetElementId: selected ? null : t.id, link: selected ? element.link : null } as any)}
+                    />
+                  ))}
                 </View>
               );
             })()}
@@ -584,233 +697,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
           </>
         )}
         {element.type === 'product' && (
-          <>
-            <Text style={styles.fieldLabel}>What is this?</Text>
-            <View style={styles.rowButtons}>
-              <Pressable
-                style={[styles.toggleBtn, element.saleType === 'product' && styles.toggleBtnActive]}
-                onPress={() => onChange({ saleType: 'product' } as any)}
-              >
-                <Text style={styles.toggleBtnText}>🛍️ Physical product</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.toggleBtn, element.saleType === 'digital' && styles.toggleBtnActive]}
-                onPress={() => onChange({ saleType: 'digital' } as any)}
-              >
-                <Text style={styles.toggleBtnText}>💾 Digital product</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.toggleBtn, element.saleType === 'service' && styles.toggleBtnActive]}
-                onPress={() => onChange({ saleType: 'service' } as any)}
-              >
-                <Text style={styles.toggleBtnText}>📅 Real-life service</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.fieldLabel}>
-              {element.saleType === 'service'
-                ? 'Buyers pick a date/time and pay once to reserve it — a real one-time booking payment, never a recurring charge.'
-                : element.saleType === 'digital'
-                  ? 'Buyers pay once and you deliver the file or link yourself afterward — no shipping, no pickup/delivery choice needed.'
-                  : 'Buyers add it to their cart and pay once — you choose pickup, delivery, or both below.'}
-            </Text>
-
-            <Text style={styles.fieldLabel}>Name</Text>
-            <TextInput style={styles.textInput} value={element.name} onChangeText={(name) => onChange({ name } as any)} />
-
-            <Text style={styles.fieldLabel}>Description</Text>
-            <TextInput
-              style={styles.textInput}
-              value={element.description}
-              onChangeText={(description) => onChange({ description } as any)}
-              multiline
-            />
-
-            <Text style={styles.fieldLabel}>Price ({sym.trim()})</Text>
-            <TextInput
-              style={styles.textInput}
-              value={String(element.priceUsd)}
-              keyboardType="decimal-pad"
-              onChangeText={(text) => {
-                const value = parseFloat(text);
-                onChange({ priceUsd: Number.isFinite(value) ? Math.max(0, value) : 0 } as any);
-              }}
-            />
-
-            <Text style={styles.fieldLabel}>Compare-at price (optional)</Text>
-            <TextInput
-              style={styles.textInput}
-              value={element.compareAtPriceUsd != null ? String(element.compareAtPriceUsd) : ''}
-              placeholder="e.g. 79.00"
-              placeholderTextColor="#94A3B8"
-              keyboardType="decimal-pad"
-              onChangeText={(text) => {
-                if (!text.trim()) {
-                  onChange({ compareAtPriceUsd: null } as any);
-                  return;
-                }
-                const value = parseFloat(text);
-                onChange({ compareAtPriceUsd: Number.isFinite(value) ? Math.max(0, value) : null } as any);
-              }}
-            />
-            <Text style={styles.helperText}>
-              Shown to buyers as a crossed-out "was" price next to your real price — leave blank to not show one. Doesn't change
-              what's actually charged.
-            </Text>
-
-            <Text style={styles.fieldLabel}>Your cost (optional, private)</Text>
-            <TextInput
-              style={styles.textInput}
-              value={element.costUsd != null ? String(element.costUsd) : ''}
-              placeholder="e.g. 22.00"
-              placeholderTextColor="#94A3B8"
-              keyboardType="decimal-pad"
-              onChangeText={(text) => {
-                if (!text.trim()) {
-                  onChange({ costUsd: null } as any);
-                  return;
-                }
-                const value = parseFloat(text);
-                onChange({ costUsd: Number.isFinite(value) ? Math.max(0, value) : null } as any);
-              }}
-            />
-            <Text style={styles.helperText}>
-              For your own margin tracking only — buyers and visitors never see this, it never appears anywhere on your published site.
-              {element.costUsd != null && element.priceUsd > element.costUsd
-                ? ` Profit: ${sym}${(element.priceUsd - element.costUsd).toFixed(2)} per sale.`
-                : ''}
-            </Text>
-
-            {element.images.length < MAX_PRODUCT_IMAGES ? (
-              <Pressable
-                style={styles.uploadBtn}
-                onPress={async () => {
-                  const uri = await pickImage();
-                  if (uri) onChange({ images: [...element.images, uri] } as any);
-                }}
-              >
-                <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.uploadBtnText}>Add Product Photo ({element.images.length}/{MAX_PRODUCT_IMAGES})</Text>
-              </Pressable>
-            ) : (
-              <Text style={styles.fieldLabel}>Photo limit reached ({MAX_PRODUCT_IMAGES}/{MAX_PRODUCT_IMAGES}) — remove one to add another.</Text>
-            )}
-            <Text style={styles.fieldLabel}>
-              The first photo is what shows on the main page card. All {element.images.length > 1 ? `${element.images.length} photos` : 'photos'}{' '}
-              are swipeable when a visitor taps to see more.
-            </Text>
-            <View style={styles.rowButtons}>
-              {element.images.map((uri, idx) => (
-                <Pressable
-                  key={uri + idx}
-                  style={styles.removeChip}
-                  onPress={() => onChange({ images: element.images.filter((_, i) => i !== idx) } as any)}
-                >
-                  <Text style={styles.removeChipText}>Photo {idx + 1}{idx === 0 ? ' (main)' : ''} ✕</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <ProductVariantsEditor
-              options={element.variantOptions}
-              variants={element.variants}
-              trackInventory={element.trackInventory}
-              baseFallbackPriceLabel={`Same as ${sym}${element.priceUsd.toFixed(2)}`}
-              onChange={(patch) => onChange(patch as any)}
-            />
-
-            {element.saleType === 'product' && (
-              <>
-                <Text style={styles.fieldLabel}>How do buyers get it?</Text>
-                <View style={styles.rowButtons}>
-                  {(['pickup', 'delivery', 'both'] as const).map((option) => (
-                    <Pressable
-                      key={option}
-                      style={[styles.toggleBtn, element.fulfillment === option && styles.toggleBtnActive]}
-                      onPress={() => onChange({ fulfillment: option } as any)}
-                    >
-                      <Text style={styles.toggleBtnText}>{option === 'pickup' ? 'Pickup' : option === 'delivery' ? 'Delivery' : 'Both'}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </>
-            )}
-            {element.saleType === 'service' && (
-              <SliderRow
-                label="Service duration (minutes)"
-                value={element.serviceDurationMinutes ?? 30}
-                min={5}
-                max={480}
-                step={5}
-                onChange={(v) => onChange({ serviceDurationMinutes: v } as any)}
-              />
-            )}
-
-            <Pressable
-              style={[styles.toggleBtn, element.trackInventory && styles.toggleBtnActive, { marginTop: 4 }]}
-              onPress={() =>
-                onChange({
-                  trackInventory: !element.trackInventory,
-                  initialStock: !element.trackInventory ? (element.initialStock ?? 10) : null,
-                } as any)
-              }
-            >
-              <Text style={styles.toggleBtnText}>
-                {element.saleType === 'service' ? 'Limit bookings' : element.saleType === 'digital' ? 'Limit copies for sale' : 'Track stock quantity'}{' '}
-                {element.trackInventory ? 'On' : 'Off'}
-              </Text>
-            </Pressable>
-            {element.trackInventory && element.variantOptions.length === 0 && (
-              <SliderRow
-                label={element.saleType === 'service' ? 'Bookings available' : element.saleType === 'digital' ? 'Copies for sale' : 'Starting stock'}
-                value={element.initialStock ?? 0}
-                min={0}
-                max={1000}
-                onChange={(v) => onChange({ initialStock: v } as any)}
-              />
-            )}
-            <Text style={styles.fieldLabel}>
-              {element.variantOptions.length > 0
-                ? element.trackInventory
-                  ? 'Stock is tracked per combination above — set each one’s starting stock there.'
-                  : 'Unlimited — buyers can always check out.'
-                : element.trackInventory
-                  ? `${element.saleType === 'service' ? 'Booking limit' : element.saleType === 'digital' ? 'Copies for sale' : 'Stock'} only sets on first publish — after that, only real ${element.saleType === 'service' ? 'bookings' : 'orders'} (or editing it here) change it.`
-                  : element.saleType === 'service'
-                    ? 'No limit on bookings — buyers can always reserve a slot.'
-                    : 'Unlimited — buyers can always check out.'}
-            </Text>
-
-            <Pressable
-              style={[
-                styles.toggleBtn,
-                element.inStock !== false && styles.toggleBtnActive,
-                { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
-              ]}
-              onPress={() => onChange({ inStock: element.inStock === false } as any)}
-            >
-              <Ionicons
-                name={element.inStock !== false ? 'checkmark-circle' : 'close-circle'}
-                size={16}
-                color={element.inStock !== false ? '#16A34A' : '#DC2626'}
-              />
-              <Text style={styles.toggleBtnText}>In Stock {element.inStock !== false ? 'On' : 'Off'}</Text>
-            </Pressable>
-            <Text style={styles.fieldLabel}>
-              {element.inStock !== false
-                ? 'Buyers can check out normally.'
-                : "Turned off — buyers will see it's out of stock and can't check out, no matter the quantity."}
-            </Text>
-
-            {projectId && element.variantOptions.length === 0 ? (
-              <ProductLiveStockSave
-                projectId={projectId}
-                elementId={element.id}
-                inStock={element.inStock !== false}
-                stockQuantity={element.trackInventory ? element.initialStock ?? 0 : null}
-                published={!!publishSlug}
-              />
-            ) : null}
-          </>
+          <ProductInspectorSection element={element} projectId={projectId} publishSlug={publishSlug} sym={sym} />
         )}
 
         {element.type === 'collection' && (
@@ -833,25 +720,18 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                   >
                     <Text style={styles.collectionSelectAllText}>{allSelected ? 'Clear all' : 'Select all'}</Text>
                   </Pressable>
-                  {availableProducts.map((p) => {
-                    const selected = element.productIds.includes(p.id);
-                    return (
-                      <Pressable
-                        key={p.id}
-                        style={[styles.collectionProductRow, selected && styles.collectionProductRowActive]}
-                        onPress={() =>
-                          onChange({
-                            productIds: selected ? element.productIds.filter((id) => id !== p.id) : [...element.productIds, p.id],
-                          } as any)
-                        }
-                      >
-                        <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={26} color={selected ? '#2563EB' : '#94A3B8'} />
-                        <Text style={styles.collectionProductRowText} numberOfLines={1}>
-                          {p.name || 'Untitled product'}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                  {availableProducts.map((p) => (
+                    <CollectionProductPickerRow
+                      key={p.id}
+                      productElement={p}
+                      selected={element.productIds.includes(p.id)}
+                      onToggle={(selected) =>
+                        onChange({
+                          productIds: selected ? element.productIds.filter((id) => id !== p.id) : [...element.productIds, p.id],
+                        } as any)
+                      }
+                    />
+                  ))}
                 </>
               );
             })()}
@@ -1326,153 +1206,6 @@ function CountdownTargetEditor({ targetIso, onChange }: { targetIso: string; onC
   );
 }
 
-// Add/rename/remove option groups (Size, Color, ...) and their values, regenerating the full
-// combination list on every change -- see regenerateVariants for why existing combinations'
-// price/stock overrides survive edits to unrelated options/values.
-function ProductVariantsEditor({
-  options,
-  variants,
-  trackInventory,
-  baseFallbackPriceLabel,
-  onChange,
-}: {
-  options: ProductVariantOption[];
-  variants: ProductVariant[];
-  trackInventory: boolean;
-  baseFallbackPriceLabel: string;
-  onChange: (patch: { variantOptions: ProductVariantOption[]; variants: ProductVariant[] }) => void;
-}) {
-  const [newOptionName, setNewOptionName] = useState('');
-
-  const setOptions = (nextOptions: ProductVariantOption[]) => {
-    onChange({ variantOptions: nextOptions, variants: regenerateVariants(nextOptions, variants) });
-  };
-
-  const addOption = () => {
-    const name = newOptionName.trim();
-    if (!name) return;
-    setOptions([...options, { name, values: [] }]);
-    setNewOptionName('');
-  };
-
-  const updateVariant = (key: string, patch: Partial<ProductVariant>) => {
-    onChange({ variantOptions: options, variants: variants.map((v) => (v.key === key ? { ...v, ...patch } : v)) });
-  };
-
-  return (
-    <View>
-      <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Variants (optional)</Text>
-      <Text style={styles.helperText}>
-        Add option groups like Size or Color — buyers pick one value from each before checking out. Leave empty for a simple product
-        with no choices.
-      </Text>
-
-      {options.map((option, index) => (
-        <View key={index} style={styles.variantOptionCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TextInput
-              style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
-              value={option.name}
-              onChangeText={(name) => setOptions(options.map((o, i) => (i === index ? { ...o, name } : o)))}
-              placeholder="e.g. Size"
-            />
-            <Pressable onPress={() => setOptions(options.filter((_, i) => i !== index))} hitSlop={8}>
-              <Ionicons name="trash-outline" size={18} color="#DC2626" />
-            </Pressable>
-          </View>
-          <View style={[styles.rowButtons, { marginTop: 8 }]}>
-            {option.values.map((value) => (
-              <Pressable
-                key={value}
-                style={styles.removeChip}
-                onPress={() => setOptions(options.map((o, i) => (i === index ? { ...o, values: o.values.filter((v) => v !== value) } : o)))}
-              >
-                <Text style={styles.removeChipText}>{value} ✕</Text>
-              </Pressable>
-            ))}
-          </View>
-          <VariantValueAdder
-            onAdd={(value) =>
-              setOptions(options.map((o, i) => (i === index && !o.values.includes(value) ? { ...o, values: [...o.values, value] } : o)))
-            }
-          />
-        </View>
-      ))}
-
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-        <TextInput
-          style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
-          value={newOptionName}
-          onChangeText={setNewOptionName}
-          placeholder="New option name, e.g. Color"
-        />
-        <Pressable style={styles.smallAddBtn} onPress={addOption}>
-          <Text style={styles.smallAddBtnText}>Add Option</Text>
-        </Pressable>
-      </View>
-
-      {variants.length > 0 && (
-        <>
-          <Text style={[styles.fieldLabel, { marginTop: 6 }]}>Combinations ({variants.length})</Text>
-          {variants.map((variant) => (
-            <View key={variant.key} style={styles.variantRow}>
-              <Text style={styles.variantRowLabel}>{variantLabelFor(options, variant.optionValues)}</Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-                <TextInput
-                  style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
-                  value={variant.priceUsd != null ? String(variant.priceUsd) : ''}
-                  placeholder={baseFallbackPriceLabel}
-                  placeholderTextColor="#94A3B8"
-                  keyboardType="decimal-pad"
-                  onChangeText={(text) => {
-                    if (!text.trim()) {
-                      updateVariant(variant.key, { priceUsd: null });
-                      return;
-                    }
-                    const value = parseFloat(text);
-                    updateVariant(variant.key, { priceUsd: Number.isFinite(value) ? Math.max(0, value) : null });
-                  }}
-                />
-                {trackInventory && (
-                  <TextInput
-                    style={[styles.textInput, { width: 80, marginBottom: 0 }]}
-                    value={String(variant.initialStock ?? 0)}
-                    placeholder="Stock"
-                    keyboardType="number-pad"
-                    onChangeText={(text) => {
-                      const value = parseInt(text, 10);
-                      updateVariant(variant.key, { initialStock: Number.isFinite(value) ? Math.max(0, value) : 0 });
-                    }}
-                  />
-                )}
-              </View>
-            </View>
-          ))}
-        </>
-      )}
-    </View>
-  );
-}
-
-function VariantValueAdder({ onAdd }: { onAdd: (value: string) => void }) {
-  const [value, setValue] = useState('');
-  return (
-    <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-      <TextInput style={[styles.textInput, { flex: 1, marginBottom: 0 }]} value={value} onChangeText={setValue} placeholder="e.g. Medium" />
-      <Pressable
-        style={styles.smallAddBtn}
-        onPress={() => {
-          if (!value.trim()) return;
-          onAdd(value.trim());
-          setValue('');
-        }}
-      >
-        <Text style={styles.smallAddBtnText}>Add</Text>
-      </Pressable>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { padding: 16, flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
@@ -1539,6 +1272,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   uploadBtnText: { color: '#FFFFFF', fontWeight: '600' },
+  productSummaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  productSummaryThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: '#F1F5F9' },
+  productSummaryName: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  productSummaryPrice: { fontSize: 13, color: '#4338CA', fontWeight: '700', marginTop: 2 },
   gameQuestionCard: {
     borderWidth: 1,
     borderColor: '#E2E8F0',

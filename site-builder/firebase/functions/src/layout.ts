@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement } from './types';
+import { CanvasElement, ButtonElement, CatalogProduct, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -83,7 +83,7 @@ function gameEl(partial: Partial<GameElement> & Pick<GameElement, 'y' | 'height'
   };
 }
 
-function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' | 'height' | 'name' | 'priceUsd'>): ProductElement {
+function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' | 'height'>): ProductElement {
   return {
     id: nextId('el'),
     type: 'product',
@@ -91,21 +91,15 @@ function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' |
     x: 0,
     width: CANVAS_WIDTH,
     zIndex: 1,
-    description: '',
-    compareAtPriceUsd: null,
-    costUsd: null,
-    images: [],
-    trackInventory: false,
-    initialStock: null,
-    inStock: true,
-    saleType: 'product',
-    fulfillment: 'pickup',
-    serviceDurationMinutes: null,
-    variantOptions: [],
-    variants: [],
     ...partial,
   };
 }
+
+// Real content for an AI-generated product section -- a ProductElement only ever stores a
+// productId now (see the type's own comment), so the caller (index.ts's pushPreview) needs
+// this alongside the elements to actually create/update the matching users/{uid}/products
+// catalog doc, the same way a human using ProductEditScreen would.
+export type LayoutProductContent = Omit<CatalogProduct, 'id' | 'createdAt' | 'updatedAt'>;
 
 function customWidgetEl(
   partial: Partial<CustomWidgetElement> & Pick<CustomWidgetElement, 'y' | 'height' | 'title' | 'code'>
@@ -205,15 +199,22 @@ export interface SectionCustomWidget {
   code: string | null;
 }
 
+export interface SitePlanLayout {
+  elements: CanvasElement[];
+  // Keyed by the same productId each element's ProductElement.productId points to.
+  productContents: Record<string, LayoutProductContent>;
+}
+
 export function layoutSitePlan(
   plan: SitePlan,
   sectionImages: SectionImage[],
   sectionVideos: SectionVideo[] = [],
   sectionProductImages: SectionProductImages[] = [],
   sectionCustomWidgets: SectionCustomWidget[] = []
-): CanvasElement[] {
+): SitePlanLayout {
   idCounter = 0;
   const elements: CanvasElement[] = [];
+  const productContents: Record<string, LayoutProductContent> = {};
   let y = 32;
 
   const imageFor = (section: SitePlanSection) => sectionImages.find((s) => s.section === section)?.url ?? null;
@@ -279,17 +280,24 @@ export function layoutSitePlan(
       // taller than a plain image section since a real product card needs more vertical
       // space than a decorative picture would.
       const productHeight = 340;
-      elements.push(
-        productEl({
-          y,
-          height: productHeight,
-          name,
-          description,
-          priceUsd: section.productPriceUsd || 0,
-          saleType: section.productSaleType || 'product',
-          images: urls,
-        })
-      );
+      const el = productEl({ y, height: productHeight });
+      elements.push(el);
+      productContents[el.productId] = {
+        name,
+        description,
+        priceUsd: section.productPriceUsd || 0,
+        compareAtPriceUsd: null,
+        costUsd: null,
+        images: urls,
+        trackInventory: false,
+        initialStock: null,
+        inStock: true,
+        saleType: section.productSaleType || 'product',
+        fulfillment: 'pickup',
+        serviceDurationMinutes: null,
+        variantOptions: [],
+        variants: [],
+      };
       y += productHeight + 16;
     }
 
@@ -415,7 +423,7 @@ export function layoutSitePlan(
     y += 24; // gap between sections
   });
 
-  return elements;
+  return { elements, productContents };
 }
 
 export function estimatedCanvasHeight(elements: CanvasElement[]): number {

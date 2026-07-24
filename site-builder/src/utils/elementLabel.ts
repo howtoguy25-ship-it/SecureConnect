@@ -19,7 +19,10 @@ export function labelForElement(element: CanvasElement): string {
     case 'videoEmbed':
       return element.title || 'Video (YouTube)';
     case 'product':
-      return element.name || 'Product';
+      // ProductElement only stores a productId now (see the type's own comment) -- its real
+      // name lives in the catalog and needs an async/live lookup, which this synchronous
+      // labeler (used for plain text labels in the Layers panel etc.) can't do.
+      return 'Product';
     case 'collection':
       return element.name || 'Collection';
     case 'game':

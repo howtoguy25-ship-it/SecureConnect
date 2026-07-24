@@ -14,7 +14,7 @@ import {
   DomainPurchase,
   DomainTransfer,
   UserAccount,
-  CanvasElement,
+  CatalogProduct,
   ProductElement,
   ProductVariantOption,
   StoreInventoryItem,
@@ -425,7 +425,19 @@ export const startGeneration = onCall(
       productImages: SectionProductImages[] = [],
       customWidgets: SectionCustomWidget[] = []
     ) => {
-      const previewElements = layoutSitePlan(currentPlan, images, videos, productImages, customWidgets);
+      const { elements: previewElements, productContents } = layoutSitePlan(currentPlan, images, videos, productImages, customWidgets);
+      // A ProductElement only ever stores a productId (see the type's own comment) -- an
+      // AI-generated product section needs a real catalog doc created for it too, exactly
+      // like a human using ProductEditScreen would create one. Plain overwrite (not a
+      // stock-preserving merge) is fine here: this doc doesn't exist until the AI build
+      // creates it, and every pushPreview call for the same build re-describes the same
+      // section, so there's no real seller edit or sale history to protect yet.
+      const now = Date.now();
+      await Promise.all(
+        Object.entries(productContents).map(([productId, content]) =>
+          db.collection('users').doc(uid).collection('products').doc(productId).set({ id: productId, ...content, createdAt: now, updatedAt: now })
+        )
+      );
       await projectRef.update({
         name: currentPlan.siteName,
         backgroundColor: currentPlan.backgroundColor,
@@ -962,16 +974,27 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
   // `elements` mirror -- check/publish across every page it actually has.
   const allElementsAcrossPages = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
 
+  // Product photos no longer need a check here -- ProductEditScreen uploads them immediately
+  // (see uploadLocalImage), unlike a canvas element's image/video/slideshow media, which can
+  // still be mid-upload at publish time.
   const hasLocalMedia = allElementsAcrossPages.some(
     (el) =>
       (el.type === 'image' && !!el.uri && !el.uri.startsWith('http')) ||
       (el.type === 'slideshow' && el.images.some((u) => !u.startsWith('http'))) ||
-      (el.type === 'video' && ((!!el.uri && !el.uri.startsWith('http')) || (!!el.audioUri && !el.audioUri.startsWith('http')))) ||
-      (el.type === 'product' && el.images.some((u) => !u.startsWith('http')))
+      (el.type === 'video' && ((!!el.uri && !el.uri.startsWith('http')) || (!!el.audioUri && !el.audioUri.startsWith('http'))))
   );
   if (hasLocalMedia) {
     throw new HttpsError('failed-precondition', 'Some media is still uploading — try publishing again in a moment.');
   }
+
+  // Pre-fetch every product this project's elements reference, once, so every page render
+  // (and syncStoreInventory below) resolves the same live catalog snapshot instead of each
+  // doing its own redundant Firestore reads.
+  const productElementsForPublish = allElementsAcrossPages.filter((el): el is ProductElement => el.type === 'product');
+  const catalogEntries = await Promise.all(
+    [...new Map(productElementsForPublish.map((el) => [el.productId, el])).values()].map(async (el) => [el.productId, await resolveCatalogProduct(uid, el)] as const)
+  );
+  const catalogProducts: Record<string, CatalogProduct> = Object.fromEntries(catalogEntries);
 
   // A site with product elements can't go live until the seller can actually get paid --
   // buyers would otherwise hit a real checkout that has nowhere to send the money. Building
@@ -1019,19 +1042,20 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
         DISCOUNT_ANNOUNCEMENT_URL,
         renderPageNavHtml(project.pages, page.slug),
         isLastPage,
-        currency
+        currency,
+        catalogProducts
       );
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, '', true, currency);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, '', true, currency, catalogProducts);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
   await db.collection('publishedSites').doc(slug).set(site);
   await projectRef.update({ publishSlug: slug, publishedAt: Date.now(), updatedAt: Date.now() });
-  await syncStoreInventory(uid, projectId, slug, project);
+  await syncStoreInventory(uid, projectId, slug, project, catalogProducts);
 
   const url = project.customDomain && project.domainStatus === 'active'
     ? `https://${project.customDomain}`
@@ -1050,22 +1074,58 @@ function variantLabelFor(options: ProductVariantOption[], optionValues: string[]
   return options.map((opt, i) => `${opt.name}: ${optionValues[i]}`).join(', ');
 }
 
-async function syncStoreInventory(uid: string, projectId: string, slug: string, project: Project): Promise<void> {
+// Mirrors the client's resolveProductView (src/utils/resolveProduct.ts): a ProductElement only
+// ever stores a productId now, so anything that needs real product content (name/price/images/
+// etc.) resolves it against the live catalog doc, falling back to whatever inline fields might
+// still be sitting on the element for data stored before the catalog existed.
+async function resolveCatalogProduct(uid: string, el: ProductElement): Promise<CatalogProduct> {
+  const doc = await db.collection('users').doc(uid).collection('products').doc(el.productId).get();
+  if (doc.exists) return doc.data() as CatalogProduct;
+  const legacy = el as unknown as Partial<CatalogProduct>;
+  return {
+    id: el.productId,
+    name: legacy.name ?? 'Untitled product',
+    description: legacy.description ?? '',
+    priceUsd: legacy.priceUsd ?? 0,
+    compareAtPriceUsd: legacy.compareAtPriceUsd ?? null,
+    costUsd: legacy.costUsd ?? null,
+    images: legacy.images ?? [],
+    trackInventory: legacy.trackInventory ?? false,
+    initialStock: legacy.initialStock ?? null,
+    inStock: legacy.inStock ?? true,
+    saleType: legacy.saleType ?? 'product',
+    fulfillment: legacy.fulfillment ?? 'pickup',
+    serviceDurationMinutes: legacy.serviceDurationMinutes ?? null,
+    variantOptions: legacy.variantOptions ?? [],
+    variants: legacy.variants ?? [],
+    createdAt: legacy.createdAt ?? 0,
+    updatedAt: legacy.updatedAt ?? 0,
+  };
+}
+
+// `catalogProducts`, if passed, must already have an entry for every element's productId
+// (see publishProject, which pre-fetches the same map for rendering) -- any element whose id
+// is missing from it falls back to resolveCatalogProduct's own legacy-element handling.
+async function syncStoreInventory(uid: string, projectId: string, slug: string, project: Project, catalogProducts?: Record<string, CatalogProduct>): Promise<void> {
   const allElements = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
   const productElements = allElements.filter((el): el is ProductElement => el.type === 'product');
   if (productElements.length === 0) return;
 
   const refs = productElements.map((el) => db.collection('storeInventory').doc(slug).collection('products').doc(el.productId));
-  const existingDocs = await Promise.all(refs.map((ref) => ref.get()));
+  const [existingDocs, products] = await Promise.all([
+    Promise.all(refs.map((ref) => ref.get())),
+    Promise.all(productElements.map((el) => catalogProducts?.[el.productId] ?? resolveCatalogProduct(uid, el))),
+  ]);
 
   const batch = db.batch();
   productElements.forEach((el, i) => {
+    const product = products[i];
     const existing = existingDocs[i];
     const existingItem = existing.exists ? (existing.data() as StoreInventoryItem) : undefined;
     const stockQuantity = existingItem
       ? existingItem.stockQuantity
-      : el.trackInventory
-        ? (el.initialStock ?? 0)
+      : product.trackInventory
+        ? (product.initialStock ?? 0)
         : null;
 
     // Same never-overwritten-by-republish rule as the top-level stockQuantity above, but
@@ -1074,14 +1134,14 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
     // brand new combination (e.g. a seller just added a new Size value) gets seeded from
     // initialStock.
     const existingVariantsByKey = new Map((existingItem?.variants ?? []).map((v) => [v.key, v]));
-    const variants = el.variants.map((v) => {
+    const variants = product.variants.map((v) => {
       const prior = existingVariantsByKey.get(v.key);
       return {
         key: v.key,
         optionValues: v.optionValues,
         priceUsd: v.priceUsd,
         sku: v.sku,
-        stockQuantity: prior ? prior.stockQuantity : el.trackInventory ? (v.initialStock ?? 0) : null,
+        stockQuantity: prior ? prior.stockQuantity : product.trackInventory ? (v.initialStock ?? 0) : null,
       };
     });
 
@@ -1090,17 +1150,17 @@ async function syncStoreInventory(uid: string, projectId: string, slug: string, 
       sellerUid: uid,
       projectId,
       slug,
-      name: el.name,
-      description: el.description,
-      priceUsd: el.priceUsd,
-      images: el.images,
-      trackInventory: el.trackInventory,
+      name: product.name,
+      description: product.description,
+      priceUsd: product.priceUsd,
+      images: product.images,
+      trackInventory: product.trackInventory,
       stockQuantity,
-      inStock: el.inStock,
-      saleType: el.saleType,
-      fulfillment: el.fulfillment,
-      serviceDurationMinutes: el.serviceDurationMinutes,
-      variantOptions: el.variantOptions,
+      inStock: product.inStock,
+      saleType: product.saleType,
+      fulfillment: product.fulfillment,
+      serviceDurationMinutes: product.serviceDurationMinutes,
+      variantOptions: product.variantOptions,
       variants,
       updatedAt: Date.now(),
     };
@@ -1149,11 +1209,12 @@ export const getPublishedSiteExport = onCall({ invoker: 'public' }, withCallable
   return { siteName: project.name, slug: project.publishSlug, pages };
 }));
 
-// Real, immediate stock/availability update for a product element -- separate from just
-// editing it in the inspector (which only ever changes the *draft*, applied on next
-// republish). This writes the draft element AND, if the site is already published, the live
-// storeInventory doc buyers are actually checking out against, so a seller flipping
-// "in stock" off or correcting a quantity takes effect right away without a full republish.
+// Real, immediate stock/availability update for a product -- separate from just editing it in
+// the catalog (which, for a product used across multiple sites, still needs each site's own
+// storeInventory doc pushed). This writes the catalog doc (the one place a product's real
+// inStock/initialStock live now) AND, if the site is already published, the live storeInventory
+// doc buyers are actually checking out against, so a seller flipping "in stock" off or
+// correcting a quantity takes effect right away without a full republish.
 export const updateProductStock = onCall({ invoker: 'public' }, withCallableErrors('updateProductStock', async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1170,22 +1231,13 @@ export const updateProductStock = onCall({ invoker: 'public' }, withCallableErro
   const project = snap.data() as Project | undefined;
   if (!project) throw new HttpsError('not-found', 'Project not found.');
 
-  const applyToElements = (elements: CanvasElement[]) =>
-    elements.map((el) => (el.id === elementId && el.type === 'product' ? { ...el, inStock, initialStock: stockQuantity } : el));
-
-  let productId: string | null = null;
-  if (project.pages && project.pages.length > 0) {
-    const found = project.pages.flatMap((p) => p.elements).find((el): el is ProductElement => el.id === elementId && el.type === 'product');
-    productId = found?.productId ?? null;
-    const pages = project.pages.map((p) => ({ ...p, elements: applyToElements(p.elements) }));
-    await projectRef.update({ pages, elements: pages[0].elements, backgroundColor: pages[0].backgroundColor, backgroundGradient: pages[0].backgroundGradient ?? null, updatedAt: Date.now() });
-  } else {
-    const found = project.elements.find((el): el is ProductElement => el.id === elementId && el.type === 'product');
-    productId = found?.productId ?? null;
-    await projectRef.update({ elements: applyToElements(project.elements), updatedAt: Date.now() });
-  }
-
+  const allElements = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
+  const found = allElements.find((el): el is ProductElement => el.id === elementId && el.type === 'product');
+  const productId = found?.productId ?? null;
   if (!productId) throw new HttpsError('not-found', 'Product element not found.');
+
+  await db.collection('users').doc(uid).collection('products').doc(productId)
+    .set({ inStock, initialStock: stockQuantity, updatedAt: Date.now() }, { merge: true });
 
   if (project.publishSlug) {
     const invRef = db.collection('storeInventory').doc(project.publishSlug).collection('products').doc(productId);
@@ -1216,10 +1268,30 @@ export const getProductStock = onRequest({ cors: true, invoker: 'public' }, asyn
   }
   const item = doc.data() as StoreInventoryItem;
   res.set('Cache-Control', 'no-store');
+
+  // Cosmetic fields (name/description/images) are re-fetched live from the seller's catalog doc
+  // so an edit made from the standalone Products screen shows up on an already-published page
+  // without a republish. Price/stock deliberately stay sourced from this storeInventory
+  // snapshot -- checkout validates against this same doc, so pulling price live from the
+  // (separately editable) catalog here could show a buyer one price and charge them another.
+  let name = item.name;
+  let description = item.description;
+  let images = item.images;
+  const catalogDoc = await db.collection('users').doc(item.sellerUid).collection('products').doc(productId).get();
+  if (catalogDoc.exists) {
+    const catalogProduct = catalogDoc.data() as CatalogProduct;
+    name = catalogProduct.name;
+    description = catalogProduct.description;
+    images = catalogProduct.images;
+  }
+
   // variants/variantOptions are included wholesale (not just the requested product's overall
   // stock) so the published page can build its size/color picker and show the right
   // price/stock for whichever combination a buyer selects, without a round trip per option.
   res.status(200).json({
+    name,
+    description,
+    images,
     trackInventory: item.trackInventory,
     stockQuantity: item.stockQuantity,
     inStock: item.inStock !== false,

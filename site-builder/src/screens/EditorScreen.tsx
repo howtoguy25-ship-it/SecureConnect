@@ -16,8 +16,9 @@ import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { productsStore } from '@/storage/productsStore';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
 import { labelForElement } from '@/utils/elementLabel';
@@ -54,6 +55,7 @@ function EditorInner({ navigation }: Props) {
     canRedo,
     publishStatus,
   } = useEditor();
+  const { user } = useAuth();
   const { theme } = useAppTheme();
   const [panel, setPanel] = useState<PanelTab>(null);
   // View-only lock for the whole page -- lets a user look at a finished page without a
@@ -258,12 +260,18 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
-  const addProduct = () => {
-    const el: ProductElement = {
-      id: generateId('el'),
-      type: 'product',
-      productId: generateId('prod'),
-      name: 'New product',
+  // A ProductElement only ever references a real catalog product now (see the type's own
+  // comment) -- inserting one here creates that catalog doc (same shape ProductEditScreen
+  // starts a brand new product with) and then sends the seller straight into
+  // ProductEditScreen to fill in name/price/photos, instead of leaving a nameless placeholder
+  // sitting on the canvas. Browsing/reusing an *existing* catalog product on insert (Phase 3)
+  // still needs its own picker UI -- this covers "create new" for now.
+  const addProduct = async () => {
+    if (!user) return;
+    const now = Date.now();
+    const product: CatalogProduct = {
+      id: generateId('prod'),
+      name: '',
       description: '',
       priceUsd: 10,
       compareAtPriceUsd: null,
@@ -277,6 +285,14 @@ function EditorInner({ navigation }: Props) {
       serviceDurationMinutes: null,
       variantOptions: [],
       variants: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await productsStore.save(user.uid, product);
+    const el: ProductElement = {
+      id: generateId('el'),
+      type: 'product',
+      productId: product.id,
       x: canvasCenterX - 90,
       y: canvasCenterY - 100,
       width: 180,
@@ -286,11 +302,7 @@ function EditorInner({ navigation }: Props) {
     addElement(el);
     select(el.id);
     setPanel(null);
-    // Force the inspector sheet open at full height even if it was left minimized from a
-    // previous selection -- a freshly-created "New product" placeholder is meaningless until
-    // its name/price/photo get filled in, so the create-a-product moment should land the
-    // user straight in those fields instead of a collapsed "tap to edit" row.
-    setSheetHeight(DEFAULT_SHEET_HEIGHT);
+    navigation.navigate('ProductEdit', { productId: product.id });
   };
 
   const addCollection = () => {

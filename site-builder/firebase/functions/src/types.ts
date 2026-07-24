@@ -140,36 +140,13 @@ export interface CatalogProduct {
   updatedAt: number;
 }
 
-// A sellable product block -- part of the canvas like any other element (positioned,
-// resized), but also mirrored server-side into a StoreInventoryItem at publish time (see
-// storeInventory in index.ts) since checkout has to validate price/stock authoritatively,
-// not trust whatever the client last rendered.
+// A sellable product block -- owns no product data of its own: `productId` references a real
+// CatalogProduct (users/{uid}/products), resolved live wherever it's needed (publish-time
+// snapshot, checkout, storeInventory sync). See the client's ProductElement comment for the
+// full rationale and the backward-compat fallback for elements stored before this change.
 export interface ProductElement extends BaseElement {
   type: 'product';
-  productId: string; // stable across republishes -- ties this element to its inventory doc
-  name: string;
-  description: string;
-  priceUsd: number;
-  // A crossed-out "was" price shown next to priceUsd on the published site -- marketing
-  // display only, never affects what's actually charged at checkout.
-  compareAtPriceUsd: number | null;
-  // What this costs the seller -- seller-only, never rendered on the published site.
-  costUsd: number | null;
-  images: string[];
-  trackInventory: boolean;
-  // Only used to *initialize* the inventory doc's stockQuantity the first time this
-  // product is published -- after that, stock is only ever changed by real orders
-  // decrementing it (or the seller editing it directly), never overwritten by a republish.
-  // For a 'service', this doubles as a cap on how many bookings will be accepted (no real
-  // calendar/time-slot conflict checking is built -- see ROADMAP.md Phase 10b scoping note).
-  initialStock: number | null;
-  // Manual "pause selling" switch -- see StoreInventoryItem.inStock's comment. Defaults true.
-  inStock: boolean;
-  saleType: ProductSaleType;
-  fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
-  serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
-  variantOptions: ProductVariantOption[]; // empty = simple product, no variant picker
-  variants: ProductVariant[]; // one per real combination across variantOptions
+  productId: string;
 }
 
 // Mirrors the client's CollectionElement -- see that file's comment for why productIds

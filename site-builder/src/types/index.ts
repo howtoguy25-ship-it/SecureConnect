@@ -212,39 +212,19 @@ export interface CatalogProduct {
   updatedAt: number;
 }
 
-// A sellable product block -- positioned/resized like any other canvas element, and also
-// mirrored server-side into a StoreInventoryItem at publish time (see storeInventory in
-// firebase/functions), since checkout validates price/stock authoritatively there, not
-// against whatever the client last rendered.
+// A sellable product block -- positioned/resized like any other canvas element, but owns no
+// product data of its own: `productId` references a real CatalogProduct (users/{uid}/products),
+// resolved live wherever this renders (editor canvas, published site, checkout) -- edit the
+// catalog product once, every page/site referencing it updates immediately, no republish
+// needed. This is a deliberate architecture change from the element owning its own inline
+// name/price/images/etc -- older stored elements may still carry those old inline fields at
+// runtime (TypeScript no longer declares them, but nothing has gone back and stripped them),
+// which every resolver below falls back to reading if no catalog doc exists yet for that
+// productId, so nothing silently breaks for a product that's never been touched since this
+// change landed.
 export interface ProductElement extends BaseElement {
   type: 'product';
-  productId: string; // stable across republishes -- ties this element to its inventory doc
-  name: string;
-  description: string;
-  priceUsd: number;
-  // A crossed-out "was" price shown next to priceUsd on the published site (e.g. "$59
-  // ~~$79~~") -- purely a marketing display, never affects what's actually charged at
-  // checkout. Null/0 means don't show one.
-  compareAtPriceUsd: number | null;
-  // What this item actually costs the seller to acquire/make -- shown only to the seller in
-  // the editor, for their own margin tracking. Never rendered anywhere on the published
-  // site or exposed to a buyer.
-  costUsd: number | null;
-  images: string[];
-  trackInventory: boolean;
-  // Only used to *initialize* stockQuantity the first time this product is published --
-  // after that, republishing never overwrites stock, only real orders/direct edits do.
-  // For a 'service', this doubles as a cap on how many bookings will be accepted (no real
-  // calendar/time-slot conflict checking is built).
-  initialStock: number | null;
-  // Manual "pause selling" switch, independent of stock count -- lets a seller instantly
-  // hide/disable buying without resetting their tracked quantity. Defaults true.
-  inStock: boolean;
-  saleType: ProductSaleType;
-  fulfillment: ProductFulfillment; // only meaningful when saleType === 'product'
-  serviceDurationMinutes: number | null; // only meaningful when saleType === 'service'
-  variantOptions: ProductVariantOption[]; // empty = simple product, no variant picker
-  variants: ProductVariant[]; // one per real combination across variantOptions
+  productId: string;
 }
 
 // Groups 2+ existing Product elements from the same page under one named, browsable card --

@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, Animated, Pressable, Modal, ScrollView, Linking } from 'react-native';
+import { View, Text, Image, StyleSheet, Animated, Pressable, Modal, ScrollView, Linking, ActivityIndicator } from 'react-native';
 import Svg, { Rect, Circle, Polygon, Line, Path } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useAudioPlayer } from 'expo-audio';
 import { LinearGradient } from 'expo-linear-gradient';
-import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement, CollectionElement } from '@/types';
+import { CanvasElement, VideoElement, VideoEmbedElement, ProductElement, CollectionElement, CatalogProduct } from '@/types';
 import { useGoogleFont } from '@/utils/useGoogleFont';
 import { gradientStartEnd } from '@/utils/gradient';
+import { useCatalogProduct } from '@/hooks/useCatalogProduct';
+import { resolveProductView } from '@/utils/resolveProduct';
 import GameView from '@/components/canvas/GameView';
 import WidgetView from '@/components/canvas/WidgetView';
 import CustomWidgetView from '@/components/canvas/CustomWidgetView';
@@ -204,12 +206,12 @@ function VideoEmbedView({ element, width, height }: { element: VideoEmbedElement
   );
 }
 
-function productBadge(element: ProductElement): string {
-  if (element.saleType === 'service') {
-    return `Service${element.serviceDurationMinutes ? ` · ${element.serviceDurationMinutes}m` : ''}`;
+function productBadge(product: CatalogProduct): string {
+  if (product.saleType === 'service') {
+    return `Service${product.serviceDurationMinutes ? ` · ${product.serviceDurationMinutes}m` : ''}`;
   }
-  if (element.saleType === 'digital') return 'Digital download';
-  return element.fulfillment === 'delivery' ? 'Delivery' : element.fulfillment === 'both' ? 'Delivery/Pickup' : 'Pickup';
+  if (product.saleType === 'digital') return 'Digital download';
+  return product.fulfillment === 'delivery' ? 'Delivery' : product.fulfillment === 'both' ? 'Delivery/Pickup' : 'Pickup';
 }
 
 // Editor-only preview of a sellable product block -- the real published version (with a
@@ -307,16 +309,27 @@ function ProductCardGallery({ images, width, height, compact }: { images: string
 
 function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
   const [showDetail, setShowDetail] = useState(false);
+  const catalogProduct = useCatalogProduct(element.productId);
   const MIN_TEXT_AREA = 62;
   const showImage = height - MIN_TEXT_AREA >= 28;
   const imageHeight = showImage ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
   const compact = width < 110;
-  const inStock = element.inStock !== false;
   const sym = useSellerCurrencySymbol();
+
+  if (catalogProduct === undefined) {
+    return (
+      <View style={[styles.placeholder, { width, height, borderRadius: 10 }]}>
+        <ActivityIndicator size="small" color="#94A3B8" />
+      </View>
+    );
+  }
+
+  const product = resolveProductView(element, catalogProduct);
+  const inStock = product.inStock !== false;
 
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
-      {showImage && <ProductCardGallery images={element.images} width={width} height={imageHeight} compact={compact} />}
+      {showImage && <ProductCardGallery images={product.images} width={width} height={imageHeight} compact={compact} />}
       {!inStock && (
         <View style={styles.outOfStockBadge}>
           <Text style={styles.outOfStockBadgeText}>Out of stock</Text>
@@ -324,23 +337,23 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
       )}
       <View style={{ padding: compact ? 6 : 8, flex: 1 }}>
         <Text numberOfLines={1} style={{ fontSize: compact ? 8 : 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
-          {productBadge(element)}
+          {productBadge(product)}
         </Text>
         <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: compact ? 11 : 13, color: '#0F172A', marginTop: 1 }}>
-          {element.name || 'Untitled product'}
+          {product.name || 'Untitled product'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-          <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700' }}>{sym}{element.priceUsd.toFixed(2)}</Text>
-          {element.compareAtPriceUsd != null && element.compareAtPriceUsd > element.priceUsd && !compact && (
+          <Text style={{ fontSize: compact ? 11 : 13, color: '#4338CA', fontWeight: '700' }}>{sym}{product.priceUsd.toFixed(2)}</Text>
+          {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && !compact && (
             <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-              {sym}{element.compareAtPriceUsd.toFixed(2)}
+              {sym}{product.compareAtPriceUsd.toFixed(2)}
             </Text>
           )}
         </View>
-        {element.trackInventory && !compact ? (
+        {product.trackInventory && !compact ? (
           <Text numberOfLines={1} style={{ fontSize: 10, color: inStock ? '#94A3B8' : '#DC2626', marginTop: 2, fontWeight: inStock ? '400' : '700' }}>
             {inStock
-              ? `${element.initialStock ?? 0} ${element.saleType === 'service' ? 'bookings left' : 'available'}`
+              ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings left' : 'available'}`
               : 'Out of stock'}
           </Text>
         ) : !compact ? (
@@ -358,23 +371,23 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         <View style={styles.detailBackdrop}>
           <View style={styles.detailCard}>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <ProductImageCarousel images={element.images} height={180} />
-              <Text style={styles.detailBadge}>{productBadge(element)}</Text>
-              <Text style={styles.detailName}>{element.name || 'Untitled product'}</Text>
+              <ProductImageCarousel images={product.images} height={180} />
+              <Text style={styles.detailBadge}>{productBadge(product)}</Text>
+              <Text style={styles.detailName}>{product.name || 'Untitled product'}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                <Text style={styles.detailPrice}>{sym}{element.priceUsd.toFixed(2)}</Text>
-                {element.compareAtPriceUsd != null && element.compareAtPriceUsd > element.priceUsd && (
+                <Text style={styles.detailPrice}>{sym}{product.priceUsd.toFixed(2)}</Text>
+                {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
                   <Text style={{ fontSize: 15, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-                    {sym}{element.compareAtPriceUsd.toFixed(2)}
+                    {sym}{product.compareAtPriceUsd.toFixed(2)}
                   </Text>
                 )}
               </View>
-              {!!element.description && <Text style={styles.detailDescription}>{element.description}</Text>}
+              {!!product.description && <Text style={styles.detailDescription}>{product.description}</Text>}
               <Text style={[styles.detailStock, { color: inStock ? '#16A34A' : '#DC2626', fontWeight: '700' }]}>
                 {inStock
-                  ? element.trackInventory
-                    ? `${element.initialStock ?? 0} ${element.saleType === 'service' ? 'bookings available' : 'available'}`
-                    : element.saleType === 'service'
+                  ? product.trackInventory
+                    ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings available' : 'available'}`
+                    : product.saleType === 'service'
                       ? 'Available to book'
                       : 'In stock'
                   : 'Out of stock'}
@@ -386,6 +399,60 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
           </View>
         </View>
       </Modal>
+    </View>
+  );
+}
+
+// Each grid thumbnail/detail row resolves its own catalog product independently -- a real
+// React component per item (not a loop of hook calls inside one component), so calling
+// useCatalogProduct here is safe even though CollectionView itself renders a variable number
+// of these.
+function CollectionThumb({ productElement, width, height, iconSize }: { productElement: ProductElement; width: number; height: number; iconSize: number }) {
+  const catalogProduct = useCatalogProduct(productElement.productId);
+  if (catalogProduct === undefined) {
+    return (
+      <View style={[styles.placeholder, { width, height, borderRadius: 0 }]}>
+        <ActivityIndicator size="small" color="#94A3B8" />
+      </View>
+    );
+  }
+  const product = resolveProductView(productElement, catalogProduct);
+  return product.images[0] ? (
+    <Image source={{ uri: product.images[0] }} style={{ width, height }} resizeMode="cover" />
+  ) : (
+    <View style={[styles.placeholder, { width, height, borderRadius: 0 }]}>
+      <Ionicons name="pricetag-outline" size={iconSize} color="#94A3B8" />
+    </View>
+  );
+}
+
+function CollectionDetailRow({ productElement, sym }: { productElement: ProductElement; sym: string }) {
+  const catalogProduct = useCatalogProduct(productElement.productId);
+  const product = resolveProductView(productElement, catalogProduct ?? null);
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingVertical: 8,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#E2E8F0',
+      }}
+    >
+      {product.images[0] ? (
+        <Image source={{ uri: product.images[0] }} style={{ width: 44, height: 44, borderRadius: 8 }} resizeMode="cover" />
+      ) : (
+        <View style={[styles.placeholder, { width: 44, height: 44 }]}>
+          <Ionicons name="pricetag-outline" size={14} color="#94A3B8" />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
+          {product.name || 'Untitled product'}
+        </Text>
+        <Text style={{ fontSize: 12, color: '#4338CA', fontWeight: '700' }}>{sym}{product.priceUsd.toFixed(2)}</Text>
+      </View>
     </View>
   );
 }
@@ -419,13 +486,7 @@ function CollectionView({
           <View style={{ width, height: gridHeight, flexDirection: 'row', flexWrap: 'wrap' }}>
             {thumbs.map((p) => (
               <View key={p.id} style={{ width: width / 2, height: gridHeight / 2 }}>
-                {p.images[0] ? (
-                  <Image source={{ uri: p.images[0] }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.placeholder, { width: '100%', height: '100%', borderRadius: 0 }]}>
-                    <Ionicons name="pricetag-outline" size={compact ? 12 : 18} color="#94A3B8" />
-                  </View>
-                )}
+                <CollectionThumb productElement={p} width={width / 2} height={gridHeight / 2} iconSize={compact ? 12 : 18} />
               </View>
             ))}
           </View>
@@ -461,33 +522,7 @@ function CollectionView({
               {products.length === 0 ? (
                 <Text style={styles.detailDescription}>No products added yet — edit this collection to pick some.</Text>
               ) : (
-                products.map((p) => (
-                  <View
-                    key={p.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 10,
-                      paddingVertical: 8,
-                      borderTopWidth: StyleSheet.hairlineWidth,
-                      borderTopColor: '#E2E8F0',
-                    }}
-                  >
-                    {p.images[0] ? (
-                      <Image source={{ uri: p.images[0] }} style={{ width: 44, height: 44, borderRadius: 8 }} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.placeholder, { width: 44, height: 44 }]}>
-                        <Ionicons name="pricetag-outline" size={14} color="#94A3B8" />
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text numberOfLines={1} style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>
-                        {p.name || 'Untitled product'}
-                      </Text>
-                      <Text style={{ fontSize: 12, color: '#4338CA', fontWeight: '700' }}>{sym}{p.priceUsd.toFixed(2)}</Text>
-                    </View>
-                  </View>
-                ))
+                products.map((p) => <CollectionDetailRow key={p.id} productElement={p} sym={sym} />)
               )}
             </ScrollView>
             <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>

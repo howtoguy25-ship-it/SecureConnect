@@ -13,8 +13,10 @@ import { uploadLocalImage } from '@/services/uploads';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
 import { generateId } from '@/utils/id';
-import { CatalogProduct, ProductSaleType } from '@/types';
+import { CatalogProduct, ProductSaleType, ProductVariantOption, ProductVariant } from '@/types';
 import SliderRow from '@/components/inspector/SliderRow';
+import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
+import { AppTheme } from '@/theme/appThemes';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProductEdit'>;
 
@@ -225,6 +227,15 @@ export default function ProductEditScreen({ navigation, route }: Props) {
           )}
         </View>
 
+        <ProductVariantsEditor
+          options={product.variantOptions}
+          variants={product.variants}
+          trackInventory={product.trackInventory}
+          baseFallbackPriceLabel={`Same as ${sym}${product.priceUsd.toFixed(2)}`}
+          onChange={(fields) => patch(fields)}
+          theme={theme}
+        />
+
         {product.saleType === 'product' && (
           <>
             <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>How do buyers get it?</Text>
@@ -263,7 +274,7 @@ export default function ProductEditScreen({ navigation, route }: Props) {
             {product.trackInventory ? 'On' : 'Off'}
           </Text>
         </Pressable>
-        {product.trackInventory && (
+        {product.trackInventory && product.variantOptions.length === 0 && (
           <SliderRow
             label={product.saleType === 'service' ? 'Bookings available' : product.saleType === 'digital' ? 'Copies for sale' : 'Starting stock'}
             value={product.initialStock ?? 0}
@@ -271,6 +282,9 @@ export default function ProductEditScreen({ navigation, route }: Props) {
             max={1000}
             onChange={(v) => patch({ initialStock: v })}
           />
+        )}
+        {product.trackInventory && product.variantOptions.length > 0 && (
+          <Text style={[styles.helperText, { color: theme.textMuted }]}>Stock is tracked per combination above — set each one's starting stock there.</Text>
         )}
 
         <Pressable
@@ -289,6 +303,165 @@ export default function ProductEditScreen({ navigation, route }: Props) {
   );
 }
 
+// Add/rename/remove option groups (Size, Color, ...) and their values, regenerating the full
+// combination list on every change -- see regenerateVariants for why existing combinations'
+// price/stock overrides survive edits to unrelated options/values.
+function ProductVariantsEditor({
+  options,
+  variants,
+  trackInventory,
+  baseFallbackPriceLabel,
+  onChange,
+  theme,
+}: {
+  options: ProductVariantOption[];
+  variants: ProductVariant[];
+  trackInventory: boolean;
+  baseFallbackPriceLabel: string;
+  onChange: (patch: { variantOptions: ProductVariantOption[]; variants: ProductVariant[] }) => void;
+  theme: AppTheme;
+}) {
+  const [newOptionName, setNewOptionName] = useState('');
+
+  const setOptions = (nextOptions: ProductVariantOption[]) => {
+    onChange({ variantOptions: nextOptions, variants: regenerateVariants(nextOptions, variants) });
+  };
+
+  const addOption = () => {
+    const name = newOptionName.trim();
+    if (!name) return;
+    setOptions([...options, { name, values: [] }]);
+    setNewOptionName('');
+  };
+
+  const updateVariant = (key: string, patch: Partial<ProductVariant>) => {
+    onChange({ variantOptions: options, variants: variants.map((v) => (v.key === key ? { ...v, ...patch } : v)) });
+  };
+
+  return (
+    <View>
+      <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Variants (optional)</Text>
+      <Text style={[styles.helperText, { color: theme.textMuted }]}>
+        Add option groups like Size or Color — buyers pick one value from each before checking out. Leave empty for a simple product
+        with no choices.
+      </Text>
+
+      {options.map((option, index) => (
+        <View key={index} style={[styles.variantOptionCard, { borderColor: theme.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TextInput
+              style={[styles.textInput, { flex: 1, color: theme.text, borderColor: theme.border }]}
+              value={option.name}
+              onChangeText={(name) => setOptions(options.map((o, i) => (i === index ? { ...o, name } : o)))}
+              placeholder="e.g. Size"
+              placeholderTextColor={theme.textMuted}
+            />
+            <Pressable onPress={() => setOptions(options.filter((_, i) => i !== index))} hitSlop={8}>
+              <Ionicons name="trash-outline" size={18} color="#DC2626" />
+            </Pressable>
+          </View>
+          <View style={[styles.rowButtons, { marginTop: 8 }]}>
+            {option.values.map((value) => (
+              <Pressable
+                key={value}
+                style={styles.removeChip}
+                onPress={() => setOptions(options.map((o, i) => (i === index ? { ...o, values: o.values.filter((v) => v !== value) } : o)))}
+              >
+                <Text style={styles.removeChipText}>{value} ✕</Text>
+              </Pressable>
+            ))}
+          </View>
+          <VariantValueAdder
+            theme={theme}
+            onAdd={(value) =>
+              setOptions(options.map((o, i) => (i === index && !o.values.includes(value) ? { ...o, values: [...o.values, value] } : o)))
+            }
+          />
+        </View>
+      ))}
+
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+        <TextInput
+          style={[styles.textInput, { flex: 1, color: theme.text, borderColor: theme.border }]}
+          value={newOptionName}
+          onChangeText={setNewOptionName}
+          placeholder="New option name, e.g. Color"
+          placeholderTextColor={theme.textMuted}
+        />
+        <Pressable style={[styles.smallAddBtn, { backgroundColor: theme.accent }]} onPress={addOption}>
+          <Text style={[styles.smallAddBtnText, { color: theme.accentText }]}>Add Option</Text>
+        </Pressable>
+      </View>
+
+      {variants.length > 0 && (
+        <>
+          <Text style={[styles.fieldLabel, { color: theme.textMuted, marginTop: 6 }]}>Combinations ({variants.length})</Text>
+          {variants.map((variant) => (
+            <View key={variant.key} style={[styles.variantRow, { borderColor: theme.border }]}>
+              <Text style={[styles.variantRowLabel, { color: theme.text }]}>{variantLabelFor(options, variant.optionValues)}</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                <TextInput
+                  style={[styles.textInput, { flex: 1, color: theme.text, borderColor: theme.border }]}
+                  value={variant.priceUsd != null ? String(variant.priceUsd) : ''}
+                  placeholder={baseFallbackPriceLabel}
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="decimal-pad"
+                  onChangeText={(text) => {
+                    if (!text.trim()) {
+                      updateVariant(variant.key, { priceUsd: null });
+                      return;
+                    }
+                    const value = parseFloat(text);
+                    updateVariant(variant.key, { priceUsd: Number.isFinite(value) ? Math.max(0, value) : null });
+                  }}
+                />
+                {trackInventory && (
+                  <TextInput
+                    style={[styles.textInput, { width: 80, color: theme.text, borderColor: theme.border }]}
+                    value={String(variant.initialStock ?? 0)}
+                    placeholder="Stock"
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType="number-pad"
+                    onChangeText={(text) => {
+                      const value = parseInt(text, 10);
+                      updateVariant(variant.key, { initialStock: Number.isFinite(value) ? Math.max(0, value) : 0 });
+                    }}
+                  />
+                )}
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
+function VariantValueAdder({ onAdd, theme }: { onAdd: (value: string) => void; theme: AppTheme }) {
+  const [value, setValue] = useState('');
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+      <TextInput
+        style={[styles.textInput, { flex: 1, color: theme.text, borderColor: theme.border }]}
+        value={value}
+        onChangeText={setValue}
+        placeholder="e.g. Medium"
+        placeholderTextColor={theme.textMuted}
+      />
+      <Pressable
+        style={[styles.smallAddBtn, { backgroundColor: theme.accent }]}
+        onPress={() => {
+          if (!value.trim()) return;
+          onAdd(value.trim());
+          setValue('');
+        }}
+      >
+        <Text style={[styles.smallAddBtnText, { color: theme.accentText }]}>Add</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8 },
@@ -296,11 +469,19 @@ const styles = StyleSheet.create({
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: 16, paddingBottom: 60 },
   fieldLabel: { fontSize: 13, fontWeight: '600', marginTop: 16, marginBottom: 6 },
-  textInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  helperText: { fontSize: 12, marginBottom: 10, lineHeight: 17 },
+  textInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, marginBottom: 0 },
   textArea: { minHeight: 80, textAlignVertical: 'top' },
   rowButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   toggleBtn: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   toggleBtnText: { fontSize: 13, fontWeight: '600' },
+  removeChip: { backgroundColor: '#FEE2E2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  removeChipText: { color: '#B91C1C', fontSize: 12, fontWeight: '600' },
+  variantOptionCard: { borderWidth: 1, borderRadius: 10, padding: 10, marginBottom: 10 },
+  variantRow: { borderWidth: 1, borderRadius: 10, padding: 10, marginBottom: 8 },
+  variantRowLabel: { fontSize: 13, fontWeight: '700' },
+  smallAddBtn: { borderRadius: 8, paddingHorizontal: 12, justifyContent: 'center' },
+  smallAddBtnText: { fontSize: 13, fontWeight: '700' },
   photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   photoThumbWrap: { width: 72, height: 72, position: 'relative' },
   photoThumb: { width: 72, height: 72, borderRadius: 10 },
