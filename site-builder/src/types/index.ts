@@ -429,6 +429,15 @@ export interface Project {
   // per-page), since a Privacy Policy or site menu is a whole-site concern, not a per-page one.
   policies?: PolicyDoc[];
   menu?: SiteMenu;
+  // Real site header chrome (hamburger + logo/name + search/cart) -- rendered automatically
+  // for every published site (AI-built or manual), see renderHeaderBarHtml in
+  // firebase/functions/src/siteHtml.ts and HeaderBarPreview.tsx for the editor's live match.
+  // No on/off flag: like the policy footer and announcement bar, this is always-on chrome,
+  // just configurable. logoUrl absent/null falls back to the site name as plain text.
+  logoUrl?: string | null;
+  logoHeightPx?: number; // default 32
+  logoFit?: 'contain' | 'cover'; // default 'contain'
+  headerDividerColor?: string; // default '#E2E8F0'
 }
 
 // -- AI Site Builder (Phase 3) --

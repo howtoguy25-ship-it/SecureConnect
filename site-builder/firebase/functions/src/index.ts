@@ -862,11 +862,12 @@ export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('
   const site: PublishedSite = { uid, projectId, html: '', updatedAt: Date.now() };
   const extraPagesHtml: Record<string, string> = {};
   const policies = project.policies ?? [];
+  const headerOpts = { logoUrl: project.logoUrl, logoHeightPx: project.logoHeightPx, logoFit: project.logoFit, headerDividerColor: project.headerDividerColor };
   for (const policy of policies) {
-    extraPagesHtml[policyHref(policy.id).replace(/^\//, '')] = renderPolicyPageHtml(project.name, policy, project.menu, project.pages, policies);
+    extraPagesHtml[policyHref(policy.id).replace(/^\//, '')] = renderPolicyPageHtml(project.name, policy, project.menu, project.pages, policies, headerOpts);
   }
   if (policies.length > 0) {
-    extraPagesHtml[POLICIES_INDEX_HREF.replace(/^\//, '')] = renderPoliciesIndexHtml(project.name, policies, project.menu, project.pages);
+    extraPagesHtml[POLICIES_INDEX_HREF.replace(/^\//, '')] = renderPoliciesIndexHtml(project.name, policies, project.menu, project.pages, headerOpts);
   }
 
   if (project.pages && project.pages.length > 0) {

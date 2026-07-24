@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Modal, Switch } from 'react-native';
+import { View, Text, TextInput, Image, ActivityIndicator, Pressable, ScrollView, StyleSheet, Modal, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { showAlert } from '@/utils/alert';
 import { generateId } from '@/utils/id';
 import { templateForPolicy, POLICY_KIND_LABELS } from '@/utils/richText';
+import { uploadLocalImage } from '@/services/uploads';
 import RichTextEditor from '@/components/policy/RichTextEditor';
+import SliderRow from '@/components/inspector/SliderRow';
 import { MenuItem, MenuItemTarget, PolicyDoc, PolicyKind, Project, SitePage } from '@/types';
 
 const STANDARD_KINDS: PolicyKind[] = ['privacy', 'terms', 'shipping', 'refund', 'contact'];
+const DIVIDER_SWATCHES = ['#E2E8F0', '#CBD5E1', '#0F172A', '#4338CA', '#EA580C', '#D4AF37'];
 
-type Tab = 'menu' | 'policies';
+type Tab = 'menu' | 'header' | 'policies';
 
 export default function MenuPoliciesModal({
   visible,
@@ -28,6 +32,23 @@ export default function MenuPoliciesModal({
   const [editingPolicyId, setEditingPolicyId] = useState<string | null>(null);
   const [addingMenuItem, setAddingMenuItem] = useState(false);
   const [editingMenuItemId, setEditingMenuItemId] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  const handlePickLogo = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
+    if (result.canceled || result.assets.length === 0) return;
+    setUploadingLogo(true);
+    try {
+      const url = await uploadLocalImage(result.assets[0].uri);
+      updateProject({ logoUrl: url });
+    } catch (err: any) {
+      showAlert('Could not upload logo', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
 
   const policies = project.policies ?? [];
   const menu = project.menu ?? { enabled: true, items: [] };
@@ -114,6 +135,9 @@ export default function MenuPoliciesModal({
           <Pressable style={[styles.tabBtn, tab === 'menu' && styles.tabBtnActive]} onPress={() => setTab('menu')}>
             <Text style={[styles.tabBtnText, tab === 'menu' && styles.tabBtnTextActive]}>Menu</Text>
           </Pressable>
+          <Pressable style={[styles.tabBtn, tab === 'header' && styles.tabBtnActive]} onPress={() => setTab('header')}>
+            <Text style={[styles.tabBtnText, tab === 'header' && styles.tabBtnTextActive]}>Header</Text>
+          </Pressable>
           <Pressable style={[styles.tabBtn, tab === 'policies' && styles.tabBtnActive]} onPress={() => setTab('policies')}>
             <Text style={[styles.tabBtnText, tab === 'policies' && styles.tabBtnTextActive]}>Policies</Text>
           </Pressable>
@@ -178,6 +202,87 @@ export default function MenuPoliciesModal({
                 <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
                 <Text style={styles.addBigBtnText}>Add menu item</Text>
               </Pressable>
+            </>
+          )}
+
+          {tab === 'header' && (
+            <>
+              <Text style={styles.sectionTitle}>Site logo</Text>
+              <Text style={styles.helperText}>
+                Shown at the top of every page in place of your site name. A transparent PNG blends into the header
+                naturally; a logo with its own background renders exactly as designed -- neither needs any special setup.
+              </Text>
+              {project.logoUrl ? (
+                <View style={styles.logoPreviewRow}>
+                  <View style={styles.logoPreviewBox}>
+                    <Image
+                      source={{ uri: project.logoUrl }}
+                      resizeMode={project.logoFit === 'cover' ? 'cover' : 'contain'}
+                      style={{ height: 36, width: 110 }}
+                    />
+                  </View>
+                  <Pressable style={styles.smallBtn} onPress={handlePickLogo} disabled={uploadingLogo}>
+                    {uploadingLogo ? <ActivityIndicator size="small" /> : <Text style={styles.smallBtnText}>Replace</Text>}
+                  </Pressable>
+                  <Pressable hitSlop={8} onPress={() => updateProject({ logoUrl: null })} style={{ marginLeft: 12 }}>
+                    <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable style={styles.addBigBtn} onPress={handlePickLogo} disabled={uploadingLogo}>
+                  {uploadingLogo ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="image-outline" size={18} color="#FFFFFF" />
+                      <Text style={styles.addBigBtnText}>Upload logo</Text>
+                    </>
+                  )}
+                </Pressable>
+              )}
+
+              {!!project.logoUrl && (
+                <>
+                  <View style={{ marginTop: 18 }}>
+                    <SliderRow
+                      label="Logo height"
+                      value={project.logoHeightPx ?? 32}
+                      min={20}
+                      max={80}
+                      step={1}
+                      onChange={(logoHeightPx) => updateProject({ logoHeightPx })}
+                    />
+                  </View>
+                  <Text style={[styles.sectionTitle, { marginTop: 14 }]}>Fit</Text>
+                  <View style={styles.chipRow}>
+                    <Pressable
+                      style={[styles.chip, (project.logoFit ?? 'contain') === 'contain' && styles.chipActive]}
+                      onPress={() => updateProject({ logoFit: 'contain' })}
+                    >
+                      <Text style={styles.chipText}>Contain (show whole logo)</Text>
+                    </Pressable>
+                    <Pressable style={[styles.chip, project.logoFit === 'cover' && styles.chipActive]} onPress={() => updateProject({ logoFit: 'cover' })}>
+                      <Text style={styles.chipText}>Cover (crop to fill)</Text>
+                    </Pressable>
+                  </View>
+                </>
+              )}
+
+              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Divider line colour</Text>
+              <Text style={styles.helperText}>The real line under your site's header, on every published page.</Text>
+              <View style={styles.chipRow}>
+                {DIVIDER_SWATCHES.map((hex) => (
+                  <Pressable
+                    key={hex}
+                    onPress={() => updateProject({ headerDividerColor: hex })}
+                    style={[
+                      styles.colorSwatch,
+                      { backgroundColor: hex },
+                      (project.headerDividerColor ?? '#E2E8F0').toUpperCase() === hex && styles.colorSwatchSelected,
+                    ]}
+                  />
+                ))}
+              </View>
             </>
           )}
 
@@ -441,6 +546,20 @@ const styles = StyleSheet.create({
   },
   itemLabel: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
   itemSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  logoPreviewRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  logoPreviewBox: {
+    flex: 1,
+    height: 56,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  colorSwatch: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: '#E2E8F0' },
+  colorSwatchSelected: { borderWidth: 3, borderColor: '#2563EB' },
   smallBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: '#F1F5F9' },
   smallBtnPrimary: { backgroundColor: '#111827' },
   smallBtnText: { fontSize: 12, fontWeight: '700', color: '#334155' },

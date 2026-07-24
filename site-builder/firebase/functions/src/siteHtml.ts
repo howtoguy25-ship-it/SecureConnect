@@ -2256,7 +2256,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         ? `<button id="${addBtnId}" style="margin-top:8px;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`
         : `<button disabled style="margin-top:8px;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:13px;cursor:not-allowed;">Coming Soon</button>`;
 
-      return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
+      return `<div id="el-${el.id}" data-product-name="${escapeAttr(el.name.toLowerCase())}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
@@ -2347,12 +2347,13 @@ ${script}`;
 // Stock/price are re-validated server-side in createStoreCheckout regardless of what's
 // baked into this page, so a stale published page can never let someone buy at an old
 // price or oversell what's actually left.
+// The real cart trigger (icon + live count badge) now lives inline in the header bar (see
+// renderHeaderBarHtml) instead of floating loose over the page -- this still renders the
+// panel/JS with the exact same element ids that trigger expects, so nothing else here
+// changes behavior.
 function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl: string, ordersByEmailUrl: string, currency = 'usd'): string {
   const sym = currencySymbol(currency);
-  return `<div id="sitespark-cart-fab" style="position:fixed;bottom:20px;right:20px;z-index:9998;width:56px;height:56px;border-radius:28px;background:#4338CA;color:#fff;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);" onclick="siteSparkCart.togglePanel()">
-  🛒<span id="sitespark-cart-count" style="position:absolute;top:-4px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 4px;">0</span>
-</div>
-<div id="sitespark-cart-panel" style="display:none;position:fixed;bottom:88px;right:20px;z-index:9998;width:280px;max-height:70vh;overflow-y:auto;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
+  return `<div id="sitespark-cart-panel" style="display:none;position:fixed;top:64px;right:16px;z-index:9998;width:280px;max-height:70vh;overflow-y:auto;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-family:-apple-system,sans-serif;padding:14px;">
   <div style="font-weight:700;margin-bottom:8px;color:#0F172A;">Your cart</div>
   <div id="sitespark-cart-items"></div>
   <div id="sitespark-booking-fields" style="display:none;margin-top:10px;border-top:1px solid #F1F5F9;padding-top:10px;">
@@ -2847,12 +2848,21 @@ export function renderRichTextParagraphsHtml(paragraphs: RichTextRun[][]): strin
 // (an explicit site-owner choice, distinct from never having set one up) only ever hides the
 // seller's own custom links, never these three baseline ones or Track/Stay Updated -- the
 // button/panel itself renders whenever there's anything at all to show.
+interface MenuHtml {
+  // Just the trigger -- no position:fixed, so it can sit inline inside the real header bar
+  // (renderHeaderBarHtml) instead of floating loose over the page content.
+  button: string;
+  // The slide-out drawer itself -- an inset:0 modal overlay, unaffected by where the button
+  // that opens it lives.
+  panel: string;
+}
+
 function renderMenuHtml(
   menu: SiteMenu | undefined,
   pages: SitePage[] | undefined,
   trackOrderEnabled: boolean,
   policies: PolicyDoc[] | undefined
-): string {
+): MenuHtml {
   const customItems = menu && menu.enabled ? menu.items : [];
   const linkStyle = 'display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;';
 
@@ -2888,10 +2898,10 @@ function renderMenuHtml(
     : '';
 
   const links = homeLink + catalogLink + customLinks + policiesLink + trackLink;
-  if (!links) return '';
+  if (!links) return { button: '', panel: '' };
 
-  return `<button aria-label="Menu" onclick="document.getElementById('sitespark-menu-panel').style.display='block'" style="position:fixed;top:14px;left:14px;z-index:9996;width:42px;height:42px;border-radius:10px;border:none;background:#0F172A;color:#fff;font-size:18px;cursor:pointer;">&#9776;</button>
-<div id="sitespark-menu-panel" style="display:none;position:fixed;inset:0;z-index:9998;background:#000000AA;" onclick="if(event.target===this)this.style.display='none';">
+  const button = `<button aria-label="Menu" onclick="document.getElementById('sitespark-menu-panel').style.display='block'" style="width:40px;height:40px;border-radius:10px;border:none;background:#0F172A;color:#fff;font-size:18px;cursor:pointer;flex-shrink:0;">&#9776;</button>`;
+  const panel = `<div id="sitespark-menu-panel" style="display:none;position:fixed;inset:0;z-index:9998;background:#000000AA;" onclick="if(event.target===this)this.style.display='none';">
   <div style="width:82%;max-width:300px;height:100%;background:#fff;box-shadow:2px 0 12px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif;overflow-y:auto;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #E2E8F0;">
       <span style="font-weight:800;font-size:15px;color:#0F172A;">Menu</span>
@@ -2899,6 +2909,75 @@ function renderMenuHtml(
     </div>
     ${links}
   </div>
+</div>`;
+  return { button, panel };
+}
+
+// Real, always-on site header chrome -- hamburger (left), logo or site name (center), real
+// product search + cart (right, only when the site actually sells something) -- rendered
+// automatically for every published page, AI-built or manual, matching the reference layout:
+// announcement bar, then this header bar, then the page content. No per-project opt-in;
+// like the announcement bar/policy footer, it's always there, just configurable (logo,
+// logo size/fit, divider color) via the Menu & Policies screen.
+export interface HeaderBarOptions {
+  siteName: string;
+  logoUrl?: string | null;
+  logoHeightPx?: number;
+  logoFit?: 'contain' | 'cover';
+  headerDividerColor?: string;
+}
+
+function renderHeaderBarHtml(opts: HeaderBarOptions, menuButton: string, hasProducts: boolean): string {
+  const dividerColor = opts.headerDividerColor || '#E2E8F0';
+  const logoHeight = opts.logoHeightPx || 32;
+  const logoFit = opts.logoFit || 'contain';
+
+  // A transparent-background PNG logo just naturally shows the header's own background
+  // through its transparent areas when rendered as a plain <img> -- no special-casing
+  // needed. A logo that already has its own baked-in background (a designed lockup, not a
+  // transparent mark) renders exactly as authored, for the same reason: this is just how
+  // <img> already works, not something to detect or branch on.
+  const brandHtml = opts.logoUrl
+    ? `<img src="${escapeAttr(opts.logoUrl)}" alt="${escapeAttr(opts.siteName)}" style="height:${logoHeight}px;max-width:60%;object-fit:${logoFit};display:block;" />`
+    : `<span style="font-weight:800;font-size:17px;letter-spacing:1.5px;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(opts.siteName.toUpperCase())}</span>`;
+
+  const searchHtml = hasProducts
+    ? `<button aria-label="Search" onclick="var r=document.getElementById('sitespark-search-row');var open=r.style.display==='flex';r.style.display=open?'none':'flex';if(!open)document.getElementById('sitespark-search-input').focus();" style="background:none;border:none;color:#0F172A;font-size:18px;cursor:pointer;flex-shrink:0;padding:4px;">&#128269;</button>`
+    : '';
+
+  const cartHtml = hasProducts
+    ? `<button aria-label="Cart" onclick="siteSparkCart.togglePanel()" style="position:relative;background:none;border:none;color:#0F172A;font-size:19px;cursor:pointer;flex-shrink:0;padding:4px;">
+  &#128722;<span id="sitespark-cart-count" style="position:absolute;top:-2px;right:-4px;background:#DC2626;color:#fff;border-radius:999px;min-width:16px;height:16px;font-size:10px;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px;">0</span>
+</button>`
+    : '';
+
+  const searchRow = hasProducts
+    ? `<div id="sitespark-search-row" style="display:none;padding:8px 16px 12px;">
+  <input id="sitespark-search-input" type="text" placeholder="Search products" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid ${escapeAttr(dividerColor)};border-radius:8px;font-size:14px;font-family:-apple-system,sans-serif;" />
+</div>
+<script>(function(){
+  var input = document.getElementById('sitespark-search-input');
+  if (!input) return;
+  input.addEventListener('input', function(){
+    var q = input.value.trim().toLowerCase();
+    document.querySelectorAll('[data-product-name]').forEach(function(card){
+      var name = card.getAttribute('data-product-name') || '';
+      card.style.display = (!q || name.indexOf(q) !== -1) ? '' : 'none';
+    });
+  });
+})();</script>`
+    : '';
+
+  return `<div style="width:100%;background:#FFFFFF;border-bottom:1px solid ${escapeAttr(dividerColor)};box-sizing:border-box;font-family:-apple-system,sans-serif;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;max-width:640px;margin:0 auto;box-sizing:border-box;">
+    <div style="flex:0 0 auto;min-width:40px;">${menuButton}</div>
+    <div style="flex:1;display:flex;justify-content:center;align-items:center;overflow:hidden;">${brandHtml}</div>
+    <div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;min-width:40px;justify-content:flex-end;">
+      ${searchHtml}
+      ${cartHtml}
+    </div>
+  </div>
+  ${searchRow}
 </div>`;
 }
 
@@ -2924,9 +3003,11 @@ export function renderPolicyPageHtml(
   policy: PolicyDoc,
   menu: SiteMenu | undefined,
   pages: SitePage[] | undefined,
-  policies: PolicyDoc[] | undefined
+  policies: PolicyDoc[] | undefined,
+  headerOpts?: Omit<HeaderBarOptions, 'siteName'>
 ): string {
   const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
+  const menuHtml = renderMenuHtml(menu, pages, false, policies);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2940,7 +3021,8 @@ export function renderPolicyPageHtml(
   </style>
 </head>
 <body>
-  ${renderMenuHtml(menu, pages, false, policies)}
+  ${renderHeaderBarHtml({ siteName, ...headerOpts }, menuHtml.button, false)}
+  ${menuHtml.panel}
   <div class="wrap">
     <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
     <h1 style="font-size:26px;margin:16px 0 20px;">${escapeHtml(policy.title)}</h1>
@@ -2957,7 +3039,8 @@ export function renderPoliciesIndexHtml(
   siteName: string,
   policies: PolicyDoc[],
   menu: SiteMenu | undefined,
-  pages: SitePage[] | undefined
+  pages: SitePage[] | undefined,
+  headerOpts?: Omit<HeaderBarOptions, 'siteName'>
 ): string {
   const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
   const rows = policies
@@ -2966,6 +3049,7 @@ export function renderPoliciesIndexHtml(
         `<a href="${escapeAttr(policyHref(p.id))}" style="display:block;padding:14px 16px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;margin-bottom:10px;color:#0F172A;font-weight:700;text-decoration:none;">${escapeHtml(p.title)}</a>`
     )
     .join('');
+  const menuHtml = renderMenuHtml(menu, pages, false, policies);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2979,7 +3063,8 @@ export function renderPoliciesIndexHtml(
   </style>
 </head>
 <body>
-  ${renderMenuHtml(menu, pages, false, policies)}
+  ${renderHeaderBarHtml({ siteName, ...headerOpts }, menuHtml.button, false)}
+  ${menuHtml.panel}
   <div class="wrap">
     <a href="${escapeAttr(homeHref)}" style="color:#2563EB;font-weight:600;font-size:13px;text-decoration:none;">&larr; Back to ${escapeHtml(siteName)}</a>
     <h1 style="font-size:26px;margin:16px 0 20px;">Policies</h1>
@@ -3000,10 +3085,10 @@ export function renderPoliciesIndexHtml(
 // toggle (see getActiveDiscountAnnouncement in index.ts).
 function renderDiscountAnnouncementScript(slug: string, announceUrl: string): string {
   const FIVE_MINUTES_MS = 5 * 60 * 1000;
-  // Left padding clears the fixed hamburger-menu button (top:14px;left:14px;42x42, see
-  // renderMenuHtml) which floats above this banner regardless of document flow -- without it
-  // the banner's own text would render directly underneath that button and get clipped/hidden.
-  return `<div id="sitespark-discount-banner" style="display:none;position:relative;width:100%;box-sizing:border-box;padding:12px 40px 12px 66px;background:linear-gradient(90deg,#7C3AED,#4338CA);color:#fff;font-family:-apple-system,sans-serif;font-size:13px;font-weight:700;text-align:center;">
+  // Right padding clears the dismiss (x) button, absolutely positioned inside this same bar.
+  // (No left-side compensation needed -- the hamburger menu now lives inline in the real
+  // header bar above, in normal document flow, not floating over this banner like before.)
+  return `<div id="sitespark-discount-banner" style="display:none;position:relative;width:100%;box-sizing:border-box;padding:12px 40px;background:linear-gradient(90deg,#7C3AED,#4338CA);color:#fff;font-family:-apple-system,sans-serif;font-size:13px;font-weight:700;text-align:center;">
   <span id="sitespark-discount-banner-text"></span>
   <button aria-label="Dismiss" onclick="siteSparkDiscountBanner.dismiss()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
 </div>
@@ -3055,6 +3140,7 @@ export function renderProjectHtml(
   currency = 'usd'
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
+  const menu = renderMenuHtml(project.menu, project.pages, hasProducts, project.policies);
   const hasMultiplayerGame = project.elements.some(
     (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
   );
@@ -3128,10 +3214,15 @@ export function renderProjectHtml(
 <body>
   ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
   ${needsThreeJs ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
-  ${renderMenuHtml(project.menu, project.pages, hasProducts, project.policies)}
+  ${renderAnnouncementBars(project)}
+  ${renderHeaderBarHtml(
+    { siteName: project.name, logoUrl: project.logoUrl, logoHeightPx: project.logoHeightPx, logoFit: project.logoFit, headerDividerColor: project.headerDividerColor },
+    menu.button,
+    hasProducts
+  )}
+  ${menu.panel}
   ${navHtml}
   ${hasProducts ? renderDiscountAnnouncementScript(slug, discountAnnouncementUrl) : ''}
-  ${renderAnnouncementBars(project)}
   <div id="site-wrapper">
     <div id="canvas">
       ${elementsHtml}

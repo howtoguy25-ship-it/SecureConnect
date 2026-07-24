@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Modal, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Modal, ScrollView, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Project } from '@/types';
@@ -7,6 +7,73 @@ import DraggableElement from '@/components/canvas/DraggableElement';
 import AnnouncementBarView from '@/components/canvas/AnnouncementBarView';
 import RichTextView from '@/components/policy/RichTextView';
 import { gradientStartEnd } from '@/utils/gradient';
+
+// The same real header chrome every published page gets automatically (see
+// renderHeaderBarHtml in siteHtml.ts) -- hamburger, logo/site name, search/cart icons --
+// shown live while building, matching the published layout exactly. The hamburger opens a
+// preview of the real resolved menu (same items renderMenuHtml would show); search/cart are
+// shown as real icons but aren't interactive here since there's no running cart/search
+// runtime until the site is actually published -- this is a design canvas, not a browser.
+function HeaderBarPreview({ project, width, hasProducts }: { project: Project; width: number; hasProducts: boolean }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const dividerColor = project.headerDividerColor || '#E2E8F0';
+  const logoHeight = project.logoHeightPx || 32;
+  const customItems = project.menu?.enabled ? project.menu.items : [];
+  const hasPolicies = (project.policies?.length ?? 0) > 0;
+  const hasMenu = !!project.pages?.length || hasProducts || customItems.length > 0 || hasPolicies;
+
+  return (
+    <View style={[styles.headerBar, { width, borderBottomColor: dividerColor }]}>
+      <View style={styles.headerRow}>
+        <Pressable
+          onPress={() => hasMenu && setMenuOpen(true)}
+          style={[styles.headerMenuBtn, !hasMenu && { opacity: 0.35 }]}
+          hitSlop={8}
+        >
+          <Ionicons name="menu" size={20} color="#fff" />
+        </Pressable>
+        <View style={styles.headerBrand}>
+          {project.logoUrl ? (
+            <Image
+              source={{ uri: project.logoUrl }}
+              resizeMode={project.logoFit === 'cover' ? 'cover' : 'contain'}
+              style={{ height: logoHeight, width: logoHeight * 3 }}
+            />
+          ) : (
+            <Text style={styles.headerBrandText} numberOfLines={1}>
+              {project.name.toUpperCase()}
+            </Text>
+          )}
+        </View>
+        <View style={styles.headerIcons}>
+          {hasProducts && <Ionicons name="search-outline" size={18} color="#0F172A" />}
+          {hasProducts && <Ionicons name="bag-outline" size={19} color="#0F172A" />}
+        </View>
+      </View>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.policyModalBackdrop} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menuPreviewCard}>
+            <View style={styles.policyModalHeader}>
+              <Text style={styles.policyModalTitle}>Menu</Text>
+              <Pressable hitSlop={8} onPress={() => setMenuOpen(false)}>
+                <Ionicons name="close" size={22} color="#94A3B8" />
+              </Pressable>
+            </View>
+            {!!project.pages?.length && <Text style={styles.menuPreviewRow}>Home</Text>}
+            {hasProducts && <Text style={styles.menuPreviewRow}>🛍️ Catalog</Text>}
+            {customItems.map((item) => (
+              <Text key={item.id} style={styles.menuPreviewRow} numberOfLines={1}>
+                {item.label}
+              </Text>
+            ))}
+            {hasPolicies && <Text style={styles.menuPreviewRow}>Policies</Text>}
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
 
 // The same real, evenly-spaced policy button row every published page gets automatically
 // (see renderPolicyFooterHtml in siteHtml.ts) -- shown live while building, not just after
@@ -120,6 +187,7 @@ export default function Canvas({
 }: Props) {
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
   const sizeStyle = { width: project.canvasSize.width, height: project.canvasSize.height };
+  const hasProducts = project.elements.some((el) => el.type === 'product');
 
   const content = (
     <>
@@ -160,7 +228,8 @@ export default function Canvas({
     const { start, end } = gradientStartEnd(project.backgroundGradient.angle);
     return (
       <View>
-        <LinearGradient colors={project.backgroundGradient.colors} start={start} end={end} style={[styles.canvas, sizeStyle]}>
+        <HeaderBarPreview project={project} width={project.canvasSize.width} hasProducts={hasProducts} />
+        <LinearGradient colors={project.backgroundGradient.colors} start={start} end={end} style={[styles.canvas, sizeStyle, styles.canvasBelowHeader]}>
           {content}
         </LinearGradient>
         {onExtend && <ExtendCanvasButton width={project.canvasSize.width} onPress={onExtend} />}
@@ -172,7 +241,8 @@ export default function Canvas({
 
   return (
     <View>
-      <View style={[styles.canvas, sizeStyle, { backgroundColor: project.backgroundColor }]}>{content}</View>
+      <HeaderBarPreview project={project} width={project.canvasSize.width} hasProducts={hasProducts} />
+      <View style={[styles.canvas, sizeStyle, styles.canvasBelowHeader, { backgroundColor: project.backgroundColor }]}>{content}</View>
       {onExtend && <ExtendCanvasButton width={project.canvasSize.width} onPress={onExtend} />}
       <PolicyFooterBar project={project} width={project.canvasSize.width} />
       <SiteSparkBadgePreview width={project.canvasSize.width} isLastPage={isLastPage} />
@@ -202,6 +272,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   badgePreviewText: { fontSize: 11, color: '#64748B', textAlign: 'center', fontStyle: 'italic' },
+  headerBar: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomWidth: 1,
+    overflow: 'hidden',
+  },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  headerMenuBtn: { width: 34, height: 34, borderRadius: 9, backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center' },
+  headerBrand: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  headerBrandText: { fontSize: 14, fontWeight: '800', letterSpacing: 1, color: '#0F172A' },
+  headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 34, justifyContent: 'flex-end' },
+  menuPreviewCard: {
+    alignSelf: 'flex-start',
+    marginTop: 60,
+    marginLeft: 16,
+    width: '78%',
+    maxWidth: 280,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 18,
+  },
+  menuPreviewRow: { fontSize: 13, fontWeight: '600', color: '#0F172A', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  canvasBelowHeader: { borderTopLeftRadius: 0, borderTopRightRadius: 0 },
   canvas: {
     overflow: 'hidden',
     borderRadius: 18,
