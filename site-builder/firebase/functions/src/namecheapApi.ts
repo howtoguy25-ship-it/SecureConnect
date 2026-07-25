@@ -31,8 +31,28 @@ function buildUrl(creds: NamecheapCredentials, command: string, params: Record<s
   return url.toString();
 }
 
+// Real domain searches were hanging on the spinner with no error and no result for as long
+// as a minute (the platform's own function-level deadline) whenever this request stalled --
+// a VPC connector/NAT egress hiccup en route to Namecheap can black-hole the TCP connection
+// entirely (no error, just silence), and a bare fetch() with no timeout of its own just waits
+// however long the platform lets it. A real, much shorter timeout here means a stalled call
+// fails fast with an honest, actionable message instead of leaving the UI spinning.
+const NAMECHEAP_TIMEOUT_MS = 15000;
+
 async function callNamecheap(creds: NamecheapCredentials, command: string, params: Record<string, string>): Promise<any> {
-  const res = await fetch(buildUrl(creds, command, params));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), NAMECHEAP_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(creds, command, params), { signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Namecheap did not respond in time -- try searching again in a moment.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await res.text();
   const parsed = parser.parse(text);
   const apiResponse = parsed?.ApiResponse;

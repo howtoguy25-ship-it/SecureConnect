@@ -1179,13 +1179,22 @@ async function doPublishProject(uid: string, projectId: string): Promise<{ slug:
 
   if (project.pages && project.pages.length > 0) {
     const pagesHtml: Record<string, string> = { ...extraPagesHtml };
+    // Home's real slug is '' (see SitePage's own comment) -- but `site.pages` is a Firestore
+    // map field, and the Admin SDK's document-transform walk rejects ANY object key that's an
+    // empty string (throws "Element at index 0 should not be an empty string.") before the
+    // write even reaches Firestore, which is exactly what was making every multi-page website
+    // fail to publish. Home's HTML goes straight into `site.html` below instead of into this
+    // map -- servePublishedSite already treats `site.html` as the real source for the root
+    // path (its own `site.pages['']` read is just a redundant fallback), so nothing about how
+    // a published site is served actually changes.
+    let homeHtml = '';
     for (let i = 0; i < project.pages.length; i++) {
       const page = project.pages[i];
       const pageProject: Project = { ...project, elements: page.elements, backgroundColor: page.backgroundColor, backgroundGradient: page.backgroundGradient };
       // "Built by SiteSpark" only ever appears once for the whole site -- on the very last
       // page -- never once per page, so a 3-page site doesn't show it 3 times.
       const isLastPage = i === project.pages.length - 1;
-      pagesHtml[page.slug] = renderProjectHtml(
+      const pageHtml = renderProjectHtml(
         pageProject,
         slug,
         STORE_CHECKOUT_URL,
@@ -1200,9 +1209,11 @@ async function doPublishProject(uid: string, projectId: string): Promise<{ slug:
         catalogProducts,
         siteBaseHref
       );
+      if (page.slug) pagesHtml[page.slug] = pageHtml;
+      else homeHtml = pageHtml;
     }
     site.pages = pagesHtml;
-    site.html = pagesHtml[project.pages[0].slug];
+    site.html = homeHtml;
   } else {
     site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, '', true, currency, catalogProducts, siteBaseHref);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
@@ -1600,12 +1611,13 @@ export const servePublishedSite = onRequest({ invoker: 'public' }, async (req, r
   }
 
   res.set('Cache-Control', 'public, max-age=60');
-  // A manually-built multi-page website keys every real page by its slug segment ('' for
-  // Home) in `site.pages`; a single-page project has no `site.pages` entry for Home at all
-  // (its Home is just `site.html`), but MAY still have policy/policies-index sub-pages
-  // stashed there (see publishProject) -- so a non-root path always checks `site.pages`
-  // first regardless of whether this is "really" a multi-page site, and only root falls
-  // back to `site.html` when there's no explicit '' entry.
+  // A manually-built multi-page website keys every real non-Home page by its slug segment in
+  // `site.pages`; Home (real slug '') is never a key in that map -- Firestore rejects an
+  // empty-string map key outright -- so Home's HTML always lives in `site.html` instead (see
+  // publishProject). A single-page project has no `site.pages` entry for Home either, for the
+  // same reason, but MAY still have policy/policies-index sub-pages stashed there -- so a
+  // non-root path always checks `site.pages` first regardless of whether this is "really" a
+  // multi-page site, and root always falls back to `site.html`.
   const pageSlug = pagePath.replace(/^\/|\/$/g, '');
   if (pageSlug) {
     const pageHtml = site.pages?.[pageSlug];
