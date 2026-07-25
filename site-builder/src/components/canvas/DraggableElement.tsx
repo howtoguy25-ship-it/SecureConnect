@@ -70,6 +70,40 @@ const TAP_MOVE_THRESHOLD = 6;
 
 type Touch = { pageX: number; pageY: number };
 
+// clampBoxToCanvas (used for a plain move) treats x/y as free -- pin whichever edge is
+// out of bounds back inside, no matter which edge that pushes. That's wrong for a resize:
+// dragging the RIGHT-side handle out has a FIXED left edge (the anchor corner never moves),
+// so once the box would grow past the canvas's right edge, only the WIDTH should stop
+// growing -- clampBoxToCanvas instead recomputed x from the (still-growing) width, which
+// silently dragged the whole box's left edge backwards even though the user's finger was
+// only ever moving further right. That's what read as the resize "blocking"/jumping instead
+// of just stopping cleanly at the edge. This clamps each axis against whichever edge that
+// corner actually anchors, so the anchor corner truly never moves during a resize.
+function clampResizeToCanvas(box: Box, corner: Corner, canvasSize: { width: number; height: number }): Box {
+  let { x, y, width, height } = box;
+  if (corner === 'tr' || corner === 'br') {
+    // Left edge anchored -- width can't push the right edge past canvasSize.width.
+    width = Math.min(width, Math.max(0, canvasSize.width - x));
+  } else {
+    // Right edge anchored (origin.x + origin.width) -- x can't go below 0.
+    if (x < 0) {
+      width = Math.max(0, width + x);
+      x = 0;
+    }
+  }
+  if (corner === 'bl' || corner === 'br') {
+    // Top edge anchored -- height can't push the bottom edge past canvasSize.height.
+    height = Math.min(height, Math.max(0, canvasSize.height - y));
+  } else {
+    // Bottom edge anchored (origin.y + origin.height) -- y can't go below 0.
+    if (y < 0) {
+      height = Math.max(0, height + y);
+      y = 0;
+    }
+  }
+  return { x, y, width, height };
+}
+
 function resizeFromCorner(corner: Corner, origin: Box, dx: number, dy: number, minWidth = MIN_SIZE, minHeight = MIN_SIZE): Box {
   let width = origin.width;
   let height = origin.height;
@@ -244,7 +278,7 @@ export default function DraggableElement({
           const minHeight = elementRef.current.type === 'product' ? MIN_PRODUCT_HEIGHT : MIN_SIZE;
           const origin = originRef.current.box;
           const resized = resizeFromCorner(corner, origin, dx, dy, minWidth, minHeight);
-          setBox(clampBoxToCanvas(resized, canvasSizeRef.current));
+          setBox(clampResizeToCanvas(resized, corner, canvasSizeRef.current));
 
           // Canva-style: dragging any corner in shrinks the text along with the box,
           // dragging out grows it -- instead of the old behavior where only the box
