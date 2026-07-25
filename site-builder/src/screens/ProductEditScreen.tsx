@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Image, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -66,6 +66,7 @@ export default function ProductEditScreen({ navigation, route }: Props) {
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sym, setSym] = useState('$');
+  const [viewingPhotoIndex, setViewingPhotoIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!productId) return;
@@ -219,7 +220,9 @@ export default function ProductEditScreen({ navigation, route }: Props) {
         <View style={styles.photoRow}>
           {product.images.map((uri, idx) => (
             <View key={uri + idx} style={styles.photoThumbWrap}>
-              <Image source={{ uri }} style={styles.photoThumb} />
+              <Pressable onPress={() => setViewingPhotoIndex(idx)}>
+                <Image source={{ uri }} style={styles.photoThumb} />
+              </Pressable>
               <Pressable style={styles.photoRemoveBtn} onPress={() => patch({ images: product.images.filter((_, i) => i !== idx) })}>
                 <Ionicons name="close" size={12} color="#FFFFFF" />
               </Pressable>
@@ -327,6 +330,17 @@ export default function ProductEditScreen({ navigation, route }: Props) {
           {saving ? <ActivityIndicator color={theme.accentText} /> : <Text style={[styles.saveBtnText, { color: theme.accentText }]}>Save</Text>}
         </Pressable>
       </ScrollView>
+
+      <Modal visible={viewingPhotoIndex != null} transparent animationType="fade" onRequestClose={() => setViewingPhotoIndex(null)}>
+        <View style={styles.photoLightboxBackdrop}>
+          <Pressable style={styles.photoLightboxClose} onPress={() => setViewingPhotoIndex(null)} hitSlop={12}>
+            <Ionicons name="close" size={28} color="#FFFFFF" />
+          </Pressable>
+          {viewingPhotoIndex != null && (
+            <Image source={{ uri: product.images[viewingPhotoIndex] }} style={styles.photoLightboxImage} resizeMode="contain" />
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -517,4 +531,7 @@ const styles = StyleSheet.create({
   photoAddBtn: { width: 72, height: 72, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
   saveBtn: { marginTop: 28, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   saveBtnText: { fontSize: 16, fontWeight: '700' },
+  photoLightboxBackdrop: { flex: 1, backgroundColor: '#000000EE', alignItems: 'center', justifyContent: 'center' },
+  photoLightboxClose: { position: 'absolute', top: 50, right: 20, zIndex: 1 },
+  photoLightboxImage: { width: '100%', height: '80%' },
 });

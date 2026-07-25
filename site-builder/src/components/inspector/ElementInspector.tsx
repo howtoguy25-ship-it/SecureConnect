@@ -38,6 +38,15 @@ interface Props {
   // Only read by the 'customWidget' case, so the AI has real site context (rather than a
   // generic default) to design the widget's look around.
   siteName?: string;
+  // Opens a full account-catalog picker for a Button's link target -- lets a seller link
+  // straight to any product they've ever created, not just one already placed on this page
+  // (see EditorScreen's insertProductAndLinkButton). Only the 'button' case uses this.
+  onPickProductForLink?: () => void;
+  // Only the 'section' case uses these -- adding a text child and bulk-applying a font/size
+  // to every existing text child both need to create/update OTHER elements, not just patch
+  // the section itself, which is all onChange above can do.
+  onAddSectionText?: () => void;
+  onApplySectionTextStyle?: (patch: { fontFamily?: string; fontSize?: number }) => void;
 }
 
 // Pushes a product's in-stock switch + current quantity straight to the live storeInventory
@@ -426,7 +435,7 @@ function CustomWidgetGenerator({
   );
 }
 
-export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug, siteName }: Props) {
+export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug, siteName, onPickProductForLink, onAddSectionText, onApplySectionTextStyle }: Props) {
   const { user } = useAuth();
   const [sellerCurrency, setSellerCurrency] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -562,6 +571,12 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                 </View>
               );
             })()}
+            {!!onPickProductForLink && (
+              <Pressable style={styles.insertProductLinkBtn} onPress={onPickProductForLink}>
+                <Ionicons name="pricetag-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.insertProductLinkBtnText}>Insert product from catalog…</Text>
+              </Pressable>
+            )}
 
             <SliderRow
               label="Corner Radius"
@@ -803,6 +818,77 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               priceFontSize={element.priceFontSize}
               onChange={(patch) => onChange(patch as any)}
             />
+          </>
+        )}
+
+        {element.type === 'section' && (
+          <>
+            <GradientPickerRow
+              label="Background"
+              solidColor={element.backgroundColor}
+              onSolidColorChange={(backgroundColor) => onChange({ backgroundColor } as any)}
+              gradient={element.backgroundGradient}
+              onGradientChange={(backgroundGradient) => onChange({ backgroundGradient } as any)}
+            />
+
+            {(() => {
+              const textChildren = allElements.filter(
+                (el): el is Extract<CanvasElement, { type: 'text' }> => element.childIds.includes(el.id) && el.type === 'text'
+              );
+              return (
+                <>
+                  <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Text in this section ({textChildren.length})</Text>
+                  {textChildren.length === 0 ? (
+                    <Text style={styles.helperText}>No text yet -- tap "Add text" below to add your first line.</Text>
+                  ) : (
+                    <View style={styles.rowButtons}>
+                      {textChildren.map((t) => (
+                        <View key={t.id} style={styles.sectionChildChip}>
+                          <Text style={styles.sectionChildChipText} numberOfLines={1}>
+                            {t.text.trim() || 'Text'}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  {!!onAddSectionText && (
+                    <Pressable style={styles.insertProductLinkBtn} onPress={onAddSectionText}>
+                      <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.insertProductLinkBtnText}>Add text</Text>
+                    </Pressable>
+                  )}
+
+                  {textChildren.length > 0 && (
+                    <>
+                      <Text style={[styles.fieldLabel, { marginTop: 6 }]}>Font for all text in this section</Text>
+                      <View style={styles.rowButtons}>
+                        {FONT_OPTIONS.map((option) => (
+                          <FontChip
+                            key={option.id}
+                            option={option}
+                            selected={(element.textFontFamily ?? 'system') === option.id}
+                            onPress={() => {
+                              onChange({ textFontFamily: option.id } as any);
+                              onApplySectionTextStyle?.({ fontFamily: option.id });
+                            }}
+                          />
+                        ))}
+                      </View>
+                      <SliderRow
+                        label="Text size"
+                        value={element.textFontSize ?? 16}
+                        min={10}
+                        max={48}
+                        onChange={(v) => {
+                          onChange({ textFontSize: v } as any);
+                          onApplySectionTextStyle?.({ fontSize: v });
+                        }}
+                      />
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 
@@ -1480,6 +1566,20 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   saveStockBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  insertProductLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#16A34A',
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  insertProductLinkBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  sectionChildChip: { backgroundColor: '#F1F5F9', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 160 },
+  sectionChildChipText: { fontSize: 12, fontWeight: '600', color: '#334155' },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -17,12 +17,14 @@ import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import ProductCatalogPickerModal from '@/components/editor/ProductCatalogPickerModal';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
-import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct } from '@/types';
+import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct, SectionElement } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { productsStore } from '@/storage/productsStore';
 import { useAppTheme } from '@/context/AppThemeContext';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
 import { labelForElement } from '@/utils/elementLabel';
+import { CartProvider, useCart } from '@/context/CartContext';
+import { useSellerCurrencySymbol } from '@/hooks/useSellerCurrencySymbol';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
@@ -79,6 +81,10 @@ function EditorInner({ navigation }: Props) {
   };
   const [menuPoliciesOpen, setMenuPoliciesOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
+  // Which Button element (if any) is currently picking a product to link to -- distinct from
+  // productPickerOpen (the "+ Add to page" flow, which just inserts with nothing to link).
+  const [linkPickerButtonId, setLinkPickerButtonId] = useState<string | null>(null);
   // Replaces the old horizontal-scrolling tab strip -- a real full-width grid sheet instead
   // of a thin scrollable row sitting right at the screen's bottom edge, which fought with
   // iOS's own edge-swipe-to-exit gesture and made it easy to background the app or mis-tap
@@ -340,6 +346,92 @@ function EditorInner({ navigation }: Props) {
     navigation.navigate('ProductEdit', { productId: product.id });
   };
 
+  // Links a Button straight to any product in the account catalog, not just one already
+  // placed on this page -- inserting it first (stacked below whatever's already here, same
+  // spot a plain "+ Product" insert would use) if it isn't on the page yet, so "insert
+  // product & link" is one real action instead of two separate manual steps.
+  const insertProductAndLinkButton = (buttonId: string, product: CatalogProduct) => {
+    const existing = activeElements.find((el): el is ProductElement => el.type === 'product' && el.productId === product.id);
+    if (existing) {
+      updateElement(buttonId, { linkTargetElementId: existing.id, link: null } as any);
+      return;
+    }
+    const { x, y } = stackedProductPosition(180, 220);
+    const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
+    addElement(el);
+    updateElement(buttonId, { linkTargetElementId: el.id, link: null } as any);
+    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  // Adds a new text child stacked inside the section's own bounds (not the canvas center),
+  // so it visibly lands inside the band it belongs to rather than somewhere unrelated on the
+  // page -- each existing child adds a little vertical offset so repeated taps don't stack
+  // every new line exactly on top of the last one.
+  const addTextToSection = (sectionId: string) => {
+    const section = activeElements.find((el): el is SectionElement => el.id === sectionId && el.type === 'section');
+    if (!section) return;
+    const existingCount = section.childIds.length;
+    const el: TextElement = {
+      id: generateId('el'),
+      type: 'text',
+      text: 'New text',
+      x: section.x + 16,
+      y: Math.min(section.y + 16 + existingCount * 28, section.y + section.height - 32),
+      width: Math.max(80, section.width - 32),
+      height: 28,
+      zIndex: section.zIndex + 1 + existingCount,
+      fontSize: 16,
+      color: '#0F172A',
+      fontWeight: 'normal',
+      align: 'left',
+    };
+    addElement(el);
+    updateElement(sectionId, { childIds: [...section.childIds, el.id] } as any);
+  };
+
+  // Bulk-applies a font/size to every text child of this section in one action -- the
+  // section's own onChange (in ElementInspector) only patches the section itself, so the
+  // actual per-child TextElement fontFamily/fontSize fields (what ElementRenderer/siteHtml.ts
+  // really read) need to be written here instead, looping over its real children.
+  const applySectionTextStyle = (sectionId: string, patch: { fontFamily?: string; fontSize?: number }) => {
+    const section = activeElements.find((el): el is SectionElement => el.id === sectionId && el.type === 'section');
+    if (!section) return;
+    section.childIds.forEach((childId) => {
+      const child = activeElements.find((el) => el.id === childId);
+      if (child?.type === 'text') updateElement(childId, patch as any);
+    });
+  };
+
+  const createProductAndLinkButton = async (buttonId: string) => {
+    if (!user) return;
+    const now = Date.now();
+    const product: CatalogProduct = {
+      id: generateId('prod'),
+      name: '',
+      description: '',
+      priceUsd: 10,
+      compareAtPriceUsd: null,
+      costUsd: null,
+      images: [],
+      trackInventory: false,
+      initialStock: null,
+      inStock: true,
+      saleType: 'product',
+      fulfillment: 'pickup',
+      serviceDurationMinutes: null,
+      variantOptions: [],
+      variants: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await productsStore.save(user.uid, product);
+    const { x, y } = stackedProductPosition(180, 220);
+    const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
+    addElement(el);
+    updateElement(buttonId, { linkTargetElementId: el.id, link: null } as any);
+    navigation.navigate('ProductEdit', { productId: product.id });
+  };
+
   const addCollection = () => {
     const el: CollectionElement = {
       id: generateId('el'),
@@ -355,6 +447,60 @@ function EditorInner({ navigation }: Props) {
     addElement(el);
     select(el.id);
     setPanel(null);
+  };
+
+  // A blank starting Section. addElement always places a freshly-added element at the very
+  // front (see its own comment on why), which is exactly backwards for a section -- it needs
+  // to sit BEHIND everything so anything added into it later (see addTextToSection) paints in
+  // front of its background, so this immediately patches the zIndex back down below whatever
+  // else is already on the page right after adding it.
+  const addSection = () => {
+    const lowestZ = Math.min(0, ...activeElements.map((e) => e.zIndex));
+    const el: SectionElement = {
+      id: generateId('el'),
+      type: 'section',
+      backgroundColor: '#F1F5F9',
+      childIds: [],
+      x: canvasCenterX - 150,
+      y: canvasCenterY - 100,
+      width: 300,
+      height: 200,
+      zIndex: lowestZ - 1,
+    };
+    addElement(el);
+    updateElement(el.id, { zIndex: lowestZ - 1 } as any);
+    select(el.id);
+    setPanel(null);
+  };
+
+  // Wraps a set of already-selected elements (from the Layers panel's group mode) into a new
+  // Section sized to their combined bounding box, so an existing AI-generated band like "Why
+  // Choose Us" can adopt a real background/shared-font/tap-to-select-as-one-unit section
+  // without a full migration -- the children themselves keep their own x/y unchanged, only
+  // the new section's own box and their zIndex (so the section paints behind them) change.
+  const groupIntoSection = (ids: string[]) => {
+    const members = activeElements.filter((el) => ids.includes(el.id));
+    if (members.length < 2) return;
+    const PADDING = 16;
+    const minX = Math.min(...members.map((el) => el.x));
+    const minY = Math.min(...members.map((el) => el.y));
+    const maxX = Math.max(...members.map((el) => el.x + el.width));
+    const maxY = Math.max(...members.map((el) => el.y + el.height));
+    const minChildZ = Math.min(...members.map((el) => el.zIndex));
+    const el: SectionElement = {
+      id: generateId('el'),
+      type: 'section',
+      backgroundColor: project.backgroundColor,
+      childIds: ids,
+      x: Math.max(0, minX - PADDING),
+      y: Math.max(0, minY - PADDING),
+      width: maxX - minX + PADDING * 2,
+      height: maxY - minY + PADDING * 2,
+      zIndex: minChildZ - 1,
+    };
+    addElement(el);
+    updateElement(el.id, { zIndex: minChildZ - 1 } as any);
+    select(el.id);
   };
 
   const addGame = () => {
@@ -458,6 +604,7 @@ function EditorInner({ navigation }: Props) {
   };
 
   return (
+    <CartProvider publishSlug={project.publishSlug}>
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
@@ -489,6 +636,7 @@ function EditorInner({ navigation }: Props) {
                   <Ionicons name="menu-outline" size={22} color={theme.text} />
                 </Pressable>
               )}
+              {project.pageType === 'website' && <CartHeaderButton onPress={() => setCartOpen(true)} color={theme.text} />}
             </>
           )}
           {isGenerating ? (
@@ -556,6 +704,7 @@ function EditorInner({ navigation }: Props) {
             onSelect={select}
             onReorder={reorderElement}
             onToggleLock={toggleLock}
+            onGroupIntoSection={groupIntoSection}
           />
         </View>
       )}
@@ -633,6 +782,9 @@ function EditorInner({ navigation }: Props) {
               projectId={project.id}
               publishSlug={project.publishSlug}
               siteName={project.name}
+              onPickProductForLink={selectedElement.type === 'button' ? () => setLinkPickerButtonId(selectedElement.id) : undefined}
+              onAddSectionText={selectedElement.type === 'section' ? () => addTextToSection(selectedElement.id) : undefined}
+              onApplySectionTextStyle={selectedElement.type === 'section' ? (patch) => applySectionTextStyle(selectedElement.id, patch) : undefined}
             />
           )}
         </View>
@@ -683,6 +835,7 @@ function EditorInner({ navigation }: Props) {
                   <AddMenuTile icon="albums-outline" label="Collection" onPress={() => { setAddMenuOpen(false); addCollection(); }} />
                 </>
               )}
+              <AddMenuTile icon="copy-outline" label="Section" onPress={() => { setAddMenuOpen(false); addSection(); }} />
               <AddMenuTile icon="game-controller-outline" label="Game" onPress={() => { setAddMenuOpen(false); addGame(); }} />
               <AddMenuTile icon="time-outline" label="Widget" onPress={() => { setAddMenuOpen(false); addWidget(); }} />
               <AddMenuTile icon="sparkles-outline" label="Custom" highlightColor="#7C3AED" onPress={() => { setAddMenuOpen(false); addCustomWidget(); }} />
@@ -718,6 +871,16 @@ function EditorInner({ navigation }: Props) {
         />
       )}
 
+      {user && (
+        <ProductCatalogPickerModal
+          visible={!!linkPickerButtonId}
+          onClose={() => setLinkPickerButtonId(null)}
+          uid={user.uid}
+          onInsert={(product) => linkPickerButtonId && insertProductAndLinkButton(linkPickerButtonId, product)}
+          onCreateNew={() => linkPickerButtonId && createProductAndLinkButton(linkPickerButtonId)}
+        />
+      )}
+
       <Modal visible={bgEditorOpen} transparent animationType="fade" onRequestClose={() => setBgEditorOpen(false)}>
         <View style={styles.bgModalBackdrop}>
           <View style={styles.bgModalCard}>
@@ -735,7 +898,100 @@ function EditorInner({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+
+      <CartSheetModal visible={cartOpen} onClose={() => setCartOpen(false)} />
     </SafeAreaView>
+    </CartProvider>
+  );
+}
+
+// A real shopping-bag icon + item-count badge in the header, matching the "beside like a
+// professional business site" cart counter every seller storefront has -- reads straight off
+// CartContext (see that file), so it stays in sync with every Add to Cart tap anywhere on the
+// canvas without any prop drilling.
+function CartHeaderButton({ onPress, color }: { onPress: () => void; color: string }) {
+  const cart = useCart();
+  return (
+    <Pressable onPress={onPress} hitSlop={8} style={{ position: 'relative' }}>
+      <Ionicons name="bag-outline" size={22} color={color} />
+      {cart.itemCount > 0 && (
+        <View style={styles.cartBadge}>
+          <Text style={styles.cartBadgeText}>{cart.itemCount > 99 ? '99+' : cart.itemCount}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+// Lists what's in the in-editor cart (real CartContext state, shared with every product's
+// buy buttons on the canvas) and lets the seller check out for real -- the same
+// createStoreCheckout Stripe session the published site's own cart uses, just invoked
+// directly instead of via baked published-site JS (see CartContext's comment).
+function CartSheetModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { theme } = useAppTheme();
+  const cart = useCart();
+  const sym = useSellerCurrencySymbol();
+  const total = cart.items.reduce((sum, i) => sum + i.priceUsd * i.quantity, 0);
+
+  const handleCheckout = async () => {
+    try {
+      await cart.checkout();
+      onClose();
+    } catch (err: any) {
+      showAlert('Could not start checkout', err?.message ?? 'Try again in a moment.');
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.bgModalBackdrop}>
+        <View style={[styles.bgModalCard, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.bgModalTitle, { color: theme.text }]}>Your Cart</Text>
+          {!cart.canCheckout && (
+            <Text style={[styles.cartHelperText, { color: theme.textMuted }]}>Publish your site to enable real checkout.</Text>
+          )}
+          {cart.items.length === 0 ? (
+            <Text style={[styles.cartHelperText, { color: theme.textMuted }]}>Your cart is empty.</Text>
+          ) : (
+            <ScrollView style={{ maxHeight: 280 }}>
+              {cart.items.map((item) => (
+                <View key={item.productId + (item.variantKey ?? '')} style={styles.cartRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cartRowName, { color: theme.text }]} numberOfLines={1}>
+                      {item.name || 'Untitled product'} {item.quantity > 1 ? `x${item.quantity}` : ''}
+                    </Text>
+                    {!!item.variantLabel && <Text style={[styles.cartRowVariant, { color: theme.textMuted }]}>{item.variantLabel}</Text>}
+                  </View>
+                  <Text style={[styles.cartRowPrice, { color: theme.text }]}>
+                    {sym}{(item.priceUsd * item.quantity).toFixed(2)}
+                  </Text>
+                  <Pressable onPress={() => cart.removeItem(item.productId, item.variantKey)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={20} color={theme.textMuted} />
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+          {cart.items.length > 0 && (
+            <Text style={[styles.cartTotal, { color: theme.text }]}>Total: {sym}{total.toFixed(2)}</Text>
+          )}
+          <Pressable
+            style={[styles.bgModalDoneBtn, { backgroundColor: theme.accent }, (!cart.canCheckout || cart.items.length === 0 || cart.processing) && { opacity: 0.5 }]}
+            disabled={!cart.canCheckout || cart.items.length === 0 || cart.processing}
+            onPress={handleCheckout}
+          >
+            {cart.processing ? (
+              <ActivityIndicator color={theme.accentText} />
+            ) : (
+              <Text style={[styles.bgModalDoneBtnText, { color: theme.accentText }]}>Checkout</Text>
+            )}
+          </Pressable>
+          <Pressable style={[styles.bgModalDoneBtn, { backgroundColor: 'transparent', marginTop: 4 }]} onPress={onClose}>
+            <Text style={[styles.bgModalDoneBtnText, { color: theme.textMuted }]}>Close</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -909,4 +1165,23 @@ const styles = StyleSheet.create({
   bgModalTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A', marginBottom: 14 },
   bgModalDoneBtn: { marginTop: 4, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: '#111827' },
   bgModalDoneBtnText: { color: '#FFFFFF', fontWeight: '600' },
+  cartBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  cartBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
+  cartHelperText: { fontSize: 13, marginBottom: 12 },
+  cartRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E2E8F0' },
+  cartRowName: { fontSize: 13, fontWeight: '600' },
+  cartRowVariant: { fontSize: 11, marginTop: 2 },
+  cartRowPrice: { fontSize: 13, fontWeight: '700' },
+  cartTotal: { fontSize: 15, fontWeight: '800', marginTop: 12, textAlign: 'right' },
 });

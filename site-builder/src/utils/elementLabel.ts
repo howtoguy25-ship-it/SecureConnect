@@ -31,6 +31,8 @@ export function labelForElement(element: CanvasElement): string {
       return element.title || 'Widget';
     case 'customWidget':
       return element.title || 'Custom Feature';
+    case 'section':
+      return 'Section';
     default:
       return 'Element';
   }
@@ -64,6 +66,8 @@ export function iconForElement(element: CanvasElement): keyof typeof import('@ex
       return 'time-outline';
     case 'customWidget':
       return 'sparkles-outline';
+    case 'section':
+      return 'copy-outline';
     default:
       return 'square-outline';
   }

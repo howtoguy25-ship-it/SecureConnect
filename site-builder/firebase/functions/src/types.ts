@@ -5,7 +5,7 @@
 
 export type PageType = 'website' | 'video' | 'social' | 'logo';
 
-export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game' | 'widget' | 'customWidget';
+export type ElementType = 'text' | 'image' | 'shape' | 'button' | 'icon' | 'slideshow' | 'video' | 'videoEmbed' | 'product' | 'collection' | 'game' | 'widget' | 'customWidget' | 'section';
 
 // Mirrors the client's GradientFill -- `angle` is the CSS linear-gradient() angle (0deg =
 // bottom-to-top, 90deg = left-to-right), so siteHtml.ts can drop it straight into real CSS.
@@ -168,6 +168,16 @@ export interface CollectionElement extends BaseElement {
   priceFontSize?: number;
 }
 
+// Mirrors the client's SectionElement -- see that file's comment for the full rationale.
+export interface SectionElement extends BaseElement {
+  type: 'section';
+  backgroundColor: string;
+  backgroundGradient?: GradientFill | null;
+  childIds: string[];
+  textFontFamily?: string;
+  textFontSize?: number;
+}
+
 // Mirrors the client's CatalogCollection -- the account-level Collections catalog
 // (users/{uid}/collections/{id}), independent of any one project/page.
 export interface CatalogCollection {
@@ -256,7 +266,8 @@ export type CanvasElement =
   | CollectionElement
   | GameElement
   | WidgetElement
-  | CustomWidgetElement;
+  | CustomWidgetElement
+  | SectionElement;
 
 export interface CanvasSize {
   width: number;

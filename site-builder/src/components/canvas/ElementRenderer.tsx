@@ -13,19 +13,9 @@ import { resolveProductView } from '@/utils/resolveProduct';
 import GameView from '@/components/canvas/GameView';
 import WidgetView from '@/components/canvas/WidgetView';
 import CustomWidgetView from '@/components/canvas/CustomWidgetView';
-import { useAuth } from '@/context/AuthContext';
-import { sellerAccountStore } from '@/services/store';
-import { currencySymbol } from '@/utils/currency';
-
-function useSellerCurrencySymbol(): string {
-  const { user } = useAuth();
-  const [currency, setCurrency] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    if (!user) return;
-    return sellerAccountStore.subscribe(user.uid, (account) => setCurrency(account?.currency));
-  }, [user]);
-  return currencySymbol(currency);
-}
+import { useSellerCurrencySymbol } from '@/hooks/useSellerCurrencySymbol';
+import { useCart } from '@/context/CartContext';
+import { showAlert } from '@/utils/alert';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -228,13 +218,15 @@ function productBadge(product: CatalogProduct): string {
 // size for this element type so it can't be dragged smaller than a legible card in the first
 // place).
 // Swipeable photo carousel for the product detail modal -- up to 7 photos, dot pagination.
-function ProductImageCarousel({ images, height }: { images: string[]; height: number }) {
+function ProductImageCarousel({ images, height, onImagePress }: { images: string[]; height: number; onImagePress?: (uri: string) => void }) {
   const [page, setPage] = useState(0);
   const [carouselWidth, setCarouselWidth] = useState(0);
 
   if (images.length <= 1) {
     return images[0] ? (
-      <Image source={{ uri: images[0] }} style={[styles.detailImage, { height }]} resizeMode="cover" />
+      <Pressable onPress={() => onImagePress?.(images[0])} disabled={!onImagePress}>
+        <Image source={{ uri: images[0] }} style={[styles.detailImage, { height }]} resizeMode="cover" />
+      </Pressable>
     ) : (
       <View style={[styles.placeholder, styles.detailImage, { height }]}>
         <Ionicons name="pricetag-outline" size={36} color="#94A3B8" />
@@ -254,7 +246,9 @@ function ProductImageCarousel({ images, height }: { images: string[]; height: nu
         }}
       >
         {images.map((uri, idx) => (
-          <Image key={uri + idx} source={{ uri }} style={{ width: carouselWidth, height }} resizeMode="cover" />
+          <Pressable key={uri + idx} onPress={() => onImagePress?.(uri)} disabled={!onImagePress}>
+            <Image source={{ uri }} style={{ width: carouselWidth, height }} resizeMode="cover" />
+          </Pressable>
         ))}
       </ScrollView>
       <View style={styles.carouselDots}>
@@ -308,8 +302,114 @@ function ProductCardGallery({ images, width, height, compact }: { images: string
   );
 }
 
+// A real, working Add to Cart / Buy Now (or both) -- driven by the same product.buyButtonMode
+// a seller sets in ProductEditScreen, and wired to the real CartContext (see that file):
+// Add to Cart queues it in the in-editor cart (with the header badge), Buy Now starts a real
+// Stripe Checkout session for just this item immediately. Only usable once the project is
+// actually published (checkout looks the product up in storeInventory/{slug}) and once a
+// variant-free product actually has a name/price/photo -- both cases render a real, clearly
+// explained disabled state instead of silently doing nothing on tap.
+function ProductBuyButtons({ product, compact }: { product: CatalogProduct; compact?: boolean }) {
+  const cart = useCart();
+  const [busy, setBusy] = useState(false);
+  const inStock = product.inStock !== false;
+  const isService = product.saleType === 'service';
+  const isReady = !!product.name?.trim() && product.priceUsd > 0 && product.images.length > 0;
+  const hasVariants = product.variantOptions.length > 0;
+  const buyMode = product.buyButtonMode ?? 'cart';
+  const showCartBtn = buyMode === 'cart' || buyMode === 'both';
+  const showBuyNowBtn = buyMode === 'buyNow' || buyMode === 'both';
+
+  if (!isReady) {
+    return (
+      <View style={[styles.buyBtn, styles.buyBtnDisabled, compact && styles.buyBtnCompact]}>
+        <Text style={[styles.buyBtnText, styles.buyBtnTextDisabled]}>Coming Soon</Text>
+      </View>
+    );
+  }
+
+  const disabledReason = !cart.canCheckout
+    ? 'Publish your site to enable checkout'
+    : hasVariants
+      ? 'Pick options on your published site to buy'
+      : !inStock
+        ? isService
+          ? 'Fully booked'
+          : 'Sold out'
+        : null;
+  const disabled = !!disabledReason || busy;
+
+  const lineItem = {
+    productId: product.id,
+    variantKey: null,
+    variantLabel: null,
+    name: product.name,
+    priceUsd: product.priceUsd,
+    saleType: product.saleType,
+  };
+
+  const handleAddToCart = () => cart.addItem(lineItem);
+
+  const handleBuyNow = async () => {
+    if (isService) {
+      handleAddToCart();
+      return;
+    }
+    setBusy(true);
+    try {
+      await cart.buyNow(lineItem);
+    } catch (err: any) {
+      showAlert('Could not start checkout', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', gap: 6, marginTop: compact ? 4 : 8 }}>
+        {showCartBtn && (
+          <Pressable
+            disabled={disabled}
+            onPress={handleAddToCart}
+            style={[styles.buyBtn, styles.buyBtnCart, compact && styles.buyBtnCompact, disabled && styles.buyBtnDisabled, buyMode === 'both' && { flex: 1 }]}
+          >
+            <Text style={[styles.buyBtnText, disabled && styles.buyBtnTextDisabled]}>{isService ? 'Book Now' : 'Add to Cart'}</Text>
+          </Pressable>
+        )}
+        {showBuyNowBtn && (
+          <Pressable
+            disabled={disabled}
+            onPress={handleBuyNow}
+            style={[styles.buyBtn, styles.buyBtnNow, compact && styles.buyBtnCompact, disabled && styles.buyBtnDisabled, buyMode === 'both' && { flex: 1 }]}
+          >
+            {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={[styles.buyBtnText, disabled && styles.buyBtnTextDisabled]}>{isService ? 'Book Now' : 'Buy Now'}</Text>}
+          </Pressable>
+        )}
+      </View>
+      {!!disabledReason && !compact && <Text style={styles.buyBtnReason}>{disabledReason}</Text>}
+    </View>
+  );
+}
+
+// Tapping any photo in a product's gallery/detail view opens it fullscreen with a real close
+// (X) control -- same convention already used by the published site's own lightbox.
+function FullImageLightbox({ uri, onClose }: { uri: string | null; onClose: () => void }) {
+  return (
+    <Modal visible={!!uri} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.lightboxBackdrop}>
+        <Pressable style={styles.lightboxCloseBtn} onPress={onClose} hitSlop={12}>
+          <Ionicons name="close" size={28} color="#FFFFFF" />
+        </Pressable>
+        {!!uri && <Image source={{ uri }} style={styles.lightboxImage} resizeMode="contain" />}
+      </View>
+    </Modal>
+  );
+}
+
 function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
   const [showDetail, setShowDetail] = useState(false);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const catalogProduct = useCatalogProduct(element.productId);
   const MIN_TEXT_AREA = 62;
   const showImage = height - MIN_TEXT_AREA >= 28;
@@ -382,6 +482,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
             {inStock ? 'In stock' : 'Out of stock'}
           </Text>
         ) : null}
+        {!compact && <ProductBuyButtons product={product} compact />}
       </View>
 
       <Pressable style={styles.productInfoBtn} onPress={() => setShowDetail(true)} hitSlop={8}>
@@ -392,7 +493,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         <View style={styles.detailBackdrop}>
           <View style={styles.detailCard}>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <ProductImageCarousel images={product.images} height={180} />
+              <ProductImageCarousel images={product.images} height={180} onImagePress={setViewingImage} />
               <Text style={styles.detailBadge}>{productBadge(product)}</Text>
               <Text style={styles.detailName}>{product.name || 'Untitled product'}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
@@ -413,6 +514,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
                       : 'In stock'
                   : 'Out of stock'}
               </Text>
+              <ProductBuyButtons product={product} />
             </ScrollView>
             <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>
               <Text style={styles.detailCloseBtnText}>Close</Text>
@@ -420,6 +522,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
           </View>
         </View>
       </Modal>
+      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
     </View>
   );
 }
@@ -429,11 +532,11 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
 // far better than the small ~180x220 card everyone else on the page would otherwise be
 // scrunched next to. Whatever size the element itself has been resized to (the only element
 // on the page, so sellers typically stretch it to fill the canvas) is what this fills, same
-// as ProductCardView does for the compact case. Purely a richer *content* layout, same as
-// tapping the "i" info button already shows in ProductCardView's modal -- not a real
-// storefront (no buy button here; that only exists on the published site).
+// as ProductCardView does for the compact case. A real, working buy button (see
+// ProductBuyButtons) sits right here too, matching the published site.
 function ProductPageView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
   const catalogProduct = useCatalogProduct(element.productId);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const sym = useSellerCurrencySymbol();
   const nameFont = useGoogleFont(element.nameFontFamily);
   const priceFont = useGoogleFont(element.priceFontFamily);
@@ -452,7 +555,7 @@ function ProductPageView({ element, width, height }: { element: ProductElement; 
   return (
     <View style={{ width, height, backgroundColor: '#FFFFFF' }}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
-        <ProductImageCarousel images={product.images} height={Math.min(height * 0.5, 420)} />
+        <ProductImageCarousel images={product.images} height={Math.min(height * 0.5, 420)} onImagePress={setViewingImage} />
         <Text style={styles.pdpBadge}>{productBadge(product)}</Text>
         <Text
           style={[
@@ -489,7 +592,9 @@ function ProductPageView({ element, width, height }: { element: ProductElement; 
                 : 'In stock'
             : 'Out of stock'}
         </Text>
+        <ProductBuyButtons product={product} />
       </ScrollView>
+      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
     </View>
   );
 }
@@ -521,60 +626,64 @@ function CollectionDetailRow({ productElement, sym }: { productElement: ProductE
   const catalogProduct = useCatalogProduct(productElement.productId);
   const nameFont = useGoogleFont(productElement.nameFontFamily);
   const priceFont = useGoogleFont(productElement.priceFontFamily);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const product = resolveProductView(productElement, catalogProduct ?? null);
   return (
     <View
       style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
         paddingVertical: 10,
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: '#E2E8F0',
       }}
     >
-      {product.images[0] ? (
-        <Image source={{ uri: product.images[0] }} style={{ width: 64, height: 64, borderRadius: 10 }} resizeMode="cover" />
-      ) : (
-        <View style={[styles.placeholder, { width: 64, height: 64 }]}>
-          <Ionicons name="pricetag-outline" size={20} color="#94A3B8" />
-        </View>
-      )}
-      <View style={{ flex: 1 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontWeight: '700',
-            fontSize: productElement.nameFontSize ?? 14,
-            color: '#0F172A',
-            ...(nameFont ? { fontFamily: nameFont } : null),
-          }}
-        >
-          {product.name || 'Untitled product'}
-        </Text>
-        {!!product.description && (
-          <Text numberOfLines={2} style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
-            {product.description}
-          </Text>
-        )}
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Pressable onPress={() => product.images[0] && setViewingImage(product.images[0])} disabled={!product.images[0]}>
+          {product.images[0] ? (
+            <Image source={{ uri: product.images[0] }} style={{ width: 64, height: 64, borderRadius: 10 }} resizeMode="cover" />
+          ) : (
+            <View style={[styles.placeholder, { width: 64, height: 64 }]}>
+              <Ionicons name="pricetag-outline" size={20} color="#94A3B8" />
+            </View>
+          )}
+        </Pressable>
+        <View style={{ flex: 1 }}>
           <Text
+            numberOfLines={1}
             style={{
-              fontSize: productElement.priceFontSize ?? 13,
-              color: '#4338CA',
               fontWeight: '700',
-              ...(priceFont ? { fontFamily: priceFont } : null),
+              fontSize: productElement.nameFontSize ?? 14,
+              color: '#0F172A',
+              ...(nameFont ? { fontFamily: nameFont } : null),
             }}
           >
-            {sym}{product.priceUsd.toFixed(2)}
+            {product.name || 'Untitled product'}
           </Text>
-          {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
-            <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-              {sym}{product.compareAtPriceUsd.toFixed(2)}
+          {!!product.description && (
+            <Text numberOfLines={2} style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+              {product.description}
             </Text>
           )}
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+            <Text
+              style={{
+                fontSize: productElement.priceFontSize ?? 13,
+                color: '#4338CA',
+                fontWeight: '700',
+                ...(priceFont ? { fontFamily: priceFont } : null),
+              }}
+            >
+              {sym}{product.priceUsd.toFixed(2)}
+            </Text>
+            {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
+              <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+                {sym}{product.compareAtPriceUsd.toFixed(2)}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
+      <ProductBuyButtons product={product} compact />
+      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
     </View>
   );
 }
@@ -751,6 +860,34 @@ export default function ElementRenderer({ element, allElements }: { element: Can
       return <WidgetView element={element} width={width} height={height} />;
     case 'customWidget':
       return <CustomWidgetView element={element} width={width} height={height} />;
+    case 'section': {
+      // A real background band behind whichever other elements sit inside it (see the
+      // childIds comment on SectionElement) -- rendered exactly like any other absolutely
+      // positioned element, just with a lower zIndex than its children so they paint on top.
+      // No special hit-testing needed: tapping a child hits the child (it's on top), tapping
+      // anywhere else in this box hits the section itself, same as everything else on canvas.
+      const emptyHint = element.childIds.length === 0 && (
+        <View style={styles.sectionEmptyHint}>
+          <Ionicons name="albums-outline" size={18} color={element.backgroundGradient ? 'rgba(255,255,255,0.7)' : '#94A3B8'} />
+          <Text style={[styles.sectionEmptyHintText, { color: element.backgroundGradient ? 'rgba(255,255,255,0.7)' : '#94A3B8' }]}>
+            Section
+          </Text>
+        </View>
+      );
+      if (element.backgroundGradient) {
+        const { start, end } = gradientStartEnd(element.backgroundGradient.angle);
+        return (
+          <LinearGradient colors={element.backgroundGradient.colors} start={start} end={end} style={{ width, height, borderRadius: 8 }}>
+            {emptyHint}
+          </LinearGradient>
+        );
+      }
+      return (
+        <View style={{ width, height, backgroundColor: element.backgroundColor, borderRadius: 8 }}>
+          {emptyHint}
+        </View>
+      );
+    }
     default:
       return null;
   }
@@ -805,6 +942,19 @@ const styles = StyleSheet.create({
   detailStock: { fontSize: 13, color: '#94A3B8', marginTop: 10 },
   detailCloseBtn: { marginTop: 14, backgroundColor: '#111827', borderRadius: 10, height: 46, alignItems: 'center', justifyContent: 'center' },
   detailCloseBtnText: { color: '#FFFFFF', fontWeight: '700' },
+  buyBtn: { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
+  buyBtnCompact: { paddingVertical: 6, borderRadius: 6 },
+  buyBtnCart: { backgroundColor: '#4338CA' },
+  buyBtnNow: { backgroundColor: '#0F172A' },
+  buyBtnDisabled: { backgroundColor: '#E2E8F0' },
+  buyBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  buyBtnTextDisabled: { color: '#94A3B8' },
+  buyBtnReason: { fontSize: 10, color: '#94A3B8', marginTop: 4 },
+  lightboxBackdrop: { flex: 1, backgroundColor: '#000000EE', alignItems: 'center', justifyContent: 'center' },
+  lightboxCloseBtn: { position: 'absolute', top: 50, right: 20, zIndex: 1 },
+  lightboxImage: { width: '100%', height: '80%' },
+  sectionEmptyHint: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 },
+  sectionEmptyHintText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   pdpBadge: { fontSize: 12, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase', marginTop: 16 },
   pdpName: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginTop: 4 },
   pdpPrice: { fontSize: 22, fontWeight: '800', color: '#4338CA' },

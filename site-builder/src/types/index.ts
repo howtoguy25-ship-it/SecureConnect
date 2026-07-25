@@ -55,7 +55,8 @@ export type ElementType =
   | 'collection'
   | 'game'
   | 'widget'
-  | 'customWidget';
+  | 'customWidget'
+  | 'section';
 
 interface BaseElement {
   id: string;
@@ -259,6 +260,27 @@ export interface CollectionElement extends BaseElement {
   priceFontSize?: number;
 }
 
+// A real, selectable "section" band -- e.g. a page's whole "Why Choose Us" area -- rendered
+// as a background box behind whichever other elements sit inside it (see `childIds`). Tapping
+// directly on a child (a heading, a paragraph) still selects that child as normal, since it
+// paints on top of the section at a higher zIndex; tapping anywhere else within the section's
+// own bounds selects the section itself, with no special hit-testing needed beyond the
+// existing zIndex-ordered rendering every element already uses. Children keep their own
+// x/y in the SAME canvas coordinate space as everything else (not section-relative) --
+// this is a background band + a membership list, not real nested/relative layout.
+export interface SectionElement extends BaseElement {
+  type: 'section';
+  backgroundColor: string;
+  // Overrides backgroundColor when set -- see GradientFill's comment.
+  backgroundGradient?: GradientFill | null;
+  childIds: string[];
+  // Applied to every text element among childIds when set from the section's own inspector,
+  // so "change the font/size for this whole section's text" is one action instead of editing
+  // each child individually. Undefined leaves each child's own existing font/size alone.
+  textFontFamily?: string;
+  textFontSize?: number;
+}
+
 // The account-level Collections catalog -- a named, reusable group of existing CatalogProducts
 // a seller owns independent of any one project/page, created/edited from CollectionEditScreen
 // and stored at users/{uid}/collections/{id}. Distinct from CollectionElement above (which
@@ -357,7 +379,8 @@ export type CanvasElement =
   | CollectionElement
   | GameElement
   | WidgetElement
-  | CustomWidgetElement;
+  | CustomWidgetElement
+  | SectionElement;
 
 export interface AnnouncementBarConfig {
   id: string;

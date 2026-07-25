@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, PanResponder, PanResponderInstance } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
@@ -10,6 +10,29 @@ interface Props {
   onSelect: (id: string) => void;
   onReorder: (id: string, direction: 'up' | 'down') => void;
   onToggleLock: (id: string) => void;
+  // Lets a seller pick 2+ existing elements (e.g. a heading + paragraph AI-generated as a
+  // "Why Choose Us" band) and wrap them into a real Section container in one action -- see
+  // EditorScreen's groupIntoSection. Omitted (no "Group" entry point) wherever there's
+  // nowhere to route the result.
+  onGroupIntoSection?: (ids: string[]) => void;
+}
+
+// A plain checkbox row, deliberately separate from LayerRow's drag-to-reorder gesture below
+// -- group-selection and drag-reorder are two different interactions on the same list, and
+// keeping them as two whole separate row components (rather than threading a "groupMode" flag
+// through LayerRow's delicate PanResponder) means neither one risks breaking the other.
+function GroupSelectRow({ el, selected, onToggle }: { el: CanvasElement; selected: boolean; onToggle: (id: string) => void }) {
+  return (
+    <Pressable style={[styles.row, selected && styles.rowSelected]} onPress={() => onToggle(el.id)}>
+      <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? '#2563EB' : '#94A3B8'} />
+      <View style={styles.rowMain}>
+        <Ionicons name={iconForElement(el)} size={18} color="#334155" />
+        <Text style={styles.rowLabel} numberOfLines={1}>
+          {labelForElement(el)}
+        </Text>
+      </View>
+    </Pressable>
+  );
 }
 
 // Matches `list.gap` + a row's real rendered height below -- used to convert a hold-and-drag
@@ -184,10 +207,12 @@ function LayerRow({ el, index, count, isSelected, onSelect, onReorder, onToggleL
 // A single element on the page has nothing to layer against, so reordering only makes
 // sense -- and only shows -- once there are at least two, mirroring how Canva-style layers
 // panels stay empty of overlap controls for a lone object.
-export default function LayersPanel({ elements, selectedId, onSelect, onReorder, onToggleLock }: Props) {
+export default function LayersPanel({ elements, selectedId, onSelect, onReorder, onToggleLock, onGroupIntoSection }: Props) {
   const topmostFirst = [...elements].sort((a, b) => b.zIndex - a.zIndex);
   const rowHeightRef = useRef(DEFAULT_ROW_HEIGHT);
   const [rowDragging, setRowDragging] = React.useState(false);
+  const [groupMode, setGroupMode] = useState(false);
+  const [groupSelection, setGroupSelection] = useState<string[]>([]);
 
   if (elements.length === 0) {
     return (
@@ -207,32 +232,84 @@ export default function LayersPanel({ elements, selectedId, onSelect, onReorder,
     );
   }
 
+  const toggleGroupMember = (id: string) => {
+    setGroupSelection((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
+  };
+
+  const confirmGroup = () => {
+    if (groupSelection.length < 2) return;
+    onGroupIntoSection?.(groupSelection);
+    setGroupMode(false);
+    setGroupSelection([]);
+  };
+
   return (
-    <ScrollView
-      style={styles.scrollFill}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={styles.list}
-      scrollEnabled={!rowDragging}
-    >
-      {topmostFirst.map((el, index) => (
-        <LayerRow
-          key={el.id}
-          el={el}
-          index={index}
-          count={topmostFirst.length}
-          isSelected={el.id === selectedId}
-          onSelect={onSelect}
-          onReorder={onReorder}
-          onToggleLock={onToggleLock}
-          rowHeightRef={rowHeightRef}
-          onDragStateChange={setRowDragging}
-        />
-      ))}
-    </ScrollView>
+    <View style={styles.scrollFill}>
+      {!!onGroupIntoSection && (
+        <View style={styles.groupBar}>
+          <Pressable
+            style={[styles.groupBarBtn, groupMode && styles.groupBarBtnActive]}
+            onPress={() => {
+              setGroupMode((v) => !v);
+              setGroupSelection([]);
+            }}
+          >
+            <Ionicons name="copy-outline" size={15} color={groupMode ? '#2563EB' : '#334155'} />
+            <Text style={[styles.groupBarBtnText, groupMode && styles.groupBarBtnTextActive]}>
+              {groupMode ? 'Cancel grouping' : 'Group into Section'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+      <ScrollView
+        style={styles.scrollFill}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.list}
+        scrollEnabled={!rowDragging}
+      >
+        {topmostFirst.map((el, index) =>
+          groupMode ? (
+            <GroupSelectRow key={el.id} el={el} selected={groupSelection.includes(el.id)} onToggle={toggleGroupMember} />
+          ) : (
+            <LayerRow
+              key={el.id}
+              el={el}
+              index={index}
+              count={topmostFirst.length}
+              isSelected={el.id === selectedId}
+              onSelect={onSelect}
+              onReorder={onReorder}
+              onToggleLock={onToggleLock}
+              rowHeightRef={rowHeightRef}
+              onDragStateChange={setRowDragging}
+            />
+          )
+        )}
+      </ScrollView>
+      {groupMode && (
+        <Pressable
+          style={[styles.groupConfirmBtn, groupSelection.length < 2 && styles.groupConfirmBtnDisabled]}
+          disabled={groupSelection.length < 2}
+          onPress={confirmGroup}
+        >
+          <Text style={styles.groupConfirmBtnText}>
+            {groupSelection.length < 2 ? 'Pick 2 or more to group' : `Group ${groupSelection.length} into Section`}
+          </Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  groupBar: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
+  groupBarBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#F1F5F9' },
+  groupBarBtnActive: { backgroundColor: '#DBEAFE' },
+  groupBarBtnText: { fontSize: 12, fontWeight: '700', color: '#334155' },
+  groupBarBtnTextActive: { color: '#2563EB' },
+  groupConfirmBtn: { margin: 12, marginTop: 6, backgroundColor: '#2563EB', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  groupConfirmBtnDisabled: { backgroundColor: '#94A3B8' },
+  groupConfirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   emptyState: { padding: 24, alignItems: 'center', justifyContent: 'center', gap: 8 },
   emptyText: { fontSize: 13, color: '#94A3B8', textAlign: 'center', paddingHorizontal: 20 },
   scrollFill: { flex: 1 },

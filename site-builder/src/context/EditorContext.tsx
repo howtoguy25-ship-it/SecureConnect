@@ -316,7 +316,27 @@ export function EditorProvider({
           const reordered = sorted.slice();
           [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
           const zIndexById = new Map(reordered.map((el, i) => [el.id, i]));
-          return elements.map((el) => ({ ...el, zIndex: zIndexById.get(el.id) ?? el.zIndex }));
+          // A z-index-only swap is silently invisible whenever the two elements don't actually
+          // overlap on screen -- true of most stacked, non-overlapping content blocks (a
+          // heading above a paragraph, a button below both) -- which is exactly what made
+          // "swap" in Layers look like it did nothing even though the data really did change.
+          // Whenever that's the case, also swap their x/y position so the two blocks visibly
+          // trade places; genuinely overlapping elements keep the old front/behind-only
+          // behavior, since moving them would look wrong when the point was just stacking order.
+          const a = sorted[index];
+          const b = sorted[swapIndex];
+          const overlaps = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+          const positionById = overlaps
+            ? new Map<string, { x: number; y: number }>()
+            : new Map([
+                [a.id, { x: b.x, y: b.y }],
+                [b.id, { x: a.x, y: a.y }],
+              ]);
+          return elements.map((el) => ({
+            ...el,
+            zIndex: zIndexById.get(el.id) ?? el.zIndex,
+            ...(positionById.get(el.id) ?? null),
+          }));
         });
         scheduleSave(next);
         return next;

@@ -2469,6 +2469,15 @@ ${script}`;
       return renderWidgetHtml(el, base);
     case 'customWidget':
       return renderCustomWidgetHtml(el, base);
+    case 'section': {
+      // A real background band behind whichever other elements sit inside it (see the
+      // childIds comment on the client's SectionElement) -- elements publish in ascending
+      // zIndex order (see the .sort() around this function's call site), and a section is
+      // always given a lower zIndex than its children client-side, so this div simply lands
+      // earlier in the DOM and paints behind them with zero special stacking logic needed.
+      const background = el.backgroundGradient ? cssGradient(el.backgroundGradient) : escapeAttr(el.backgroundColor);
+      return `<div style="${base}background:${background};border-radius:8px;"></div>`;
+    }
     default:
       return '';
   }
