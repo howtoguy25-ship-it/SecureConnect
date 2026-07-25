@@ -22,6 +22,7 @@ interface BaseElement {
   width: number;
   height: number;
   zIndex: number;
+  rotation?: number; // degrees clockwise from upright -- see the client BaseElement's comment
 }
 
 export interface TextElement extends BaseElement {

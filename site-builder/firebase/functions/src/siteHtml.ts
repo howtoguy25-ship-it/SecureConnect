@@ -2010,7 +2010,9 @@ function renderWidgetHtml(el: WidgetElement, base: string): string {
 
 function renderElement(el: CanvasElement, slug: string, productStockUrl: string, allElements: CanvasElement[], products: Record<string, CatalogProduct>, currency = 'usd', isSingleProductPage = false): string {
   const sym = currencySymbol(currency);
-  const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;`;
+  const base = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;${
+    el.rotation ? `transform:rotate(${el.rotation}deg);` : ''
+  }`;
   switch (el.type) {
     case 'text': {
       const font = getFontOption(el.fontFamily);

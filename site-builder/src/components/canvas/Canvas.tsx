@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable, Modal, ScrollView, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -131,6 +131,37 @@ function SiteSparkBadgePreview({ width, isLastPage }: { width: number; isLastPag
   );
 }
 
+// A real, tappable Canva-style "show my exact size" outline -- a purple border traced right
+// along the canvas edge plus a small arrow at the midpoint of each side pointing at that edge
+// (matching the reference: a purple outline with arrows calling out top/bottom/left/right),
+// with the literal width x height shown in a small badge. Purely a visual overlay
+// (pointerEvents="none") so it never blocks tapping/dragging the elements underneath --
+// toggled by tapping the bare canvas background (see Canvas's onPress below).
+function CanvasSizeOutline({ width, height }: { width: number; height: number }) {
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <View style={[styles.sizeOutlineBorder, { width, height }]} />
+      <View style={[styles.sizeArrow, { top: 2, left: width / 2 - 11 }]}>
+        <Ionicons name="chevron-up" size={16} color="#fff" />
+      </View>
+      <View style={[styles.sizeArrow, { bottom: 2, left: width / 2 - 11 }]}>
+        <Ionicons name="chevron-down" size={16} color="#fff" />
+      </View>
+      <View style={[styles.sizeArrow, { left: 2, top: height / 2 - 11 }]}>
+        <Ionicons name="chevron-back" size={16} color="#fff" />
+      </View>
+      <View style={[styles.sizeArrow, { right: 2, top: height / 2 - 11 }]}>
+        <Ionicons name="chevron-forward" size={16} color="#fff" />
+      </View>
+      <View style={[styles.sizeLabelWrap, { top: height / 2 - 12, left: width / 2 - 40 }]}>
+        <Text style={styles.sizeLabelText}>
+          {Math.round(width)} × {Math.round(height)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 // A real "+" that extends this page with more empty room to build into, positioned right at
 // the bottom of the canvas content itself (in normal document flow, sized as its own full-
 // width row) so it can never float on top of -- or get floated on top of by -- anything else,
@@ -190,6 +221,12 @@ export default function Canvas({
   isLastPage = true,
   onExtend,
 }: Props) {
+  const [outlineVisible, setOutlineVisible] = useState(false);
+  // Selecting any element means the user is back to actively designing -- hide the outline so
+  // it doesn't sit on top of the selection chrome/handles.
+  useEffect(() => {
+    if (selectedId) setOutlineVisible(false);
+  }, [selectedId]);
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
   const sizeStyle = { width: project.canvasSize.width, height: project.canvasSize.height };
   const hasProducts = project.elements.some((el) => el.type === 'product');
@@ -208,13 +245,19 @@ export default function Canvas({
         style={StyleSheet.absoluteFill}
         onPress={() => {
           // First tap on the background just deselects whatever was selected (so you can tap
-          // away from an element you were editing without anything else popping up). Only once
-          // nothing is selected does tapping the bare background double as "edit this page's
-          // background color" -- keeps the shortcut from feeling like it hijacks every deselect.
+          // away from an element you were editing without anything else popping up). Once
+          // nothing is selected, tapping the bare canvas toggles the Canva-style size outline
+          // on/off -- tap again (still nothing selected) to hide it and keep designing. The
+          // header's own palette icon (openBackgroundEditor) remains the direct path to the
+          // background color editor, so repurposing this tap doesn't remove that shortcut.
           if (selectedId) onSelect(null);
-          else onBackgroundTap?.();
+          else setOutlineVisible((v) => !v);
+        }}
+        onLongPress={() => {
+          if (!selectedId) onBackgroundTap?.();
         }}
       />
+      {outlineVisible && <CanvasSizeOutline width={project.canvasSize.width} height={project.canvasSize.height} />}
       {sorted.map((el) => (
         <DraggableElement
           key={el.id}
@@ -337,4 +380,30 @@ const styles = StyleSheet.create({
   policyModalCard: { width: '100%', maxWidth: 420, maxHeight: '75%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18 },
   policyModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   policyModalTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A', flex: 1, marginRight: 10 },
+  sizeOutlineBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    borderWidth: 3,
+    borderColor: '#7C3AED',
+    borderRadius: 18,
+  },
+  sizeArrow: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#7C3AED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sizeLabelWrap: {
+    position: 'absolute',
+    width: 80,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#7C3AED',
+    alignItems: 'center',
+  },
+  sizeLabelText: { fontSize: 11, fontWeight: '800', color: '#fff' },
 });

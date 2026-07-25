@@ -67,6 +67,10 @@ interface BaseElement {
   height: number;
   zIndex: number;
   locked?: boolean; // when true, stays put in the canvas -- no drag, resize, or pinch
+  // Degrees clockwise from upright, Canva-style free rotation via the round handle below the
+  // selection box. 0/undefined = the element's normal, unrotated orientation. Kept in
+  // (-180, 180] -- see normalizeRotationDeg in DraggableElement.tsx.
+  rotation?: number;
 }
 
 export interface TextElement extends BaseElement {

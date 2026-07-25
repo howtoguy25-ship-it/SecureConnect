@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput } from 'react-native';
+import { View, PanResponder, PanResponderInstance, StyleSheet, Pressable, TextInput, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CanvasElement } from '@/types';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
@@ -104,6 +104,26 @@ function clampResizeToCanvas(box: Box, corner: Corner, canvasSize: { width: numb
   return { x, y, width, height };
 }
 
+// Keeps a rotation angle inside (-180, 180] -- e.g. 190 -> -170, -185 -> 175 -- so it never
+// grows unbounded across many spins and a straight-up compare against 0/180 stays simple.
+function normalizeRotationDeg(deg: number): number {
+  let n = deg % 360;
+  if (n > 180) n -= 360;
+  if (n <= -180) n += 360;
+  return n;
+}
+
+// Canva-style "snap to straight": within this many degrees of exactly 0 or 180, the live
+// rotation locks to that exact value instead of the raw (jittery-by-hand) gesture angle --
+// this is what makes the small "0" straight-indicator meaningful (it only ever shows at a
+// real, exact 0, never an almost-0 the user can't feel through a touchscreen).
+const ROTATION_SNAP_DEG = 4;
+function snapRotationDeg(deg: number): number {
+  if (Math.abs(deg) < ROTATION_SNAP_DEG) return 0;
+  if (Math.abs(Math.abs(deg) - 180) < ROTATION_SNAP_DEG) return deg > 0 ? 180 : -180;
+  return deg;
+}
+
 function resizeFromCorner(corner: Corner, origin: Box, dx: number, dy: number, minWidth = MIN_SIZE, minHeight = MIN_SIZE): Box {
   let width = origin.width;
   let height = origin.height;
@@ -146,6 +166,9 @@ export default function DraggableElement({
   );
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+  // Non-null only while actively dragging the rotate handle -- a live preview of the angle,
+  // committed to element.rotation on release (same pattern as liveFontSize below).
+  const [liveRotation, setLiveRotation] = useState<number | null>(null);
   // Non-null only while actively resizing a text element from a corner handle -- a live,
   // Canva-style preview of the font scaling with the box, committed to the real element on
   // release.
@@ -176,7 +199,10 @@ export default function DraggableElement({
   onInteractionChangeRef.current = onInteractionChange;
   const liveFontSizeRef = useRef(liveFontSize);
   liveFontSizeRef.current = liveFontSize;
+  const liveRotationRef = useRef(liveRotation);
+  liveRotationRef.current = liveRotation;
   const interacting = useRef(false);
+  const wrapperRef = useRef<View>(null);
 
   useEffect(() => {
     if (!interacting.current) {
@@ -320,6 +346,58 @@ export default function DraggableElement({
   const blResponder = useCornerResponder('bl');
   const brResponder = useCornerResponder('br');
 
+  // Measured once per gesture (onPanResponderGrant), not on every move -- the canvas
+  // ScrollView already disables scrolling for the duration of any interaction (see
+  // onInteractionChange), so the element's on-screen center can't shift mid-gesture and a
+  // single measure() is both correct and far cheaper than re-measuring every frame.
+  const rotateOriginRef = useRef({ centerX: 0, centerY: 0, startAngleDeg: 0, startRotation: 0 });
+  const rotateResponder = useRef<PanResponderInstance>(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !lockedRef.current,
+      onMoveShouldSetPanResponder: () => !lockedRef.current,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (evt) => {
+        interacting.current = true;
+        onInteractionChangeRef.current?.(true);
+        const touch = evt.nativeEvent.touches[0] as Touch;
+        const startRotation = elementRef.current.rotation || 0;
+        wrapperRef.current?.measure((_x, _y, w, h, pageX, pageY) => {
+          const centerX = pageX + w / 2;
+          const centerY = pageY + h / 2;
+          const startAngleDeg = (Math.atan2(touch.pageY - centerY, touch.pageX - centerX) * 180) / Math.PI;
+          rotateOriginRef.current = { centerX, centerY, startAngleDeg, startRotation };
+        });
+      },
+      onPanResponderMove: (evt) => {
+        const touch = evt.nativeEvent.touches[0] as Touch;
+        if (!touch) return;
+        const { centerX, centerY, startAngleDeg, startRotation } = rotateOriginRef.current;
+        const currentAngleDeg = (Math.atan2(touch.pageY - centerY, touch.pageX - centerX) * 180) / Math.PI;
+        const next = normalizeRotationDeg(startRotation + (currentAngleDeg - startAngleDeg));
+        setLiveRotation(snapRotationDeg(next));
+      },
+      onPanResponderRelease: () => {
+        interacting.current = false;
+        onInteractionChangeRef.current?.(false);
+        if (liveRotationRef.current != null) onChangeRef.current({ rotation: liveRotationRef.current } as any);
+        setLiveRotation(null);
+      },
+      onPanResponderTerminate: () => {
+        interacting.current = false;
+        onInteractionChangeRef.current?.(false);
+        if (liveRotationRef.current != null) onChangeRef.current({ rotation: liveRotationRef.current } as any);
+        setLiveRotation(null);
+      },
+    })
+  ).current;
+
+  const displayRotation = liveRotation ?? (element.rotation || 0);
+  // Shows only mid-gesture, and only once the angle has actually snapped to dead straight --
+  // disappears the instant the finger moves off 0 again or is lifted (liveRotation resets to
+  // null on release), matching "shows while spun back straight, disappears when let go or
+  // still adjusting away from it."
+  const showStraightIndicator = liveRotation === 0;
+
   const liveElement = {
     ...element,
     width: box.width,
@@ -330,6 +408,7 @@ export default function DraggableElement({
 
   return (
     <View
+      ref={wrapperRef}
       style={[
         styles.wrapper,
         { left: box.x, top: box.y, width: box.width, height: box.height, zIndex: element.zIndex },
@@ -341,6 +420,10 @@ export default function DraggableElement({
       ]}
       {...moveResponder.panHandlers}
     >
+      {/* Only the visual content spins -- the outer box above (and the resize handles/
+      toolbar/rotate handle below) stay axis-aligned, so dragging a corner handle still means
+      exactly what it looks like regardless of the element's current rotation. */}
+      <View style={[styles.rotatingContent, displayRotation ? { transform: [{ rotate: `${displayRotation}deg` }] } : null]}>
       {editing && editable ? (
         <TextInput
           autoFocus
@@ -388,6 +471,7 @@ export default function DraggableElement({
           <ElementRenderer element={liveElement} allElements={allElements} locked={locked} />
         </ElementErrorBoundary>
       )}
+      </View>
 
       {elementLocked && (
         <View style={styles.lockBadge}>
@@ -409,6 +493,22 @@ export default function DraggableElement({
           <View style={[styles.resizeHandle, styles.handleBR]} {...brResponder.panHandlers}>
             <Ionicons name="resize" size={12} color="#FFFFFF" />
           </View>
+          {/* Sits on whichever side the action toolbar below ISN'T on, so the two never
+          overlap regardless of where the element sits on the page. */}
+          <View
+            style={[styles.rotateHandle, toolbarBelow ? styles.rotateHandleAbove : styles.rotateHandleBelow]}
+            {...rotateResponder.panHandlers}
+          >
+            <Ionicons name="sync" size={13} color="#FFFFFF" />
+          </View>
+          {showStraightIndicator && (
+            <View
+              style={[styles.straightIndicator, toolbarBelow ? styles.straightIndicatorAbove : styles.straightIndicatorBelow]}
+            >
+              <View style={styles.straightDot} />
+              <Text style={styles.straightIndicatorText}>0°</Text>
+            </View>
+          )}
         </>
       )}
 
@@ -433,6 +533,7 @@ export default function DraggableElement({
 
 const styles = StyleSheet.create({
   wrapper: { position: 'absolute' },
+  rotatingContent: { width: '100%', height: '100%' },
   selected: {
     borderWidth: 2,
     borderColor: '#2563EB',
@@ -497,4 +598,36 @@ const styles = StyleSheet.create({
   toolbarBelow: { bottom: -46 },
   toolbarBtn: { padding: 6 },
   toolbarDivider: { width: StyleSheet.hairlineWidth, height: 18, backgroundColor: '#E2E8F0' },
+  rotateHandle: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -13,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#7C3AED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Always the side opposite wherever the action toolbar is currently rendered (see
+  // toolbarAbove/toolbarBelow above) so the two floating controls never collide.
+  rotateHandleAbove: { top: -46 },
+  rotateHandleBelow: { bottom: -46 },
+  straightIndicator: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -20,
+    width: 40,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#0F172AE6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  straightIndicatorAbove: { top: -82 },
+  straightIndicatorBelow: { bottom: -82 },
+  straightDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#4ADE80' },
+  straightIndicatorText: { fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
 });
