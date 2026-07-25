@@ -250,6 +250,11 @@ function EditorInner({ navigation }: Props) {
     if (!permission.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
     if (result.canceled || result.assets.length === 0) return;
+    // A real 16:9 landscape frame by default -- 200x140 (close to square) was cramping every
+    // video into a letterboxed sliver of its own actual shape, which read as "just a static
+    // image" more than an actual video player would.
+    const width = 300;
+    const height = 169;
     const el: VideoElement = {
       id: generateId('el'),
       type: 'video',
@@ -258,12 +263,14 @@ function EditorInner({ navigation }: Props) {
       trimEndMs: null,
       muted: false,
       loop: true,
+      autoPlay: false,
+      previewSeconds: null,
       audioUri: null,
       audioVolume: 1,
-      x: canvasCenterX - 100,
-      y: canvasCenterY - 70,
-      width: 200,
-      height: 140,
+      x: canvasCenterX - width / 2,
+      y: canvasCenterY - height / 2,
+      width,
+      height,
       zIndex: 5,
     };
     addElement(el);

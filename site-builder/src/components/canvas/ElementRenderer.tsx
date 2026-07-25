@@ -108,15 +108,26 @@ function SlideshowView({ images, autoPlay, intervalMs, width, height }: { images
 function VideoElementView({ element, width, height }: { element: VideoElement; width: number; height: number }) {
   const player = useVideoPlayer(element.uri, (p) => {
     p.loop = element.loop;
-    p.muted = element.muted;
+    // Autoplay only ever works muted (same rule every browser/native player enforces) --
+    // forcing it here too keeps the editor's own preview honest about what a real visitor
+    // will actually get on the published site.
+    p.muted = element.autoPlay ? true : element.muted;
     if (element.trimStartMs > 0) p.currentTime = element.trimStartMs / 1000;
+    if (element.autoPlay) p.play();
   });
   const audioPlayer = useAudioPlayer(element.audioUri);
-
+  const [isPlaying, setIsPlaying] = useState(!!element.autoPlay);
+  // A real, tappable mute/unmute control needs its own live state to flip immediately --
+  // reset back to the saved default whenever that default itself changes (edited from the
+  // inspector), same convention as ProductEditScreen's own local-mirrors-saved-state fields.
+  const [muted, setMuted] = useState(element.autoPlay ? true : element.muted);
+  useEffect(() => setMuted(element.autoPlay ? true : element.muted), [element.autoPlay, element.muted]);
   useEffect(() => {
-    player.muted = element.muted;
+    player.muted = muted;
+  }, [player, muted]);
+  useEffect(() => {
     player.loop = element.loop;
-  }, [player, element.muted, element.loop]);
+  }, [player, element.loop]);
 
   useEffect(() => {
     if (element.audioUri) audioPlayer.volume = element.audioVolume;
@@ -124,9 +135,13 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
 
   useEffect(() => {
     if (!element.uri) return;
+    // A set previewSeconds caps playback at trimStart+previewSeconds regardless of how it
+    // started (autoplay or a manual tap) -- a short preview clip instead of the whole thing.
+    const naturalEndSec = element.trimEndMs != null ? element.trimEndMs / 1000 : player.duration;
+    const previewEndSec = element.previewSeconds != null ? element.trimStartMs / 1000 + element.previewSeconds : Infinity;
+    const endSec = Math.min(naturalEndSec, previewEndSec);
     const timeSub = player.addListener('timeUpdate', (payload) => {
-      const endSec = element.trimEndMs != null ? element.trimEndMs / 1000 : player.duration;
-      if (endSec > 0 && payload.currentTime >= endSec) {
+      if (endSec > 0 && Number.isFinite(endSec) && payload.currentTime >= endSec) {
         if (element.loop) {
           player.currentTime = element.trimStartMs / 1000;
           if (element.audioUri) audioPlayer.currentTime = 0;
@@ -137,6 +152,7 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
       }
     });
     const playingSub = player.addListener('playingChange', (payload) => {
+      setIsPlaying(payload.isPlaying);
       if (!element.audioUri) return;
       if (payload.isPlaying) audioPlayer.play();
       else audioPlayer.pause();
@@ -145,7 +161,7 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
       timeSub.remove();
       playingSub.remove();
     };
-  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.loop]);
+  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.previewSeconds, element.loop]);
 
   if (!element.uri) {
     return (
@@ -157,12 +173,25 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
   }
 
   return (
-    <VideoView
-      player={player}
-      style={{ width, height, borderRadius: 8, backgroundColor: '#000' }}
-      contentFit="cover"
-      nativeControls={false}
-    />
+    <View style={{ width, height, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000' }}>
+      <VideoView player={player} style={{ width, height }} contentFit="cover" nativeControls={false} />
+      {/* A real, full-size play button -- tapping the video itself toggles play/pause so the
+          whole frame is a legible "this is a real player" affordance, not just a static poster
+          frame with no visible way to interact with it. */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={() => (player.playing ? player.pause() : player.play())}
+      >
+        {!isPlaying && (
+          <View style={styles.videoPlayOverlay}>
+            <Ionicons name="play" size={Math.max(20, Math.min(width, height) * 0.22)} color="#FFFFFF" />
+          </View>
+        )}
+      </Pressable>
+      <Pressable style={styles.videoMuteBtn} onPress={() => setMuted((m) => !m)} hitSlop={8}>
+        <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={14} color="#FFFFFF" />
+      </Pressable>
+    </View>
   );
 }
 
@@ -407,7 +436,7 @@ function FullImageLightbox({ uri, onClose }: { uri: string | null; onClose: () =
   );
 }
 
-function ProductCardView({ element, width, height }: { element: ProductElement; width: number; height: number }) {
+function ProductCardView({ element, width, height, locked }: { element: ProductElement; width: number; height: number; locked?: boolean }) {
   const [showDetail, setShowDetail] = useState(false);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const catalogProduct = useCatalogProduct(element.productId);
@@ -431,7 +460,14 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
   const inStock = product.inStock !== false;
 
   return (
-    <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
+    // A locked element can't be dragged (DraggableElement disarms its move responder), but a
+    // shopper -- or a seller previewing a locked page -- can still tap it to see what it is.
+    // While unlocked, this Pressable is a plain View (no onPress) so it never competes with
+    // drag-select, matching the info-button/buy-buttons below, which already work either way.
+    <Pressable
+      style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}
+      onPress={locked ? () => setShowDetail(true) : undefined}
+    >
       {showImage && <ProductCardGallery images={product.images} width={width} height={imageHeight} compact={compact} />}
       {!inStock && (
         <View style={styles.outOfStockBadge}>
@@ -523,7 +559,7 @@ function ProductCardView({ element, width, height }: { element: ProductElement; 
         </View>
       </Modal>
       <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
-    </View>
+    </Pressable>
   );
 }
 
@@ -693,11 +729,13 @@ function CollectionView({
   allElements,
   width,
   height,
+  locked,
 }: {
   element: CollectionElement;
   allElements: CanvasElement[];
   width: number;
   height: number;
+  locked?: boolean;
 }) {
   const [showDetail, setShowDetail] = useState(false);
   const products = element.productIds
@@ -711,7 +749,13 @@ function CollectionView({
   const sym = useSellerCurrencySymbol();
 
   return (
-    <View style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}>
+    // See ProductCardView's identical Pressable wrap for why -- lets a locked collection card
+    // still be tapped open (drag is already disarmed one level up) without interfering with
+    // the info-button/thumbnails below, which work regardless of lock state.
+    <Pressable
+      style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}
+      onPress={locked ? () => setShowDetail(true) : undefined}
+    >
       {showGrid &&
         (thumbs.length > 0 ? (
           <View style={{ width, height: gridHeight, flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -762,11 +806,22 @@ function CollectionView({
           </View>
         </View>
       </Modal>
-    </View>
+    </Pressable>
   );
 }
 
-export default function ElementRenderer({ element, allElements }: { element: CanvasElement; allElements: CanvasElement[] }) {
+export default function ElementRenderer({
+  element,
+  allElements,
+  locked,
+}: {
+  element: CanvasElement;
+  allElements: CanvasElement[];
+  // Only 'product'/'collection' read this -- lets the whole card open its detail view on tap
+  // once DraggableElement has disarmed dragging for a locked element, instead of only the tiny
+  // "i" info button being reachable. See ProductCardView/CollectionView's Pressable wrap.
+  locked?: boolean;
+}) {
   const { width, height } = element;
   // Called unconditionally (rules-of-hooks) regardless of element.type -- resolves to
   // undefined for anything but a text element with a custom font picked.
@@ -850,10 +905,10 @@ export default function ElementRenderer({ element, allElements }: { element: Can
       return allElements.length === 1 ? (
         <ProductPageView element={element} width={width} height={height} />
       ) : (
-        <ProductCardView element={element} width={width} height={height} />
+        <ProductCardView element={element} width={width} height={height} locked={locked} />
       );
     case 'collection':
-      return <CollectionView element={element} allElements={allElements} width={width} height={height} />;
+      return <CollectionView element={element} allElements={allElements} width={width} height={height} locked={locked} />;
     case 'game':
       return <GameView element={element} width={width} height={height} />;
     case 'widget':
@@ -921,6 +976,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   videoTitleText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  videoMuteBtn: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15,23,42,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   productInfoBtn: {
     position: 'absolute',
     top: 6,

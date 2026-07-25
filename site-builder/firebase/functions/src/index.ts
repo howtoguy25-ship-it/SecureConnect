@@ -1371,23 +1371,25 @@ export const getPublishedSiteExport = onCall({ invoker: 'public' }, withCallable
 export const updateProductStock = onCall({ invoker: 'public' }, withCallableErrors('updateProductStock', async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
-  const { projectId, elementId, inStock, stockQuantity } = request.data as {
+  const { projectId, productId, inStock, stockQuantity } = request.data as {
     projectId: string;
-    elementId: string;
+    productId: string;
     inStock: boolean;
     stockQuantity: number | null;
   };
-  if (!projectId || !elementId) throw new HttpsError('invalid-argument', 'Missing projectId or elementId.');
+  if (!projectId || !productId) throw new HttpsError('invalid-argument', 'Missing projectId or productId.');
 
+  // The element only ever carries a productId reference now (see ProductElement's comment in
+  // types.ts) -- the client already has it in hand, so this trusts it directly instead of
+  // re-deriving it by searching the project doc's elements. Searching used to race the editor's
+  // own 400ms draft-save debounce: toggle stock right after inserting a brand new product and
+  // this callable could run before that element had actually reached Firestore yet, throwing a
+  // spurious "Product element not found." The project doc is still fetched, but only for its
+  // publishSlug.
   const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
   const snap = await projectRef.get();
   const project = snap.data() as Project | undefined;
   if (!project) throw new HttpsError('not-found', 'Project not found.');
-
-  const allElements = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
-  const found = allElements.find((el): el is ProductElement => el.id === elementId && el.type === 'product');
-  const productId = found?.productId ?? null;
-  if (!productId) throw new HttpsError('not-found', 'Product element not found.');
 
   await db.collection('users').doc(uid).collection('products').doc(productId)
     .set({ inStock, initialStock: stockQuantity, updatedAt: Date.now() }, { merge: true });

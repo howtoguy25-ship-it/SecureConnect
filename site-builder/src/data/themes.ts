@@ -103,7 +103,13 @@ export const THEMES: Theme[] = [
     textColor: '#111827',
     seedElements: [
       shapeEl({ id: 'seed-block', y: 0, color: '#FDE68A', height: 180 }),
-      textEl({ id: 'seed-h1', text: 'Say It Boldly', y: 60, fontSize: 32, color: '#111827' }),
+      // Explicit (narrower-than-default) width -- the shared textEl() default of 342 leaves a
+      // headline almost exactly as wide as the 390px canvas, so there's only ~24px of room to
+      // drag it left or right before the canvas-bounds clamp stops it -- exactly the "barely
+      // moves / stuck" feel reported against this theme's headline. Narrower here leaves real
+      // room to reposition without touching the shared default (used by dozens of other,
+      // already-fine-fitting elements across every theme).
+      textEl({ id: 'seed-h1', text: 'Say It Boldly', y: 60, width: 280, fontSize: 32, color: '#111827' }),
       buttonEl({ id: 'seed-btn', label: 'Explore', y: 220, backgroundColor: '#D97706' }),
 
       iconEl({ id: 'seed-feat1-icon', x: 44, y: 308, iconName: 'pricetag-outline', color: '#D97706' }),

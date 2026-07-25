@@ -8,13 +8,13 @@ import { requireFunctions } from '@/services/requireFunctions';
 // takes effect right away without needing a full republish.
 export async function updateProductStock(
   projectId: string,
-  elementId: string,
+  productId: string,
   inStock: boolean,
   stockQuantity: number | null
 ): Promise<void> {
   const call = httpsCallable<
-    { projectId: string; elementId: string; inStock: boolean; stockQuantity: number | null },
+    { projectId: string; productId: string; inStock: boolean; stockQuantity: number | null },
     { ok: boolean }
   >(requireFunctions(functions), 'updateProductStock');
-  await call({ projectId, elementId, inStock, stockQuantity });
+  await call({ projectId, productId, inStock, stockQuantity });
 }

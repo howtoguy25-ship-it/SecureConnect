@@ -21,6 +21,14 @@ function escapeAttr(value: string): string {
   return escapeHtml(value);
 }
 
+// Inline SVGs for the real video play/mute controls (case 'video' below) -- no icon-font/CDN
+// dependency for three tiny glyphs used on a published static page.
+const PLAY_ICON_SVG = '<svg width="22%" height="22%" viewBox="0 0 24 24" fill="#fff" style="min-width:32px;min-height:32px;"><path d="M8 5v14l11-7z"/></svg>';
+const SOUND_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M3 10v4h4l5 5V5L7 10H3z"/><path d="M16.5 12a4.5 4.5 0 0 0-2.5-4.03v8.06A4.5 4.5 0 0 0 16.5 12z"/></svg>';
+const MUTE_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M3 10v4h4l5 5V5L7 10H3z"/><path d="M19 12l2.5-2.5-1-1L18 11l-2.5-2.5-1 1L17 12l-2.5 2.5 1 1L18 13l2.5 2.5 1-1L19 12z"/></svg>';
+
 function hexToRgba(hex: string, alpha: number): string {
   const clean = hex.replace('#', '');
   const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
@@ -2056,32 +2064,56 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       if (!el.uri) return '';
       const videoId = `video-${el.id}`;
       const audioId = `video-audio-${el.id}`;
+      const playBtnId = `video-play-${el.id}`;
+      const muteBtnId = `video-mute-${el.id}`;
       const trimStartSec = el.trimStartMs / 1000;
       const trimEndSec = el.trimEndMs != null ? el.trimEndMs / 1000 : null;
+      // Autoplay only ever works muted (every browser enforces this) -- forcing it here keeps
+      // the initial markup honest about what will actually play instead of silently failing.
+      const initiallyMuted = el.autoPlay || el.muted;
       const audioTag = el.audioUri
         ? `<audio id="${audioId}" src="${escapeAttr(el.audioUri)}" style="display:none;" ${
             el.audioVolume === 0 ? 'muted' : ''
           }></audio>`
         : '';
+      // previewSeconds caps playback at trimStart+previewSeconds regardless of how it started
+      // (autoplay or a visitor tapping play) -- a short preview loop instead of the whole clip.
+      const naturalEndExpr = trimEndSec != null ? String(trimEndSec) : 'v.duration';
+      const endExpr = el.previewSeconds != null ? `Math.min(${naturalEndExpr},${trimStartSec}+${el.previewSeconds})` : naturalEndExpr;
       const script = `<script>(function(){
   var v=document.getElementById(${JSON.stringify(videoId)});
   var a=document.getElementById(${JSON.stringify(audioId)});
+  var playBtn=document.getElementById(${JSON.stringify(playBtnId)});
+  var muteBtn=document.getElementById(${JSON.stringify(muteBtnId)});
   if(!v)return;
   if(a){a.volume=${el.audioVolume};}
   v.addEventListener('loadedmetadata',function(){v.currentTime=${trimStartSec};});
-  v.addEventListener('play',function(){if(a){a.currentTime=0;a.play();}});
-  v.addEventListener('pause',function(){if(a){a.pause();}});
+  v.addEventListener('play',function(){if(a){a.currentTime=0;a.play();}if(playBtn)playBtn.style.display='none';});
+  v.addEventListener('pause',function(){if(a){a.pause();}if(playBtn)playBtn.style.display='flex';});
   v.addEventListener('timeupdate',function(){
-    var end=${trimEndSec != null ? trimEndSec : 'v.duration'};
+    var end=${endExpr};
     if(end && v.currentTime>=end){
       if(${el.loop ? 'true' : 'false'}){v.currentTime=${trimStartSec};if(a){a.currentTime=0;}}
       else{v.pause();}
     }
   });
+  if(playBtn){playBtn.addEventListener('click',function(){if(v.paused){v.play();}else{v.pause();}});}
+  if(muteBtn){muteBtn.addEventListener('click',function(){
+    v.muted=!v.muted;
+    muteBtn.innerHTML=v.muted?${JSON.stringify(MUTE_ICON_SVG)}:${JSON.stringify(SOUND_ICON_SVG)};
+  });}
 })();</script>`;
-      return `<video id="${videoId}" src="${escapeAttr(el.uri)}" style="${base}object-fit:cover;background:#000;" ${
-        el.muted ? 'muted' : ''
-      } playsinline controls></video>${audioTag}${script}`;
+      return `<div style="${base}overflow:hidden;background:#000;">
+  <video id="${videoId}" src="${escapeAttr(el.uri)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" ${
+        initiallyMuted ? 'muted' : ''
+      } playsinline ${el.autoPlay ? 'autoplay' : ''}></video>
+  <button type="button" id="${playBtnId}" aria-label="Play" style="position:absolute;inset:0;width:100%;height:100%;border:0;padding:0;margin:0;background:rgba(15,23,42,0.15);align-items:center;justify-content:center;cursor:pointer;display:${
+        el.autoPlay ? 'none' : 'flex'
+      };">${PLAY_ICON_SVG}</button>
+  <button type="button" id="${muteBtnId}" aria-label="Mute" style="position:absolute;right:8px;bottom:8px;width:28px;height:28px;border-radius:14px;border:0;padding:0;background:rgba(15,23,42,0.65);display:flex;align-items:center;justify-content:center;cursor:pointer;">${
+        initiallyMuted ? MUTE_ICON_SVG : SOUND_ICON_SVG
+      }</button>
+</div>${audioTag}${script}`;
     }
     case 'videoEmbed': {
       // A real, already-existing video (not one the site owner uploaded) -- played back
@@ -3150,7 +3182,7 @@ function renderHeaderBarHtml(opts: HeaderBarOptions, menuButton: string, hasProd
 })();</script>`
     : '';
 
-  return `<div style="width:100%;background:#FFFFFF;border-bottom:1px solid ${escapeAttr(dividerColor)};box-sizing:border-box;font-family:-apple-system,sans-serif;">
+  return `<div style="width:100%;background:#FFFFFF;border-bottom:1px solid ${escapeAttr(dividerColor)};box-shadow:0 1px 3px rgba(15,23,42,0.06);box-sizing:border-box;font-family:-apple-system,sans-serif;">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;max-width:640px;margin:0 auto;box-sizing:border-box;">
     <div style="flex:0 0 auto;min-width:40px;">${menuButton}</div>
     <div style="flex:1;display:flex;justify-content:center;align-items:center;overflow:hidden;">${brandHtml}</div>
@@ -3332,6 +3364,12 @@ export function renderProjectHtml(
   // This page's only real content is one product -- render it Shopify-PDP-style (see the
   // product case's `fullBleed` handling below) instead of the small catalog-grid card.
   const isSingleProductPage = project.elements.length === 1 && project.elements[0].type === 'product';
+  // The header bar (hamburger/logo/search), sitewide announcement bars, and the policy footer
+  // are all real-website concepts -- a Logo or 9:16 Video project publishes as one fixed
+  // single-page card meant to look like its own thing (a logo reveal, a vertical video),
+  // not a mini website with navigation chrome bolted onto it. Social is the same fixed
+  // single-card shape (see PageType's own comment), grouped the same way.
+  const isWebsite = project.pageType === 'website';
   const menu = renderMenuHtml(project.menu, project.pages, hasProducts, project.policies, project.elements);
   const hasMultiplayerGame = project.elements.some(
     (el) => el.type === 'game' && (el.kind === 'tictactoe' || el.kind === 'connect4' || el.kind === 'rps')
@@ -3409,13 +3447,17 @@ export function renderProjectHtml(
 <body>
   ${hasMultiplayerGame ? sharedGameRuntimeScript() : ''}
   ${needsThreeJs ? '<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>' : ''}
-  ${renderAnnouncementBars(project)}
-  ${renderHeaderBarHtml(
-    { siteName: project.name, logoUrl: project.logoUrl, logoHeightPx: project.logoHeightPx, logoFit: project.logoFit, headerDividerColor: project.headerDividerColor },
-    menu.button,
-    hasProducts
-  )}
-  ${menu.panel}
+  ${isWebsite ? renderAnnouncementBars(project) : ''}
+  ${
+    isWebsite
+      ? renderHeaderBarHtml(
+          { siteName: project.name, logoUrl: project.logoUrl, logoHeightPx: project.logoHeightPx, logoFit: project.logoFit, headerDividerColor: project.headerDividerColor },
+          menu.button,
+          hasProducts
+        )
+      : ''
+  }
+  ${isWebsite ? menu.panel : ''}
   ${navHtml}
   ${hasProducts ? renderDiscountAnnouncementScript(slug, discountAnnouncementUrl) : ''}
   <div id="site-wrapper">
@@ -3423,7 +3465,7 @@ export function renderProjectHtml(
       ${elementsHtml}
     </div>
   </div>
-  ${renderPolicyFooterHtml(project.policies)}
+  ${isWebsite ? renderPolicyFooterHtml(project.policies) : ''}
   ${isLastPage ? '<a class="sitespark-badge" href="https://sitespark.app" target="_blank" rel="noopener">Built by SiteSpark</a>' : ''}
   <!-- Fixed-position UI (report link always; cart/track FABs when hasProducts) is pinned to
        the viewport bottom regardless of document height -- on a page short enough to fit in

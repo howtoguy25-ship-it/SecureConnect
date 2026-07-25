@@ -133,6 +133,15 @@ export interface VideoElement extends BaseElement {
   trimEndMs: number | null; // null = play to the natural end
   muted: boolean; // mute the clip's own audio -- useful when overlaying audioUri instead
   loop: boolean;
+  // Starts playing on its own instead of waiting for a visitor to tap the play button --
+  // browsers (and most native players) only allow this when the clip is also muted, so
+  // turning this on forces `muted` on too (see the inspector's own toggle logic).
+  autoPlay: boolean;
+  // When set, playback -- autoplay or a manual tap -- never goes past trimStartMs +
+  // previewSeconds: loops back there if `loop` is on, otherwise pauses. A short preview clip
+  // instead of the whole thing, regardless of how it started. null (the default) means the
+  // full trimmed range (trimStartMs..trimEndMs) plays out normally.
+  previewSeconds: 3 | 5 | 10 | null;
   audioUri: string | null; // optional second clip used only for its audio track (overlay/replace)
   audioVolume: number; // 0-1, only relevant when audioUri is set
 }

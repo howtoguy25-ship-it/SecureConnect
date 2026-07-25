@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, Image } from 'react-native';
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -57,13 +57,13 @@ interface Props {
 // instead of waiting for a full republish. Local to this file since nothing else needs it.
 function ProductLiveStockSave({
   projectId,
-  elementId,
+  productId,
   inStock,
   stockQuantity,
   published,
 }: {
   projectId: string;
-  elementId: string;
+  productId: string;
   inStock: boolean;
   stockQuantity: number | null;
   published: boolean;
@@ -73,7 +73,7 @@ function ProductLiveStockSave({
   const save = async () => {
     setSaving(true);
     try {
-      await updateProductStock(projectId, elementId, inStock, stockQuantity);
+      await updateProductStock(projectId, productId, inStock, stockQuantity);
       showAlert(
         published ? 'Saved to live store' : 'Saved',
         published
@@ -181,9 +181,7 @@ function ProductInspectorSection({
     <>
       <View style={styles.productSummaryCard}>
         {product.images[0] ? (
-          <View style={styles.productSummaryThumb}>
-            <Ionicons name="image" size={20} color="#CBD5E1" />
-          </View>
+          <Image source={{ uri: product.images[0] }} style={styles.productSummaryThumb} />
         ) : (
           <View style={[styles.productSummaryThumb, { alignItems: 'center', justifyContent: 'center' }]}>
             <Ionicons name="pricetag-outline" size={20} color="#94A3B8" />
@@ -212,7 +210,7 @@ function ProductInspectorSection({
       {projectId && product.variantOptions.length === 0 ? (
         <ProductLiveStockSave
           projectId={projectId}
-          elementId={element.id}
+          productId={element.productId}
           inStock={product.inStock !== false}
           stockQuantity={product.trackInventory ? product.initialStock ?? 0 : null}
           published={!!publishSlug}
@@ -717,6 +715,30 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               >
                 <Text style={styles.toggleBtnText}>Loop {element.loop ? 'On' : 'Off'}</Text>
               </Pressable>
+              <Pressable
+                style={[styles.toggleBtn, element.autoPlay && styles.toggleBtnActive]}
+                // Browsers/native players only allow autoplay when muted -- turning this on
+                // forces mute too, rather than silently failing to autoplay later.
+                onPress={() => onChange({ autoPlay: !element.autoPlay, ...(!element.autoPlay ? { muted: true } : null) } as any)}
+              >
+                <Text style={styles.toggleBtnText}>Autoplay {element.autoPlay ? 'On' : 'Off'}</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.fieldLabel}>Preview length</Text>
+            <Text style={styles.helperText}>
+              Loop just the first few seconds instead of the whole clip -- a short preview instead of the full video.
+            </Text>
+            <View style={styles.rowButtons}>
+              {([null, 3, 5, 10] as const).map((seconds) => (
+                <Pressable
+                  key={String(seconds)}
+                  style={[styles.toggleBtn, element.previewSeconds === seconds && styles.toggleBtnActive]}
+                  onPress={() => onChange({ previewSeconds: seconds } as any)}
+                >
+                  <Text style={styles.toggleBtnText}>{seconds == null ? 'Full clip' : `${seconds}s`}</Text>
+                </Pressable>
+              ))}
             </View>
 
             <Text style={styles.fieldLabel}>Sound source (optional)</Text>

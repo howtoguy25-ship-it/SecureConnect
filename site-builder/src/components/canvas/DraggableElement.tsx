@@ -346,12 +346,12 @@ export default function DraggableElement({
           }}
         >
           <ElementErrorBoundary>
-            <ElementRenderer element={liveElement} allElements={allElements} />
+            <ElementRenderer element={liveElement} allElements={allElements} locked={locked} />
           </ElementErrorBoundary>
         </Pressable>
       ) : (
         <ElementErrorBoundary>
-          <ElementRenderer element={liveElement} allElements={allElements} />
+          <ElementRenderer element={liveElement} allElements={allElements} locked={locked} />
         </ElementErrorBoundary>
       )}
 

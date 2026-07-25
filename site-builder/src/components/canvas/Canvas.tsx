@@ -193,10 +193,17 @@ export default function Canvas({
   const sorted = [...project.elements].sort((a, b) => a.zIndex - b.zIndex);
   const sizeStyle = { width: project.canvasSize.width, height: project.canvasSize.height };
   const hasProducts = project.elements.some((el) => el.type === 'product');
+  // The real hamburger/logo/search header bar, announcement bar, and policy footer are all
+  // website concepts (real published multi-page navigation, sitewide announcements, sitewide
+  // policy links) -- a Logo or 9:16 Video project is one fixed single-page card meant to look
+  // and feel like its own thing, not a mini website, so none of that chrome belongs there. A
+  // Social project is the same fixed single-card shape as Logo/Video (see PageType's own
+  // comment), so it's grouped the same way.
+  const isWebsite = project.pageType === 'website';
 
   const content = (
     <>
-      <AnnouncementBarView settings={project.announcements} />
+      {isWebsite && <AnnouncementBarView settings={project.announcements} />}
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={() => {
@@ -233,12 +240,17 @@ export default function Canvas({
     const { start, end } = gradientStartEnd(project.backgroundGradient.angle);
     return (
       <View>
-        <HeaderBarPreview project={project} width={project.canvasSize.width} hasProducts={hasProducts} />
-        <LinearGradient colors={project.backgroundGradient.colors} start={start} end={end} style={[styles.canvas, sizeStyle, styles.canvasBelowHeader]}>
+        {isWebsite && <HeaderBarPreview project={project} width={project.canvasSize.width} hasProducts={hasProducts} />}
+        <LinearGradient
+          colors={project.backgroundGradient.colors}
+          start={start}
+          end={end}
+          style={[styles.canvas, sizeStyle, isWebsite && styles.canvasBelowHeader]}
+        >
           {content}
         </LinearGradient>
         {onExtend && <ExtendCanvasButton width={project.canvasSize.width} onPress={onExtend} />}
-        <PolicyFooterBar project={project} width={project.canvasSize.width} />
+        {isWebsite && <PolicyFooterBar project={project} width={project.canvasSize.width} />}
         <SiteSparkBadgePreview width={project.canvasSize.width} isLastPage={isLastPage} />
       </View>
     );
@@ -246,10 +258,10 @@ export default function Canvas({
 
   return (
     <View>
-      <HeaderBarPreview project={project} width={project.canvasSize.width} hasProducts={hasProducts} />
-      <View style={[styles.canvas, sizeStyle, styles.canvasBelowHeader, { backgroundColor: project.backgroundColor }]}>{content}</View>
+      {isWebsite && <HeaderBarPreview project={project} width={project.canvasSize.width} hasProducts={hasProducts} />}
+      <View style={[styles.canvas, sizeStyle, isWebsite && styles.canvasBelowHeader, { backgroundColor: project.backgroundColor }]}>{content}</View>
       {onExtend && <ExtendCanvasButton width={project.canvasSize.width} onPress={onExtend} />}
-      <PolicyFooterBar project={project} width={project.canvasSize.width} />
+      {isWebsite && <PolicyFooterBar project={project} width={project.canvasSize.width} />}
       <SiteSparkBadgePreview width={project.canvasSize.width} isLastPage={isLastPage} />
     </View>
   );

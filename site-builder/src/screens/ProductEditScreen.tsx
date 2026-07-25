@@ -88,6 +88,10 @@ export default function ProductEditScreen({ navigation, route }: Props) {
       showAlert('Give it a name', 'Products need a real name before they can be saved.');
       return;
     }
+    if (uploadingImage) {
+      showAlert('Still uploading', 'Wait for the photo to finish uploading before saving.');
+      return;
+    }
     setSaving(true);
     try {
       await productsStore.save(uid, product);
@@ -326,8 +330,16 @@ export default function ProductEditScreen({ navigation, route }: Props) {
           side.
         </Text>
 
-        <Pressable style={[styles.saveBtn, { backgroundColor: theme.accent }, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-          {saving ? <ActivityIndicator color={theme.accentText} /> : <Text style={[styles.saveBtnText, { color: theme.accentText }]}>Save</Text>}
+        <Pressable
+          style={[styles.saveBtn, { backgroundColor: theme.accent }, (saving || uploadingImage) && { opacity: 0.6 }]}
+          onPress={handleSave}
+          disabled={saving || uploadingImage}
+        >
+          {saving ? (
+            <ActivityIndicator color={theme.accentText} />
+          ) : (
+            <Text style={[styles.saveBtnText, { color: theme.accentText }]}>{uploadingImage ? 'Uploading photo…' : 'Save'}</Text>
+          )}
         </Pressable>
       </ScrollView>
 

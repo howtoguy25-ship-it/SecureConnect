@@ -79,6 +79,8 @@ export interface VideoElement extends BaseElement {
   trimEndMs: number | null;
   muted: boolean;
   loop: boolean;
+  autoPlay: boolean;
+  previewSeconds: 3 | 5 | 10 | null;
   audioUri: string | null;
   audioVolume: number;
 }
