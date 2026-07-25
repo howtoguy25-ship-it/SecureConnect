@@ -8,6 +8,11 @@ export default function SliderRow({
   min,
   max,
   step = 1,
+  // Digits of precision for the number field/slider readout -- 0 (the default, matching every
+  // existing whole-number use of this row) rounds to an integer; a time control in real
+  // seconds (step < 1) passes 1 so "2.3" doesn't get flattened to "2" the instant you stop
+  // dragging.
+  decimals = 0,
   onChange,
 }: {
   label: string;
@@ -15,15 +20,17 @@ export default function SliderRow({
   min: number;
   max: number;
   step?: number;
+  decimals?: number;
   onChange: (value: number) => void;
 }) {
-  const [text, setText] = useState(String(Math.round(value)));
+  const format = (v: number) => v.toFixed(decimals);
+  const [text, setText] = useState(format(value));
   const [focused, setFocused] = useState(false);
 
   // Keep the typed text in sync with external changes (dragging the slider, undo, etc.)
   // without clobbering what the user is actively typing into the numeric field.
   useEffect(() => {
-    if (!focused) setText(String(Math.round(value)));
+    if (!focused) setText(format(value));
   }, [value, focused]);
 
   const commitText = () => {
@@ -31,7 +38,7 @@ export default function SliderRow({
     if (Number.isFinite(parsed)) {
       onChange(Math.min(max, Math.max(min, parsed)));
     } else {
-      setText(String(Math.round(value)));
+      setText(format(value));
     }
   };
 

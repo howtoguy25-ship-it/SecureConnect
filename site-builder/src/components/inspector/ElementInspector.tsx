@@ -350,20 +350,22 @@ function VideoCaptionsEditor({
             multiline
           />
           <SliderRow
-            label="Starts at (ms)"
-            value={caption.startMs}
-            min={trimStartMs}
-            max={Math.max(trimStartMs, caption.endMs - 200)}
-            step={100}
-            onChange={(v) => updateCaption(caption.id, { startMs: v })}
+            label="Starts at (s)"
+            value={caption.startMs / 1000}
+            min={trimStartMs / 1000}
+            max={Math.max(trimStartMs, caption.endMs - 200) / 1000}
+            step={0.1}
+            decimals={1}
+            onChange={(v) => updateCaption(caption.id, { startMs: Math.round(v * 1000) })}
           />
           <SliderRow
-            label="Ends at (ms)"
-            value={caption.endMs}
-            min={caption.startMs + 200}
-            max={maxMs}
-            step={100}
-            onChange={(v) => updateCaption(caption.id, { endMs: v })}
+            label="Ends at (s)"
+            value={caption.endMs / 1000}
+            min={(caption.startMs + 200) / 1000}
+            max={maxMs / 1000}
+            step={0.1}
+            decimals={1}
+            onChange={(v) => updateCaption(caption.id, { endMs: Math.round(v * 1000) })}
           />
         </View>
       ))}
@@ -746,12 +748,13 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             </Pressable>
 
             <SliderRow
-              label="Trim Start (ms)"
-              value={element.trimStartMs}
+              label="Trim Start (s)"
+              value={element.trimStartMs / 1000}
               min={0}
-              max={MAX_TRIM_MS}
-              step={500}
-              onChange={(v) => onChange({ trimStartMs: v } as any)}
+              max={MAX_TRIM_MS / 1000}
+              step={0.5}
+              decimals={1}
+              onChange={(v) => onChange({ trimStartMs: Math.round(v * 1000) } as any)}
             />
             <Pressable
               style={[styles.toggleBtn, element.trimEndMs == null && styles.toggleBtnActive]}
@@ -763,12 +766,13 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             </Pressable>
             {element.trimEndMs != null && (
               <SliderRow
-                label="Trim End (ms)"
-                value={element.trimEndMs}
-                min={element.trimStartMs + 500}
-                max={MAX_TRIM_MS}
-                step={500}
-                onChange={(v) => onChange({ trimEndMs: v } as any)}
+                label="Trim End (s)"
+                value={element.trimEndMs / 1000}
+                min={(element.trimStartMs + 500) / 1000}
+                max={MAX_TRIM_MS / 1000}
+                step={0.5}
+                decimals={1}
+                onChange={(v) => onChange({ trimEndMs: Math.round(v * 1000) } as any)}
               />
             )}
 
