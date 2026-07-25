@@ -29,6 +29,12 @@ export interface Theme {
   textColor: string;
   fontFamily?: string;
   seedElements: CanvasElement[];
+  // Which page type this theme's seedElements are actually laid out for -- a full multi-
+  // section site (nav/hero/gallery/footer) only ever makes sense on a scrollable 'website'
+  // page, not a single fixed-size Logo/Video/Social card, so ThemeGalleryScreen only offers a
+  // theme when this matches (or is left undefined, meaning "every page type" -- used only by
+  // the single seedElements-free Blank Page theme, which is trivially safe everywhere).
+  pageType?: PageType;
 }
 
 // A simple two-color linear gradient -- `angle` follows the CSS linear-gradient()

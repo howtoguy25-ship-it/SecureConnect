@@ -112,6 +112,11 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const isLocked = (theme: Theme) => theme.price > 0 && !unlocked.includes(theme.id);
 
   const filteredThemes = THEMES.filter((theme) => {
+    // A full multi-section site (nav/hero/gallery/footer) only ever fits a scrollable
+    // 'website' page -- Logo/Video/Social are one fixed-size card, so they only ever see the
+    // Blank page (theme.pageType left undefined, meaning "every page type") plus whatever
+    // real templates are actually built for that exact page type (see themes.ts).
+    if (theme.pageType !== undefined && theme.pageType !== pageType) return false;
     if (selectedCategory !== 'All' && theme.category !== selectedCategory) return false;
     const query = search.trim().toLowerCase();
     if (!query) return true;

@@ -103,6 +103,11 @@ export default function ThemeMiniPreview({ theme, width, height }: { theme: Them
             ) : (
               <View key={el.id} style={[boxStyle, styles.imagePlaceholder]} />
             );
+          // A Video/Social-page theme's seed video has no real clip yet (see videoEl's
+          // comment in themes.ts) -- same placeholder box as an unset image, so the preview
+          // card shows a real frame instead of a gap where the whole layout's background is.
+          case 'video':
+            return <View key={el.id} style={[boxStyle, styles.imagePlaceholder]} />;
           case 'icon': {
             const IconComp = ICON_SETS[el.iconSet] as any;
             const size = Math.max(5, Math.min(el.width, el.height) * scale * 0.85);

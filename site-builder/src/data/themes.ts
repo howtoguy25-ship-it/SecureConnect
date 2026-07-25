@@ -1,4 +1,4 @@
-import { Theme, TextElement, ShapeElement, ButtonElement, IconElement } from '@/types';
+import { Theme, TextElement, ShapeElement, ButtonElement, IconElement, ImageElement, VideoElement } from '@/types';
 
 function textEl(partial: Partial<TextElement> & Pick<TextElement, 'id' | 'text' | 'y'>): TextElement {
   return {
@@ -52,6 +52,36 @@ function iconEl(partial: Partial<IconElement> & Pick<IconElement, 'id' | 'x' | '
   };
 }
 
+function imageEl(partial: Partial<ImageElement> & Pick<ImageElement, 'id' | 'x' | 'y' | 'width' | 'height'>): ImageElement {
+  return {
+    type: 'image',
+    uri: null,
+    zIndex: 0,
+    ...partial,
+  };
+}
+
+// A real, placeholder-only VideoElement (uri: null, same as tapping "+ Video" from the
+// Elements tab) -- a Video/Social template's whole point is the layout around where the
+// user's own clip goes, not a clip we don't have, so every video-page-type theme below seeds
+// this and lets the user pick their real footage the normal way once the project opens.
+function videoEl(partial: Partial<VideoElement> & Pick<VideoElement, 'id' | 'x' | 'y' | 'width' | 'height'>): VideoElement {
+  return {
+    type: 'video',
+    uri: null,
+    trimStartMs: 0,
+    trimEndMs: null,
+    muted: false,
+    loop: true,
+    autoPlay: false,
+    previewSeconds: null,
+    audioUri: null,
+    audioVolume: 1,
+    zIndex: 0,
+    ...partial,
+  };
+}
+
 export const THEMES: Theme[] = [
   {
     id: 'blank',
@@ -70,6 +100,7 @@ export const THEMES: Theme[] = [
     id: 'free-minimal',
     name: 'Studio',
     tier: 'free',
+    pageType: 'website',
     category: 'Business',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — clean corporate white and blue.',
@@ -133,6 +164,7 @@ export const THEMES: Theme[] = [
     id: 'free-bold',
     name: 'Bazaar',
     tier: 'free',
+    pageType: 'website',
     category: 'Retail',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — bright amber color blocks.',
@@ -196,6 +228,7 @@ export const THEMES: Theme[] = [
     id: 'free-soft',
     name: 'Bloom',
     tier: 'free',
+    pageType: 'website',
     category: 'Portfolio',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — gentle pastel indigo.',
@@ -259,6 +292,7 @@ export const THEMES: Theme[] = [
     id: 'free-appetite',
     name: 'Appetite',
     tier: 'free',
+    pageType: 'website',
     category: 'Restaurant',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — warm restaurant orange.',
@@ -322,6 +356,7 @@ export const THEMES: Theme[] = [
     id: 'free-momentum',
     name: 'Momentum',
     tier: 'free',
+    pageType: 'website',
     category: 'Fitness',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — high-energy fitness green.',
@@ -385,6 +420,7 @@ export const THEMES: Theme[] = [
     id: 'free-nextgen',
     name: 'Next Gen',
     tier: 'free',
+    pageType: 'website',
     category: 'Tech',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — sharp modern blue.',
@@ -448,6 +484,7 @@ export const THEMES: Theme[] = [
     id: 'free-atelier',
     name: 'Atelier',
     tier: 'free',
+    pageType: 'website',
     category: 'Portfolio',
     price: 0,
     description: 'A full real site already built: nav, hero, story, features, gallery, and testimonial — understated gallery neutrals.',
@@ -511,6 +548,7 @@ export const THEMES: Theme[] = [
     id: 'luxury-noir',
     name: 'Noir Luxury',
     tier: 'luxury',
+    pageType: 'website',
     category: 'Fashion',
     price: 189,
     description: 'A full premium site already built: nav, hero, story, services, gallery, and testimonial — dark with gold accents.',
@@ -574,6 +612,7 @@ export const THEMES: Theme[] = [
     id: 'luxury-coastal',
     name: 'Coastal Estate',
     tier: 'luxury',
+    pageType: 'website',
     category: 'Real Estate',
     price: 189,
     description: 'A full premium site already built: nav, hero, story, amenities, gallery, and testimonial — airy neutrals throughout.',
@@ -637,6 +676,7 @@ export const THEMES: Theme[] = [
     id: 'crazy-neon',
     name: 'Neon Overdrive',
     tier: 'luxury-crazy',
+    pageType: 'website',
     category: 'Retail',
     price: 399,
     description: 'A full maximalist site already built: nav, hero, story, drops, gallery, and testimonial — neon gradients throughout.',
@@ -701,6 +741,7 @@ export const THEMES: Theme[] = [
     id: 'crazy-editorial',
     name: 'Editorial Maximal',
     tier: 'luxury-crazy',
+    pageType: 'website',
     category: 'Media',
     price: 399,
     description: 'A full magazine-grade site already built: nav, hero, story, sections, gallery, and testimonial — dramatic contrast throughout.',
@@ -758,6 +799,175 @@ export const THEMES: Theme[] = [
 
       shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 752, color: '#000000', height: 92 }),
       buttonEl({ id: 'seed-footer-btn', label: 'Subscribe', x: 115, width: 160, y: 780, backgroundColor: '#E63946' }),
+    ],
+  },
+
+  // -- Logo templates (390x390 square canvas) -- real logo-composition layouts (wordmark,
+  // icon badge, monogram), not a squished-down website hero. See Theme.pageType's comment.
+  {
+    id: 'logo-wordmark',
+    name: 'Wordmark',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'logo',
+    description: 'A clean, centered brand name and tagline -- the classic wordmark logo layout.',
+    swatch: ['#FFFFFF', '#0F172A'],
+    background: '#FFFFFF',
+    accent: '#0F172A',
+    textColor: '#0F172A',
+    seedElements: [
+      textEl({ id: 'seed-name', text: 'Brand Name', x: 20, width: 350, y: 160, fontSize: 34, color: '#0F172A', align: 'center', height: 48 }),
+      textEl({ id: 'seed-tagline', text: 'YOUR TAGLINE HERE', x: 20, width: 350, y: 214, fontSize: 12, color: '#64748B', fontWeight: 'normal', align: 'center', height: 24 }),
+    ],
+  },
+  {
+    id: 'logo-badge',
+    name: 'Icon Badge',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'logo',
+    description: 'An icon inside a bold circular badge, with the brand name underneath.',
+    swatch: ['#FFFBEB', '#D97706'],
+    background: '#FFFFFF',
+    accent: '#D97706',
+    textColor: '#111827',
+    seedElements: [
+      shapeEl({ id: 'seed-circle', x: 95, y: 70, width: 200, height: 200, color: '#D97706', shapeKind: 'circle' }),
+      iconEl({ id: 'seed-icon', x: 145, y: 120, width: 100, height: 100, iconName: 'sparkles', color: '#FFFFFF' }),
+      textEl({ id: 'seed-name', text: 'BRAND NAME', x: 20, width: 350, y: 290, fontSize: 18, color: '#111827', align: 'center', height: 28 }),
+    ],
+  },
+  {
+    id: 'logo-monogram',
+    name: 'Monogram',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'logo',
+    description: 'A single bold initial inside a dark circle, with the full name below -- a monogram mark.',
+    swatch: ['#0B0B0D', '#D4AF37'],
+    background: '#0B0B0D',
+    accent: '#D4AF37',
+    textColor: '#F5F5F4',
+    seedElements: [
+      shapeEl({ id: 'seed-circle', x: 75, y: 55, width: 240, height: 240, color: '#16161A', shapeKind: 'circle' }),
+      textEl({ id: 'seed-letter', text: 'B', x: 75, width: 240, y: 108, fontSize: 108, color: '#D4AF37', align: 'center', height: 140 }),
+      textEl({ id: 'seed-fullname', text: 'BRAND NAME CO.', x: 20, width: 350, y: 312, fontSize: 14, color: '#F5F5F4', fontWeight: 'normal', align: 'center', height: 24 }),
+    ],
+  },
+
+  // -- Video templates (390x693 canvas) -- real layouts built around a full-frame video the
+  // user picks after opening the project (see videoEl's comment), not a scaled-down website.
+  {
+    id: 'video-title',
+    name: 'Title Card',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'video',
+    description: 'A full-frame video with a bold title and subtitle overlaid -- pick your clip, then edit the text.',
+    swatch: ['#0F172A', '#FFFFFF'],
+    background: '#0F172A',
+    accent: '#FFFFFF',
+    textColor: '#FFFFFF',
+    seedElements: [
+      videoEl({ id: 'seed-video', x: 0, y: 0, width: 390, height: 693 }),
+      textEl({ id: 'seed-title', text: 'Your Title Here', x: 20, width: 350, y: 300, fontSize: 30, color: '#FFFFFF', align: 'center', height: 60, zIndex: 2 }),
+      textEl({ id: 'seed-subtitle', text: 'A short subtitle', x: 20, width: 350, y: 364, fontSize: 15, color: '#FFFFFF', fontWeight: 'normal', align: 'center', height: 32, zIndex: 2 }),
+    ],
+  },
+  {
+    id: 'video-promo',
+    name: 'Promo',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'video',
+    description: 'A full-frame video with a bottom caption bar and a call-to-action button.',
+    swatch: ['#000000', '#FFFFFF'],
+    background: '#000000',
+    accent: '#FFFFFF',
+    textColor: '#FFFFFF',
+    seedElements: [
+      videoEl({ id: 'seed-video', x: 0, y: 0, width: 390, height: 693 }),
+      shapeEl({ id: 'seed-bar', x: 0, y: 560, width: 390, height: 133, color: '#000000B3', zIndex: 2 }),
+      textEl({ id: 'seed-caption', text: 'Check out our latest drop', x: 20, width: 350, y: 580, fontSize: 18, color: '#FFFFFF', height: 40, zIndex: 3 }),
+      buttonEl({ id: 'seed-cta', label: 'Shop Now', x: 130, width: 130, y: 628, height: 44, backgroundColor: '#FFFFFF', textColor: '#111827', borderRadius: 22, zIndex: 3 }),
+    ],
+  },
+  {
+    id: 'video-minimal',
+    name: 'Minimal',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'video',
+    description: 'Just a full-frame video with a small brand label in the corner -- clean, no extra chrome.',
+    swatch: ['#111827', '#FFFFFF'],
+    background: '#111827',
+    accent: '#FFFFFF',
+    textColor: '#FFFFFF',
+    seedElements: [
+      videoEl({ id: 'seed-video', x: 0, y: 0, width: 390, height: 693 }),
+      textEl({ id: 'seed-label', text: '@yourbrand', x: 16, y: 16, width: 160, fontSize: 13, color: '#FFFFFF', height: 24, zIndex: 2 }),
+    ],
+  },
+
+  // -- Social (9:16) templates (390x585 canvas) -- real story/reel-style layouts, not a
+  // scaled-down website.
+  {
+    id: 'social-quote',
+    name: 'Quote Card',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'social',
+    description: 'A bold, centered quote on a solid background -- a real story/reel quote card.',
+    swatch: ['#111827', '#FFFFFF'],
+    background: '#111827',
+    accent: '#FFFFFF',
+    textColor: '#FFFFFF',
+    seedElements: [
+      textEl({ id: 'seed-quote', text: '"Say something worth sharing."', x: 30, width: 330, y: 220, fontSize: 26, color: '#FFFFFF', align: 'center', height: 140 }),
+      textEl({ id: 'seed-attr', text: '— Your Name', x: 30, width: 330, y: 370, fontSize: 13, color: '#94A3B8', fontWeight: 'normal', align: 'center', height: 24 }),
+    ],
+  },
+  {
+    id: 'social-announcement',
+    name: 'Announcement',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'social',
+    description: 'A bright headline, subtext, and a call-to-action button -- a real story-ad layout.',
+    swatch: ['#7C3AED', '#FFFFFF'],
+    background: '#7C3AED',
+    accent: '#FFFFFF',
+    textColor: '#FFFFFF',
+    seedElements: [
+      textEl({ id: 'seed-headline', text: 'Big News!', x: 30, width: 330, y: 220, fontSize: 34, color: '#FFFFFF', align: 'center', height: 50 }),
+      textEl({ id: 'seed-sub', text: "Tell people what's happening", x: 30, width: 330, y: 276, fontSize: 15, color: '#EDE9FE', fontWeight: 'normal', align: 'center', height: 40 }),
+      buttonEl({ id: 'seed-cta', label: 'Learn More', x: 130, width: 130, y: 334, height: 46, backgroundColor: '#FFFFFF', textColor: '#7C3AED', borderRadius: 23 }),
+    ],
+  },
+  {
+    id: 'social-photo',
+    name: 'Photo Story',
+    tier: 'free',
+    category: 'Other',
+    price: 0,
+    pageType: 'social',
+    description: 'A full-bleed photo with a caption bar -- pick your image, then edit the caption.',
+    swatch: ['#1E293B', '#FFFFFF'],
+    background: '#1E293B',
+    accent: '#FFFFFF',
+    textColor: '#FFFFFF',
+    seedElements: [
+      imageEl({ id: 'seed-photo', x: 0, y: 0, width: 390, height: 585 }),
+      shapeEl({ id: 'seed-bar', x: 0, y: 480, width: 390, height: 105, color: '#000000B3', zIndex: 2 }),
+      textEl({ id: 'seed-caption', text: 'Add your caption here', x: 20, width: 350, y: 500, fontSize: 16, color: '#FFFFFF', height: 60, zIndex: 3 }),
     ],
   },
 ];

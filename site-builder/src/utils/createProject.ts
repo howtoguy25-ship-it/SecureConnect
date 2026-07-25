@@ -3,19 +3,21 @@ import { getTheme } from '@/data/themes';
 import { CanvasElement, CanvasSize, PageType, Project } from '@/types';
 import { generateId } from '@/utils/id';
 
-// Every theme's seedElements is authored against the tall "website" canvas (see
-// CANVAS_SIZES.website). Width is the same 390px across every page type, but height isn't --
-// Social (585), Video (693), Logo (390, square), and any custom size are all shorter, so
-// laying the raw seed coordinates straight onto one of those canvases either left about half
-// of every theme's elements below the visible area (Logo) or -- for Social/Video, which used
-// to just get an empty canvas instead -- meant picking a theme did nothing at all. Scaling Y
-// (position, height, and font size) by how much shorter the real canvas is, while leaving X
-// untouched (since width already matches), keeps every element's real horizontal design but
-// compresses the vertical layout to actually fit inside the canvas the user picked.
-const SEED_SOURCE_HEIGHT = CANVAS_SIZES.website.height;
+// A 'website' theme's seedElements is authored against the tall "website" canvas (see
+// CANVAS_SIZES.website); a Logo/Video/Social theme (theme.pageType set to that exact page
+// type -- see Theme.pageType's comment) is instead authored directly at that page type's own
+// native canvas size, since it's a real purpose-built layout, not a squished-down website.
+// Scaling Y (position, height, and font size) by how much the real canvas differs from
+// whichever of those the theme was actually authored against covers both cases with the same
+// math -- a plain website theme opened at its own default size, or a custom website size,
+// scales the old way; a Logo/Video/Social theme opened at its own matching default size comes
+// out at scale 1 (no distortion at all).
+function seedSourceHeight(themePageType: PageType | undefined): number {
+  return CANVAS_SIZES[themePageType ?? 'website'].height;
+}
 
-function fitSeedElements(seedElements: CanvasElement[], canvasHeight: number): CanvasElement[] {
-  const scaleY = canvasHeight / SEED_SOURCE_HEIGHT;
+function fitSeedElements(seedElements: CanvasElement[], canvasHeight: number, sourceHeight: number): CanvasElement[] {
+  const scaleY = canvasHeight / sourceHeight;
   return seedElements.map((el) => {
     const scaled: CanvasElement = { ...el, id: generateId('el'), y: el.y * scaleY, height: el.height * scaleY };
     if (scaled.type === 'text') scaled.fontSize = Math.max(8, el.type === 'text' ? el.fontSize * scaleY : 12);
@@ -31,7 +33,7 @@ export function createProject(name: string, pageType: PageType, themeId: string,
   // Every page type gets the theme's real design now, scaled to actually fit the canvas it's
   // starting from -- see fitSeedElements above for why this used to leave Social/Video
   // completely blank and Logo missing roughly half its elements.
-  const elements = fitSeedElements(theme.seedElements, canvasSize.height);
+  const elements = fitSeedElements(theme.seedElements, canvasSize.height, seedSourceHeight(theme.pageType));
 
   return {
     id: generateId('project'),
