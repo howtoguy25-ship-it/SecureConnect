@@ -81,6 +81,13 @@ export const THEMES: Theme[] = [
       textEl({ id: 'seed-h1', text: 'Your Headline Here', y: 120, fontSize: 30, color: '#0F172A' }),
       textEl({ id: 'seed-sub', text: 'A short line about what you offer.', y: 168, fontSize: 15, color: '#475569', fontWeight: 'normal', height: 40 }),
       buttonEl({ id: 'seed-btn', label: 'Get Started', y: 224, backgroundColor: '#2563EB' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 312, iconName: 'checkmark-circle-outline', color: '#2563EB' }),
+      textEl({ id: 'seed-feat1-label', text: 'Reliable', x: 20, width: 110, y: 350, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 312, iconName: 'flash-outline', color: '#2563EB' }),
+      textEl({ id: 'seed-feat2-label', text: 'Fast Setup', x: 140, width: 110, y: 350, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 312, iconName: 'people-outline', color: '#2563EB' }),
+      textEl({ id: 'seed-feat3-label', text: 'Real Support', x: 260, width: 110, y: 350, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
@@ -98,6 +105,13 @@ export const THEMES: Theme[] = [
       shapeEl({ id: 'seed-block', y: 0, color: '#FDE68A', height: 180 }),
       textEl({ id: 'seed-h1', text: 'Say It Boldly', y: 60, fontSize: 32, color: '#111827' }),
       buttonEl({ id: 'seed-btn', label: 'Explore', y: 220, backgroundColor: '#D97706' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 308, iconName: 'pricetag-outline', color: '#D97706' }),
+      textEl({ id: 'seed-feat1-label', text: 'Great Deals', x: 20, width: 110, y: 346, fontSize: 12, color: '#111827', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 308, iconName: 'flame-outline', color: '#D97706' }),
+      textEl({ id: 'seed-feat2-label', text: 'Trending Now', x: 140, width: 110, y: 346, fontSize: 12, color: '#111827', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 308, iconName: 'heart-outline', color: '#D97706' }),
+      textEl({ id: 'seed-feat3-label', text: 'Customer Favorites', x: 260, width: 110, y: 346, fontSize: 12, color: '#111827', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
@@ -115,6 +129,13 @@ export const THEMES: Theme[] = [
       textEl({ id: 'seed-h1', text: 'Welcome', y: 120, fontSize: 30, color: '#1E1B4B' }),
       textEl({ id: 'seed-sub', text: 'A calm, friendly space to share your work.', y: 168, fontSize: 15, color: '#4338CA', fontWeight: 'normal', height: 40 }),
       buttonEl({ id: 'seed-btn', label: 'Learn More', y: 224, backgroundColor: '#6366F1' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 312, iconName: 'color-palette-outline', color: '#6366F1' }),
+      textEl({ id: 'seed-feat1-label', text: 'Creative Work', x: 20, width: 110, y: 350, fontSize: 12, color: '#1E1B4B', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 312, iconName: 'chatbubbles-outline', color: '#6366F1' }),
+      textEl({ id: 'seed-feat2-label', text: "Let's Talk", x: 140, width: 110, y: 350, fontSize: 12, color: '#1E1B4B', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 312, iconName: 'sparkles-outline', color: '#6366F1' }),
+      textEl({ id: 'seed-feat3-label', text: 'Fresh Ideas', x: 260, width: 110, y: 350, fontSize: 12, color: '#1E1B4B', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
@@ -132,6 +153,13 @@ export const THEMES: Theme[] = [
       textEl({ id: 'seed-h1', text: 'Taste the Difference', y: 120, fontSize: 28, color: '#431407' }),
       textEl({ id: 'seed-sub', text: 'Fresh ingredients, made-to-order, every day.', y: 168, fontSize: 15, color: '#9A3412', fontWeight: 'normal', height: 40 }),
       buttonEl({ id: 'seed-btn', label: 'View Menu', y: 224, backgroundColor: '#EA580C' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 312, iconName: 'restaurant-outline', color: '#EA580C' }),
+      textEl({ id: 'seed-feat1-label', text: 'Fresh Daily', x: 20, width: 110, y: 350, fontSize: 12, color: '#431407', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 312, iconName: 'time-outline', color: '#EA580C' }),
+      textEl({ id: 'seed-feat2-label', text: 'Quick Service', x: 140, width: 110, y: 350, fontSize: 12, color: '#431407', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 312, iconName: 'heart-outline', color: '#EA580C' }),
+      textEl({ id: 'seed-feat3-label', text: 'Local Favorite', x: 260, width: 110, y: 350, fontSize: 12, color: '#431407', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
@@ -149,6 +177,13 @@ export const THEMES: Theme[] = [
       textEl({ id: 'seed-h1', text: 'Stronger Every Day', y: 120, fontSize: 28, color: '#052E16' }),
       textEl({ id: 'seed-sub', text: 'Real coaching, real results — book your first session.', y: 168, fontSize: 15, color: '#166534', fontWeight: 'normal', height: 40 }),
       buttonEl({ id: 'seed-btn', label: 'Get Started', y: 224, backgroundColor: '#16A34A' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 312, iconName: 'barbell-outline', color: '#16A34A' }),
+      textEl({ id: 'seed-feat1-label', text: 'Real Coaching', x: 20, width: 110, y: 350, fontSize: 12, color: '#052E16', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 312, iconName: 'trending-up-outline', color: '#16A34A' }),
+      textEl({ id: 'seed-feat2-label', text: 'Real Results', x: 140, width: 110, y: 350, fontSize: 12, color: '#052E16', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 312, iconName: 'calendar-outline', color: '#16A34A' }),
+      textEl({ id: 'seed-feat3-label', text: 'Flexible Scheduling', x: 260, width: 110, y: 350, fontSize: 12, color: '#052E16', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
@@ -166,6 +201,13 @@ export const THEMES: Theme[] = [
       textEl({ id: 'seed-h1', text: 'Build Faster. Ship Sooner.', y: 120, fontSize: 27, color: '#0F172A' }),
       textEl({ id: 'seed-sub', text: 'The tool your team actually wants to use.', y: 168, fontSize: 15, color: '#334155', fontWeight: 'normal', height: 40 }),
       buttonEl({ id: 'seed-btn', label: 'Try It Free', y: 224, backgroundColor: '#2563EB' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 312, iconName: 'rocket-outline', color: '#2563EB' }),
+      textEl({ id: 'seed-feat1-label', text: 'Ship Faster', x: 20, width: 110, y: 350, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 312, iconName: 'shield-checkmark-outline', color: '#2563EB' }),
+      textEl({ id: 'seed-feat2-label', text: 'Rock Solid', x: 140, width: 110, y: 350, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 312, iconName: 'people-outline', color: '#2563EB' }),
+      textEl({ id: 'seed-feat3-label', text: 'Loved by Teams', x: 260, width: 110, y: 350, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
@@ -183,6 +225,13 @@ export const THEMES: Theme[] = [
       textEl({ id: 'seed-h1', text: 'Selected Work', y: 120, fontSize: 28, color: '#1C1917' }),
       textEl({ id: 'seed-sub', text: 'A collection of projects, 2020 to present.', y: 168, fontSize: 15, color: '#57534E', fontWeight: 'normal', height: 40 }),
       buttonEl({ id: 'seed-btn', label: 'View Work', y: 224, backgroundColor: '#57534E' }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 312, iconName: 'images-outline', color: '#57534E' }),
+      textEl({ id: 'seed-feat1-label', text: 'Curated Work', x: 20, width: 110, y: 350, fontSize: 12, color: '#1C1917', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 312, iconName: 'ribbon-outline', color: '#57534E' }),
+      textEl({ id: 'seed-feat2-label', text: 'Award-Winning', x: 140, width: 110, y: 350, fontSize: 12, color: '#1C1917', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 312, iconName: 'mail-outline', color: '#57534E' }),
+      textEl({ id: 'seed-feat3-label', text: 'Get in Touch', x: 260, width: 110, y: 350, fontSize: 12, color: '#1C1917', align: 'center', fontWeight: 'normal', height: 32 }),
     ],
   },
   {
