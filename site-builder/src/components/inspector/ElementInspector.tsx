@@ -47,6 +47,9 @@ interface Props {
   // the section itself, which is all onChange above can do.
   onAddSectionText?: () => void;
   onApplySectionTextStyle?: (patch: { fontFamily?: string; fontSize?: number }) => void;
+  // Opens the column/row layout picker scoped to insert into this specific section (e.g.
+  // "Add columns" under an existing "Shop Now" band) -- only the 'section' case uses this.
+  onAddSectionColumns?: () => void;
 }
 
 // Pushes a product's in-stock switch + current quantity straight to the live storeInventory
@@ -435,7 +438,7 @@ function CustomWidgetGenerator({
   );
 }
 
-export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug, siteName, onPickProductForLink, onAddSectionText, onApplySectionTextStyle }: Props) {
+export default function ElementInspector({ element, allElements, onChange, onDelete, onBringToFront, onClose, projectId, publishSlug, siteName, onPickProductForLink, onAddSectionText, onApplySectionTextStyle, onAddSectionColumns }: Props) {
   const { user } = useAuth();
   const [sellerCurrency, setSellerCurrency] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -851,12 +854,20 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                       ))}
                     </View>
                   )}
-                  {!!onAddSectionText && (
-                    <Pressable style={styles.insertProductLinkBtn} onPress={onAddSectionText}>
-                      <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
-                      <Text style={styles.insertProductLinkBtnText}>Add text</Text>
-                    </Pressable>
-                  )}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {!!onAddSectionText && (
+                      <Pressable style={[styles.insertProductLinkBtn, { flex: 1 }]} onPress={onAddSectionText}>
+                        <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
+                        <Text style={styles.insertProductLinkBtnText}>Add text</Text>
+                      </Pressable>
+                    )}
+                    {!!onAddSectionColumns && (
+                      <Pressable style={[styles.insertProductLinkBtn, { flex: 1, backgroundColor: '#4338CA' }]} onPress={onAddSectionColumns}>
+                        <Ionicons name="grid-outline" size={16} color="#FFFFFF" />
+                        <Text style={styles.insertProductLinkBtnText}>Add columns</Text>
+                      </Pressable>
+                    )}
+                  </View>
 
                   {textChildren.length > 0 && (
                     <>

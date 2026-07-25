@@ -15,6 +15,8 @@ import PageTabsBar, { PageTabsBarHandle } from '@/components/editor/PageTabsBar'
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import ProductCatalogPickerModal from '@/components/editor/ProductCatalogPickerModal';
+import ColumnLayoutPickerModal from '@/components/editor/ColumnLayoutPickerModal';
+import { ColumnLayoutTemplate, buildColumnLayout } from '@/data/columnLayouts';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct, SectionElement } from '@/types';
@@ -85,6 +87,10 @@ function EditorInner({ navigation }: Props) {
   // Which Button element (if any) is currently picking a product to link to -- distinct from
   // productPickerOpen (the "+ Add to page" flow, which just inserts with nothing to link).
   const [linkPickerButtonId, setLinkPickerButtonId] = useState<string | null>(null);
+  const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  // null = the global "+ Add to page" flow (lands as a new Section at the bottom of the
+  // page); a real section id = "Add columns" from inside that section's own inspector.
+  const [columnPickerTargetSectionId, setColumnPickerTargetSectionId] = useState<string | null>(null);
   // Replaces the old horizontal-scrolling tab strip -- a real full-width grid sheet instead
   // of a thin scrollable row sitting right at the screen's bottom edge, which fought with
   // iOS's own edge-swipe-to-exit gesture and made it easy to background the app or mis-tap
@@ -503,6 +509,131 @@ function EditorInner({ navigation }: Props) {
     select(el.id);
   };
 
+  // Same horizontal margin every full-width band on the page uses (see insertColumnLayout
+  // below and groupIntoSection's own padding) -- kept as one constant so a column layout's
+  // outer edges always line up with the canvas the same amount, not a magic number repeated.
+  const COLUMN_SECTION_MARGIN = 20;
+  const COLUMN_SECTION_PADDING = 16;
+
+  // Drops a pre-built column/row layout (see columnLayouts.ts) as a brand new Section,
+  // stacked below whatever's already on the page -- same "never overlap what's already
+  // there, extend the canvas if it doesn't fit" placement as stackedProductPosition, just
+  // spanning most of the page width instead of a fixed small card size. The section is added
+  // *before* its children (not after) specifically so it lands with a lower zIndex than them
+  // automatically -- addElement always bumps a fresh element to the very front, so adding the
+  // background first and the content after means the content naturally paints on top with no
+  // manual zIndex correction needed afterward.
+  const insertColumnLayout = (template: ColumnLayoutTemplate) => {
+    const sectionWidth = project.canvasSize.width - COLUMN_SECTION_MARGIN * 2;
+    const built = buildColumnLayout(template, sectionWidth - COLUMN_SECTION_PADDING * 2);
+    const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
+    const gap = activeElements.length > 0 ? 24 : 32;
+    const sectionY = lowestBottom + gap;
+    const sectionHeight = built.height + COLUMN_SECTION_PADDING * 2;
+    const requiredHeight = sectionY + sectionHeight + 40;
+    if (requiredHeight > project.canvasSize.height) {
+      updateProject({ canvasSize: { ...project.canvasSize, height: requiredHeight } });
+    }
+
+    const childElements: CanvasElement[] = built.elements.map((spec) =>
+      spec.kind === 'image'
+        ? ({
+            id: generateId('el'),
+            type: 'image',
+            uri: null,
+            x: COLUMN_SECTION_MARGIN + COLUMN_SECTION_PADDING + spec.x,
+            y: sectionY + COLUMN_SECTION_PADDING + spec.y,
+            width: spec.width,
+            height: spec.height,
+            zIndex: 0,
+          } as ImageElement)
+        : ({
+            id: generateId('el'),
+            type: 'text',
+            text: spec.text,
+            x: COLUMN_SECTION_MARGIN + COLUMN_SECTION_PADDING + spec.x,
+            y: sectionY + COLUMN_SECTION_PADDING + spec.y,
+            width: spec.width,
+            height: spec.height,
+            zIndex: 0,
+            fontSize: spec.fontSize,
+            color: spec.color,
+            fontWeight: spec.fontWeight,
+            align: 'left',
+          } as TextElement)
+    );
+
+    const section: SectionElement = {
+      id: generateId('el'),
+      type: 'section',
+      backgroundColor: project.backgroundColor,
+      childIds: childElements.map((c) => c.id),
+      x: COLUMN_SECTION_MARGIN,
+      y: sectionY,
+      width: sectionWidth,
+      height: sectionHeight,
+      zIndex: 0,
+    };
+    addElement(section);
+    childElements.forEach((el) => addElement(el));
+    select(section.id);
+    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  // "Add columns" from inside an already-existing section's own inspector (e.g. under "Shop
+  // Now") -- appends the new content stacked below whatever's already in that section,
+  // growing the section's own height (and the canvas, if needed) to fit rather than creating
+  // a whole separate section.
+  const insertColumnLayoutIntoSection = (sectionId: string, template: ColumnLayoutTemplate) => {
+    const section = activeElements.find((el): el is SectionElement => el.id === sectionId && el.type === 'section');
+    if (!section) return;
+    const built = buildColumnLayout(template, section.width - COLUMN_SECTION_PADDING * 2);
+    const existingContentBottom = section.childIds.reduce((max, id) => {
+      const child = activeElements.find((el) => el.id === id);
+      return child ? Math.max(max, child.y + child.height - section.y) : max;
+    }, 0);
+    const startY = existingContentBottom > 0 ? existingContentBottom + COLUMN_SECTION_PADDING : COLUMN_SECTION_PADDING;
+    const newSectionHeight = startY + built.height + COLUMN_SECTION_PADDING;
+
+    const requiredCanvasHeight = section.y + newSectionHeight + 40;
+    if (requiredCanvasHeight > project.canvasSize.height) {
+      updateProject({ canvasSize: { ...project.canvasSize, height: requiredCanvasHeight } });
+    }
+
+    const childElements: CanvasElement[] = built.elements.map((spec) =>
+      spec.kind === 'image'
+        ? ({
+            id: generateId('el'),
+            type: 'image',
+            uri: null,
+            x: section.x + COLUMN_SECTION_PADDING + spec.x,
+            y: section.y + startY + spec.y,
+            width: spec.width,
+            height: spec.height,
+            zIndex: 0,
+          } as ImageElement)
+        : ({
+            id: generateId('el'),
+            type: 'text',
+            text: spec.text,
+            x: section.x + COLUMN_SECTION_PADDING + spec.x,
+            y: section.y + startY + spec.y,
+            width: spec.width,
+            height: spec.height,
+            zIndex: 0,
+            fontSize: spec.fontSize,
+            color: spec.color,
+            fontWeight: spec.fontWeight,
+            align: 'left',
+          } as TextElement)
+    );
+    childElements.forEach((el) => addElement(el));
+    updateElement(sectionId, {
+      childIds: [...section.childIds, ...childElements.map((c) => c.id)],
+      height: Math.max(section.height, newSectionHeight),
+    } as any);
+  };
+
   const addGame = () => {
     // Defaults to Tic-Tac-Toe -- the only kind that's a real, complete, playable game with
     // zero setup; the other kinds (Trivia/Memory/Clicker) need real content first, added via
@@ -785,6 +916,14 @@ function EditorInner({ navigation }: Props) {
               onPickProductForLink={selectedElement.type === 'button' ? () => setLinkPickerButtonId(selectedElement.id) : undefined}
               onAddSectionText={selectedElement.type === 'section' ? () => addTextToSection(selectedElement.id) : undefined}
               onApplySectionTextStyle={selectedElement.type === 'section' ? (patch) => applySectionTextStyle(selectedElement.id, patch) : undefined}
+              onAddSectionColumns={
+                selectedElement.type === 'section'
+                  ? () => {
+                      setColumnPickerTargetSectionId(selectedElement.id);
+                      setColumnPickerOpen(true);
+                    }
+                  : undefined
+              }
             />
           )}
         </View>
@@ -836,6 +975,15 @@ function EditorInner({ navigation }: Props) {
                 </>
               )}
               <AddMenuTile icon="copy-outline" label="Section" onPress={() => { setAddMenuOpen(false); addSection(); }} />
+              <AddMenuTile
+                icon="grid-outline"
+                label="Columns"
+                onPress={() => {
+                  setAddMenuOpen(false);
+                  setColumnPickerTargetSectionId(null);
+                  setColumnPickerOpen(true);
+                }}
+              />
               <AddMenuTile icon="game-controller-outline" label="Game" onPress={() => { setAddMenuOpen(false); addGame(); }} />
               <AddMenuTile icon="time-outline" label="Widget" onPress={() => { setAddMenuOpen(false); addWidget(); }} />
               <AddMenuTile icon="sparkles-outline" label="Custom" highlightColor="#7C3AED" onPress={() => { setAddMenuOpen(false); addCustomWidget(); }} />
@@ -898,6 +1046,15 @@ function EditorInner({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+
+      <ColumnLayoutPickerModal
+        visible={columnPickerOpen}
+        onClose={() => setColumnPickerOpen(false)}
+        onInsert={(template) => {
+          if (columnPickerTargetSectionId) insertColumnLayoutIntoSection(columnPickerTargetSectionId, template);
+          else insertColumnLayout(template);
+        }}
+      />
 
       <CartSheetModal visible={cartOpen} onClose={() => setCartOpen(false)} />
     </SafeAreaView>
