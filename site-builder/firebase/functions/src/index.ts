@@ -121,9 +121,14 @@ const MAX_ASSISTANT_MESSAGE_WORDS = 500;
 const MAX_ASSISTANT_HISTORY = 20;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const HOSTING_DOMAIN = `${process.env.GCLOUD_PROJECT}.web.app`;
-// The product's own real domain -- every published project gets a free subdomain of
-// this by default (https://{slug}.buildsitespark.com), via a wildcard custom domain
-// attached to this Hosting site (see ROADMAP.md Phase 7 setup).
+// The product's own real domain -- every published project without its own connected custom
+// domain gets a free URL under this by default (https://buildsitespark.com/s/{slug}). NOT a
+// wildcard *.buildsitespark.com subdomain per project -- classic Firebase Hosting (what this
+// project uses) has never supported wildcard custom domains, so that was never actually
+// achievable (confirmed directly: buildsitespark.com/app.buildsitespark.com/
+// www.buildsitespark.com all resolve fine, any other *.buildsitespark.com does not resolve
+// at all). See servePublishedSite below and doPublishProject's siteBaseHref for the real
+// path-based scheme.
 const PRODUCT_DOMAIN = 'buildsitespark.com';
 // The real, callable URL for createStoreCheckout (defined further down) -- built from the
 // live project id rather than hardcoded, since 2nd-gen HTTPS function URLs always follow
@@ -1151,16 +1156,25 @@ async function doPublishProject(uid: string, projectId: string): Promise<{ slug:
   const currency = seller?.currency ?? 'usd';
 
   const slug = project.publishSlug ?? (await uniqueSlug(db, slugify(project.name)));
+  // Classic Firebase Hosting (what this project uses) has never supported wildcard custom
+  // domains -- there is no way to actually serve *.buildsitespark.com, so a project without
+  // its own connected custom domain is served under a path on the one domain that IS real
+  // and verified instead. See siteBaseHref's use in renderProjectHtml/renderPolicyPageHtml/
+  // renderPoliciesIndexHtml -- every internal link on the page is a bare relative reference
+  // (siteRef in siteHtml.ts) resolved against this, so the exact same rendered HTML works
+  // unchanged under either hosting shape.
+  const isCustomDomainActive = !!project.customDomain && project.domainStatus === 'active';
+  const siteBaseHref = isCustomDomainActive ? `https://${project.customDomain}/` : `https://${PRODUCT_DOMAIN}/s/${slug}/`;
 
   const site: PublishedSite = { uid, projectId, html: '', updatedAt: Date.now() };
   const extraPagesHtml: Record<string, string> = {};
   const policies = project.policies ?? [];
   const headerOpts = { logoUrl: project.logoUrl, logoHeightPx: project.logoHeightPx, logoFit: project.logoFit, headerDividerColor: project.headerDividerColor };
   for (const policy of policies) {
-    extraPagesHtml[policyHref(policy.id).replace(/^\//, '')] = renderPolicyPageHtml(project.name, policy, project.menu, project.pages, policies, headerOpts, project.elements);
+    extraPagesHtml[policyHref(policy.id)] = renderPolicyPageHtml(project.name, policy, project.menu, project.pages, policies, headerOpts, project.elements, siteBaseHref);
   }
   if (policies.length > 0) {
-    extraPagesHtml[POLICIES_INDEX_HREF.replace(/^\//, '')] = renderPoliciesIndexHtml(project.name, policies, project.menu, project.pages, headerOpts, project.elements);
+    extraPagesHtml[POLICIES_INDEX_HREF] = renderPoliciesIndexHtml(project.name, policies, project.menu, project.pages, headerOpts, project.elements, siteBaseHref);
   }
 
   if (project.pages && project.pages.length > 0) {
@@ -1183,13 +1197,14 @@ async function doPublishProject(uid: string, projectId: string): Promise<{ slug:
         renderPageNavHtml(project.pages, page.slug),
         isLastPage,
         currency,
-        catalogProducts
+        catalogProducts,
+        siteBaseHref
       );
     }
     site.pages = pagesHtml;
     site.html = pagesHtml[project.pages[0].slug];
   } else {
-    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, '', true, currency, catalogProducts);
+    site.html = renderProjectHtml(project, slug, STORE_CHECKOUT_URL, REPORT_SITE_URL, PRODUCT_STOCK_URL, DISCOUNT_VALIDATE_URL, ORDERS_BY_EMAIL_URL, DISCOUNT_ANNOUNCEMENT_URL, '', true, currency, catalogProducts, siteBaseHref);
     if (Object.keys(extraPagesHtml).length > 0) site.pages = extraPagesHtml;
   }
 
@@ -1197,15 +1212,18 @@ async function doPublishProject(uid: string, projectId: string): Promise<{ slug:
   await projectRef.update({ publishSlug: slug, publishedAt: Date.now(), updatedAt: Date.now() });
   await syncStoreInventory(uid, projectId, slug, project, catalogProducts);
 
-  const url = project.customDomain && project.domainStatus === 'active'
-    ? `https://${project.customDomain}`
-    : `https://${slug}.${PRODUCT_DOMAIN}`;
+  // Same as siteBaseHref above but without the trailing slash -- this is the link shown to
+  // (and shared by) the seller, so it should read as a normal URL, not one with a bare "/" at
+  // the end.
+  const url = isCustomDomainActive ? `https://${project.customDomain}` : `https://${PRODUCT_DOMAIN}/s/${slug}`;
   return { slug, url };
 }
 
-// Publishes a project as a real, publicly-reachable static page -- servePublishedSite
-// below answers for it at https://{slug}.buildsitespark.com by default (and at any
-// custom domain connected via connectDomain).
+// Publishes a project as a real, publicly-reachable static page -- servePublishedSite below
+// answers for it at https://buildsitespark.com/s/{slug} by default (classic Firebase Hosting,
+// which this project uses, has never supported wildcard custom domains, so a real per-project
+// subdomain isn't achievable -- see siteBaseHref's comment above), or at any custom domain
+// connected via connectDomain.
 export const publishProject = onCall({ invoker: 'public' }, withCallableErrors('publishProject', async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -1507,11 +1525,17 @@ export const getProductStock = onRequest({ cors: true, invoker: 'public' }, asyn
 // domains) routes here, since Firebase Hosting can't vary rewrites by Host header (see
 // firebase.json's catch-all rewrite). This function decides what to serve based on the
 // request's actual hostname:
-//   - {slug}.buildsitespark.com  -> that project's published page (the free default URL)
+//   - buildsitespark.com/s/{slug}  -> that project's published page (the free default URL --
+//     classic Firebase Hosting has never supported wildcard custom domains, so a real
+//     {slug}.buildsitespark.com subdomain per project was never actually achievable; this
+//     path-based form is the real one)
 //   - bare buildsitespark.com / www. / the raw *.web.app or *.firebaseapp.com domain
 //     with no /s/ path -> the product's own landing page
-//   - *.web.app or *.firebaseapp.com with a /s/{slug} path -> legacy URLs from before
-//     buildsitespark.com existed, kept working rather than broken
+//   - *.web.app or *.firebaseapp.com with a /s/{slug} path -> same free URL, reachable from
+//     the raw Hosting domain too (mostly useful for testing)
+//   - {slug}.buildsitespark.com -- still handled if DNS for that literal subdomain ever
+//     starts resolving (e.g. a future per-project wildcard workaround), but not the URL the
+//     app hands out today
 //   - anything else -> a user's own connected custom domain, looked up via domainMappings
 export const servePublishedSite = onRequest({ invoker: 'public' }, async (req, res) => {
   const hostname = (req.hostname || '').toLowerCase();
@@ -1520,14 +1544,14 @@ export const servePublishedSite = onRequest({ invoker: 'public' }, async (req, r
 
   let slug: string | null = null;
   // The sub-path *within* a resolved site (e.g. "/about") -- distinct from the slug
-  // resolution above, since the legacy /s/{slug} form has the page path nested after the
-  // slug segment rather than being the whole request path. Used below to pick which of a
+  // resolution above, since the /s/{slug} form has the page path nested after the slug
+  // segment rather than being the whole request path. Used below to pick which of a
   // multi-page website's rendered pages to serve (see Project.pages / publishProject).
   let pagePath = req.path;
 
   if (hostname.endsWith(`.${PRODUCT_DOMAIN}`) && !isBareProductDomain) {
     slug = hostname.slice(0, hostname.length - PRODUCT_DOMAIN.length - 1);
-  } else if (isDefaultHostingDomain && req.path.startsWith('/s/')) {
+  } else if ((isDefaultHostingDomain || isBareProductDomain) && req.path.startsWith('/s/')) {
     const rest = req.path.replace(/^\/s\//, '');
     const slashIndex = rest.indexOf('/');
     if (slashIndex === -1) {
@@ -3134,6 +3158,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
     );
 
     let sellerUid: string | null = null;
+    let projectId: string | null = null;
     let subtotalUsd = 0;
     let hasService = false;
     let needsShipping = false;
@@ -3156,6 +3181,7 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
         return;
       }
       sellerUid = product.sellerUid;
+      projectId = product.projectId;
       if (product.inStock === false) {
         res.status(400).json({
           error: product.saleType === 'service' ? `${product.name} isn't taking bookings right now.` : `${product.name} is currently out of stock.`,
@@ -3230,6 +3256,16 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       return;
     }
     const currency = seller.currency ?? 'usd';
+
+    // Where Stripe sends the buyer back to after paying (or cancelling) -- classic Firebase
+    // Hosting (what this app uses) has never supported wildcard custom domains, so a site
+    // with no connected custom domain of its own is reached at a path under the one real,
+    // verified domain instead (see siteBaseHref's comment in doPublishProject).
+    const checkoutProject = projectId ? ((await db.collection('users').doc(sellerUid).collection('projects').doc(projectId).get()).data() as Project | undefined) : undefined;
+    const siteUrl =
+      checkoutProject?.customDomain && checkoutProject.domainStatus === 'active'
+        ? `https://${checkoutProject.customDomain}`
+        : `https://${PRODUCT_DOMAIN}/s/${slug}`;
     for (const li of lineItems) {
       if (li.price_data) li.price_data.currency = currency;
     }
@@ -3303,8 +3339,8 @@ export const createStoreCheckout = onRequest({ secrets: [stripeSecretKey], cors:
       // session id (== this order's real id, see handleStoreOrderCompleted) -- that's what
       // lets the success banner show a real order number and pre-fill the track-order
       // widget, since there's no buyer account to look orders up through otherwise.
-      success_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `https://${slug}.${PRODUCT_DOMAIN}/?order=cancelled`,
+      success_url: `${siteUrl}/?order=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteUrl}/?order=cancelled`,
       payment_intent_data: {
         application_fee_amount: Math.round(platformFeeUsd * 100),
         transfer_data: { destination: seller.stripeAccountId },
@@ -3366,7 +3402,7 @@ export const reportPublishedSite = onRequest({ secrets: [resendApiKey], cors: tr
       reportedUid: site.uid,
       reason,
       message: (message ?? '').slice(0, 2000),
-      pageUrl: pageUrl ?? `https://${slug}.${PRODUCT_DOMAIN}`,
+      pageUrl: pageUrl ?? `https://${PRODUCT_DOMAIN}/s/${slug}`,
       createdAt: Date.now(),
     });
 
@@ -3374,7 +3410,7 @@ export const reportPublishedSite = onRequest({ secrets: [resendApiKey], cors: tr
       slug,
       reason,
       message: (message ?? '').slice(0, 2000),
-      pageUrl: pageUrl ?? `https://${slug}.${PRODUCT_DOMAIN}`,
+      pageUrl: pageUrl ?? `https://${PRODUCT_DOMAIN}/s/${slug}`,
     }).catch((err) => console.error('sendContentReportEmail failed', err));
 
     res.status(200).json({ ok: true });

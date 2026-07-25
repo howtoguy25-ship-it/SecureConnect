@@ -2980,16 +2980,17 @@ function renderPopupAnnouncements(project: Project): string {
 }
 
 // Real, working nav bar for a manually-built multi-page website (see Project.pages) --
-// shared verbatim across every one of that site's rendered pages, each page's link built
-// from a root-relative path so it works identically on the free {slug}.buildsitespark.com
-// subdomain and any connected custom domain. `currentSlug` highlights which page a visitor
-// is already on ('' for Home). Returns '' for every non-multi-page project (nothing to link
-// between), which renderProjectHtml below just inlines as-is.
+// shared verbatim across every one of that site's rendered pages, each page's link a bare
+// relative reference (see siteRef) so it resolves correctly against the page's own <base>
+// tag whether this site is hosted at buildsitespark.com/s/{slug} or its own connected custom
+// domain. `currentSlug` highlights which page a visitor is already on ('' for Home). Returns
+// '' for every non-multi-page project (nothing to link between), which renderProjectHtml
+// below just inlines as-is.
 export function renderPageNavHtml(pages: SitePage[], currentSlug: string): string {
   if (pages.length <= 1) return '';
   const links = pages
     .map((page) => {
-      const href = page.slug ? `/${page.slug}` : '/';
+      const href = siteRef(page.slug);
       const active = page.slug === currentSlug;
       return `<a href="${escapeAttr(href)}" style="color:${active ? '#FFFFFF' : '#CBD5E1'};font-weight:${
         active ? '700' : '600'
@@ -2999,14 +3000,27 @@ export function renderPageNavHtml(pages: SitePage[], currentSlug: string): strin
   return `<nav style="position:sticky;top:0;z-index:9997;display:flex;flex-wrap:wrap;justify-content:center;gap:2px;padding:6px 10px;background:#0F172A;font-family:-apple-system,sans-serif;font-size:14px;">${links}</nav>`;
 }
 
+// The relative href for linking to another page of THIS SAME published site -- deliberately
+// never a leading "/" (an absolute-path reference), since a site with no connected custom
+// domain is served under a shared path prefix (buildsitespark.com/s/{slug}/...) rather than
+// at its own domain root, and a leading "/" would resolve against the real domain root,
+// silently dropping that prefix. Paired with the <base> tag every full page gets (see
+// siteBaseHref on renderProjectHtml/renderPolicyPageHtml/renderPoliciesIndexHtml below) so
+// this exact same relative reference resolves correctly whether the site is hosted at a
+// domain root (a connected custom domain) or under that shared path prefix.
+function siteRef(pageSlugOrPath: string): string {
+  const clean = pageSlugOrPath.replace(/^\/+/, '');
+  return clean === '' ? '.' : clean;
+}
+
 // A real, standalone, real published page's URL path for a given policy -- kept as one
 // literal path segment (no nested slash) so servePublishedSite's slug lookup in index.ts
 // doesn't need any special-casing beyond stripping leading/trailing slashes.
 export function policyHref(policyId: string): string {
-  return `/policy-${policyId}`;
+  return `policy-${policyId}`;
 }
 
-export const POLICIES_INDEX_HREF = '/site-policies';
+export const POLICIES_INDEX_HREF = 'site-policies';
 
 // A product/collection menu target points at wherever that productId/elementId is actually
 // placed on the site -- a single-page project (no `pages`) is treated as one implicit page
@@ -3017,15 +3031,15 @@ function findElementHref(pages: SitePage[] | undefined, rootElements: CanvasElem
   const candidatePages = pages && pages.length > 0 ? pages : [{ slug: '', elements: rootElements } as SitePage];
   for (const page of candidatePages) {
     const el = page.elements.find(matches);
-    if (el) return `${page.slug ? `/${page.slug}` : '/'}#el-${el.id}`;
+    if (el) return `${siteRef(page.slug)}#el-${el.id}`;
   }
-  return '/';
+  return '.';
 }
 
 function resolveMenuTargetHref(target: MenuItem['target'], pages: SitePage[] | undefined, rootElements: CanvasElement[]): string {
   if (target.type === 'page') {
     const page = pages?.find((p) => p.id === target.pageId);
-    return page ? (page.slug ? `/${page.slug}` : '/') : '/';
+    return page ? siteRef(page.slug) : '.';
   }
   if (target.type === 'policy') return policyHref(target.policyId);
   if (target.type === 'product') return findElementHref(pages, rootElements, (el) => el.type === 'product' && el.productId === target.productId);
@@ -3081,9 +3095,9 @@ function renderMenuHtml(
   const linkStyle = 'display:block;padding:14px 20px;color:#0F172A;font-weight:600;text-decoration:none;border-bottom:1px solid #E2E8F0;';
 
   const homePage = pages && pages.length > 0 ? pages[0] : null;
-  const homeHref = homePage ? (homePage.slug ? `/${homePage.slug}` : '/') : null;
+  const homeHref = homePage ? siteRef(homePage.slug) : null;
   const catalogPage = pages?.find((p) => p.elements.some((el) => el.type === 'product')) ?? null;
-  const catalogHref = catalogPage ? (catalogPage.slug ? `/${catalogPage.slug}` : '/') : null;
+  const catalogHref = catalogPage ? siteRef(catalogPage.slug) : null;
   const isPageTargeted = (pageId: string) => customItems.some((item) => item.target.type === 'page' && item.target.pageId === pageId);
 
   const homeLink = homePage && !isPageTargeted(homePage.id) ? `<a href="${escapeAttr(homeHref!)}" style="${linkStyle}">Home</a>` : '';
@@ -3219,14 +3233,20 @@ export function renderPolicyPageHtml(
   pages: SitePage[] | undefined,
   policies: PolicyDoc[] | undefined,
   headerOpts?: Omit<HeaderBarOptions, 'siteName'>,
-  rootElements: CanvasElement[] = []
+  rootElements: CanvasElement[] = [],
+  // The site's own root URL (e.g. https://buildsitespark.com/s/{slug}/ or
+  // https://{customDomain}/) -- every internal link on this page is a bare relative
+  // reference (see siteRef), resolved against this <base> so it lands in the right place
+  // regardless of which of those two hosting shapes this particular site is using.
+  siteBaseHref = ''
 ): string {
-  const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
+  const homeHref = siteRef(pages && pages.length > 0 ? pages[0].slug : '');
   const menuHtml = renderMenuHtml(menu, pages, false, policies, rootElements);
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  ${siteBaseHref ? `<base href="${escapeAttr(siteBaseHref)}">` : ''}
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(policy.title)} — ${escapeHtml(siteName)}</title>
   <style>
@@ -3256,9 +3276,11 @@ export function renderPoliciesIndexHtml(
   menu: SiteMenu | undefined,
   pages: SitePage[] | undefined,
   headerOpts?: Omit<HeaderBarOptions, 'siteName'>,
-  rootElements: CanvasElement[] = []
+  rootElements: CanvasElement[] = [],
+  // See renderPolicyPageHtml's identical parameter for what this is and why.
+  siteBaseHref = ''
 ): string {
-  const homeHref = pages && pages.length > 0 ? (pages[0].slug ? `/${pages[0].slug}` : '/') : '/';
+  const homeHref = siteRef(pages && pages.length > 0 ? pages[0].slug : '');
   const rows = policies
     .map(
       (p) =>
@@ -3270,6 +3292,7 @@ export function renderPoliciesIndexHtml(
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  ${siteBaseHref ? `<base href="${escapeAttr(siteBaseHref)}">` : ''}
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Policies — ${escapeHtml(siteName)}</title>
   <style>
@@ -3358,7 +3381,9 @@ export function renderProjectHtml(
   // (publishProject in index.ts) from the seller's catalog (users/{uid}/products), keyed by
   // productId -- see resolveProduct's comment for the legacy-element fallback when an id has
   // no catalog doc.
-  products: Record<string, CatalogProduct> = {}
+  products: Record<string, CatalogProduct> = {},
+  // See renderPolicyPageHtml's identical parameter for what this is and why.
+  siteBaseHref = ''
 ): string {
   const hasProducts = project.elements.some((el) => el.type === 'product');
   // This page's only real content is one product -- render it Shopify-PDP-style (see the
@@ -3420,6 +3445,7 @@ export function renderProjectHtml(
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  ${siteBaseHref ? `<base href="${escapeAttr(siteBaseHref)}">` : ''}
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(project.name)}</title>
   ${iconLinks}
@@ -3473,7 +3499,7 @@ export function renderProjectHtml(
        inside that same reserved band and visibly collide with it. This invisible spacer just
        pushes the true end of the document below that band instead. -->
   <div aria-hidden="true" style="height:${hasProducts ? 130 : 50}px;"></div>
-  ${renderReportWidget(slug, reportUrl, `https://${slug}.buildsitespark.com`)}
+  ${renderReportWidget(slug, reportUrl, siteBaseHref || `https://${slug}.buildsitespark.com`)}
   ${renderPopupAnnouncements(project)}
   ${hasProducts ? renderCartWidget(slug, storeCheckoutUrl, discountValidateUrl, ordersByEmailUrl, currency) : ''}
   <script>
