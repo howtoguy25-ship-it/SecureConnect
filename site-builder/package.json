@@ -41,6 +41,7 @@
     "expo-splash-screen": "~57.0.5",
     "expo-status-bar": "~57.0.1",
     "expo-video": "~57.0.2",
+    "expo-video-thumbnails": "~57.0.1",
     "expo-web-browser": "~57.0.2",
     "firebase": "^12.16.0",
     "jszip": "^3.10.1",

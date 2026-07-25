@@ -107,12 +107,19 @@ function SlideshowView({ images, autoPlay, intervalMs, width, height }: { images
 // since expo-video and expo-audio are independent native players with no built-in link.
 function VideoElementView({ element, width, height }: { element: VideoElement; width: number; height: number }) {
   const player = useVideoPlayer(element.uri, (p) => {
-    p.loop = element.loop;
+    // A real edit list (segments) starts wherever its first segment does, not
+    // trimStartMs -- see the timeUpdate effect below for how the rest of the list plays.
+    // Native looping is left off for segment mode (handled manually there instead, so a loop
+    // restarts at the first SEGMENT, not literally frame 0 of the file); plain single-range
+    // clips keep using the native player's own loop flag as before.
+    const segs = element.segments;
+    p.loop = segs && segs.length > 0 ? false : element.loop;
     // Autoplay only ever works muted (same rule every browser/native player enforces) --
     // forcing it here too keeps the editor's own preview honest about what a real visitor
     // will actually get on the published site.
     p.muted = element.autoPlay ? true : element.muted;
-    if (element.trimStartMs > 0) p.currentTime = element.trimStartMs / 1000;
+    const startMs = segs && segs.length > 0 ? segs[0].startMs : element.trimStartMs;
+    if (startMs > 0) p.currentTime = startMs / 1000;
     if (element.autoPlay) p.play();
   });
   const audioPlayer = useAudioPlayer(element.audioUri);
@@ -139,6 +146,65 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
 
   useEffect(() => {
     if (!element.uri) return;
+    const segments = element.segments && element.segments.length > 0 ? element.segments : null;
+
+    // Real CapCut/Snapchat-style edit-list playback: instead of one plain trim range, step
+    // through each segment in order -- seek past a cut instantly, or hold dead still through
+    // a freeze -- so what a split/freeze in the timeline editor actually DOES matches what a
+    // visitor (and this same preview) sees play back.
+    if (segments) {
+      let currentIndex = 0;
+      let freezeTimer: ReturnType<typeof setTimeout> | null = null;
+
+      // A freeze hold is a real wall-clock timer, not something timeUpdate can drive (the
+      // player is paused, so its own clock never advances) -- a manual pause/play tap during
+      // a hold doesn't extend it; the hold always finishes on real time, same as it would for
+      // a published site's visitor, who has no way to pause the timer either.
+      const armFreeze = (index: number) => {
+        player.pause();
+        freezeTimer = setTimeout(() => advanceTo(index + 1), segments[index].freezeDurationMs ?? 1500);
+      };
+
+      const advanceTo = (index: number) => {
+        if (index >= segments.length) {
+          if (element.loop) {
+            currentIndex = 0;
+            player.currentTime = segments[0].startMs / 1000;
+            if (element.audioUri) audioPlayer.currentTime = 0;
+            if (segments[0].kind === 'freeze') armFreeze(0);
+            else player.play();
+          } else {
+            player.pause();
+            audioPlayer.pause();
+          }
+          return;
+        }
+        currentIndex = index;
+        player.currentTime = segments[index].startMs / 1000;
+        if (segments[index].kind === 'freeze') armFreeze(index);
+        else player.play();
+      };
+
+      const timeSub = player.addListener('timeUpdate', (payload) => {
+        const seg = segments[currentIndex];
+        if (seg && seg.kind === 'clip' && payload.currentTime * 1000 >= seg.endMs) advanceTo(currentIndex + 1);
+        const nowMs = payload.currentTime * 1000;
+        const caption = (element.captions ?? []).find((c) => nowMs >= c.startMs && nowMs < c.endMs);
+        setActiveCaption(caption?.text ?? null);
+      });
+      const playingSub = player.addListener('playingChange', (payload) => {
+        setIsPlaying(payload.isPlaying);
+        if (!element.audioUri) return;
+        if (payload.isPlaying) audioPlayer.play();
+        else audioPlayer.pause();
+      });
+      return () => {
+        timeSub.remove();
+        playingSub.remove();
+        if (freezeTimer) clearTimeout(freezeTimer);
+      };
+    }
+
     // A set previewSeconds caps playback at trimStart+previewSeconds regardless of how it
     // started (autoplay or a manual tap) -- a short preview clip instead of the whole thing.
     const naturalEndSec = element.trimEndMs != null ? element.trimEndMs / 1000 : player.duration;
@@ -168,7 +234,7 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
       timeSub.remove();
       playingSub.remove();
     };
-  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.previewSeconds, element.loop, element.captions]);
+  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.previewSeconds, element.loop, element.captions, element.segments]);
 
   if (!element.uri) {
     return (

@@ -146,6 +146,26 @@ export interface VideoCaption {
   endMs: number;
 }
 
+// One real edit-list entry, CapCut/Snapchat-style -- a Video element with `segments` set
+// plays through these in order instead of the plain single trimStartMs..trimEndMs range,
+// which is what makes a real split ("cut the clip in two here") or a real freeze frame
+// ("hold this exact instant for a beat") possible: a split is just two 'clip' segments
+// sharing the cut point, and a freeze is a segment that shows one still source instant
+// (startMs === endMs) for `freezeDurationMs` before playback continues. startMs/endMs are
+// always in the ORIGINAL uploaded file's own clock (same clock trimStartMs/trimEndMs already
+// used), regardless of how many cuts came before -- so re-splitting or deleting a segment
+// never has to re-map every other segment's timestamps.
+export interface VideoSegment {
+  id: string;
+  kind: 'clip' | 'freeze';
+  startMs: number;
+  endMs: number;
+  // Only meaningful for kind:'freeze' -- real real-time milliseconds this still frame holds
+  // the timeline before the next segment plays. Undefined/absent for kind:'clip', where the
+  // segment's own natural duration (endMs - startMs) is how long it plays.
+  freezeDurationMs?: number;
+}
+
 export interface VideoElement extends BaseElement {
   type: 'video';
   uri: string | null;
@@ -154,6 +174,11 @@ export interface VideoElement extends BaseElement {
   muted: boolean; // mute the clip's own audio -- useful when overlaying audioUri instead
   loop: boolean;
   captions?: VideoCaption[];
+  // A real edit list (split/cut/freeze) -- see VideoSegment's comment. Absent or empty means
+  // "no edits made yet," in which case playback (editor and published site alike) falls back
+  // to the plain trimStartMs/trimEndMs/previewSeconds behavior unchanged, so every video
+  // created before this feature existed keeps working exactly as it did.
+  segments?: VideoSegment[];
   // Starts playing on its own instead of waiting for a visitor to tap the play button --
   // browsers (and most native players) only allow this when the clip is also muted, so
   // turning this on forces `muted` on too (see the inspector's own toggle logic).

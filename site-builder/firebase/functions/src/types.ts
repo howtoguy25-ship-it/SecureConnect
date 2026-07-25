@@ -80,6 +80,15 @@ export interface VideoCaption {
   endMs: number;
 }
 
+// Mirrors the client's VideoSegment (src/types/index.ts) -- see its comment.
+export interface VideoSegment {
+  id: string;
+  kind: 'clip' | 'freeze';
+  startMs: number;
+  endMs: number;
+  freezeDurationMs?: number;
+}
+
 export interface VideoElement extends BaseElement {
   type: 'video';
   uri: string | null;
@@ -92,6 +101,7 @@ export interface VideoElement extends BaseElement {
   audioUri: string | null;
   audioVolume: number;
   captions?: VideoCaption[];
+  segments?: VideoSegment[];
 }
 
 // A real video found on the open web (currently YouTube), not one the user uploaded --

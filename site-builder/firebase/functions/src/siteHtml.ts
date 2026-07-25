@@ -2070,6 +2070,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const muteBtnId = `video-mute-${el.id}`;
       const captionId = `video-caption-${el.id}`;
       const captions = el.captions ?? [];
+      const segments = el.segments ?? [];
       const trimStartSec = el.trimStartMs / 1000;
       const trimEndSec = el.trimEndMs != null ? el.trimEndMs / 1000 : null;
       // Autoplay only ever works muted (every browser enforces this) -- forcing it here keeps
@@ -2084,6 +2085,44 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // (autoplay or a visitor tapping play) -- a short preview loop instead of the whole clip.
       const naturalEndExpr = trimEndSec != null ? String(trimEndSec) : 'v.duration';
       const endExpr = el.previewSeconds != null ? `Math.min(${naturalEndExpr},${trimStartSec}+${el.previewSeconds})` : naturalEndExpr;
+      // Real CapCut/Snapchat-style edit-list playback (see VideoSegment's comment) -- when a
+      // clip has real cuts/freezes, this drives the SAME step-through-each-segment logic the
+      // editor's own preview uses, so a visitor sees exactly what was edited, not just the
+      // plain trimmed range. Falls back to the plain trim/preview logic above when there are
+      // no segments (every clip made before this feature existed keeps working unchanged).
+      const segmentScript = `
+  var segments=${JSON.stringify(segments)};
+  var segIndex=0,freezeTimer=null;
+  function armFreeze(i){
+    v.pause();
+    freezeTimer=setTimeout(function(){advanceTo(i+1);},segments[i].freezeDurationMs||1500);
+  }
+  function advanceTo(i){
+    if(i>=segments.length){
+      if(${el.loop ? 'true' : 'false'}){
+        segIndex=0;v.currentTime=segments[0].startMs/1000;if(a){a.currentTime=0;}
+        if(segments[0].kind==='freeze'){armFreeze(0);}else{v.play();}
+      } else { v.pause(); if(a){a.pause();} }
+      return;
+    }
+    segIndex=i;
+    v.currentTime=segments[i].startMs/1000;
+    if(segments[i].kind==='freeze'){armFreeze(i);}else{v.play();}
+  }
+  v.addEventListener('loadedmetadata',function(){v.currentTime=segments[0].startMs/1000;});
+  v.addEventListener('timeupdate',function(){
+    var seg=segments[segIndex];
+    if(seg&&seg.kind==='clip'&&v.currentTime*1000>=seg.endMs){advanceTo(segIndex+1);}
+  });`;
+      const legacyScript = `
+  v.addEventListener('loadedmetadata',function(){v.currentTime=${trimStartSec};});
+  v.addEventListener('timeupdate',function(){
+    var end=${endExpr};
+    if(end && v.currentTime>=end){
+      if(${el.loop ? 'true' : 'false'}){v.currentTime=${trimStartSec};if(a){a.currentTime=0;}}
+      else{v.pause();}
+    }
+  });`;
       const script = `<script>(function(){
   var v=document.getElementById(${JSON.stringify(videoId)});
   var a=document.getElementById(${JSON.stringify(audioId)});
@@ -2093,15 +2132,9 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   var captions=${JSON.stringify(captions)};
   if(!v)return;
   if(a){a.volume=${el.audioVolume};}
-  v.addEventListener('loadedmetadata',function(){v.currentTime=${trimStartSec};});
   v.addEventListener('play',function(){if(a){a.currentTime=0;a.play();}if(playBtn)playBtn.style.display='none';});
   v.addEventListener('pause',function(){if(a){a.pause();}if(playBtn)playBtn.style.display='flex';});
   v.addEventListener('timeupdate',function(){
-    var end=${endExpr};
-    if(end && v.currentTime>=end){
-      if(${el.loop ? 'true' : 'false'}){v.currentTime=${trimStartSec};if(a){a.currentTime=0;}}
-      else{v.pause();}
-    }
     if(captionEl){
       var nowMs=v.currentTime*1000;
       var active=null;
@@ -2110,6 +2143,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       else{captionEl.style.display='none';}
     }
   });
+  ${segments.length > 0 ? segmentScript : legacyScript}
   if(playBtn){playBtn.addEventListener('click',function(){if(v.paused){v.play();}else{v.pause();}});}
   if(muteBtn){muteBtn.addEventListener('click',function(){
     v.muted=!v.muted;

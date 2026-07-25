@@ -11,6 +11,7 @@ import { AnalogClockFace, DigitalClockFace, WIDGET_THEME } from '@/components/ca
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import SliderRow from '@/components/inspector/SliderRow';
+import VideoTimelineEditor from '@/components/inspector/VideoTimelineEditor';
 import { labelForElement } from '@/utils/elementLabel';
 import { FONT_OPTIONS, FontOption } from '@/data/fonts';
 import { useGoogleFont } from '@/utils/useGoogleFont';
@@ -740,13 +741,34 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               style={styles.uploadBtn}
               onPress={async () => {
                 const uri = await pickVideo();
-                if (uri) onChange({ uri, trimStartMs: 0, trimEndMs: null } as any);
+                // A previous edit list's timestamps only mean anything against the OLD file --
+                // resetting segments (same as trim) keeps a fresh clip from silently playing
+                // back cuts/freezes that no longer line up with anything real in it.
+                if (uri) onChange({ uri, trimStartMs: 0, trimEndMs: null, segments: [] } as any);
               }}
             >
               <Ionicons name="videocam-outline" size={18} color="#FFFFFF" />
               <Text style={styles.uploadBtnText}>{element.uri ? 'Replace Video' : 'Choose Video'}</Text>
             </Pressable>
 
+            {!!element.uri && (
+              <>
+                <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Timeline Editor</Text>
+                <Text style={styles.helperText}>
+                  Real cut/split, freeze-frame, and a live scrub preview -- see exactly where you're editing.
+                </Text>
+                <VideoTimelineEditor
+                  uri={element.uri}
+                  segments={element.segments ?? []}
+                  trimStartMs={element.trimStartMs}
+                  trimEndMs={element.trimEndMs}
+                  onChange={(segments) => onChange({ segments } as any)}
+                />
+              </>
+            )}
+
+            <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Basic Trim</Text>
+            <Text style={styles.helperText}>Where the clip starts/ends before any cuts -- ignored once you've split or frozen the timeline above.</Text>
             <SliderRow
               label="Trim Start (s)"
               value={element.trimStartMs / 1000}
