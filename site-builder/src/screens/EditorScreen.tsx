@@ -16,6 +16,7 @@ import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import ProductCatalogPickerModal from '@/components/editor/ProductCatalogPickerModal';
 import ColumnLayoutPickerModal from '@/components/editor/ColumnLayoutPickerModal';
+import CanvasSizePickerModal from '@/components/editor/CanvasSizePickerModal';
 import { ColumnLayoutTemplate, buildColumnLayout } from '@/data/columnLayouts';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
@@ -96,6 +97,9 @@ function EditorInner({ navigation }: Props) {
   // iOS's own edge-swipe-to-exit gesture and made it easy to background the app or mis-tap
   // by accident while just trying to scroll the strip.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // Canva-style prebuilt video/social export size picker -- only meaningful for pages whose
+  // whole canvas IS the exported media (Video/Social), not a scrollable website page.
+  const [sizePickerOpen, setSizePickerOpen] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
   // same touch underneath an active element drag, which is what made moving or resizing a
@@ -769,6 +773,11 @@ function EditorInner({ navigation }: Props) {
               <Pressable onPress={openBackgroundEditor} hitSlop={8}>
                 <Ionicons name="color-palette-outline" size={22} color={theme.text} />
               </Pressable>
+              {(project.pageType === 'video' || project.pageType === 'social') && (
+                <Pressable onPress={() => setSizePickerOpen(true)} hitSlop={8}>
+                  <Ionicons name="expand-outline" size={22} color={theme.text} />
+                </Pressable>
+              )}
               {project.pageType === 'website' && (
                 <Pressable onPress={() => setMenuPoliciesOpen(true)} hitSlop={8}>
                   <Ionicons name="menu-outline" size={22} color={theme.text} />
@@ -1074,6 +1083,12 @@ function EditorInner({ navigation }: Props) {
       />
 
       <CartSheetModal visible={cartOpen} onClose={() => setCartOpen(false)} />
+
+      <CanvasSizePickerModal
+        visible={sizePickerOpen}
+        onClose={() => setSizePickerOpen(false)}
+        onSelect={(canvasSize) => updateProject({ canvasSize })}
+      />
     </SafeAreaView>
     </CartProvider>
   );
