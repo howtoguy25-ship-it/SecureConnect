@@ -2068,6 +2068,8 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const audioId = `video-audio-${el.id}`;
       const playBtnId = `video-play-${el.id}`;
       const muteBtnId = `video-mute-${el.id}`;
+      const captionId = `video-caption-${el.id}`;
+      const captions = el.captions ?? [];
       const trimStartSec = el.trimStartMs / 1000;
       const trimEndSec = el.trimEndMs != null ? el.trimEndMs / 1000 : null;
       // Autoplay only ever works muted (every browser enforces this) -- forcing it here keeps
@@ -2087,6 +2089,8 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   var a=document.getElementById(${JSON.stringify(audioId)});
   var playBtn=document.getElementById(${JSON.stringify(playBtnId)});
   var muteBtn=document.getElementById(${JSON.stringify(muteBtnId)});
+  var captionEl=document.getElementById(${JSON.stringify(captionId)});
+  var captions=${JSON.stringify(captions)};
   if(!v)return;
   if(a){a.volume=${el.audioVolume};}
   v.addEventListener('loadedmetadata',function(){v.currentTime=${trimStartSec};});
@@ -2097,6 +2101,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
     if(end && v.currentTime>=end){
       if(${el.loop ? 'true' : 'false'}){v.currentTime=${trimStartSec};if(a){a.currentTime=0;}}
       else{v.pause();}
+    }
+    if(captionEl){
+      var nowMs=v.currentTime*1000;
+      var active=null;
+      for(var i=0;i<captions.length;i++){if(nowMs>=captions[i].startMs&&nowMs<captions[i].endMs){active=captions[i];break;}}
+      if(active){captionEl.textContent=active.text;captionEl.style.display='flex';}
+      else{captionEl.style.display='none';}
     }
   });
   if(playBtn){playBtn.addEventListener('click',function(){if(v.paused){v.play();}else{v.pause();}});}
@@ -2115,6 +2126,11 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   <button type="button" id="${muteBtnId}" aria-label="Mute" style="position:absolute;right:8px;bottom:8px;width:28px;height:28px;border-radius:14px;border:0;padding:0;background:rgba(15,23,42,0.65);display:flex;align-items:center;justify-content:center;cursor:pointer;">${
         initiallyMuted ? MUTE_ICON_SVG : SOUND_ICON_SVG
       }</button>
+  ${
+    captions.length > 0
+      ? `<div id="${captionId}" style="display:none;position:absolute;left:8px;right:8px;bottom:10px;background:rgba(0,0,0,0.7);border-radius:6px;padding:4px 8px;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;text-align:center;pointer-events:none;"></div>`
+      : ''
+  }
 </div>${audioTag}${script}`;
     }
     case 'videoEmbed': {

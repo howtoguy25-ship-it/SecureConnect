@@ -117,6 +117,10 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
   });
   const audioPlayer = useAudioPlayer(element.audioUri);
   const [isPlaying, setIsPlaying] = useState(!!element.autoPlay);
+  // Which caption (if any) is on-screen right now, tracked off the same timeUpdate listener
+  // already driving trim/preview-end logic below -- a real synced subtitle, not just a
+  // static label, matching what the published site's own timeupdate handler shows visitors.
+  const [activeCaption, setActiveCaption] = useState<string | null>(null);
   // A real, tappable mute/unmute control needs its own live state to flip immediately --
   // reset back to the saved default whenever that default itself changes (edited from the
   // inspector), same convention as ProductEditScreen's own local-mirrors-saved-state fields.
@@ -150,6 +154,9 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
           audioPlayer.pause();
         }
       }
+      const nowMs = payload.currentTime * 1000;
+      const caption = (element.captions ?? []).find((c) => nowMs >= c.startMs && nowMs < c.endMs);
+      setActiveCaption(caption?.text ?? null);
     });
     const playingSub = player.addListener('playingChange', (payload) => {
       setIsPlaying(payload.isPlaying);
@@ -161,7 +168,7 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
       timeSub.remove();
       playingSub.remove();
     };
-  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.previewSeconds, element.loop]);
+  }, [player, audioPlayer, element.uri, element.audioUri, element.trimStartMs, element.trimEndMs, element.previewSeconds, element.loop, element.captions]);
 
   if (!element.uri) {
     return (
@@ -191,6 +198,13 @@ function VideoElementView({ element, width, height }: { element: VideoElement; w
       <Pressable style={styles.videoMuteBtn} onPress={() => setMuted((m) => !m)} hitSlop={8}>
         <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={14} color="#FFFFFF" />
       </Pressable>
+      {!!activeCaption && (
+        <View style={styles.videoCaptionBar} pointerEvents="none">
+          <Text style={styles.videoCaptionText} numberOfLines={2}>
+            {activeCaption}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -987,6 +1001,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  videoCaptionBar: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 10,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  videoCaptionText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', textAlign: 'center' },
   productInfoBtn: {
     position: 'absolute',
     top: 6,

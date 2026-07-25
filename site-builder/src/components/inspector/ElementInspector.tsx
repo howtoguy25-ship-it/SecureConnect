@@ -3,7 +3,8 @@ import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndic
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement, ImageElement, ProductElement, WidgetKind, WidgetTimezone } from '@/types';
+import { CanvasElement, ImageElement, ProductElement, VideoCaption, WidgetKind, WidgetTimezone } from '@/types';
+import { generateId } from '@/utils/id';
 import { useCatalogProduct } from '@/hooks/useCatalogProduct';
 import { resolveProductView } from '@/utils/resolveProduct';
 import { AnalogClockFace, DigitalClockFace, WIDGET_THEME } from '@/components/canvas/WidgetView';
@@ -304,6 +305,75 @@ async function pickVideo(): Promise<string | null> {
 }
 
 const MAX_TRIM_MS = 5 * 60 * 1000;
+
+// Real, working caption list editor -- add/edit/remove timed subtitle lines, each with its
+// own start/end time (clip-relative, same clock as trimStartMs/trimEndMs) via the same
+// SliderRow every other time control here uses. Kept purely as an array of plain values
+// (no separate "current caption index" selection state) since captions are typically edited
+// one at a time in order, not jumped between.
+function VideoCaptionsEditor({
+  captions,
+  trimStartMs,
+  trimEndMs,
+  onChange,
+}: {
+  captions: VideoCaption[];
+  trimStartMs: number;
+  trimEndMs: number | null;
+  onChange: (captions: VideoCaption[]) => void;
+}) {
+  const maxMs = trimEndMs ?? MAX_TRIM_MS;
+  const addCaption = () => {
+    const lastEnd = captions.length > 0 ? captions[captions.length - 1].endMs : trimStartMs;
+    const start = Math.min(lastEnd, Math.max(trimStartMs, maxMs - 3000));
+    onChange([...captions, { id: generateId('caption'), text: '', startMs: start, endMs: Math.min(maxMs, start + 3000) }]);
+  };
+  const updateCaption = (id: string, patch: Partial<VideoCaption>) =>
+    onChange(captions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const removeCaption = (id: string) => onChange(captions.filter((c) => c.id !== id));
+
+  return (
+    <View>
+      {captions.map((caption, idx) => (
+        <View key={caption.id} style={styles.captionCard}>
+          <View style={styles.captionCardHeader}>
+            <Text style={styles.captionCardTitle}>Caption {idx + 1}</Text>
+            <Pressable onPress={() => removeCaption(caption.id)} hitSlop={8}>
+              <Ionicons name="trash-outline" size={16} color="#DC2626" />
+            </Pressable>
+          </View>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Caption text"
+            value={caption.text}
+            onChangeText={(text) => updateCaption(caption.id, { text })}
+            multiline
+          />
+          <SliderRow
+            label="Starts at (ms)"
+            value={caption.startMs}
+            min={trimStartMs}
+            max={Math.max(trimStartMs, caption.endMs - 200)}
+            step={100}
+            onChange={(v) => updateCaption(caption.id, { startMs: v })}
+          />
+          <SliderRow
+            label="Ends at (ms)"
+            value={caption.endMs}
+            min={caption.startMs + 200}
+            max={maxMs}
+            step={100}
+            onChange={(v) => updateCaption(caption.id, { endMs: v })}
+          />
+        </View>
+      ))}
+      <Pressable style={styles.uploadBtn} onPress={addCaption}>
+        <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+        <Text style={styles.uploadBtnText}>Add Caption</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 // Real AI background remove/change for an already-placed image (see editImageBackground in
 // src/services/uploads.ts). Keyed by element.id where it's used below so switching to a
@@ -767,6 +837,17 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                 />
               </>
             )}
+
+            <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Captions</Text>
+            <Text style={styles.helperText}>
+              Real, timed subtitles -- each one shows while playback is between its start and end time, then hides.
+            </Text>
+            <VideoCaptionsEditor
+              captions={element.captions ?? []}
+              trimStartMs={element.trimStartMs}
+              trimEndMs={element.trimEndMs}
+              onChange={(captions) => onChange({ captions } as any)}
+            />
           </>
         )}
         {element.type === 'videoEmbed' && (
@@ -1661,6 +1742,9 @@ const styles = StyleSheet.create({
   confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   removeChip: { backgroundColor: '#FEE2E2', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   removeChipText: { fontSize: 11, color: '#B91C1C', fontWeight: '600' },
+  captionCard: { backgroundColor: '#F8FAFC', borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  captionCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  captionCardTitle: { fontSize: 12, fontWeight: '700', color: '#334155' },
   variantOptionCard: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 10 },
   variantRow: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 8 },
   variantRowLabel: { fontSize: 12, fontWeight: '700', color: '#0F172A' },

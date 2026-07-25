@@ -130,6 +130,16 @@ export interface SlideshowElement extends BaseElement {
   intervalMs: number;
 }
 
+// A real, timed caption line -- shown while playback is between startMs and endMs (clip-
+// relative, same clock as trimStartMs/trimEndMs), then hidden. Several can cover the same
+// clip end-to-end (a real subtitle track) or leave gaps where nothing shows.
+export interface VideoCaption {
+  id: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface VideoElement extends BaseElement {
   type: 'video';
   uri: string | null;
@@ -137,6 +147,7 @@ export interface VideoElement extends BaseElement {
   trimEndMs: number | null; // null = play to the natural end
   muted: boolean; // mute the clip's own audio -- useful when overlaying audioUri instead
   loop: boolean;
+  captions?: VideoCaption[];
   // Starts playing on its own instead of waiting for a visitor to tap the play button --
   // browsers (and most native players) only allow this when the clip is also muted, so
   // turning this on forces `muted` on too (see the inspector's own toggle logic).

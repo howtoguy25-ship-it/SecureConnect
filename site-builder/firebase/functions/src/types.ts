@@ -73,6 +73,13 @@ export interface SlideshowElement extends BaseElement {
   intervalMs: number;
 }
 
+export interface VideoCaption {
+  id: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface VideoElement extends BaseElement {
   type: 'video';
   uri: string | null;
@@ -84,6 +91,7 @@ export interface VideoElement extends BaseElement {
   previewSeconds: 3 | 5 | 10 | null;
   audioUri: string | null;
   audioVolume: number;
+  captions?: VideoCaption[];
 }
 
 // A real video found on the open web (currently YouTube), not one the user uploaded --
