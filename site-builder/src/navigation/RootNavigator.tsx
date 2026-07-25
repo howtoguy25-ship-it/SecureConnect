@@ -48,7 +48,14 @@ function AppStack() {
       <Stack.Screen name="AIClarify" component={AIClarifyScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="AIBuildProgress" component={AIBuildProgressScreen} options={{ gestureEnabled: false }} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="Editor" component={EditorScreen} />
+      {/* The native edge-swipe-to-go-back gesture shares the same "drag starting near the left
+      edge, moving right" touch pattern as dragging a canvas element rightward -- competing
+      with DraggableElement's own PanResponder for exactly that gesture, which is what read as
+      an element's drag getting "blocked" moving right, and (worse) could pop the screen back
+      out of the editor entirely on an accidental edge-swipe while just trying to move
+      something. EditorScreen already has a real, always-visible back button in its own header
+      (see its chevron-back Pressable) -- that's the one real way back out now. */}
+      <Stack.Screen name="Editor" component={EditorScreen} options={{ gestureEnabled: false }} />
       <Stack.Screen name="Publish" component={PublishScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="BuyDomain" component={BuyDomainScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="TransferDomain" component={TransferDomainScreen} options={{ presentation: 'modal' }} />
