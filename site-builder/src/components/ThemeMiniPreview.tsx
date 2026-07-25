@@ -1,7 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Theme } from '@/types';
+import { gradientStartEnd } from '@/utils/gradient';
 
 const ICON_SETS = { Ionicons, MaterialCommunityIcons, FontAwesome5 };
 
@@ -55,12 +57,51 @@ export default function ThemeMiniPreview({ theme, width, height }: { theme: Them
                 {el.text}
               </Text>
             );
-          case 'button':
+          case 'button': {
+            // Renders the real label text + gradient (if any) -- a plain colored box with no
+            // text made this preview look nothing like what a theme actually creates, since
+            // every real button on the canvas always shows its label.
+            const buttonInner = (
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: el.textColor,
+                  fontSize: Math.max(4, 11 * scale),
+                  fontWeight: '700',
+                  textAlign: 'center',
+                }}
+              >
+                {el.label}
+              </Text>
+            );
+            if (el.backgroundGradient) {
+              const { start, end } = gradientStartEnd(el.backgroundGradient.angle);
+              return (
+                <LinearGradient
+                  key={el.id}
+                  colors={el.backgroundGradient.colors}
+                  start={start}
+                  end={end}
+                  style={[boxStyle, styles.iconWrap, { borderRadius: el.borderRadius * scale }]}
+                >
+                  {buttonInner}
+                </LinearGradient>
+              );
+            }
             return (
               <View
                 key={el.id}
-                style={[boxStyle, { backgroundColor: el.backgroundColor, borderRadius: el.borderRadius * scale }]}
-              />
+                style={[boxStyle, styles.iconWrap, { backgroundColor: el.backgroundColor, borderRadius: el.borderRadius * scale }]}
+              >
+                {buttonInner}
+              </View>
+            );
+          }
+          case 'image':
+            return el.uri ? (
+              <Image key={el.id} source={{ uri: el.uri }} style={boxStyle} resizeMode="cover" />
+            ) : (
+              <View key={el.id} style={[boxStyle, styles.imagePlaceholder]} />
             );
           case 'icon': {
             const IconComp = ICON_SETS[el.iconSet] as any;
@@ -81,5 +122,6 @@ export default function ThemeMiniPreview({ theme, width, height }: { theme: Them
 
 const styles = StyleSheet.create({
   wrap: { overflow: 'hidden' },
+  imagePlaceholder: { backgroundColor: '#E2E8F0' },
   iconWrap: { alignItems: 'center', justifyContent: 'center' },
 });

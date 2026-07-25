@@ -378,7 +378,7 @@ export default function DraggableElement({
         </>
       )}
 
-      {isSelected && !editing && (
+      {isSelected && !locked && !editing && (
         <View style={[styles.toolbar, toolbarBelow ? styles.toolbarBelow : styles.toolbarAbove]}>
           <Pressable style={styles.toolbarBtn} onPress={onDuplicate} hitSlop={6}>
             <Ionicons name="copy-outline" size={16} color="#0F172A" />

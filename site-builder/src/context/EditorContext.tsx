@@ -372,11 +372,61 @@ export function EditorProvider({
         if (!prev || !prev.pages) return prev;
         pushHistory(prev);
         const slug = slugifyPageName(name, prev.pages.map((p) => p.slug));
+        // A real starter fixture -- a title, a short subheading, and a button, centered near
+        // the top -- instead of a blank canvas, so a brand new page reads like a real page
+        // from the first tap rather than an empty one built entirely from scratch.
+        const canvasWidth = prev.canvasSize.width;
+        const titleWidth = Math.min(320, canvasWidth - 40);
+        const titleX = (canvasWidth - titleWidth) / 2;
+        const buttonWidth = 160;
+        const elements: CanvasElement[] = [
+          {
+            id: generateId('el'),
+            type: 'text',
+            text: name.trim() || 'New Page',
+            x: titleX,
+            y: 40,
+            width: titleWidth,
+            height: 36,
+            zIndex: 1,
+            fontSize: 26,
+            color: '#0F172A',
+            fontWeight: 'bold',
+            align: 'center',
+          },
+          {
+            id: generateId('el'),
+            type: 'text',
+            text: 'Add a short description for this page.',
+            x: titleX,
+            y: 84,
+            width: titleWidth,
+            height: 44,
+            zIndex: 2,
+            fontSize: 14,
+            color: '#64748B',
+            fontWeight: 'normal',
+            align: 'center',
+          },
+          {
+            id: generateId('el'),
+            type: 'button',
+            label: 'Learn More',
+            backgroundColor: '#4338CA',
+            textColor: '#FFFFFF',
+            borderRadius: 10,
+            x: (canvasWidth - buttonWidth) / 2,
+            y: 144,
+            width: buttonWidth,
+            height: 46,
+            zIndex: 3,
+          },
+        ];
         const newPage: SitePage = {
           id: generateId('page'),
           name: name.trim() || 'Untitled',
           slug,
-          elements: [],
+          elements,
           backgroundColor: prev.pages[0]?.backgroundColor ?? prev.backgroundColor,
         };
         const next = { ...prev, pages: [...prev.pages, newPage] };

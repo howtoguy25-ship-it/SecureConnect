@@ -975,6 +975,16 @@ function EditorInner({ navigation }: Props) {
                 </>
               )}
               <AddMenuTile icon="copy-outline" label="Section" onPress={() => { setAddMenuOpen(false); addSection(); }} />
+              {pages && (
+                <AddMenuTile
+                  icon="document-outline"
+                  label="Add Page"
+                  onPress={() => {
+                    setAddMenuOpen(false);
+                    addPage(`Page ${pages.length + 1}`);
+                  }}
+                />
+              )}
               <AddMenuTile
                 icon="grid-outline"
                 label="Columns"
