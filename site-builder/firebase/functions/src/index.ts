@@ -1405,6 +1405,53 @@ export const updateProductStock = onCall({ invoker: 'public' }, withCallableErro
   return { ok: true };
 }));
 
+// Pushes a catalog product's CURRENT stock (top-level + per-variant) straight to every live
+// storeInventory doc that references it, across every one of the seller's published projects.
+// This is the missing half of syncStoreInventory's "never overwrite stockQuantity on
+// republish" rule: that rule protects against an UNRELATED edit (colors, copy) silently
+// resetting stock a seller already sold against, but it also means ProductEditScreen's
+// ordinary Save button -- ordinarily the one place a seller actually changes a stock number --
+// never reaches checkout at all, since it only writes the catalog doc. The client only calls
+// this when the saved product's own stock/inStock fields actually changed (see
+// ProductEditScreen), so an unrelated save (just a description edit) still never touches
+// live stock, preserving the original rule's intent while making an explicit stock edit
+// actually take effect.
+export const syncProductStock = onCall({ invoker: 'public' }, withCallableErrors('syncProductStock', async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const { productId } = request.data as { productId: string };
+  if (!productId) throw new HttpsError('invalid-argument', 'Missing productId.');
+
+  const productDoc = await db.collection('users').doc(uid).collection('products').doc(productId).get();
+  const product = productDoc.data() as CatalogProduct | undefined;
+  if (!product) throw new HttpsError('not-found', 'Product not found.');
+
+  const projectsSnap = await db.collection('users').doc(uid).collection('projects').get();
+  const batch = db.batch();
+  let synced = 0;
+  for (const doc of projectsSnap.docs) {
+    const project = doc.data() as Project;
+    if (!project.publishSlug) continue;
+    const allElements = project.pages && project.pages.length > 0 ? project.pages.flatMap((p) => p.elements) : project.elements;
+    const usesProduct = allElements.some((el) => el.type === 'product' && el.productId === productId);
+    if (!usesProduct) continue;
+
+    const invRef = db.collection('storeInventory').doc(project.publishSlug).collection('products').doc(productId);
+    const invDoc = await invRef.get();
+    if (!invDoc.exists) continue;
+    const existingItem = invDoc.data() as StoreInventoryItem;
+    const stockQuantity = product.trackInventory ? (product.initialStock ?? 0) : null;
+    const variants: StoreInventoryVariant[] = existingItem.variants.map((v) => {
+      const source = product.variants.find((pv) => pv.key === v.key);
+      return { ...v, stockQuantity: product.trackInventory ? (source?.initialStock ?? 0) : null };
+    });
+    batch.set(invRef, { inStock: product.inStock, stockQuantity, variants, updatedAt: Date.now() }, { merge: true });
+    synced += 1;
+  }
+  if (synced > 0) await batch.commit();
+  return { ok: true, synced };
+}));
+
 // Public, unauthenticated, read-only -- lets a published page show the buyer real live
 // stock/availability instead of whatever number was baked in at publish time (which goes
 // stale the moment an order comes in). Called client-side by a small script in the

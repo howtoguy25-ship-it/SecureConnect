@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Image, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,7 @@ import { generateId } from '@/utils/id';
 import { CatalogProduct, ProductSaleType, ProductVariantOption, ProductVariant, BuyButtonMode } from '@/types';
 import SliderRow from '@/components/inspector/SliderRow';
 import { regenerateVariants, variantLabelFor } from '@/utils/productVariants';
+import { syncProductStock, stockSignature } from '@/services/productStock';
 import { AppTheme } from '@/theme/appThemes';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProductEdit'>;
@@ -67,11 +68,18 @@ export default function ProductEditScreen({ navigation, route }: Props) {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sym, setSym] = useState('$');
   const [viewingPhotoIndex, setViewingPhotoIndex] = useState<number | null>(null);
+  // A snapshot of just the stock-relevant fields as they were when this screen loaded --
+  // compared against the same fields at save time so a plain description/price edit never
+  // triggers a live-store stock push (see syncProductStock's own comment for why that
+  // distinction matters), while an actual stock change always does.
+  const loadedStockSignature = useRef<string | null>(null);
 
   useEffect(() => {
     if (!productId) return;
     productsStore.get(uid, productId).then((p) => {
-      setProduct(p ?? blankProduct());
+      const loaded = p ?? blankProduct();
+      setProduct(loaded);
+      loadedStockSignature.current = stockSignature(loaded);
       setLoading(false);
     });
   }, [uid, productId]);
@@ -95,6 +103,17 @@ export default function ProductEditScreen({ navigation, route }: Props) {
     setSaving(true);
     try {
       await productsStore.save(uid, product);
+      // Only an actual stock change needs pushing to already-published sites -- everything
+      // else (name/price/photos/description) already reaches checkout on the next
+      // auto-republish, and stockQuantity is deliberately never touched by a republish (see
+      // syncStoreInventory's own comment), so an unrelated save must never trigger this.
+      if (productId && loadedStockSignature.current != null && stockSignature(product) !== loadedStockSignature.current) {
+        try {
+          await syncProductStock(productId);
+        } catch {
+          // Best-effort -- the catalog save above already succeeded, so don't block on this.
+        }
+      }
       navigation.goBack();
     } catch (err: any) {
       showAlert('Could not save', err?.message ?? 'Try again in a moment.');
