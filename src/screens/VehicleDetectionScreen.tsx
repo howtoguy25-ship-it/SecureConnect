@@ -108,14 +108,14 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         boxes.map((box) => {
           const [x, y, w, h] = box.bbox;
           const isEmergency = box.label !== "Vehicle";
-          const speedText =
-            box.speedKmh === null
-              ? ""
-              : box.speedKmh > 3
-                ? ` · ~${Math.round(box.speedKmh)} km/h approaching`
-                : box.speedKmh < -3
-                  ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
-                  : " · steady";
+          const speedLabel =
+            box.state === "parked"
+              ? "PARKED"
+              : box.speedKmh === null
+                ? null
+                : Math.abs(box.speedKmh) < 3
+                  ? "steady"
+                  : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
           return (
             <View
               key={box.id}
@@ -131,8 +131,18 @@ export function VehicleDetectionScreen({ onClose }: Props) {
               ]}
             >
               <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
-                {box.label} {Math.round((box.confidence ?? box.score) * 100)}%{speedText}
+                {box.label} {Math.round((box.confidence ?? box.score) * 100)}%
               </Text>
+              {/* Anchored top-right, just outside the box edge, separate from the type/
+                  confidence label at top-left -- so it never overlaps the vehicle or the
+                  other label, and updates live every frame the tracker emits a speed. */}
+              {speedLabel && (
+                <Text
+                  style={[styles.speedLabel, box.state === "parked" && styles.speedLabelParked]}
+                >
+                  {speedLabel}
+                </Text>
+              )}
             </View>
           );
         })}
@@ -240,6 +250,20 @@ const styles = StyleSheet.create({
   boxLabelEmergency: {
     backgroundColor: "#DC2626",
     color: "#fff",
+  },
+  speedLabel: {
+    position: "absolute",
+    top: -22,
+    right: 0,
+    backgroundColor: "#111827",
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  speedLabelParked: {
+    backgroundColor: "#4B5563",
   },
   banner: {
     position: "absolute",

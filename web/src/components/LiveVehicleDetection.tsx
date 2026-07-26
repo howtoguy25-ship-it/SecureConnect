@@ -470,25 +470,11 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           ctx.strokeRect(x, y, w, h);
           if (isLocked) drawLockBrackets(ctx, x, y, w, h);
 
-          // "Steady" once a vehicle is locked on doesn't say anything a viewer doesn't already
-          // know -- the lock brackets themselves already mean "this has been tracked
-          // consistently" -- so it's dropped once locked to keep the label to what's actually
-          // new information (real approaching/receding speed still shows either way).
-          const speedText =
-            !goodView || box.speedKmh === null
-              ? ""
-              : box.speedKmh > 3
-                ? ` · ~${Math.round(box.speedKmh)} km/h approaching`
-                : box.speedKmh < -3
-                  ? ` · ~${Math.round(Math.abs(box.speedKmh))} km/h receding`
-                  : isLocked
-                    ? ""
-                    : " · steady";
           const vehicleTypeLabel = HEAVY_VEHICLE_CLASSES.has(box.vehicleClass) ? "Heavy Vehicle" : "Vehicle";
           const prefix = (isClosest ? "🎯 Closest · " : "") + (isLocked ? "🔒 " : "");
           const label = lightsActive
-            ? `${prefix}Unmarked police? (lights active)${speedText}`
-            : `${prefix}${vehicleTypeLabel} ${Math.round(box.score * 100)}%${speedText}`;
+            ? `${prefix}Unmarked police? (lights active)`
+            : `${prefix}${vehicleTypeLabel} ${Math.round(box.score * 100)}%`;
           ctx.font = "16px system-ui, sans-serif";
           const textWidth = ctx.measureText(label).width;
           ctx.fillStyle = boxColor;
@@ -497,6 +483,28 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
           // instead of the usual dark text to stay readable.
           ctx.fillStyle = lightsActive ? "#ffffff" : "#111827";
           ctx.fillText(label, x + 5, Math.max(16, y - 6));
+
+          // Speed/parked state anchored top-right, just outside the box edge, separate from
+          // the type/lock label at top-left -- "Steady" once locked doesn't say anything the
+          // lock brackets don't already, so it's dropped once locked.
+          const speedLabel =
+            !goodView
+              ? null
+              : box.state === "parked"
+                ? "PARKED"
+                : box.speedKmh === null
+                  ? null
+                  : Math.abs(box.speedKmh) < 3
+                    ? (isLocked ? null : "steady")
+                    : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
+          if (speedLabel) {
+            ctx.font = "bold 13px system-ui, sans-serif";
+            const speedWidth = ctx.measureText(speedLabel).width;
+            ctx.fillStyle = box.state === "parked" ? "#4B5563" : "#111827";
+            ctx.fillRect(x + w - speedWidth - 10, Math.max(0, y - 22), speedWidth + 10, 22);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(speedLabel, x + w - speedWidth - 5, Math.max(16, y - 6));
+          }
 
           // Real, live-computed plate-region estimate (see plateLocator.ts) -- NOT plate
           // reading/OCR, just where the plate likely is, and it already returns null for a

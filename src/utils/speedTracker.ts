@@ -19,6 +19,7 @@ export interface TrackedBox {
   label: string;
   confidence?: number;
   speedKmh: number | null;
+  state: "moving" | "parked";
 }
 
 interface InternalTrack {
@@ -29,7 +30,25 @@ interface InternalTrack {
   lastSeenMs: number;
   distanceM: number;
   speedKmh: number | null;
+  center: [number, number];
+  state: "moving" | "parked";
+  // When the current run of below-threshold centroid movement started -- null while actually
+  // moving. Used to require a *sustained* 2.5s of near-zero displacement before calling a
+  // vehicle parked, instead of one still frame (a red light, momentary occlusion) suppressing
+  // its speed.
+  lowMovementSinceMs: number | null;
+  // Consecutive frames of above-threshold movement seen *while parked* -- requires a few in a
+  // row before resuming live speed, so a single noisy frame (camera shake) doesn't flicker a
+  // truly parked car back to a fake speed reading.
+  aboveThresholdStreak: number;
 }
+
+// A parked car's box still jitters a pixel or two frame-to-frame from detector noise alone --
+// this is the displacement (as a fraction of frame width) below which movement doesn't count
+// as "real" motion.
+const NOISE_THRESHOLD_RATIO = 0.015;
+const PARKED_AFTER_MS = 2500;
+const RESUME_AFTER_FRAMES = 3;
 
 // How long a track survives a missed detection before its identity is given up on -- a
 // partially-visible or edge-of-frame vehicle can easily fail to detect for a single frame
@@ -42,7 +61,7 @@ const TRACK_GRACE_MS = 600;
 // it -- the underlying detector's box coordinates jitter slightly frame to frame even for a
 // vehicle that isn't really moving relative to the frame, which read as the box not quite
 // "attached" to the vehicle.
-const BBOX_SMOOTHING = 0.55;
+const BBOX_SMOOTHING = 0.4;
 
 function boxCenter(bbox: [number, number, number, number]): [number, number] {
   return [bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2];
@@ -107,16 +126,56 @@ export function createSpeedTracker() {
       if (best) {
         unmatched.delete(best.id);
         matchedIds.add(best.id);
+
+        const dispRatio = Math.hypot(cx - best.center[0], cy - best.center[1]) / imageWidthPx;
+        const movingNow = dispRatio >= NOISE_THRESHOLD_RATIO;
+
+        let state = best.state;
+        let lowMovementSinceMs = best.lowMovementSinceMs;
+        let aboveThresholdStreak = best.aboveThresholdStreak;
+
+        if (state === "moving") {
+          if (movingNow) {
+            lowMovementSinceMs = null;
+          } else {
+            if (lowMovementSinceMs === null) lowMovementSinceMs = nowMs;
+            if (nowMs - lowMovementSinceMs >= PARKED_AFTER_MS) state = "parked";
+          }
+          aboveThresholdStreak = 0;
+        } else {
+          aboveThresholdStreak = movingNow ? aboveThresholdStreak + 1 : 0;
+          if (aboveThresholdStreak >= RESUME_AFTER_FRAMES) {
+            state = "moving";
+            lowMovementSinceMs = null;
+            aboveThresholdStreak = 0;
+          }
+        }
+
         const dtSec = (nowMs - best.lastSeenMs) / 1000;
-        if (dtSec > 0.15) {
+        if (state === "moving" && dtSec > 0.15) {
           const closingMPerSec = (best.distanceM - distanceM) / dtSec;
           const rawKmh = closingMPerSec * 3.6;
           speedKmh = best.speedKmh === null ? rawKmh : best.speedKmh * 0.6 + rawKmh * 0.4;
-        } else {
+        } else if (state === "moving") {
           speedKmh = best.speedKmh;
+        } else {
+          // Parked -- speed is suppressed entirely rather than left to decay toward zero, so
+          // the UI shows a clean "PARKED" state instead of a jittery near-zero number.
+          speedKmh = null;
         }
+
         const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
-        nextTracks.push({ id: best.id, bbox, lastSeenMs: nowMs, distanceM, speedKmh });
+        nextTracks.push({
+          id: best.id,
+          bbox,
+          lastSeenMs: nowMs,
+          distanceM,
+          speedKmh,
+          center: [cx, cy],
+          state,
+          lowMovementSinceMs,
+          aboveThresholdStreak,
+        });
         result.push({
           id: best.id,
           bbox,
@@ -124,10 +183,21 @@ export function createSpeedTracker() {
           label: det.label,
           confidence: det.confidence,
           speedKmh,
+          state,
         });
       } else {
         const id = nextId++;
-        nextTracks.push({ id, bbox: det.bbox, lastSeenMs: nowMs, distanceM, speedKmh: null });
+        nextTracks.push({
+          id,
+          bbox: det.bbox,
+          lastSeenMs: nowMs,
+          distanceM,
+          speedKmh: null,
+          center: [cx, cy],
+          state: "moving",
+          lowMovementSinceMs: null,
+          aboveThresholdStreak: 0,
+        });
         result.push({
           id,
           bbox: det.bbox,
@@ -135,6 +205,7 @@ export function createSpeedTracker() {
           label: det.label,
           confidence: det.confidence,
           speedKmh: null,
+          state: "moving",
         });
       }
     }
