@@ -11,12 +11,20 @@ import { env } from "@/config/env";
 // captures + flushes first, then hands off to our handler, which is the one that decides not to
 // forward fatal errors into React Native's crash-prone native reportFatal path. Same
 // crash-prevention fix as before, now with an actual dashboard for what's failing.
+// Registered with NavigationContainer in RootNavigator.tsx -- gives Sentry real per-screen
+// transactions so it can report actual slow/frozen frame counts (Sentry's own "Mobile
+// Vitals") instead of guessing at lag from reading code. That's the only honest way to
+// answer "does it lag" for a device I can't see -- once this is running on a real phone,
+// real frame data shows up in the dashboard instead of another blind guess.
+export const navigationIntegration = Sentry.reactNavigationIntegration();
+
 export function initSentry(): void {
   if (!env.sentryDsn) return;
   Sentry.init({
     dsn: env.sentryDsn,
     enableNative: true,
     tracesSampleRate: 0.2,
+    integrations: [navigationIntegration],
   });
 }
 
