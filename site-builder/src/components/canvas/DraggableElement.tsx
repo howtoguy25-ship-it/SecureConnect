@@ -235,7 +235,15 @@ export default function DraggableElement({
       // pass through to the surrounding ScrollView's own (purely visual) zoom instead.
       onStartShouldSetPanResponder: (evt) => !lockedRef.current && evt.nativeEvent.touches.length === 1,
       onMoveShouldSetPanResponder: (evt) => !lockedRef.current && evt.nativeEvent.touches.length === 1,
-      onPanResponderTerminationRequest: () => false,
+      // Whether to give up this gesture if the surrounding canvas ScrollView asks to take
+      // over (e.g. it's detected a real vertical scroll swipe). An element that was already
+      // selected before this touch began keeps refusing (false) -- an in-progress
+      // reposition drag must never be yanked away by the scroll mid-gesture. But an element
+      // that WASN'T selected yet yields (true): a touch-and-drag that merely started on top
+      // of an unselected element is far more likely to be "I'm trying to scroll the page"
+      // than "I meant to grab this specific thing," so scrolling wins and the element stays
+      // put -- only a real tap (handled separately below) selects it.
+      onPanResponderTerminationRequest: () => !moveOrigin.current.wasSelected,
       onPanResponderGrant: (evt) => {
         moveOrigin.current.wasSelected = isSelectedRef.current;
         moveOrigin.current.maxMove = 0;
@@ -474,9 +482,13 @@ export default function DraggableElement({
       </View>
 
       {elementLocked && (
-        <View style={styles.lockBadge}>
+        // A real Pressable, not just a status indicator -- tapping it unlocks this one
+        // element directly, without needing to open the Layers panel. Locked elements never
+        // claim the move responder (see onStartShouldSetPanResponder above), so this touch
+        // never has to compete with drag-to-move for the gesture.
+        <Pressable style={styles.lockBadge} onPress={onToggleLock} hitSlop={8}>
           <Ionicons name="lock-closed" size={11} color="#FFFFFF" />
-        </View>
+        </Pressable>
       )}
 
       {isSelected && !locked && !editing && (

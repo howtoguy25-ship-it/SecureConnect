@@ -185,6 +185,28 @@ function buildSystemPrompt(context: AssistantContext): string {
   ].join(' ');
 }
 
+// Real, deterministic keyword override for the 4 build page types -- the model's own
+// judgment (see the system prompt's pageType instructions above) is right most of the time,
+// but "build a SiteSpark logo" has been observed landing on pageType 'website' anyway. Rather
+// than trust the LLM alone, this re-derives pageType straight off the user's literal words
+// and force-corrects startBuildFlow/startAIBuild actions whenever one of these 4 words
+// unambiguously appears -- checked most-specific-first so e.g. "logo" wins over a stray "web"
+// substring match. Only overrides when a real word-boundary match is found; an ambiguous
+// message (no keyword at all) is left to the model's own pageType/clarifying-question call.
+const HARDCODED_PAGE_TYPE_KEYWORDS: Array<{ pageType: NonNullable<AssistantAction['pageType']>; re: RegExp }> = [
+  { pageType: 'logo', re: /\blogos?\b/i },
+  { pageType: 'video', re: /\bvideos?\b/i },
+  { pageType: 'social', re: /\bsocial\b/i },
+  { pageType: 'website', re: /\b(webpages?|websites?|web)\b/i },
+];
+
+function hardcodedPageTypeFromMessage(message: string): AssistantAction['pageType'] {
+  for (const { pageType, re } of HARDCODED_PAGE_TYPE_KEYWORDS) {
+    if (re.test(message)) return pageType;
+  }
+  return null;
+}
+
 export async function chatWithAssistant(
   client: OpenAI,
   model: string,
@@ -216,5 +238,16 @@ export async function chatWithAssistant(
 
   const raw = completion.choices[0]?.message?.content;
   if (!raw) throw new Error('The assistant did not return a response.');
-  return JSON.parse(raw) as AssistantResponse;
+  const parsed = JSON.parse(raw) as AssistantResponse;
+
+  const hardcodedPageType = hardcodedPageTypeFromMessage(message);
+  if (hardcodedPageType) {
+    for (const action of parsed.actions) {
+      if (action.type === 'startBuildFlow' || action.type === 'startAIBuild') {
+        action.pageType = hardcodedPageType;
+      }
+    }
+  }
+
+  return parsed;
 }

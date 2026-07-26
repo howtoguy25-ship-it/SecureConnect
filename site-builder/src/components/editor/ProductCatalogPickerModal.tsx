@@ -1,33 +1,42 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Image, Modal } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import { productsStore } from '@/storage/productsStore';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
 import { CatalogProduct } from '@/types';
 
+const MAX_MULTI_SELECT = 3;
+
 // Browse the account's real Products catalog and insert one onto the current page, or jump
 // into creating a brand new one -- the "insert product" entry point for a manually-built
 // website. Tapping a row opens a real preview (photos + description) before committing to
 // insert, so a seller can double-check which product they're placing without guessing from
-// a thumbnail alone.
+// a thumbnail alone. When onInsertMultiple is provided (the global "+ Add to page -> Product"
+// flow, not the "link this button to a product" flow, which can only ever target one), each
+// row also gets a real checkbox so a seller can select up to 3 products at once and drop them
+// all onto the page in one tap of the "Add" bar, instead of repeating this whole flow 3 times.
 export default function ProductCatalogPickerModal({
   visible,
   onClose,
   uid,
   onInsert,
+  onInsertMultiple,
   onCreateNew,
 }: {
   visible: boolean;
   onClose: () => void;
   uid: string;
   onInsert: (product: CatalogProduct) => void;
+  onInsertMultiple?: (products: CatalogProduct[]) => void;
   onCreateNew: () => void;
 }) {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [sym, setSym] = useState('$');
   const [previewProduct, setPreviewProduct] = useState<CatalogProduct | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!visible) return;
@@ -43,9 +52,32 @@ export default function ProductCatalogPickerModal({
     return sellerAccountStore.subscribe(uid, (account) => setSym(currencySymbol(account?.currency)));
   }, [uid, visible]);
 
+  useEffect(() => {
+    if (!visible) setSelectedIds([]);
+  }, [visible]);
+
   const close = () => {
     setPreviewProduct(null);
+    setSelectedIds([]);
     onClose();
+  };
+
+  const toggleSelected = (productId: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(productId)) return prev.filter((id) => id !== productId);
+      if (prev.length >= MAX_MULTI_SELECT) {
+        showAlert('Up to 3 at a time', `You can add up to ${MAX_MULTI_SELECT} products in one go -- deselect one first to swap it out.`);
+        return prev;
+      }
+      return [...prev, productId];
+    });
+  };
+
+  const addSelected = () => {
+    const selected = products.filter((p) => selectedIds.includes(p.id));
+    if (selected.length === 0 || !onInsertMultiple) return;
+    onInsertMultiple(selected);
+    close();
   };
 
   return (
@@ -125,30 +157,52 @@ export default function ProductCatalogPickerModal({
                   No products in your catalog yet -- tap "+ New Product" above to create your first one.
                 </Text>
               ) : (
-                products.map((product) => (
-                  <Pressable key={product.id} style={styles.itemRow} onPress={() => setPreviewProduct(product)}>
-                    {product.images[0] ? (
-                      <Image source={{ uri: product.images[0] }} style={styles.thumb} />
-                    ) : (
-                      <View style={[styles.thumb, styles.thumbPlaceholder]}>
-                        <Ionicons name="image-outline" size={20} color="#94A3B8" />
+                products.map((product) => {
+                  const isSelected = selectedIds.includes(product.id);
+                  return (
+                    <Pressable key={product.id} style={styles.itemRow} onPress={() => setPreviewProduct(product)}>
+                      {!!onInsertMultiple && (
+                        <Pressable
+                          style={[styles.checkbox, isSelected && styles.checkboxChecked]}
+                          onPress={() => toggleSelected(product.id)}
+                          hitSlop={8}
+                        >
+                          {isSelected && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                        </Pressable>
+                      )}
+                      {product.images[0] ? (
+                        <Image source={{ uri: product.images[0] }} style={styles.thumb} />
+                      ) : (
+                        <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                          <Ionicons name="image-outline" size={20} color="#94A3B8" />
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.itemLabel} numberOfLines={1}>
+                          {product.name || 'Untitled product'}
+                        </Text>
+                        <Text style={styles.itemSub}>
+                          {sym}
+                          {product.priceUsd.toFixed(2)} ·{' '}
+                          {product.saleType === 'product' ? 'Physical' : product.saleType === 'digital' ? 'Digital' : product.saleType === 'service' ? 'Service' : 'Custom'}
+                        </Text>
                       </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemLabel} numberOfLines={1}>
-                        {product.name || 'Untitled product'}
-                      </Text>
-                      <Text style={styles.itemSub}>
-                        {sym}
-                        {product.priceUsd.toFixed(2)} ·{' '}
-                        {product.saleType === 'product' ? 'Physical' : product.saleType === 'digital' ? 'Digital' : product.saleType === 'service' ? 'Service' : 'Custom'}
-                      </Text>
-                    </View>
-                    <Ionicons name="eye-outline" size={20} color="#94A3B8" />
-                  </Pressable>
-                ))
+                      <Ionicons name="eye-outline" size={20} color="#94A3B8" />
+                    </Pressable>
+                  );
+                })
               )}
             </ScrollView>
+            {!!onInsertMultiple && selectedIds.length > 0 && (
+              <View style={styles.selectBar}>
+                <Pressable style={styles.addBigBtn} onPress={addSelected}>
+                  <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.addBigBtnText}>
+                    Add {selectedIds.length} Product{selectedIds.length === 1 ? '' : 's'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
           </>
         )}
       </View>
@@ -170,6 +224,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     padding: 12,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: { backgroundColor: '#4338CA', borderColor: '#4338CA' },
+  selectBar: {
+    padding: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
   },
   thumb: { width: 52, height: 52, borderRadius: 10 },
   thumbPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' },

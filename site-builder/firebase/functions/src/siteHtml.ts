@@ -2035,11 +2035,25 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         el.borderWidth ? `border:${el.borderWidth}px solid ${escapeAttr(el.borderColor ?? '#000000')};` : ''
       }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;`;
       // A linked Product/Collection takes priority over a raw URL (the inspector already
-      // keeps them mutually exclusive) -- jumps to that element's own real card further down
-      // the same page via its id="el-{id}" (see the 'product'/'collection' cases below),
-      // rather than duplicating that element's info here. Only a real, non-empty link/target
-      // renders as a clickable <a> -- a button with nothing set stays a plain div, exactly as
-      // before this field existed, instead of a dead link that goes nowhere or reloads the page.
+      // keeps them mutually exclusive). A Collection still just jumps to its own real card
+      // further down the page via its id="el-{id}" anchor. A Product is different: it opens
+      // that product's real full-screen detail overlay (see the 'product' case's
+      // productDetailOverlay below) -- a genuine separate page-like view (swipeable gallery,
+      // name, discount pricing, description, buy action), matching what tapping the same
+      // button on a real e-commerce site does, instead of just scrolling to a small card.
+      // Only a real, non-empty link/target renders as a clickable <a> -- a button with
+      // nothing set stays a plain div, exactly as before this field existed, instead of a
+      // dead link that goes nowhere or reloads the page.
+      const linkTarget = el.linkTargetElementId ? allElements.find((sib) => sib.id === el.linkTargetElementId) : null;
+      if (linkTarget?.type === 'product') {
+        const detailOverlayId = `product-detail-${linkTarget.id}`;
+        // JSON.stringify's own double-quoted output must be HTML-entity-escaped (escapeAttr)
+        // before landing inside this onclick="..." attribute, which is itself double-quoted
+        // -- otherwise the embedded raw " characters close the attribute early and corrupt
+        // the tag, silently breaking this click handler (confirmed via a real HTML-parser
+        // round-trip, not assumed).
+        return `<a href="#" onclick="var m=document.getElementById(${escapeAttr(JSON.stringify(detailOverlayId))});if(m){m.style.display='flex';}return false;" style="${buttonStyle}">${escapeHtml(el.label)}</a>`;
+      }
       const href = el.linkTargetElementId ? `#el-${el.linkTargetElementId}` : el.link?.trim() ? safeUrl(el.link) : null;
       return href
         ? `<a href="${escapeAttr(href)}" style="${buttonStyle}">${escapeHtml(el.label)}</a>`
@@ -2201,6 +2215,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // the item without an extra step. Tapping any photo still opens the lightbox (below)
       // for a bigger view, starting at whichever photo was showing, not always the first.
       const galleryHeightPct = fullBleed ? '65%' : '55%';
+      // Real element ids always contain hyphens (see generateId in utils/id.ts), which makes
+      // `${lightboxVar}`/`${galleryVar}` invalid as BARE JS identifiers in an onclick body --
+      // `foo-bar.open()` parses as `foo - bar.open()`, a silent no-op, not a method call.
+      // window[...] is already how these are DEFINED below (bracket notation, any string key
+      // is fine there); every place they're CALLED from an onclick has to use the same
+      // window[JSON.stringify(...)] bracket form, escapeAttr'd since it also sits inside a
+      // double-quoted HTML attribute (see the Button case's identical escaping comment).
       const imgTag =
         product.images.length > 0
           ? `<div id="${galleryWrapId}" style="position:relative;width:100%;height:${galleryHeightPct};overflow:hidden;">
@@ -2210,14 +2231,14 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         (uri, i) =>
           `<img src="${escapeAttr(uri)}" style="flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center;${
             hasMultiplePhotos ? 'cursor:pointer;' : ''
-          }" ${hasMultiplePhotos ? `onclick="${lightboxVar}.open(${i})"` : ''} />`
+          }" ${hasMultiplePhotos ? `onclick="window[${escapeAttr(JSON.stringify(lightboxVar))}].open(${i})"` : ''} />`
       )
       .join('')}
   </div>
   ${
     hasMultiplePhotos
-      ? `<button aria-label="Previous photo" onclick="${galleryVar}.prev()" style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8249;</button>
-  <button aria-label="Next photo" onclick="${galleryVar}.next()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8250;</button>
+      ? `<button aria-label="Previous photo" onclick="window[${escapeAttr(JSON.stringify(galleryVar))}].prev()" style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8249;</button>
+  <button aria-label="Next photo" onclick="window[${escapeAttr(JSON.stringify(galleryVar))}].next()" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:#00000066;color:#fff;border:none;border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;">&#8250;</button>
   <div style="position:absolute;bottom:6px;left:0;right:0;display:flex;justify-content:center;gap:5px;">
     ${product.images.map((_, i) => `<div data-gallery-dot style="width:6px;height:6px;border-radius:3px;background:${i === 0 ? '#fff' : '#ffffff80'};"></div>`).join('')}
   </div>`
@@ -2267,7 +2288,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // lightbox is the "with slide options" view for the rest.
       const lightbox = hasMultiplePhotos
         ? `<div id="lightbox-${el.id}" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000E6;align-items:center;justify-content:center;flex-direction:column;">
-  <button aria-label="Close" onclick="${lightboxVar}.close()" style="position:absolute;top:16px;right:16px;z-index:2;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;">&times;</button>
+  <button aria-label="Close" onclick="window[${escapeAttr(JSON.stringify(lightboxVar))}].close()" style="position:absolute;top:16px;right:16px;z-index:2;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;">&times;</button>
   <div style="position:relative;width:100%;max-width:520px;z-index:1;">
     <div id="lightbox-track-${el.id}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">
       ${product.images
@@ -2277,8 +2298,8 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         )
         .join('')}
     </div>
-    <button aria-label="Previous photo" onclick="${lightboxVar}.prev()" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8249;</button>
-    <button aria-label="Next photo" onclick="${lightboxVar}.next()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8250;</button>
+    <button aria-label="Previous photo" onclick="window[${escapeAttr(JSON.stringify(lightboxVar))}].prev()" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8249;</button>
+    <button aria-label="Next photo" onclick="window[${escapeAttr(JSON.stringify(lightboxVar))}].next()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:#00000099;color:#fff;border:none;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer;">&#8250;</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:14px;">
     ${product.images.map((_, i) => `<div data-dot style="width:7px;height:7px;border-radius:4px;background:${i === 0 ? '#fff' : '#6B7280'};"></div>`).join('')}
@@ -2461,6 +2482,69 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const priceFontOption = getFontOption(el.priceFontFamily);
       const priceFontCss = priceFontOption.id !== 'system' ? `font-family:'${priceFontOption.family}',sans-serif;` : '';
 
+      // A real full-screen detail view, separate from this card's own (possibly small)
+      // on-page footprint -- what a Button linking to this product opens (see the 'button'
+      // case above), matching the editor's own full-screen ProductDetailModal. Skipped when
+      // this product IS the whole page already (fullBleed) since that page already shows
+      // everything below at full size -- and no other element could exist on that page to
+      // link to it anyway (a single-product page has no room for a Button alongside it).
+      // Keeps its own ids (prefixed `pd-`) distinct from the compact card's own gallery/buy
+      // ids above so the two views' scripts never collide if both happen to be present.
+      const detailOverlayId = `product-detail-${el.id}`;
+      const detailGalleryTrackId = `pd-gallery-${el.id}`;
+      const detailGalleryHtml =
+        product.images.length > 0
+          ? `<div style="width:100%;height:320px;overflow:hidden;border-radius:12px;position:relative;">
+    <div id="${detailGalleryTrackId}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:100%;">
+      ${product.images.map((uri) => `<img src="${escapeAttr(uri)}" style="flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center;" />`).join('')}
+    </div>
+    ${
+      hasMultiplePhotos
+        ? `<div style="position:absolute;bottom:8px;left:0;right:0;display:flex;justify-content:center;gap:5px;">${product.images
+            .map((_, i) => `<div style="width:6px;height:6px;border-radius:3px;background:${i === 0 ? '#0F172A' : '#CBD5E1'};"></div>`)
+            .join('')}</div>`
+        : ''
+    }
+  </div>`
+          : `<div style="width:100%;height:320px;background:#F1F5F9;border-radius:12px;"></div>`;
+      // Variant products need the real picker/qty UI the compact card already has, so their
+      // action here just jumps to that real card instead of duplicating a whole second
+      // variant picker -- everything else (no-variant products, the common case) gets a real
+      // working Add to Cart/Book Now right in this overlay.
+      // Every JSON.stringify(...) embedded below sits inside a double-quoted onclick="..."
+      // attribute -- escapeAttr entity-encodes its raw double quotes (and product.name,
+      // unlike an internal id, can contain real quotes/apostrophes a seller typed) so the
+      // browser's HTML parser doesn't treat them as closing the attribute early and
+      // corrupting the tag.
+      const detailBuyAction = !isReady
+        ? `<button disabled style="margin-top:16px;width:100%;box-sizing:border-box;background:#E2E8F0;color:#94A3B8;border:none;border-radius:10px;padding:14px;font-weight:700;font-size:16px;">Coming Soon</button>`
+        : hasVariants
+          ? `<a href="#el-${el.id}" onclick="document.getElementById(${escapeAttr(JSON.stringify(detailOverlayId))}).style.display='none';" style="display:block;margin-top:16px;width:100%;box-sizing:border-box;text-align:center;background:#4338CA;color:#fff;border-radius:10px;padding:14px;font-weight:700;font-size:16px;text-decoration:none;">See Options &amp; Buy</a>`
+          : `<button onclick="siteSparkCart.${isService ? 'buyNow' : 'add'}(${escapeAttr(JSON.stringify(el.productId))}, ${escapeAttr(JSON.stringify(product.name))}, ${product.priceUsd}, 1, ${escapeAttr(JSON.stringify(product.saleType))}, null, null); document.getElementById(${escapeAttr(JSON.stringify(detailOverlayId))}).style.display='none';" style="margin-top:16px;width:100%;box-sizing:border-box;background:#4338CA;color:#fff;border:none;border-radius:10px;padding:14px;font-weight:700;font-size:16px;cursor:pointer;">${isService ? 'Book Now' : 'Add to Cart'}</button>`;
+      const productDetailOverlay = fullBleed
+        ? ''
+        : `<div id="${detailOverlayId}" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;overflow-y:auto;font-family:-apple-system,sans-serif;flex-direction:column;">
+  <div style="display:flex;align-items:center;padding:14px 16px;border-bottom:1px solid #E2E8F0;position:sticky;top:0;background:#fff;">
+    <button aria-label="Back" onclick="document.getElementById(${escapeAttr(JSON.stringify(detailOverlayId))}).style.display='none';" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:#0F172A;padding:2px 10px 2px 0;">&#8249;</button>
+    <div style="flex:1;text-align:center;font-weight:700;font-size:16px;color:#0F172A;margin-right:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(product.name || 'Product')}</div>
+  </div>
+  <div style="padding:20px;">
+    ${detailGalleryHtml}
+    <div style="font-size:11px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;margin-top:16px;">${badge}</div>
+    <div style="font-weight:800;font-size:22px;color:#0F172A;margin-top:4px;">${escapeHtml(product.name || 'Untitled product')}</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px;">
+      <div style="font-weight:800;color:#4338CA;font-size:20px;">${sym}${product.priceUsd.toFixed(2)}</div>
+      ${
+        product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd
+          ? `<div style="font-size:15px;color:#94A3B8;text-decoration:line-through;">${sym}${product.compareAtPriceUsd.toFixed(2)}</div>`
+          : ''
+      }
+    </div>
+    ${product.description ? `<div style="font-size:14px;color:#475569;line-height:21px;margin-top:12px;">${escapeHtml(product.description)}</div>` : ''}
+    ${detailBuyAction}
+  </div>
+</div>`;
+
       return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;${fullBleed ? '' : 'border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);'}overflow:${fullBleed ? 'auto' : 'hidden'};display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
   ${imgTag}
   <div style="padding:${fullBleed ? '20px' : '10px'};flex:1;display:flex;flex-direction:column;">
@@ -2487,7 +2571,8 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
 </div>
 ${lightbox}
 ${galleryScript}
-${script}`;
+${script}
+${productDetailOverlay}`;
     }
     case 'collection': {
       const memberElements = el.productIds
@@ -2510,7 +2595,7 @@ ${script}`;
       const rows = members.length
         ? members
             .map(
-              ({ id, product: p }) => `<a href="#el-${id}" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
+              ({ id, product: p }) => `<a href="#el-${id}" onclick="document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='none';" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
   ${
     p.images[0]
       ? `<img src="${escapeAttr(p.images[0])}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;" />`
@@ -2530,7 +2615,7 @@ ${script}`;
             .join('')
         : `<div style="font-size:13px;color:#94A3B8;padding:12px 0;">No products in this collection yet.</div>`;
 
-      return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;cursor:pointer;" onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='flex';">
+      return `<div id="el-${el.id}" style="${base}background:#FFFFFF;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,sans-serif;cursor:pointer;" onclick="document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='flex';">
   <div style="width:100%;height:55%;flex-shrink:0;display:flex;flex-wrap:wrap;">${thumbs || '<div style="width:100%;height:100%;background:#F1F5F9;"></div>'}</div>
   <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">Collection</div>
@@ -2543,7 +2628,7 @@ ${script}`;
     <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">Collection</div>
     <div style="font-weight:800;font-size:17px;color:#0F172A;margin-top:2px;margin-bottom:8px;">${escapeHtml(el.name || 'Untitled collection')}</div>
     ${rows}
-    <button onclick="document.getElementById(${JSON.stringify(modalId)}).style.display='none';" style="width:100%;margin-top:14px;background:#111827;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:13px;cursor:pointer;">Close</button>
+    <button onclick="document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='none';" style="width:100%;margin-top:14px;background:#111827;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:13px;cursor:pointer;">Close</button>
   </div>
 </div>`;
     }

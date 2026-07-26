@@ -516,9 +516,77 @@ function FullImageLightbox({ uri, onClose }: { uri: string | null; onClose: () =
   );
 }
 
+// A real full-screen product page (not a floating card) with a standard top-left chevron-
+// back header, matching every other screen in the app -- reused by ProductCardView's own
+// "i"/locked-tap preview below AND by a locked Button element that links straight to a
+// product (see EditorScreen's productDetailElementId state), so both entry points land on
+// the exact same real detail page instead of two different-looking previews. `element` is
+// nullable so the caller can mount this once and just flip it between a real element and
+// null rather than conditionally mounting/unmounting a whole subtree.
+export function ProductDetailModal({ element, onClose }: { element: ProductElement | null; onClose: () => void }) {
+  const catalogProduct = useCatalogProduct(element?.productId ?? '');
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const sym = useSellerCurrencySymbol();
+  const nameFont = useGoogleFont(element?.nameFontFamily);
+  const priceFont = useGoogleFont(element?.priceFontFamily);
+
+  const product = element ? resolveProductView(element, catalogProduct ?? null) : null;
+  const inStock = product ? product.inStock !== false : false;
+
+  return (
+    <Modal visible={!!element} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      <View style={styles.pdpScreen}>
+        <View style={styles.pdpHeader}>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Ionicons name="chevron-back" size={26} color="#0F172A" />
+          </Pressable>
+          <Text style={styles.pdpHeaderTitle} numberOfLines={1}>
+            {product?.name || 'Product'}
+          </Text>
+          <View style={{ width: 26 }} />
+        </View>
+        {!product ? (
+          <View style={[styles.placeholder, { flex: 1, borderRadius: 0 }]}>
+            <ActivityIndicator color="#94A3B8" />
+          </View>
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
+            <ProductImageCarousel images={product.images} height={280} onImagePress={setViewingImage} />
+            <Text style={styles.detailBadge}>{productBadge(product)}</Text>
+            <Text style={[styles.detailName, nameFont ? { fontFamily: nameFont } : null]}>{product.name || 'Untitled product'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+              <Text style={[styles.detailPrice, priceFont ? { fontFamily: priceFont } : null]}>
+                {sym}
+                {product.priceUsd.toFixed(2)}
+              </Text>
+              {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
+                <Text style={{ fontSize: 15, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+                  {sym}
+                  {product.compareAtPriceUsd.toFixed(2)}
+                </Text>
+              )}
+            </View>
+            {!!product.description && <Text style={styles.detailDescription}>{product.description}</Text>}
+            <Text style={[styles.detailStock, { color: inStock ? '#16A34A' : '#DC2626', fontWeight: '700' }]}>
+              {inStock
+                ? product.trackInventory
+                  ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings available' : 'available'}`
+                  : product.saleType === 'service'
+                    ? 'Available to book'
+                    : 'In stock'
+                : 'Out of stock'}
+            </Text>
+            <ProductBuyButtons product={product} />
+          </ScrollView>
+        )}
+      </View>
+      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
+    </Modal>
+  );
+}
+
 function ProductCardView({ element, width, height, locked }: { element: ProductElement; width: number; height: number; locked?: boolean }) {
   const [showDetail, setShowDetail] = useState(false);
-  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const catalogProduct = useCatalogProduct(element.productId);
   const MIN_TEXT_AREA = 62;
   const showImage = height - MIN_TEXT_AREA >= 28;
@@ -605,40 +673,7 @@ function ProductCardView({ element, width, height, locked }: { element: ProductE
         <Ionicons name="information" size={13} color="#FFFFFF" />
       </Pressable>
 
-      <Modal visible={showDetail} transparent animationType="fade" onRequestClose={() => setShowDetail(false)}>
-        <View style={styles.detailBackdrop}>
-          <View style={styles.detailCard}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <ProductImageCarousel images={product.images} height={180} onImagePress={setViewingImage} />
-              <Text style={styles.detailBadge}>{productBadge(product)}</Text>
-              <Text style={styles.detailName}>{product.name || 'Untitled product'}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                <Text style={styles.detailPrice}>{sym}{product.priceUsd.toFixed(2)}</Text>
-                {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
-                  <Text style={{ fontSize: 15, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-                    {sym}{product.compareAtPriceUsd.toFixed(2)}
-                  </Text>
-                )}
-              </View>
-              {!!product.description && <Text style={styles.detailDescription}>{product.description}</Text>}
-              <Text style={[styles.detailStock, { color: inStock ? '#16A34A' : '#DC2626', fontWeight: '700' }]}>
-                {inStock
-                  ? product.trackInventory
-                    ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings available' : 'available'}`
-                    : product.saleType === 'service'
-                      ? 'Available to book'
-                      : 'In stock'
-                  : 'Out of stock'}
-              </Text>
-              <ProductBuyButtons product={product} />
-            </ScrollView>
-            <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>
-              <Text style={styles.detailCloseBtnText}>Close</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
+      <ProductDetailModal element={showDetail ? element : null} onClose={() => setShowDetail(false)} />
     </Pressable>
   );
 }
@@ -1090,6 +1125,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  pdpScreen: { flex: 1, backgroundColor: '#FFFFFF' },
+  pdpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+  },
+  pdpHeaderTitle: { flex: 1, marginHorizontal: 10, fontSize: 16, fontWeight: '700', color: '#0F172A', textAlign: 'center' },
   detailBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 24 },
   detailCard: { width: '100%', maxWidth: 360, maxHeight: '80%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18 },
   detailImage: { width: '100%', height: 180, borderRadius: 10, marginBottom: 12 },

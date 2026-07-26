@@ -7,6 +7,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { EditorProvider, useEditor } from '@/context/EditorContext';
 import Canvas from '@/components/canvas/Canvas';
+import { ProductDetailModal } from '@/components/canvas/ElementRenderer';
 import ElementsPanel from '@/components/elements/ElementsPanel';
 import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
@@ -88,6 +89,10 @@ function EditorInner({ navigation }: Props) {
   // Which Button element (if any) is currently picking a product to link to -- distinct from
   // productPickerOpen (the "+ Add to page" flow, which just inserts with nothing to link).
   const [linkPickerButtonId, setLinkPickerButtonId] = useState<string | null>(null);
+  // A locked Button linking straight to a Product opens this real full-screen detail page
+  // (see navigateToElementOnLockedTap below) instead of just scrolling that product's small
+  // card into view -- matches what tapping the same button on the published site does.
+  const [productDetailElementId, setProductDetailElementId] = useState<string | null>(null);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   // null = the global "+ Add to page" flow (lands as a new Section at the bottom of the
   // page); a real section id = "Add columns" from inside that section's own inspector.
@@ -184,14 +189,24 @@ function EditorInner({ navigation }: Props) {
   const canvasCenterY = project.canvasSize.height / 2;
 
   // A locked button linking to a Product/Collection on this page should behave the way it
-  // really does on the published site -- scroll that card into view -- not select it for
-  // editing. Selecting would swap the whole bottom UI into the edit inspector, which defeats
-  // the entire point of locking the page to preview it read-only.
+  // really does on the published site. For a Product specifically, that means opening the
+  // real full-screen product page (see ProductDetailModal below) -- matching the published
+  // site's own full-screen overlay for the same link -- rather than just scrolling its small
+  // card into view. Anything else (a Collection, or any other element) still just scrolls
+  // into view; selecting would swap the whole bottom UI into the edit inspector, which
+  // defeats the entire point of locking the page to preview it read-only.
   const navigateToElementOnLockedTap = (id: string) => {
     const target = activeElements.find((el) => el.id === id);
     if (!target) return;
+    if (target.type === 'product') {
+      setProductDetailElementId(id);
+      return;
+    }
     canvasScrollRef.current?.scrollTo({ y: Math.max(0, target.y - 40), animated: true });
   };
+
+  const productDetailElement =
+    (activeElements.find((el) => el.id === productDetailElementId && el.type === 'product') as ProductElement | undefined) ?? null;
 
   // "+" at the bottom of the canvas -- gives the page more real, empty room to build into
   // (rather than just cramming new elements into whatever space is already there) and opens
@@ -328,6 +343,44 @@ function EditorInner({ navigation }: Props) {
     const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
     addElement(el);
     select(el.id);
+    setPanel(null);
+    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  // The "select up to 3 products, then Add" flow from ProductCatalogPickerModal -- computes
+  // every new product's stacked position up front against one running bottom-edge tracker
+  // (seeded from the current activeElements, then advanced locally per product added in this
+  // same batch) instead of calling insertExistingProduct 3 times in a row, which would have
+  // each call re-read the same still-stale activeElements/canvasSize (React hasn't
+  // re-rendered between synchronous calls yet) and stack all 3 products on top of each other
+  // at the exact same spot.
+  const insertMultipleProducts = (products: CatalogProduct[]) => {
+    if (products.length === 0) return;
+    const width = 180;
+    const height = 220;
+    let bottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
+    let canvasHeightNeeded = project.canvasSize.height;
+    const newElements: ProductElement[] = products.map((product, i) => {
+      const gap = i === 0 && activeElements.length > 0 ? 24 : i === 0 ? 32 : 24;
+      const y = bottom + gap;
+      bottom = y + height;
+      canvasHeightNeeded = Math.max(canvasHeightNeeded, bottom + 40);
+      return {
+        id: generateId('el'),
+        type: 'product',
+        productId: product.id,
+        x: (project.canvasSize.width - width) / 2,
+        y,
+        width,
+        height,
+        zIndex: 5,
+      };
+    });
+    if (canvasHeightNeeded > project.canvasSize.height) {
+      updateProject({ canvasSize: { ...project.canvasSize, height: canvasHeightNeeded } });
+    }
+    newElements.forEach((el) => addElement(el));
+    select(newElements[newElements.length - 1].id);
     setPanel(null);
     requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
   };
@@ -973,11 +1026,16 @@ function EditorInner({ navigation }: Props) {
         </>
       )}
 
-      <Modal visible={addMenuOpen} transparent animationType="slide" onRequestClose={() => setAddMenuOpen(false)}>
-        <Pressable style={styles.addMenuBackdrop} onPress={() => setAddMenuOpen(false)}>
-          <Pressable style={[styles.addMenuSheet, { backgroundColor: theme.surface }]} onPress={() => {}}>
-            <View style={styles.sheetHandle} />
+      <Modal visible={addMenuOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setAddMenuOpen(false)}>
+        <SafeAreaView style={[styles.addMenuScreen, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+          <View style={[styles.addMenuHeader, { borderBottomColor: theme.border }]}>
+            <Pressable onPress={() => setAddMenuOpen(false)} hitSlop={8}>
+              <Ionicons name="chevron-back" size={26} color={theme.text} />
+            </Pressable>
             <Text style={[styles.addMenuTitle, { color: theme.text }]}>Add to page</Text>
+            <View style={{ width: 26 }} />
+          </View>
+          <ScrollView contentContainerStyle={styles.addMenuScrollContent}>
             <View style={styles.addMenuGrid}>
               <AddMenuTile icon="shapes-outline" label="Elements" onPress={() => { setAddMenuOpen(false); setPanel('elements'); }} />
               <AddMenuTile icon="text-outline" label="Text" onPress={() => { setAddMenuOpen(false); addTextBox(); }} />
@@ -1015,11 +1073,8 @@ function EditorInner({ navigation }: Props) {
               <AddMenuTile icon="sparkles-outline" label="Custom" highlightColor="#7C3AED" onPress={() => { setAddMenuOpen(false); addCustomWidget(); }} />
               <AddMenuTile icon="megaphone-outline" label="Bar" onPress={() => { setAddMenuOpen(false); setPanel('bar'); }} />
             </View>
-            <Pressable style={[styles.addMenuCancel, { borderColor: theme.border }]} onPress={() => setAddMenuOpen(false)}>
-              <Text style={[styles.addMenuCancelText, { color: theme.text }]}>Cancel</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
         </>
       )}
@@ -1041,6 +1096,7 @@ function EditorInner({ navigation }: Props) {
           onClose={() => setProductPickerOpen(false)}
           uid={user.uid}
           onInsert={insertExistingProduct}
+          onInsertMultiple={insertMultipleProducts}
           onCreateNew={createNewProductAndInsert}
         />
       )}
@@ -1081,6 +1137,8 @@ function EditorInner({ navigation }: Props) {
           else insertColumnLayout(template);
         }}
       />
+
+      <ProductDetailModal element={productDetailElement} onClose={() => setProductDetailElementId(null)} />
 
       <CartSheetModal visible={cartOpen} onClose={() => setCartOpen(false)} />
 
@@ -1304,15 +1362,21 @@ const styles = StyleSheet.create({
   addBarBtnText: { fontSize: 15, fontWeight: '700' },
   addBarLayersBtn: { alignItems: 'center', gap: 2, paddingHorizontal: 6, minWidth: 56 },
   addBarLayersLabel: { fontSize: 10, fontWeight: '600' },
-  addMenuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  addMenuSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 32, alignItems: 'center' },
-  addMenuTitle: { fontSize: 15, fontWeight: '700', marginTop: 4, marginBottom: 14 },
-  addMenuGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12, width: '100%' },
-  addMenuTile: { width: 84, alignItems: 'center', gap: 6, paddingVertical: 6 },
-  addMenuTileIcon: { width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  addMenuScreen: { flex: 1 },
+  addMenuHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  addMenuScrollContent: { padding: 20, alignItems: 'center' },
+  addMenuTitle: { fontSize: 17, fontWeight: '700' },
+  addMenuGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 16, width: '100%' },
+  addMenuTile: { width: 90, alignItems: 'center', gap: 8, paddingVertical: 8 },
+  addMenuTileIcon: { width: 60, height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   addMenuTileLabel: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  addMenuCancel: { marginTop: 18, width: '100%', borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  addMenuCancelText: { fontSize: 14, fontWeight: '700' },
   panel: {
     height: 240,
     backgroundColor: '#FFFFFF',
