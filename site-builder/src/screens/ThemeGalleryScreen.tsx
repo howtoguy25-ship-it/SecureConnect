@@ -222,7 +222,12 @@ export default function ThemeGalleryScreen({ navigation, route }: Props) {
         />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.categoryScroll}
+        contentContainerStyle={styles.categoryRow}
+      >
         {(['All', ...ALL_CATEGORIES] as const).map((cat) => (
           <Pressable
             key={cat}
@@ -327,6 +332,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   searchInput: { flex: 1, paddingVertical: 8, fontSize: 14, color: '#0F172A' },
+  // A horizontal ScrollView with no explicit height (only contentContainerStyle, which sizes
+  // the scrollable content, not the viewport) was letting the surrounding flex column
+  // collapse its viewport shorter than the chips actually need -- the chips overflowed and
+  // got clipped to their top half, reading as illegible/"blocked off" text rather than a
+  // rendering bug. A fixed height sized to categoryChip's real content (14 font line-height +
+  // 7*2 vertical padding) plus categoryRow's own 12*2 vertical padding guarantees the full
+  // pill, including its text, always fits.
+  categoryScroll: { height: 56, flexGrow: 0 },
   categoryRow: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
   categoryChip: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
   categoryChipActive: { backgroundColor: '#111827', borderColor: '#111827' },
