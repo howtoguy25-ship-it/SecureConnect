@@ -8,6 +8,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
+import { TRACKLINE_MAP_STYLE } from "@/utils/mapStyle";
 
 import { useLocation } from "@/context/LocationContext";
 import { useAuth } from "@/context/AuthContext";
@@ -215,6 +216,7 @@ export function MapScreen() {
       <MapView
         ref={mapRef}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
+        customMapStyle={TRACKLINE_MAP_STYLE}
         style={StyleSheet.absoluteFill}
         showsUserLocation
         showsMyLocationButton={false}
