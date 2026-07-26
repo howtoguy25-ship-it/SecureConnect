@@ -107,3 +107,22 @@ export function computeBuildCost(plan: PlanId, complexity: BuildComplexity): num
   if (complexity === 'crazy') return max;
   return Math.round((min + max) / 2);
 }
+
+// A real, honest [min, max] minute range per tier -- not a marketing number. Section images
+// generate in parallel (see index.ts's startGeneration), so wall-clock time tracks section
+// COUNT and per-image quality far more than a flat "it's fancier" multiplier: Simple is 3
+// sections with at most one 'medium'-quality image; Professional is 4-5 sections with an
+// image on every visual one, plus assembling the real nav bar/announcement bar this tier
+// adds; Go All Out is the full 6 sections, an image on every visual one at 'high' quality
+// (a real, slower generation call -- see generateImage's own comment), two announcement
+// bars, and the same nav bar assembly. Real network/API variance means any single build can
+// land outside its own range, but this reflects the actual mechanics, not a guess.
+export const BUILD_TIME_ESTIMATE_MINUTES: Record<BuildComplexity, [number, number]> = {
+  simple: [1, 2],
+  standard: [2, 4],
+  crazy: [4, 7],
+};
+
+export function estimateBuildMinutes(complexity: BuildComplexity): [number, number] {
+  return BUILD_TIME_ESTIMATE_MINUTES[complexity];
+}

@@ -2034,6 +2034,14 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       )};border-radius:${el.borderRadius}px;${
         el.borderWidth ? `border:${el.borderWidth}px solid ${escapeAttr(el.borderColor ?? '#000000')};` : ''
       }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;`;
+      // A real same-page smooth-scroll target (see ButtonElement.scrollToY's comment) --
+      // used by the AI builder's "prebuilt tabs" nav bar (layout.ts's buildNavBar). Plain
+      // window.scrollTo with a known pixel offset, not a DOM-id anchor, since most sections
+      // (plain text/image) never render an id="el-{id}" the way product/widget cards do.
+      // Checked first since it's set exclusively of link/linkTargetElementId.
+      if (el.scrollToY != null) {
+        return `<a href="#" onclick="window.scrollTo({top:${el.scrollToY},behavior:'smooth'});return false;" style="${buttonStyle}">${escapeHtml(el.label)}</a>`;
+      }
       // A linked Product/Collection takes priority over a raw URL (the inspector already
       // keeps them mutually exclusive). A Collection still just jumps to its own real card
       // further down the page via its id="el-{id}" anchor. A Product is different: it opens

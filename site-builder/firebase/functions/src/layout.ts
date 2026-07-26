@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, CatalogProduct, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement } from './types';
+import { CanvasElement, ButtonElement, CatalogProduct, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement, SectionElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -205,16 +205,80 @@ export interface SitePlanLayout {
   productContents: Record<string, LayoutProductContent>;
 }
 
+// A short (<=14 char), real, readable tab label for a section -- first word or two of its
+// own real headline (not a generic "Section 1"), falling back to its kind when a section
+// somehow has no headline yet (mid-generation preview).
+function shortSectionLabel(section: SitePlanSection): string {
+  const source = stripMarkdown(section.headline?.trim() || section.kind);
+  const words = source.split(/\s+/).slice(0, 2).join(' ');
+  return words.length > 14 ? `${words.slice(0, 13)}…` : words;
+}
+
+const NAV_BAR_HEIGHT = 56;
+const NAV_TAB_GAP = 8;
+// A narrow 390px canvas can't fit more than a handful of real tappable tabs before they'd
+// get too cramped to read/tap -- caps the "prebuilt tabs" nav bar to the first few sections
+// (skipping index 0, the hero, since a visitor is already looking at it) rather than
+// shrinking tabs indefinitely to fit every section.
+const MAX_NAV_TABS = 4;
+
+// A real, working "prebuilt tabs" nav bar for Professional/Go All Out builds (see
+// startGeneration's complexity param) -- a Section background plus one real Button per
+// tab, each with scrollToY set to that section's actual on-page position. Returns an empty
+// array (no nav bar) when there aren't at least 2 other sections worth jumping between.
+function buildNavBar(sectionStarts: { label: string; y: number }[], accentColor: string, textColor: string): CanvasElement[] {
+  const tabs = sectionStarts.slice(1, 1 + MAX_NAV_TABS); // skip the hero -- already visible
+  if (tabs.length < 2) return [];
+
+  const tabWidth = Math.floor((CONTENT_WIDTH - NAV_TAB_GAP * (tabs.length - 1)) / tabs.length);
+  const bar: SectionElement = {
+    id: nextId('el'),
+    type: 'section',
+    backgroundColor: '#FFFFFF',
+    childIds: [],
+    x: 0,
+    y: 0,
+    width: CANVAS_WIDTH,
+    height: NAV_BAR_HEIGHT,
+    zIndex: 0,
+  };
+  const buttons: ButtonElement[] = tabs.map((tab, i) =>
+    buttonEl({
+      label: tab.label,
+      y: 8,
+      height: NAV_BAR_HEIGHT - 16,
+      x: MARGIN + i * (tabWidth + NAV_TAB_GAP),
+      width: tabWidth,
+      backgroundColor: 'transparent',
+      textColor: accentColor || textColor,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: accentColor || textColor,
+      zIndex: 2,
+      // Shifted by NAV_BAR_HEIGHT below (once the bar itself pushes every section down) --
+      // set to a placeholder here and corrected by the caller once that shift is known.
+      scrollToY: tab.y,
+    })
+  );
+  bar.childIds = buttons.map((b) => b.id);
+  return [bar, ...buttons];
+}
+
 export function layoutSitePlan(
   plan: SitePlan,
   sectionImages: SectionImage[],
   sectionVideos: SectionVideo[] = [],
   sectionProductImages: SectionProductImages[] = [],
-  sectionCustomWidgets: SectionCustomWidget[] = []
+  sectionCustomWidgets: SectionCustomWidget[] = [],
+  // Real "prebuilt tabs" nav bar (see buildNavBar) -- only Professional ('standard') and Go
+  // All Out ('crazy') builds get one; 'simple' stays exactly one plain scrolling page, no
+  // extra chrome, matching what that tier promises.
+  includeNavBar = false
 ): SitePlanLayout {
   idCounter = 0;
   const elements: CanvasElement[] = [];
   const productContents: Record<string, LayoutProductContent> = {};
+  const sectionStarts: { label: string; y: number }[] = [];
   let y = 32;
 
   const imageFor = (section: SitePlanSection) => sectionImages.find((s) => s.section === section)?.url ?? null;
@@ -223,6 +287,7 @@ export function layoutSitePlan(
   const customWidgetFor = (section: SitePlanSection) => sectionCustomWidgets.find((s) => s.section === section) ?? null;
 
   plan.sections.forEach((section, index) => {
+    sectionStarts.push({ label: shortSectionLabel(section), y });
     const isHero = index === 0 && section.kind === 'hero';
     const image = imageFor(section);
     const headline = stripMarkdown(section.headline);
@@ -422,6 +487,20 @@ export function layoutSitePlan(
 
     y += 24; // gap between sections
   });
+
+  if (includeNavBar) {
+    const navElements = buildNavBar(sectionStarts, plan.accentColor, plan.textColor);
+    if (navElements.length > 0) {
+      // Every already-placed element (and every tab's own scroll target, captured above
+      // before the bar existed) shifts down by exactly the bar's own height, so the bar
+      // slots in above everything without covering or overlapping the first section.
+      const shifted = elements.map((el) => ({ ...el, y: el.y + NAV_BAR_HEIGHT }));
+      const shiftedNav = navElements.map((el) =>
+        el.type === 'button' && el.scrollToY != null ? { ...el, scrollToY: el.scrollToY + NAV_BAR_HEIGHT } : el
+      );
+      return { elements: [...shiftedNav, ...shifted], productContents };
+    }
+  }
 
   return { elements, productContents };
 }

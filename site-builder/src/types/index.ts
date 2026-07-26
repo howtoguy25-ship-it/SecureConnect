@@ -120,6 +120,13 @@ export interface ButtonElement extends BaseElement {
   // element's id. Published as a same-page anchor link (see id="el-{id}" in siteHtml.ts),
   // so it always points at that element's current position, even after reordering.
   linkTargetElementId?: string | null;
+  // Same-page smooth-scroll target, in canvas px -- used by an AI-generated "prebuilt tabs"
+  // nav bar (see layout.ts's buildNavBar) to jump to a section further down the SAME page.
+  // Deliberately a raw Y coordinate rather than another element's id: most sections are
+  // plain text/image elements that don't render a DOM id on the published site (only
+  // product/widget/collection cards do), so a real id-based anchor wouldn't work for them.
+  // Mutually exclusive with link/linkTargetElementId -- setting one clears the others.
+  scrollToY?: number | null;
 }
 
 export interface IconElement extends BaseElement {

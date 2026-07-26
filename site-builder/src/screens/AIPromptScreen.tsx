@@ -8,7 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { useAuth } from '@/context/AuthContext';
 import { userAccountStore } from '@/storage/userAccountStore';
-import { computeBuildCost } from '@/data/pricing';
+import { computeBuildCost, estimateBuildMinutes } from '@/data/pricing';
 import { COMPLEXITY_INFO, BuildComplexity } from '@/data/pricing';
 import { PAGE_TYPE_INFO } from '@/data/canvasSizes';
 import { UserAccount } from '@/types';
@@ -68,6 +68,7 @@ export default function AIPromptScreen({ navigation, route }: Props) {
   const words = wordCount(prompt);
   const overLimit = words > MAX_WORDS;
   const estimatedCost = account ? computeBuildCost(account.plan, complexity) : null;
+  const [estMin, estMax] = estimateBuildMinutes(complexity);
   const insufficientCredits = account != null && estimatedCost != null && account.credits < estimatedCost;
 
   const handleStart = () => {
@@ -164,6 +165,12 @@ export default function AIPromptScreen({ navigation, route }: Props) {
             </Text>
           </View>
         )}
+        <View style={[styles.costRow, styles.timeRow]}>
+          <Ionicons name="time-outline" size={16} color="#64748B" />
+          <Text style={styles.timeText}>
+            Estimated time: ~{estMin}-{estMax} min
+          </Text>
+        </View>
 
         <Pressable style={styles.generateButton} onPress={handleStart}>
           <Ionicons name="sparkles" size={18} color="#FFFFFF" />
@@ -232,6 +239,8 @@ const styles = StyleSheet.create({
   complexityDesc: { fontSize: 12, color: '#64748B', marginTop: 4 },
   costRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 18 },
   costText: { fontSize: 13, color: '#B45309', fontWeight: '600' },
+  timeRow: { marginTop: 8 },
+  timeText: { fontSize: 13, color: '#64748B', fontWeight: '600' },
   generateButton: {
     marginTop: 24,
     backgroundColor: '#4338CA',

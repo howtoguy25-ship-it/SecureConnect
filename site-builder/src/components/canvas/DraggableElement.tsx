@@ -42,6 +42,10 @@ interface Props {
   // whether it's really an internal page-slug (switch pages in-editor, since Linking.openURL
   // can't do in-app navigation) or a genuine external URL/mailto/tel (open it for real).
   onOpenLink?: (link: string) => void;
+  // Handles a locked button's scrollToY (an AI-generated "prebuilt tabs" nav button) --
+  // scrolls the real canvas ScrollView to that Y, matching the same window.scrollTo the
+  // published site does for the same button (see siteHtml.ts's button case).
+  onScrollToY?: (y: number) => void;
 }
 
 const MIN_TEXT_FONT_SIZE = 6;
@@ -156,6 +160,7 @@ export default function DraggableElement({
   forceLocked,
   onNavigateToElement,
   onOpenLink,
+  onScrollToY,
 }: Props) {
   const elementLocked = !!element.locked;
   const locked = elementLocked || !!forceLocked;
@@ -459,14 +464,15 @@ export default function DraggableElement({
               : { fontSize: 15, color: '#0F172A', textAlign: 'center', fontWeight: '600' },
           ]}
         />
-      ) : locked && element.type === 'button' && (element.link || element.linkTargetElementId) ? (
+      ) : locked && element.type === 'button' && (element.link || element.linkTargetElementId || element.scrollToY != null) ? (
         // Only mounted while locked -- the outer moveResponder above already goes inert once
         // locked (onStartShouldSetPanResponder returns false), so there's no responder to
         // compete with for the tap, unlike trying to add this to the unlocked/editable case.
         <Pressable
           style={{ width: '100%', height: '100%' }}
           onPress={() => {
-            if (element.linkTargetElementId) onNavigateToElement?.(element.linkTargetElementId);
+            if (element.scrollToY != null) onScrollToY?.(element.scrollToY);
+            else if (element.linkTargetElementId) onNavigateToElement?.(element.linkTargetElementId);
             else if (element.link) onOpenLink?.(element.link);
           }}
         >

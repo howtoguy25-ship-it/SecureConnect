@@ -203,6 +203,8 @@ interface Props {
   // Omitted (no button rendered) wherever there's no editor to extend into, e.g. a locked
   // read-only preview.
   onExtend?: () => void;
+  // See DraggableElement's onScrollToY comment.
+  onScrollToY?: (y: number) => void;
 }
 
 export default function Canvas({
@@ -220,6 +222,7 @@ export default function Canvas({
   onBackgroundTap,
   isLastPage = true,
   onExtend,
+  onScrollToY,
 }: Props) {
   const [outlineVisible, setOutlineVisible] = useState(false);
   // Selecting any element means the user is back to actively designing -- hide the outline so
@@ -274,6 +277,7 @@ export default function Canvas({
           forceLocked={forceLocked}
           onNavigateToElement={onNavigateToElement ?? onSelect}
           onOpenLink={onOpenLink}
+          onScrollToY={onScrollToY}
         />
       ))}
     </>

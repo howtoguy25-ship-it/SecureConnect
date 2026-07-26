@@ -947,6 +947,7 @@ function EditorInner({ navigation }: Props) {
             onBackgroundTap={openBackgroundEditor}
             isLastPage={!pages || pages[pages.length - 1]?.id === activePageId}
             onExtend={extendCanvas}
+            onScrollToY={(y) => canvasScrollRef.current?.scrollTo({ y: Math.max(0, y - 40), animated: true })}
           />
         </ScrollView>
       </View>

@@ -65,6 +65,16 @@ export interface SitePlan {
   accentColor: string;
   textColor: string;
   sections: SitePlanSection[];
+  // A real, on-topic promo/announcement line for the site's top announcement bar -- only
+  // ever used (see startGeneration in index.ts) for the Professional ('standard') and Go
+  // All Out ('crazy') complexity tiers, matching a real business site's "prebuilt
+  // announcement bar" rather than the Simple tier's bare single page. Empty string for the
+  // Simple tier (the model is told not to bother writing one).
+  announcementText: string;
+  // A second, different announcement line -- only ever used for the Go All Out tier, which
+  // gets two rotating bars (the app's own announcement feature already supports up to 2).
+  // Empty string for Simple/Professional.
+  announcementText2: string;
 }
 
 const SITE_PLAN_SCHEMA = {
@@ -79,6 +89,16 @@ const SITE_PLAN_SCHEMA = {
       backgroundColor: { type: 'string', description: 'Hex color, e.g. #FFFFFF' },
       accentColor: { type: 'string', description: 'Hex color, e.g. #2563EB' },
       textColor: { type: 'string', description: 'Hex color, e.g. #0F172A' },
+      announcementText: {
+        type: 'string',
+        description:
+          'A short, real, on-brand announcement-bar line for this exact site (e.g. a real-sounding promo, shipping note, or hours notice that fits what the site is about) -- only for the Professional/"standard" and Go All Out/"crazy" complexity tiers (see your instructions for which tier this build is). Empty string for the Simple tier.',
+      },
+      announcementText2: {
+        type: 'string',
+        description:
+          'A second, different real announcement-bar line -- only for the Go All Out/"crazy" tier, which rotates two bars. Empty string for Simple/Professional.',
+      },
       sections: {
         type: 'array',
         minItems: 3,
@@ -215,17 +235,17 @@ const SITE_PLAN_SCHEMA = {
         },
       },
     },
-    required: ['siteName', 'tagline', 'backgroundColor', 'accentColor', 'textColor', 'sections'],
+    required: ['siteName', 'tagline', 'backgroundColor', 'accentColor', 'textColor', 'announcementText', 'announcementText2', 'sections'],
   },
 } as const;
 
 function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy', todayIso: string): string {
   const complexityNote =
     complexity === 'simple'
-      ? 'Keep it minimal: 3 sections, short copy, no more than one image.'
+      ? 'This is the Simple tier: keep it minimal and genuinely easy to build on top of -- exactly 3 sections, short unfussy copy, no more than one image, no announcement bar (leave announcementText and announcementText2 empty strings). A clean, real, working site someone can comfortably keep editing by hand, not a stripped-down placeholder.'
       : complexity === 'crazy'
-        ? 'Go maximal: use the full 6 sections, bold/vivid copy, and an image for every visual section.'
-        : 'A professional, well-rounded site: 4-5 sections, clear and polished copy.';
+        ? 'This is the Go All Out tier: the fullest, boldest build this app can produce. Use the full 6 sections, the most vivid and specific copy you can write, a real generated image for every visual section, and lean hard into real interactive elements (product/game/widget/video) wherever the prompt supports one instead of a plain decorative picture. Write BOTH announcementText and announcementText2 as two different real, on-brand lines -- this tier gets a real rotating two-bar announcement bar. A real top navigation bar linking to the site\'s major sections is added automatically after your plan is generated, so write short, distinct section headlines that would also read well as a tab label.'
+        : 'This is the Professional tier: a real, polished, full-featured site -- 4-5 sections, clear and confident copy, and a genuine call-to-action (the hero or cta section\'s buttonLabel should read like a real, specific action a visitor would take, not a generic "Learn More"). Write announcementText as one real, on-brand announcement line (leave announcementText2 an empty string -- the second bar is Go All Out only). A real top navigation bar linking to the site\'s major sections is added automatically after your plan is generated, so write short, distinct section headlines that would also read well as a tab label.';
 
   return [
     // Deliberately does NOT name this app-building tool "SiteSpark" (or any other brand name)

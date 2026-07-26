@@ -57,6 +57,9 @@ export interface ButtonElement extends BaseElement {
   borderColor?: string;
   link?: string | null;
   linkTargetElementId?: string | null;
+  // Mirrors src/types/index.ts's identical field -- see that comment for why this is a raw
+  // Y coordinate rather than an element id.
+  scrollToY?: number | null;
 }
 
 export interface IconElement extends BaseElement {

@@ -432,7 +432,14 @@ export const startGeneration = onCall(
       productImages: SectionProductImages[] = [],
       customWidgets: SectionCustomWidget[] = []
     ) => {
-      const { elements: previewElements, productContents } = layoutSitePlan(currentPlan, images, videos, productImages, customWidgets);
+      const { elements: previewElements, productContents } = layoutSitePlan(
+        currentPlan,
+        images,
+        videos,
+        productImages,
+        customWidgets,
+        complexity !== 'simple'
+      );
       // A ProductElement only ever stores a productId (see the type's own comment) -- an
       // AI-generated product section needs a real catalog doc created for it too, exactly
       // like a human using ProductEditScreen would create one. Plain overwrite (not a
@@ -445,11 +452,35 @@ export const startGeneration = onCall(
           db.collection('users').doc(uid).collection('products').doc(productId).set({ id: productId, ...content, createdAt: now, updatedAt: now })
         )
       );
+      // A real announcement bar -- Professional ('standard') gets the model's one written
+      // line, Go All Out ('crazy') gets both (the app's own bar feature already rotates up
+      // to 2); Simple stays bare (no bar), matching what that tier promises. Rebuilt fresh
+      // from the plan on every pushPreview call rather than only at the very end, so the
+      // live build preview shows it too, same as everything else here.
+      const announcementBars =
+        complexity === 'simple'
+          ? []
+          : [
+              ...(currentPlan.announcementText?.trim()
+                ? [{ id: 'ai-announce-1', text: currentPlan.announcementText.trim(), backgroundColor: currentPlan.accentColor, textColor: '#FFFFFF' }]
+                : []),
+              ...(complexity === 'crazy' && currentPlan.announcementText2?.trim()
+                ? [{ id: 'ai-announce-2', text: currentPlan.announcementText2.trim(), backgroundColor: currentPlan.textColor, textColor: '#FFFFFF' }]
+                : []),
+            ];
+
       await projectRef.update({
         name: currentPlan.siteName,
         backgroundColor: currentPlan.backgroundColor,
         elements: previewElements,
         canvasSize: { width: 390, height: estimatedCanvasHeight(previewElements), label: 'AI-generated' },
+        announcements: {
+          enabled: announcementBars.length > 0,
+          autoSlide: true,
+          intervalMs: 5000,
+          bars: announcementBars,
+          popups: [],
+        },
         updatedAt: Date.now(),
       });
     };
@@ -503,7 +534,12 @@ export const startGeneration = onCall(
       await Promise.all([
         ...sectionsNeedingImages.map(async (section: SitePlanSection) => {
           try {
-            const buffer = await generateImage(client, section.imagePrompt);
+            // Go All Out gets the same 'high' quality already used for product/custom-widget
+            // photos elsewhere in this build -- a real, verifiable image-quality bump for
+            // this tier's decorative/hero art, not just marketing copy (gpt-image-1's real
+            // resolution ceiling is ~1536px, so "highest quality this app generates" is the
+            // honest framing -- see generateImage's own comment for why not literal "4K").
+            const buffer = await generateImage(client, section.imagePrompt, complexity === 'crazy' ? 'high' : 'medium');
             const path = `users/${uid}/generated/${sessionId}/${section.kind}-${Date.now()}.png`;
             const file = bucket.file(path);
             await file.save(buffer, { contentType: 'image/png' });
@@ -728,7 +764,7 @@ export const askBuildQuestion = onCall({ secrets: [openaiApiKey], invoker: 'publ
   const answer = await answerBuildQuestion(
     client,
     model,
-    { siteName: '', tagline: '', backgroundColor: '', accentColor: '', textColor: '', sections: [] },
+    { siteName: '', tagline: '', backgroundColor: '', accentColor: '', textColor: '', sections: [], announcementText: '', announcementText2: '' },
     `${question}\n\n(Original build prompt: ${session.prompt})`
   );
   return { answer };
