@@ -202,9 +202,10 @@ export function MapScreen() {
   }, []);
 
   const activeStep = route?.steps[activeStepIndex] ?? null;
-  const remainingDistanceMeters = route
-    ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.distanceMeters, 0)
-    : 0;
+  const remainingDistanceMeters = useMemo(
+    () => (route ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.distanceMeters, 0) : 0),
+    [route, activeStepIndex]
+  );
 
   return (
     <View style={styles.container}>
