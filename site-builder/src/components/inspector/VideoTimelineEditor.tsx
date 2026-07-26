@@ -63,6 +63,22 @@ function msForPx(px: number, segments: VideoSegment[]): number {
   }
   return accMs;
 }
+// Reverse of the timeline->source mapping resolvePlayhead does, used while the raw preview is
+// actually playing: given the player's real current source time, find which 'clip' segment
+// (if any) it still falls inside and what timeline position that corresponds to. Returns null
+// once playback has run past the end of the segment it started in -- that raw footage isn't
+// part of the edited timeline anymore (it was cut or lives after a freeze/deleted gap), so the
+// caller stops playback there instead of silently drifting through footage the edit doesn't use.
+function timelineMsForSource(sourceMs: number, segments: VideoSegment[]): number | null {
+  let acc = 0;
+  for (const seg of segments) {
+    if (seg.kind === 'clip' && sourceMs >= seg.startMs && sourceMs <= seg.endMs) {
+      return acc + (sourceMs - seg.startMs);
+    }
+    acc += segTimelineMs(seg);
+  }
+  return null;
+}
 
 // Real, working CapCut/Snapchat-style timeline: a row of segment blocks (each a real
 // thumbnail pulled from the actual clip, sized by its own real duration), a FIXED playhead
@@ -89,7 +105,11 @@ export default function VideoTimelineEditor({
   const previewPlayer = useVideoPlayer(uri, (p) => {
     p.muted = true;
     p.loop = false;
+    // Fires 'timeUpdate' every 50ms while playing -- frequent enough for the playhead line
+    // and film strip to visibly track real playback instead of jumping in big steps.
+    p.timeUpdateEventInterval = 0.05;
   });
+  const [isPlaying, setIsPlaying] = useState(false);
   const [durationMs, setDurationMs] = useState<number | null>(trimEndMs);
   useEffect(() => {
     const sub = previewPlayer.addListener('statusChange', (payload) => {
@@ -194,6 +214,39 @@ export default function VideoTimelineEditor({
     seekPreview(msForPx(e.nativeEvent.contentOffset.x, effectiveSegments));
   };
 
+  // Real play/pause on the preview itself: tapping Play actually plays the raw clip from the
+  // current scrub position, dragging the film strip's fixed playhead line along with it in
+  // real time (via 'timeUpdate'), and tapping Pause actually stops it -- instead of the preview
+  // only ever showing a single still frame you can scrub between.
+  useEffect(() => {
+    const playingSub = previewPlayer.addListener('playingChange', (payload) => setIsPlaying(payload.isPlaying));
+    const timeSub = previewPlayer.addListener('timeUpdate', (payload) => {
+      const sourceMs = payload.currentTime * 1000;
+      const timelineMs = timelineMsForSource(sourceMs, effectiveSegments);
+      if (timelineMs == null) {
+        // Ran past the end of the clip segment it started in -- that footage is a cut or the
+        // far side of a freeze/deleted gap, so stop instead of playing through it silently.
+        previewPlayer.pause();
+        return;
+      }
+      setPlayheadMs(timelineMs);
+      suppressScrollSeek.current = true;
+      scrollRef.current?.scrollTo({ x: pxForMs(timelineMs, effectiveSegments), animated: false });
+      requestAnimationFrame(() => {
+        suppressScrollSeek.current = false;
+      });
+    });
+    return () => {
+      playingSub.remove();
+      timeSub.remove();
+    };
+  }, [previewPlayer, effectiveSegments]);
+
+  const togglePlay = () => {
+    if (previewPlayer.playing) previewPlayer.pause();
+    else previewPlayer.play();
+  };
+
   const splitHere = () => {
     const { segment, index, sourceMs } = resolvePlayhead(playheadMs);
     if (segment.kind !== 'clip') return;
@@ -236,6 +289,11 @@ export default function VideoTimelineEditor({
     <View>
       <View style={styles.previewWrap}>
         <VideoView player={previewPlayer} style={styles.preview} contentFit="cover" nativeControls={false} />
+        <Pressable style={styles.playPauseBtn} onPress={togglePlay} hitSlop={10}>
+          <View style={styles.playPauseCircle}>
+            <Ionicons name={isPlaying ? 'pause' : 'play'} size={26} color="#FFFFFF" style={isPlaying ? undefined : styles.playIconNudge} />
+          </View>
+        </Pressable>
         <View style={styles.previewBadge}>
           <Ionicons name="eye-outline" size={12} color="#FFFFFF" />
           <Text style={styles.previewBadgeText}>{(playheadMs / 1000).toFixed(1)}s / {totalSec.toFixed(1)}s</Text>
@@ -297,11 +355,15 @@ export default function VideoTimelineEditor({
       <View style={styles.actionsRow}>
         <Pressable style={[styles.actionBtn, current.segment.kind === 'freeze' && styles.actionBtnDisabled]} onPress={splitHere} disabled={current.segment.kind === 'freeze'}>
           <Ionicons name="cut-outline" size={16} color="#FFFFFF" />
-          <Text style={styles.actionBtnText}>Split</Text>
+          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            Split
+          </Text>
         </Pressable>
         <Pressable style={[styles.actionBtn, current.segment.kind === 'freeze' && styles.actionBtnDisabled]} onPress={freezeHere} disabled={current.segment.kind === 'freeze'}>
           <Ionicons name="snow-outline" size={16} color="#FFFFFF" />
-          <Text style={styles.actionBtnText}>Freeze Here</Text>
+          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            Freeze
+          </Text>
         </Pressable>
         <Pressable
           style={[styles.actionBtn, styles.deleteBtn, effectiveSegments.length <= 1 && styles.actionBtnDisabled]}
@@ -309,7 +371,9 @@ export default function VideoTimelineEditor({
           disabled={effectiveSegments.length <= 1}
         >
           <Ionicons name="trash-outline" size={16} color="#FFFFFF" />
-          <Text style={styles.actionBtnText}>Delete Segment</Text>
+          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            Delete
+          </Text>
         </Pressable>
       </View>
 
@@ -385,8 +449,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563EB',
     borderRadius: 10,
     paddingVertical: 10,
+    paddingHorizontal: 4,
+    overflow: 'hidden',
   },
   deleteBtn: { backgroundColor: '#DC2626' },
   actionBtnDisabled: { opacity: 0.4 },
-  actionBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  // flexShrink + numberOfLines/adjustsFontSizeToFit (set at the call site) together guarantee
+  // the label always fits inside the button's real rendered width instead of spilling past its
+  // rounded edge -- the "Delete Segment" label used to render wider than its flex:1 share and
+  // visibly cut off at the screen edge since nothing here bounded or shrank it.
+  actionBtnText: { flexShrink: 1, color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  // A real play/pause control over the live preview -- previously the preview only ever showed
+  // a single still frame at whatever point the film strip was scrubbed to, with no way to
+  // actually watch the clip play.
+  playPauseBtn: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playPauseCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playIconNudge: { marginLeft: 3 },
 });
