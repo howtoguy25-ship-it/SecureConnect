@@ -2208,11 +2208,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       const isService = product.saleType === 'service';
       const isDigital = product.saleType === 'digital';
       // A buyer must never land on a real checkout for a half-finished listing -- only
-      // show a working buy button once the seller has actually filled in a name, a real
-      // price, and at least one photo. Anything short of that renders the card (so the
-      // seller can see it taking shape) but with the buy action disabled, and it updates
-      // live the moment the missing pieces are filled in and republished.
-      const isReady = !!product.name?.trim() && product.priceUsd > 0 && product.images.length > 0;
+      // show a working buy button once the seller has actually filled in a name and a real
+      // price. A photo is optional cosmetic polish (an unphotographed product still renders
+      // its placeholder box and is fully sellable), so it's not part of this gate. Anything
+      // short of name+price renders the card (so the seller can see it taking shape) but
+      // with the buy action disabled, and it updates live the moment the missing pieces are
+      // filled in and republished.
+      const isReady = !!product.name?.trim() && product.priceUsd > 0;
       const hasMultiplePhotos = product.images.length > 1;
       const lightboxVar = `siteSparkLightbox_${el.id}`;
       const galleryVar = `siteSparkGallery_${el.id}`;

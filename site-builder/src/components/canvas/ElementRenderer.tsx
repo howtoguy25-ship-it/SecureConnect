@@ -416,14 +416,16 @@ function ProductCardGallery({ images, width, height, compact }: { images: string
 // Add to Cart queues it in the in-editor cart (with the header badge), Buy Now starts a real
 // Stripe Checkout session for just this item immediately. Only usable once the project is
 // actually published (checkout looks the product up in storeInventory/{slug}) and once a
-// variant-free product actually has a name/price/photo -- both cases render a real, clearly
-// explained disabled state instead of silently doing nothing on tap.
+// variant-free product actually has a name/price -- a photo is optional cosmetic polish (an
+// unphotographed product still renders its placeholder box and is fully sellable), so it's
+// not part of this gate. Both cases render a real, clearly explained disabled state instead
+// of silently doing nothing on tap.
 function ProductBuyButtons({ product, compact }: { product: CatalogProduct; compact?: boolean }) {
   const cart = useCart();
   const [busy, setBusy] = useState(false);
   const inStock = product.inStock !== false;
   const isService = product.saleType === 'service';
-  const isReady = !!product.name?.trim() && product.priceUsd > 0 && product.images.length > 0;
+  const isReady = !!product.name?.trim() && product.priceUsd > 0;
   const hasVariants = product.variantOptions.length > 0;
   const buyMode = product.buyButtonMode ?? 'cart';
   const showCartBtn = buyMode === 'cart' || buyMode === 'both';

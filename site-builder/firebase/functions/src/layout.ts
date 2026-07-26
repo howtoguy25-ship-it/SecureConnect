@@ -5,6 +5,17 @@ const CANVAS_WIDTH = 390;
 const MARGIN = 24;
 const CONTENT_WIDTH = CANVAS_WIDTH - MARGIN * 2;
 
+// Mirrors src/data/canvasSizes.ts's CANVAS_SIZES -- kept in sync by hand since Cloud
+// Functions run in a separate TS project and can't import straight from the client (same
+// reasoning as pricing.ts's duplication). A Logo/Video/Social AI build always renders at
+// its page type's own real fixed size (never content-driven the way a website page is),
+// matching what the manual editor already uses for the same page types.
+export const FIXED_PAGE_CANVAS_HEIGHT: Record<'video' | 'social' | 'logo', number> = {
+  video: 693,
+  social: 585,
+  logo: 390,
+};
+
 let idCounter = 0;
 function nextId(prefix: string): string {
   idCounter += 1;
@@ -273,13 +284,21 @@ export function layoutSitePlan(
   // Real "prebuilt tabs" nav bar (see buildNavBar) -- only Professional ('standard') and Go
   // All Out ('crazy') builds get one; 'simple' stays exactly one plain scrolling page, no
   // extra chrome, matching what that tier promises.
-  includeNavBar = false
+  includeNavBar = false,
+  // The real fixed frame height for a Logo/Video/Social build (see FIXED_PAGE_CANVAS_HEIGHT)
+  // -- those page types are always a single section (enforced in buildSystemPrompt), so
+  // instead of the small fixed 200px hero-image height below (sized for a website's
+  // scrolling hero banner), the one image fills nearly this entire real frame, the way an
+  // actual logo/post graphic should. Undefined/omitted for a website build, which keeps
+  // sizing itself from estimatedCanvasHeight as before.
+  singleCompositionCanvasHeight?: number
 ): SitePlanLayout {
   idCounter = 0;
   const elements: CanvasElement[] = [];
   const productContents: Record<string, LayoutProductContent> = {};
   const sectionStarts: { label: string; y: number }[] = [];
   let y = 32;
+  const isSingleFixedComposition = singleCompositionCanvasHeight != null && plan.sections.length === 1;
 
   const imageFor = (section: SitePlanSection) => sectionImages.find((s) => s.section === section)?.url ?? null;
   const videoFor = (section: SitePlanSection) => sectionVideos.find((s) => s.section === section) ?? null;
@@ -297,7 +316,16 @@ export function layoutSitePlan(
     const gameMemorySymbols = section.gameMemorySymbols.map((s) => stripMarkdown(s));
 
     if (image && (section.kind === 'hero' || section.kind === 'gallery')) {
-      const imgHeight = section.kind === 'hero' ? 200 : 220;
+      // Reserves real room below the image only if there's an actual headline to show
+      // there (a logo's wordmark is often baked into the image itself, leaving headline
+      // empty -- see buildSystemPrompt's pageTypeNote) -- 72 covers the top margin + the
+      // gap below the image + the trailing between-sections gap, all of which apply
+      // regardless of whether a headline follows.
+      const imgHeight = isSingleFixedComposition
+        ? Math.max(120, singleCompositionCanvasHeight! - 72 - (headline ? 64 : 0))
+        : section.kind === 'hero'
+          ? 200
+          : 220;
       elements.push(imageEl({ y, height: imgHeight, uri: image, x: 0, width: CANVAS_WIDTH }));
       y += imgHeight + 16;
     }

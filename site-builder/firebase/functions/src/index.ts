@@ -34,7 +34,7 @@ import {
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, CUSTOM_WIDGET_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, generateCustomWidgetCode, SitePlan, SitePlanSection } from './openai';
-import { layoutSitePlan, estimatedCanvasHeight, SectionImage, SectionVideo, SectionProductImages, SectionCustomWidget } from './layout';
+import { layoutSitePlan, estimatedCanvasHeight, FIXED_PAGE_CANVAS_HEIGHT, SectionImage, SectionVideo, SectionProductImages, SectionCustomWidget } from './layout';
 import { searchYouTubeVideo } from './youtube';
 import { chatWithAssistant, AssistantChatMessage, AssistantActionType } from './assistant';
 import { isValidCurrency } from './currency';
@@ -405,7 +405,10 @@ export const startGeneration = onCall(
         name: 'Generating...',
         pageType,
         themeId: 'blank',
-        canvasSize: { width: 390, height: 844, label: 'AI-generated' },
+        // Matches the page type's own real fixed size right from the start (see
+        // FIXED_PAGE_CANVAS_HEIGHT) -- a website still starts at the default 844 and grows
+        // to fit its content once the plan lands, same as before.
+        canvasSize: { width: 390, height: pageType === 'website' ? 844 : FIXED_PAGE_CANVAS_HEIGHT[pageType], label: 'AI-generated' },
         backgroundColor: '#FFFFFF',
         elements: [],
         announcements: { enabled: false, autoSlide: true, intervalMs: 4000, bars: [], popups: [] },
@@ -432,13 +435,18 @@ export const startGeneration = onCall(
       productImages: SectionProductImages[] = [],
       customWidgets: SectionCustomWidget[] = []
     ) => {
+      // A real top nav bar only ever makes sense for a website's multi-section scrolling
+      // page -- a Logo/Video/Social build is always a single fixed-size composition (see
+      // buildSystemPrompt's pageTypeNote), so it never gets one regardless of complexity.
+      const fixedFrameHeight = pageType === 'website' ? undefined : FIXED_PAGE_CANVAS_HEIGHT[pageType];
       const { elements: previewElements, productContents } = layoutSitePlan(
         currentPlan,
         images,
         videos,
         productImages,
         customWidgets,
-        complexity !== 'simple'
+        pageType === 'website' && complexity !== 'simple',
+        fixedFrameHeight
       );
       // A ProductElement only ever stores a productId (see the type's own comment) -- an
       // AI-generated product section needs a real catalog doc created for it too, exactly
@@ -473,7 +481,10 @@ export const startGeneration = onCall(
         name: currentPlan.siteName,
         backgroundColor: currentPlan.backgroundColor,
         elements: previewElements,
-        canvasSize: { width: 390, height: estimatedCanvasHeight(previewElements), label: 'AI-generated' },
+        // A website's canvas grows to fit whatever content it ends up with (as before) --
+        // a Logo/Video/Social build instead always renders at its page type's own real
+        // fixed size (fixedFrameHeight), matching the manual editor and never scrolling.
+        canvasSize: { width: 390, height: fixedFrameHeight ?? estimatedCanvasHeight(previewElements), label: 'AI-generated' },
         announcements: {
           enabled: announcementBars.length > 0,
           autoSlide: true,
@@ -487,7 +498,7 @@ export const startGeneration = onCall(
 
     try {
       await sessionRef.update({ status: 'generating', statusMessage: 'Writing your site\'s content...', updatedAt: Date.now() });
-      let plan = await generateSitePlan(client, model, prompt, complexity, undefined, referenceImages);
+      let plan = await generateSitePlan(client, model, prompt, complexity, undefined, referenceImages, pageType);
       await pushPreview(plan, []);
 
       let pausesUsed = 0;
@@ -495,7 +506,7 @@ export const startGeneration = onCall(
       if (injected1) {
         pausesUsed += 1;
         await sessionRef.update({ statusMessage: 'Reworking your content with your changes...', updatedAt: Date.now() });
-        plan = await generateSitePlan(client, model, prompt, complexity, injected1, referenceImages);
+        plan = await generateSitePlan(client, model, prompt, complexity, injected1, referenceImages, pageType);
         await pushPreview(plan, []);
       }
 
@@ -644,7 +655,7 @@ export const startGeneration = onCall(
         await sessionRef.update({ statusMessage: 'Applying your last change...', updatedAt: Date.now() });
         // Second pause only adjusts copy at this point (images/videos are already resolved)
         // -- keeps the second pause fast rather than re-running that work too.
-        plan = await generateSitePlan(client, model, prompt, complexity, injected2);
+        plan = await generateSitePlan(client, model, prompt, complexity, injected2, undefined, pageType);
         await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
       }
 

@@ -219,18 +219,23 @@ function EditorInner({ navigation }: Props) {
   };
 
   const handleAddLibraryItem = (item: LibraryItem) => {
+    // Built once with a throwaway center so its real width/height are known, then repositioned
+    // via nextStackedPosition -- every build() in elementsLibrary.ts derives x/y as cx - w/2 /
+    // cy - h/2, so overwriting x/y directly after the fact is equivalent, just non-overlapping.
     const el = item.build(generateId('el'), canvasCenterX, canvasCenterY);
-    addElement(el);
+    const { x, y } = nextStackedPosition(el.width, el.height);
+    addElement({ ...el, x, y });
     setPanel(null);
   };
 
   const addTextBox = () => {
+    const { x, y } = nextStackedPosition(160, 32);
     const el: TextElement = {
       id: generateId('el'),
       type: 'text',
       text: 'New text',
-      x: canvasCenterX - 80,
-      y: canvasCenterY - 16,
+      x,
+      y,
       width: 160,
       height: 32,
       zIndex: 5,
@@ -249,12 +254,13 @@ function EditorInner({ navigation }: Props) {
     if (!permission.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
     if (result.canceled || result.assets.length === 0) return;
+    const { x, y } = nextStackedPosition(160, 160);
     const el: ImageElement = {
       id: generateId('el'),
       type: 'image',
       uri: result.assets[0].uri,
-      x: canvasCenterX - 80,
-      y: canvasCenterY - 80,
+      x,
+      y,
       width: 160,
       height: 160,
       zIndex: 5,
@@ -274,6 +280,7 @@ function EditorInner({ navigation }: Props) {
     // image" more than an actual video player would.
     const width = 300;
     const height = 169;
+    const { x, y } = nextStackedPosition(width, height);
     const el: VideoElement = {
       id: generateId('el'),
       type: 'video',
@@ -286,8 +293,8 @@ function EditorInner({ navigation }: Props) {
       previewSeconds: null,
       audioUri: null,
       audioVolume: 1,
-      x: canvasCenterX - width / 2,
-      y: canvasCenterY - height / 2,
+      x,
+      y,
       width,
       height,
       zIndex: 5,
@@ -298,14 +305,15 @@ function EditorInner({ navigation }: Props) {
   };
 
   const addSlideshow = () => {
+    const { x, y } = nextStackedPosition(180, 120);
     const el: SlideshowElement = {
       id: generateId('el'),
       type: 'slideshow',
       images: [],
       autoPlay: true,
       intervalMs: 3000,
-      x: canvasCenterX - 90,
-      y: canvasCenterY - 60,
+      x,
+      y,
       width: 180,
       height: 120,
       zIndex: 5,
@@ -315,19 +323,15 @@ function EditorInner({ navigation }: Props) {
     setPanel(null);
   };
 
-  // A ProductElement only ever references a real catalog product now (see the type's own
-  // comment) -- inserting one here creates that catalog doc (same shape ProductEditScreen
-  // starts a brand new product with) and then sends the seller straight into
-  // ProductEditScreen to fill in name/price/photos, instead of leaving a nameless placeholder
-  // sitting on the canvas.
-  //
-  // Both paths place the new element stacked below whatever's already on the page (extending
-  // the canvas if needed) rather than dead-center, which is where every other addX function
-  // still drops things -- centering was fine when a product carried no real content yet, but
-  // it means a second product (or any element placed after one) lands directly on top of what
-  // came before. Products are the one element type a user is likely to insert several of in a
-  // row (browsing the catalog), so this is where the "messy/overlapping insert" fix lives.
-  const stackedProductPosition = (width: number, height: number) => {
+  // Every "add X" action shares this: place the new element stacked below whatever's already
+  // on the page (extending the canvas if needed) rather than dead-center, so a freshly-added
+  // element never spawns on top of (and hides) existing content. This is only about where an
+  // element FIRST appears -- once placed, it's exactly as freely draggable as anything else,
+  // nothing about this constrains it afterward. Products are still the element type most
+  // likely to get inserted several in a row while browsing a catalog (hence the original,
+  // narrower name this was pulled out of), but the same "don't land on top of things" problem
+  // applies to every other element type too, so every addX below uses this same helper.
+  const nextStackedPosition = (width: number, height: number) => {
     const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
     const gap = activeElements.length > 0 ? 24 : 32;
     const y = lowestBottom + gap;
@@ -339,7 +343,7 @@ function EditorInner({ navigation }: Props) {
   };
 
   const insertExistingProduct = (product: CatalogProduct) => {
-    const { x, y } = stackedProductPosition(180, 220);
+    const { x, y } = nextStackedPosition(180, 220);
     const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
     addElement(el);
     select(el.id);
@@ -408,7 +412,7 @@ function EditorInner({ navigation }: Props) {
       updatedAt: now,
     };
     await productsStore.save(user.uid, product);
-    const { x, y } = stackedProductPosition(180, 220);
+    const { x, y } = nextStackedPosition(180, 220);
     const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
     addElement(el);
     select(el.id);
@@ -426,7 +430,7 @@ function EditorInner({ navigation }: Props) {
       updateElement(buttonId, { linkTargetElementId: existing.id, link: null } as any);
       return;
     }
-    const { x, y } = stackedProductPosition(180, 220);
+    const { x, y } = nextStackedPosition(180, 220);
     const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
     addElement(el);
     updateElement(buttonId, { linkTargetElementId: el.id, link: null } as any);
@@ -495,7 +499,7 @@ function EditorInner({ navigation }: Props) {
       updatedAt: now,
     };
     await productsStore.save(user.uid, product);
-    const { x, y } = stackedProductPosition(180, 220);
+    const { x, y } = nextStackedPosition(180, 220);
     const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
     addElement(el);
     updateElement(buttonId, { linkTargetElementId: el.id, link: null } as any);
@@ -503,13 +507,14 @@ function EditorInner({ navigation }: Props) {
   };
 
   const addCollection = () => {
+    const { x, y } = nextStackedPosition(180, 220);
     const el: CollectionElement = {
       id: generateId('el'),
       type: 'collection',
       name: 'New collection',
       productIds: [],
-      x: canvasCenterX - 90,
-      y: canvasCenterY - 100,
+      x,
+      y,
       width: 180,
       height: 220,
       zIndex: 5,
@@ -526,13 +531,14 @@ function EditorInner({ navigation }: Props) {
   // else is already on the page right after adding it.
   const addSection = () => {
     const lowestZ = Math.min(0, ...activeElements.map((e) => e.zIndex));
+    const { x, y } = nextStackedPosition(300, 200);
     const el: SectionElement = {
       id: generateId('el'),
       type: 'section',
       backgroundColor: '#F1F5F9',
       childIds: [],
-      x: canvasCenterX - 150,
-      y: canvasCenterY - 100,
+      x,
+      y,
       width: 300,
       height: 200,
       zIndex: lowestZ - 1,
@@ -581,7 +587,7 @@ function EditorInner({ navigation }: Props) {
 
   // Drops a pre-built column/row layout (see columnLayouts.ts) as a brand new Section,
   // stacked below whatever's already on the page -- same "never overlap what's already
-  // there, extend the canvas if it doesn't fit" placement as stackedProductPosition, just
+  // there, extend the canvas if it doesn't fit" placement as nextStackedPosition, just
   // spanning most of the page width instead of a fixed small card size. The section is added
   // *before* its children (not after) specifically so it lands with a lower zIndex than them
   // automatically -- addElement always bumps a fresh element to the very front, so adding the
@@ -702,6 +708,7 @@ function EditorInner({ navigation }: Props) {
     // Defaults to Tic-Tac-Toe -- the only kind that's a real, complete, playable game with
     // zero setup; the other kinds (Trivia/Memory/Clicker) need real content first, added via
     // the inspector's kind picker.
+    const { x, y } = nextStackedPosition(200, 220);
     const el: GameElement = {
       id: generateId('el'),
       type: 'game',
@@ -711,8 +718,8 @@ function EditorInner({ navigation }: Props) {
       memorySymbols: [],
       clickerLabel: 'Tap!',
       clickerTarget: 20,
-      x: canvasCenterX - 90,
-      y: canvasCenterY - 100,
+      x,
+      y,
       width: 200,
       height: 220,
       zIndex: 5,
@@ -726,6 +733,7 @@ function EditorInner({ navigation }: Props) {
     // Defaults to a simple digital local-time clock -- real and complete with zero setup;
     // adding more timezones (a real world clock) or switching to analog happens via the
     // inspector.
+    const { x, y } = nextStackedPosition(180, 120);
     const el: WidgetElement = {
       id: generateId('el'),
       type: 'widget',
@@ -735,8 +743,8 @@ function EditorInner({ navigation }: Props) {
       style: 'digital',
       countdownTargetIso: '',
       countdownLabel: '',
-      x: canvasCenterX - 90,
-      y: canvasCenterY - 60,
+      x,
+      y,
       width: 180,
       height: 120,
       zIndex: 5,
@@ -750,14 +758,15 @@ function EditorInner({ navigation }: Props) {
     // Added blank -- no code yet. The inspector's "Generate" flow (a description input +
     // button) is what actually calls the AI to fill in real code, same as Game/Widget
     // needing their own kind picked before they're a real complete element.
+    const { x, y } = nextStackedPosition(200, 200);
     const el: CustomWidgetElement = {
       id: generateId('el'),
       type: 'customWidget',
       title: 'Custom Feature',
       description: '',
       code: '',
-      x: canvasCenterX - 90,
-      y: canvasCenterY - 90,
+      x,
+      y,
       width: 200,
       height: 200,
       zIndex: 5,

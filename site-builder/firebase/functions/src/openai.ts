@@ -101,7 +101,10 @@ const SITE_PLAN_SCHEMA = {
       },
       sections: {
         type: 'array',
-        minItems: 3,
+        // 1 is a real valid plan size, not just a lower bound relaxed for convenience -- a
+        // Logo/Video/Social build (see buildSystemPrompt's pageTypeNote) is deliberately a
+        // single composition, never a multi-section scrolling page the way a website is.
+        minItems: 1,
         maxItems: 6,
         items: {
           type: 'object',
@@ -239,15 +242,40 @@ const SITE_PLAN_SCHEMA = {
   },
 } as const;
 
-function buildSystemPrompt(complexity: 'simple' | 'standard' | 'crazy', todayIso: string): string {
+function buildSystemPrompt(
+  complexity: 'simple' | 'standard' | 'crazy',
+  todayIso: string,
+  pageType: 'website' | 'video' | 'social' | 'logo' = 'website'
+): string {
+  // The single biggest fidelity bug this builder had: pageType used to never reach this
+  // prompt at all, so a request for a Logo/Video/Social page still always produced the same
+  // 3-6 section scrolling website plan below -- a "logo" request would build an actual
+  // multi-section site with a hero/about/features/cta, not a real logo. Each non-website
+  // type is a single fixed-size composition (see CANVAS_SIZES/layoutSitePlan), never a
+  // scrolling multi-section page, so this note OVERRIDES the section-count/complexity
+  // instructions entirely for those three types -- checked and enforced again after
+  // generation (index.ts trims/whichever) so a model that ignores this can't still slip a
+  // multi-section plan through.
+  const pageTypeNote =
+    pageType === 'logo'
+      ? 'This build is for a LOGO page, not a website -- the output is one single square logo graphic, never a multi-section page. Produce EXACTLY 1 section, kind "hero": imagePrompt must describe a real, professional, standalone logo mark/emblem/icon design (not a photo, not a scene, not a mockup -- a clean, iconic graphic suitable for an actual brand logo, on a plain or simple background). Set headline to the brand/business name ONLY if a real text wordmark should appear alongside the mark (keep it to 1-3 words); leave headline as an empty string if the logo image itself already IS the complete wordmark. Leave body and buttonLabel as empty strings. Every section-count and complexity instruction elsewhere in this prompt does not apply here -- ignore it.'
+      : pageType === 'video'
+        ? 'This build is for a VIDEO page, not a website -- the output is one single vertical video composition, never a multi-section scrolling page. Produce EXACTLY 1 section: use kind "video" with a real, specific videoSearchQuery if the user described real existing video content (news, highlights, a tutorial); otherwise use kind "hero" with one vivid imagePrompt for the page\'s cover art, and a short headline only if the user described real on-screen text/caption. Leave body and buttonLabel empty unless the user specifically described a caption or a real link. Every section-count and complexity instruction elsewhere in this prompt does not apply here -- ignore it.'
+        : pageType === 'social'
+          ? 'This build is for a SOCIAL page, not a website -- the output is one single vertical social-post graphic, never a multi-section scrolling page. Produce EXACTLY 1 section, kind "hero": one vivid imagePrompt for the entire post design, and a short headline only if the user described real caption/post text (leave it empty otherwise). Leave body and buttonLabel as empty strings. Every section-count and complexity instruction elsewhere in this prompt does not apply here -- ignore it.'
+          : '';
+
   const complexityNote =
-    complexity === 'simple'
-      ? 'This is the Simple tier: keep it minimal and genuinely easy to build on top of -- exactly 3 sections, short unfussy copy, no more than one image, no announcement bar (leave announcementText and announcementText2 empty strings). A clean, real, working site someone can comfortably keep editing by hand, not a stripped-down placeholder.'
-      : complexity === 'crazy'
-        ? 'This is the Go All Out tier: the fullest, boldest build this app can produce. Use the full 6 sections, the most vivid and specific copy you can write, a real generated image for every visual section, and lean hard into real interactive elements (product/game/widget/video) wherever the prompt supports one instead of a plain decorative picture. Write BOTH announcementText and announcementText2 as two different real, on-brand lines -- this tier gets a real rotating two-bar announcement bar. A real top navigation bar linking to the site\'s major sections is added automatically after your plan is generated, so write short, distinct section headlines that would also read well as a tab label.'
-        : 'This is the Professional tier: a real, polished, full-featured site -- 4-5 sections, clear and confident copy, and a genuine call-to-action (the hero or cta section\'s buttonLabel should read like a real, specific action a visitor would take, not a generic "Learn More"). Write announcementText as one real, on-brand announcement line (leave announcementText2 an empty string -- the second bar is Go All Out only). A real top navigation bar linking to the site\'s major sections is added automatically after your plan is generated, so write short, distinct section headlines that would also read well as a tab label.';
+    pageType !== 'website'
+      ? ''
+      : complexity === 'simple'
+        ? 'This is the Simple tier: keep it minimal and genuinely easy to build on top of -- exactly 3 sections, short unfussy copy, no more than one image, no announcement bar (leave announcementText and announcementText2 empty strings). A clean, real, working site someone can comfortably keep editing by hand, not a stripped-down placeholder.'
+        : complexity === 'crazy'
+          ? 'This is the Go All Out tier: the fullest, boldest build this app can produce. Use the full 6 sections, the most vivid and specific copy you can write, a real generated image for every visual section, and lean hard into real interactive elements (product/game/widget/video) wherever the prompt supports one instead of a plain decorative picture. Write BOTH announcementText and announcementText2 as two different real, on-brand lines -- this tier gets a real rotating two-bar announcement bar. A real top navigation bar linking to the site\'s major sections is added automatically after your plan is generated, so write short, distinct section headlines that would also read well as a tab label.'
+          : 'This is the Professional tier: a real, polished, full-featured site -- 4-5 sections, clear and confident copy, and a genuine call-to-action (the hero or cta section\'s buttonLabel should read like a real, specific action a visitor would take, not a generic "Learn More"). Write announcementText as one real, on-brand announcement line (leave announcementText2 an empty string -- the second bar is Go All Out only). A real top navigation bar linking to the site\'s major sections is added automatically after your plan is generated, so write short, distinct section headlines that would also read well as a tab label.';
 
   return [
+    pageTypeNote,
     // Deliberately does NOT name this app-building tool "SiteSpark" (or any other brand name)
     // here -- a user building a real site FOR a business/app also called "SiteSpark" (or
     // whatever brand this tool ships under) would collide with that self-description, and the
@@ -282,7 +310,8 @@ export async function generateSitePlan(
   prompt: string,
   complexity: 'simple' | 'standard' | 'crazy',
   extraInstruction?: string,
-  referenceImages?: string[]
+  referenceImages?: string[],
+  pageType: 'website' | 'video' | 'social' | 'logo' = 'website'
 ): Promise<SitePlan> {
   const userText = extraInstruction ? `${prompt}\n\nAdditional instruction from the user mid-build: ${extraInstruction}` : prompt;
 
@@ -301,7 +330,7 @@ export async function generateSitePlan(
   const completion = await client.chat.completions.create({
     model,
     messages: [
-      { role: 'system', content: buildSystemPrompt(complexity, new Date().toISOString()) },
+      { role: 'system', content: buildSystemPrompt(complexity, new Date().toISOString(), pageType) },
       { role: 'user', content: userContent },
     ],
     response_format: { type: 'json_schema', json_schema: SITE_PLAN_SCHEMA },
