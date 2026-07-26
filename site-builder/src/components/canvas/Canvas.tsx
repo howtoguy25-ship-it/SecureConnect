@@ -245,7 +245,14 @@ export default function Canvas({
     <>
       {isWebsite && <AnnouncementBarView settings={project.announcements} />}
       <Pressable
-        style={StyleSheet.absoluteFill}
+        // A Section element deliberately renders with a NEGATIVE zIndex (see addSection/
+        // groupIntoSection/insertColumnLayout in EditorScreen.tsx) so it sits behind its own
+        // children. With no zIndex here, this full-canvas tap-catcher defaulted to 0/auto --
+        // which CSS stacking puts ABOVE any negative-zIndex sibling, so every tap on an empty
+        // (or otherwise unpopulated) Section was swallowed here instead of ever reaching the
+        // Section's own DraggableElement, making it permanently unselectable/undraggable/
+        // undeletable. -99999 guarantees this always stays behind every real element.
+        style={[StyleSheet.absoluteFill, { zIndex: -99999 }]}
         onPress={() => {
           // First tap on the background just deselects whatever was selected (so you can tap
           // away from an element you were editing without anything else popping up). Once

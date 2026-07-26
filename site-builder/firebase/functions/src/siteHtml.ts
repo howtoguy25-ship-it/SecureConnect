@@ -2763,7 +2763,14 @@ function renderCartWidget(slug: string, checkoutUrl: string, discountValidateUrl
     var subtotal = items.reduce(function(s,i){return s+i.priceUsd*i.quantity;},0);
     var discountAmount = discountAmountFor(discount, subtotal, items);
     var total = subtotal - discountAmount;
-    document.getElementById('sitespark-cart-count').textContent = String(count);
+    // sitespark-cart-count lives in the site header bar (renderHeaderBarHtml), not in this
+    // widget's own markup above -- that header only renders for isWebsite pages, while this
+    // whole cart widget renders for any page with hasProducts regardless of pageType (and for
+    // any older project whose pageType/content ended up mismatched). Null-guarded so a missing
+    // badge span never throws and kills every subsequent add/remove/checkout call, which is
+    // what an unguarded lookup here did.
+    var countEl = document.getElementById('sitespark-cart-count');
+    if (countEl) countEl.textContent = String(count);
     document.getElementById('sitespark-cart-total').textContent = CURRENCY_SYMBOL+total.toFixed(2);
     document.getElementById('sitespark-booking-fields').style.display = hasService(items) ? 'block' : 'none';
 
