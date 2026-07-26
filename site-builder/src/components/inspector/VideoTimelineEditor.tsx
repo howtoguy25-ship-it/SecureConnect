@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, Image, ActivityIndicator, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -11,6 +12,7 @@ const PX_PER_SEC = 40;
 const MIN_SEG_WIDTH = 56;
 const MAX_SEG_WIDTH = 220;
 const DEFAULT_FREEZE_MS = 1500;
+const SEG_GAP = 4;
 
 function segTimelineMs(seg: VideoSegment): number {
   return seg.kind === 'freeze' ? seg.freezeDurationMs ?? DEFAULT_FREEZE_MS : Math.max(0, seg.endMs - seg.startMs);
@@ -21,9 +23,52 @@ function segWidth(seg: VideoSegment): number {
   return Math.max(MIN_SEG_WIDTH, Math.min(MAX_SEG_WIDTH, sec * PX_PER_SEC));
 }
 
+// Real pixel<->timeline-ms mapping that accounts for each segment's own (clamped) rendered
+// width and the gap between them -- so the playhead line always lines up with wherever the
+// segments actually draw, not a naive linear scale.
+function totalContentPx(segments: VideoSegment[]): number {
+  return segments.reduce((sum, s, i) => sum + segWidth(s) + (i > 0 ? SEG_GAP : 0), 0);
+}
+function pxForMs(ms: number, segments: VideoSegment[]): number {
+  let accMs = 0;
+  let accPx = 0;
+  for (let i = 0; i < segments.length; i++) {
+    if (i > 0) accPx += SEG_GAP;
+    const seg = segments[i];
+    const segMs = segTimelineMs(seg);
+    const segPx = segWidth(seg);
+    if (ms <= accMs + segMs || i === segments.length - 1) {
+      const frac = segMs > 0 ? Math.min(1, Math.max(0, (ms - accMs) / segMs)) : 0;
+      return accPx + frac * segPx;
+    }
+    accMs += segMs;
+    accPx += segPx;
+  }
+  return accPx;
+}
+function msForPx(px: number, segments: VideoSegment[]): number {
+  let accMs = 0;
+  let accPx = 0;
+  for (let i = 0; i < segments.length; i++) {
+    if (i > 0) accPx += SEG_GAP;
+    const seg = segments[i];
+    const segMs = segTimelineMs(seg);
+    const segPx = segWidth(seg);
+    if (px <= accPx + segPx || i === segments.length - 1) {
+      const frac = segPx > 0 ? Math.min(1, Math.max(0, (px - accPx) / segPx)) : 0;
+      return accMs + frac * segMs;
+    }
+    accPx += segPx;
+    accMs += segMs;
+  }
+  return accMs;
+}
+
 // Real, working CapCut/Snapchat-style timeline: a row of segment blocks (each a real
-// thumbnail pulled from the actual clip, sized by its own real duration), a playhead you can
-// scrub with a live preview frame, and three real actions -- Split (cuts the segment under
+// thumbnail pulled from the actual clip, sized by its own real duration), a FIXED playhead
+// line at the center of the viewport with the film-strip scrolling underneath it (the same
+// scrub convention CapCut/iMovie use -- dragging the strip IS moving the playhead, no
+// separate slider to keep in sync), and three real actions -- Split (cuts the segment under
 // the playhead into two), Freeze Here (holds that exact frame for a real, adjustable duration
 // before the clip continues), and Delete Segment (a real cut -- that footage is gone from
 // playback). Segments are the real edit list VideoElement.segments stores and both the editor
@@ -116,10 +161,46 @@ export default function VideoTimelineEditor({
 
   const [freezeHoldSec, setFreezeHoldSec] = useState(DEFAULT_FREEZE_MS / 1000);
 
+  // The scrollable film-strip is padded by half the viewport on each side (see
+  // contentContainerStyle below) so timeline-ms 0 and the very last ms can both scroll all
+  // the way to the fixed center playhead line -- scrollX then maps 1:1 onto the same px
+  // space pxForMs/msForPx already use, no extra offset math needed.
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const contentPx = totalContentPx(effectiveSegments);
+  const suppressScrollSeek = useRef(false);
+
+  // Keeps the strip visually aligned with the current playhead whenever the edit list itself
+  // changes shape (a split/freeze/delete can shift every later segment's rendered width) --
+  // without this, the strip would silently drift out of sync with playheadMs after an edit.
+  useEffect(() => {
+    if (viewportWidth === 0) return;
+    suppressScrollSeek.current = true;
+    scrollRef.current?.scrollTo({ x: pxForMs(playheadMs, effectiveSegments), animated: false });
+    // Real native scroll events land a frame later -- release the guard right after so a
+    // genuine user-driven scroll (the very next frame) isn't accidentally swallowed too.
+    requestAnimationFrame(() => {
+      suppressScrollSeek.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveSegments, viewportWidth]);
+
+  const scrollToMs = (ms: number, animated = true) => {
+    scrollRef.current?.scrollTo({ x: pxForMs(ms, effectiveSegments), animated });
+  };
+
+  const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (suppressScrollSeek.current) return;
+    seekPreview(msForPx(e.nativeEvent.contentOffset.x, effectiveSegments));
+  };
+
   const splitHere = () => {
     const { segment, index, sourceMs } = resolvePlayhead(playheadMs);
     if (segment.kind !== 'clip') return;
-    if (sourceMs <= segment.startMs + 100 || sourceMs >= segment.endMs - 100) return;
+    if (sourceMs <= segment.startMs + 100 || sourceMs >= segment.endMs - 100) {
+      showAlert('Move the playhead first', 'Scrub the film strip so the line sits further from the edges of this clip, then try Split again.');
+      return;
+    }
     const next: VideoSegment[] = [
       ...effectiveSegments.slice(0, index),
       { id: generateId('seg'), kind: 'clip', startMs: segment.startMs, endMs: sourceMs },
@@ -141,7 +222,10 @@ export default function VideoTimelineEditor({
   };
 
   const deleteSelected = () => {
-    if (effectiveSegments.length <= 1 || !selectedId) return;
+    if (effectiveSegments.length <= 1 || !selectedId) {
+      showAlert('Nothing to delete', 'A clip needs to keep at least one segment -- split it first if you want to cut out just part of it.');
+      return;
+    }
     onChange(effectiveSegments.filter((s) => s.id !== selectedId));
   };
 
@@ -154,51 +238,61 @@ export default function VideoTimelineEditor({
         <VideoView player={previewPlayer} style={styles.preview} contentFit="cover" nativeControls={false} />
         <View style={styles.previewBadge}>
           <Ionicons name="eye-outline" size={12} color="#FFFFFF" />
-          <Text style={styles.previewBadgeText}>Editing here</Text>
+          <Text style={styles.previewBadgeText}>{(playheadMs / 1000).toFixed(1)}s / {totalSec.toFixed(1)}s</Text>
         </View>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timelineRow}>
-        {effectiveSegments.map((seg) => (
-          <Pressable
-            key={seg.id}
-            style={[styles.segment, { width: segWidth(seg) }, selectedId === seg.id && styles.segmentSelected]}
-            onPress={() => {
-              setSelectedId(seg.id);
-              let acc = 0;
-              for (const s of effectiveSegments) {
-                if (s.id === seg.id) break;
-                acc += segTimelineMs(s);
-              }
-              seekPreview(acc + 1);
-            }}
+      <Text style={styles.scrubHint}>Drag the film strip left/right to scrub -- tap a clip to jump to its middle.</Text>
+      <View style={styles.timelineWrap} onLayout={(e) => setViewportWidth(e.nativeEvent.layout.width)}>
+        {viewportWidth > 0 && (
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[styles.timelineRow, { paddingHorizontal: viewportWidth / 2 }]}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
           >
-            {thumbnails[seg.id] ? (
-              <Image source={{ uri: thumbnails[seg.id] }} style={styles.segmentThumb} resizeMode="cover" />
-            ) : (
-              <View style={[styles.segmentThumb, styles.segmentThumbPlaceholder]}>
-                <ActivityIndicator size="small" color="#94A3B8" />
-              </View>
-            )}
-            {seg.kind === 'freeze' && (
-              <View style={styles.freezeBadge}>
-                <Ionicons name="snow-outline" size={12} color="#FFFFFF" />
-              </View>
-            )}
-            <Text style={styles.segmentDuration}>{(segTimelineMs(seg) / 1000).toFixed(1)}s</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      <SliderRow
-        label="Playhead (s)"
-        value={playheadMs / 1000}
-        min={0}
-        max={Math.max(0.1, totalSec)}
-        step={0.1}
-        decimals={1}
-        onChange={(v) => seekPreview(Math.round(v * 1000))}
-      />
+            {effectiveSegments.map((seg) => (
+              <Pressable
+                key={seg.id}
+                style={[styles.segment, { width: segWidth(seg) }, selectedId === seg.id && styles.segmentSelected]}
+                onPress={() => {
+                  setSelectedId(seg.id);
+                  let acc = 0;
+                  for (const s of effectiveSegments) {
+                    if (s.id === seg.id) break;
+                    acc += segTimelineMs(s);
+                  }
+                  // Lands on the segment's real MIDPOINT (not its very first millisecond) --
+                  // always at least 100ms from both edges for any segment longer than 200ms,
+                  // so Split/Freeze work immediately on a single tap instead of silently
+                  // failing their too-close-to-the-edge guard.
+                  scrollToMs(acc + segTimelineMs(seg) / 2);
+                }}
+              >
+                {thumbnails[seg.id] ? (
+                  <Image source={{ uri: thumbnails[seg.id] }} style={styles.segmentThumb} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.segmentThumb, styles.segmentThumbPlaceholder]}>
+                    <ActivityIndicator size="small" color="#94A3B8" />
+                  </View>
+                )}
+                {seg.kind === 'freeze' && (
+                  <View style={styles.freezeBadge}>
+                    <Ionicons name="snow-outline" size={12} color="#FFFFFF" />
+                  </View>
+                )}
+                <Text style={styles.segmentDuration}>{(segTimelineMs(seg) / 1000).toFixed(1)}s</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
+        <View pointerEvents="none" style={styles.centerPlayhead}>
+          <View style={styles.centerPlayheadTick} />
+          <View style={styles.centerPlayheadLine} />
+        </View>
+      </View>
 
       <View style={styles.actionsRow}>
         <Pressable style={[styles.actionBtn, current.segment.kind === 'freeze' && styles.actionBtnDisabled]} onPress={splitHere} disabled={current.segment.kind === 'freeze'}>
@@ -225,7 +319,7 @@ export default function VideoTimelineEditor({
 }
 
 const styles = StyleSheet.create({
-  previewWrap: { width: '100%', height: 160, borderRadius: 10, overflow: 'hidden', backgroundColor: '#000', marginBottom: 10 },
+  previewWrap: { width: '100%', height: 200, borderRadius: 10, overflow: 'hidden', backgroundColor: '#000', marginBottom: 10 },
   preview: { width: '100%', height: '100%' },
   previewBadge: {
     position: 'absolute',
@@ -240,7 +334,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   previewBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
-  timelineRow: { gap: 4, paddingVertical: 6 },
+  scrubHint: { fontSize: 11, color: '#94A3B8', marginBottom: 4 },
+  timelineWrap: { height: 68, justifyContent: 'center' },
+  timelineRow: { gap: SEG_GAP, alignItems: 'center' },
   segment: {
     height: 56,
     borderRadius: 8,
@@ -273,6 +369,12 @@ const styles = StyleSheet.create({
     textShadowColor: '#000000AA',
     textShadowRadius: 2,
   },
+  // A fixed vertical line dead-center over the timeline viewport -- the film strip scrolls
+  // underneath it (see handleScroll), matching the real scrub convention CapCut/iMovie use
+  // instead of a separate abstract slider disconnected from what's visually on screen.
+  centerPlayhead: { position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, marginLeft: -1, alignItems: 'center' },
+  centerPlayheadLine: { flex: 1, width: 2, backgroundColor: '#DC2626' },
+  centerPlayheadTick: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#DC2626', marginBottom: -2 },
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 6, marginBottom: 4 },
   actionBtn: {
     flex: 1,

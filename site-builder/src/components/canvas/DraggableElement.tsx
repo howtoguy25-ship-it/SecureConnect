@@ -46,6 +46,14 @@ interface Props {
   // scrolls the real canvas ScrollView to that Y, matching the same window.scrollTo the
   // published site does for the same button (see siteHtml.ts's button case).
   onScrollToY?: (y: number) => void;
+  // How much smaller than real size the whole canvas is currently being rendered (see
+  // EditorScreen's fitScale) -- a visual-only CSS transform, so every PanResponder below that
+  // maps a raw finger-movement delta (reported in real screen pixels) onto this element's own
+  // x/y/width/height (stored in UNSCALED canvas pixels) has to divide that delta by scale
+  // first. Skipping this would make a drag/resize gesture feel too fast or too slow relative
+  // to the finger, proportional to how much the canvas has been shrunk to fit the screen.
+  // Defaults to 1 (no adjustment) for the common case where the canvas renders at real size.
+  scale?: number;
 }
 
 const MIN_TEXT_FONT_SIZE = 6;
@@ -161,6 +169,7 @@ export default function DraggableElement({
   onNavigateToElement,
   onOpenLink,
   onScrollToY,
+  scale = 1,
 }: Props) {
   const elementLocked = !!element.locked;
   const locked = elementLocked || !!forceLocked;
@@ -200,6 +209,8 @@ export default function DraggableElement({
   isSelectedRef.current = isSelected;
   const canvasSizeRef = useRef(canvasSize);
   canvasSizeRef.current = canvasSize;
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
   const onInteractionChangeRef = useRef(onInteractionChange);
   onInteractionChangeRef.current = onInteractionChange;
   const liveFontSizeRef = useRef(liveFontSize);
@@ -264,11 +275,18 @@ export default function DraggableElement({
         const touches = evt.nativeEvent.touches as Touch[];
         if (touches.length !== 1) return;
         const touch = touches[0];
+        // Raw screen-pixel delta -- tap-vs-drag detection (maxMove below) cares about how
+        // far the finger actually moved, not the canvas's own (possibly shrunk) coordinates.
         const dx = touch.pageX - moveOrigin.current.x0;
         const dy = touch.pageY - moveOrigin.current.y0;
         moveOrigin.current.maxMove = Math.max(moveOrigin.current.maxMove, Math.hypot(dx, dy));
+        // The element's stored x/y are in real canvas pixels, which move MORE than the
+        // finger does whenever the canvas is rendered smaller than actual size (see `scale`'s
+        // own comment) -- dividing by scale here is what keeps the drag feeling 1:1 with the
+        // finger regardless of how much the canvas has been shrunk to fit the screen.
         const origin = moveOrigin.current.box;
-        setBox(clampBoxToCanvas({ ...origin, x: origin.x + dx, y: origin.y + dy }, canvasSizeRef.current));
+        const s = scaleRef.current;
+        setBox(clampBoxToCanvas({ ...origin, x: origin.x + dx / s, y: origin.y + dy / s }, canvasSizeRef.current));
       },
       onPanResponderRelease: () => {
         interacting.current = false;
@@ -311,8 +329,12 @@ export default function DraggableElement({
         onPanResponderMove: (evt) => {
           const touch = evt.nativeEvent.touches[0] as Touch;
           if (!touch) return;
-          const dx = touch.pageX - originRef.current.x0;
-          const dy = touch.pageY - originRef.current.y0;
+          // See the move responder's identical comment -- divides the raw screen-pixel
+          // delta by the canvas's current fit-scale so a resize handle also tracks the
+          // finger 1:1 regardless of how much the canvas has been shrunk to fit the screen.
+          const s = scaleRef.current;
+          const dx = (touch.pageX - originRef.current.x0) / s;
+          const dy = (touch.pageY - originRef.current.y0) / s;
           const minWidth = elementRef.current.type === 'product' ? MIN_PRODUCT_WIDTH : MIN_SIZE;
           const minHeight = elementRef.current.type === 'product' ? MIN_PRODUCT_HEIGHT : MIN_SIZE;
           const origin = originRef.current.box;

@@ -165,6 +165,11 @@ function EditorInner({ navigation }: Props) {
   // project (project === null on the first render, while its Firestore subscription is
   // still in flight) finishes loading and this component stops taking the early-return path.
   const canvasScrollRef = useRef<ScrollView>(null);
+  // Measures the real visible room around the canvas so fixed single-composition pages
+  // (Video/Logo/Social -- see fitScale below) can be auto-scaled to show the whole page at
+  // once, Canva-style, instead of requiring the user to scroll or manually pinch-zoom out
+  // just to see their own page.
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 
   if (!project) {
     return (
@@ -286,12 +291,17 @@ function EditorInner({ navigation }: Props) {
     if (!permission.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
     if (result.canceled || result.assets.length === 0) return;
-    // A real 16:9 landscape frame by default -- 200x140 (close to square) was cramping every
-    // video into a letterboxed sliver of its own actual shape, which read as "just a static
-    // image" more than an actual video player would.
-    const width = 300;
-    const height = 169;
-    const { x, y } = nextStackedPosition(width, height);
+    // On a dedicated Video Page, the whole point of the page IS this one video -- it fills
+    // the real fixed canvas automatically (matching that page format) instead of landing as
+    // a small 16:9 card the seller then has to manually stretch to fit. Everywhere else (a
+    // video embedded as one element among others on a real website), it keeps the real 16:9
+    // landscape default -- 200x140 (close to square) was cramping every video into a
+    // letterboxed sliver of its own actual shape, which read as "just a static image" more
+    // than an actual video player would.
+    const isVideoPage = project.pageType === 'video';
+    const width = isVideoPage ? project.canvasSize.width : 300;
+    const height = isVideoPage ? project.canvasSize.height : 169;
+    const { x, y } = isVideoPage ? { x: 0, y: 0 } : nextStackedPosition(width, height);
     const el: VideoElement = {
       id: generateId('el'),
       type: 'video',
@@ -818,6 +828,18 @@ function EditorInner({ navigation }: Props) {
     Linking.openURL(isAbsolute ? trimmed : `https://${trimmed}`);
   };
 
+  // A website page is a real scrolling page that's SUPPOSED to grow taller than one screen --
+  // scrolling it is normal. Logo/Video/Social are each one fixed, single-composition canvas
+  // meant to be seen and edited as a whole, Canva-style, so those auto-scale down to fit the
+  // real visible room around them instead of forcing the user to scroll (or remember to
+  // manually pinch-zoom out) just to see their own page. Never scales UP past 1 -- a small
+  // canvas on a big screen just centers at its real size.
+  const isFixedComposition = project.pageType !== 'website';
+  const fitScale =
+    isFixedComposition && viewportSize.width > 0 && viewportSize.height > 0
+      ? Math.min(1, viewportSize.width / project.canvasSize.width, viewportSize.height / project.canvasSize.height)
+      : 1;
+
   return (
     <CartProvider publishSlug={project.publishSlug}>
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
@@ -942,7 +964,7 @@ function EditorInner({ navigation }: Props) {
         </View>
       ) : (
         <>
-      <View style={styles.canvasArea}>
+      <View style={styles.canvasArea} onLayout={(e) => setViewportSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
         <ScrollView
           ref={canvasScrollRef}
           contentContainerStyle={styles.canvasScroll}
@@ -952,23 +974,40 @@ function EditorInner({ navigation }: Props) {
           pinchGestureEnabled
           scrollEnabled={!canvasInteracting}
         >
-          <Canvas
-            project={displayProject}
-            selectedId={selectedId}
-            onSelect={select}
-            onChange={(id, patch) => updateElement(id, patch as Partial<CanvasElement>)}
-            onDuplicate={duplicateElement}
-            onDelete={confirmDeleteId}
-            onToggleLock={toggleLock}
-            onInteractionChange={setCanvasInteracting}
-            forceLocked={pageLocked}
-            onOpenLink={openLinkInEditor}
-            onNavigateToElement={navigateToElementOnLockedTap}
-            onBackgroundTap={openBackgroundEditor}
-            isLastPage={!pages || pages[pages.length - 1]?.id === activePageId}
-            onExtend={extendCanvas}
-            onScrollToY={(y) => canvasScrollRef.current?.scrollTo({ y: Math.max(0, y - 40), animated: true })}
-          />
+          <View
+            style={
+              isFixedComposition
+                ? { width: project.canvasSize.width * fitScale, height: project.canvasSize.height * fitScale }
+                : undefined
+            }
+          >
+            <View
+              style={
+                isFixedComposition
+                  ? { width: project.canvasSize.width, height: project.canvasSize.height, transform: [{ scale: fitScale }], transformOrigin: 'top left' }
+                  : undefined
+              }
+            >
+              <Canvas
+                project={displayProject}
+                selectedId={selectedId}
+                onSelect={select}
+                onChange={(id, patch) => updateElement(id, patch as Partial<CanvasElement>)}
+                onDuplicate={duplicateElement}
+                onDelete={confirmDeleteId}
+                onToggleLock={toggleLock}
+                onInteractionChange={setCanvasInteracting}
+                forceLocked={pageLocked}
+                onOpenLink={openLinkInEditor}
+                onNavigateToElement={navigateToElementOnLockedTap}
+                onBackgroundTap={openBackgroundEditor}
+                isLastPage={!pages || pages[pages.length - 1]?.id === activePageId}
+                onExtend={extendCanvas}
+                onScrollToY={(y) => canvasScrollRef.current?.scrollTo({ y: Math.max(0, y - 40), animated: true })}
+                scale={fitScale}
+              />
+            </View>
+          </View>
         </ScrollView>
       </View>
 

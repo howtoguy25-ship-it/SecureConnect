@@ -3,15 +3,14 @@ import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndic
 import { showAlert } from '@/utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { CanvasElement, ImageElement, ProductElement, VideoCaption, WidgetKind, WidgetTimezone } from '@/types';
-import { generateId } from '@/utils/id';
+import { CanvasElement, ImageElement, ProductElement, WidgetKind, WidgetTimezone } from '@/types';
 import { useCatalogProduct } from '@/hooks/useCatalogProduct';
 import { resolveProductView } from '@/utils/resolveProduct';
 import { AnalogClockFace, DigitalClockFace, WIDGET_THEME } from '@/components/canvas/WidgetView';
 import ColorSwatchRow from '@/components/inspector/ColorSwatchRow';
 import GradientPickerRow from '@/components/inspector/GradientPickerRow';
 import SliderRow from '@/components/inspector/SliderRow';
-import VideoTimelineEditor from '@/components/inspector/VideoTimelineEditor';
+import VideoEditorModal from '@/components/inspector/VideoEditorModal';
 import { labelForElement } from '@/utils/elementLabel';
 import { FONT_OPTIONS, FontOption } from '@/data/fonts';
 import { useGoogleFont } from '@/utils/useGoogleFont';
@@ -305,78 +304,6 @@ async function pickVideo(): Promise<string | null> {
   return result.assets[0].uri;
 }
 
-const MAX_TRIM_MS = 5 * 60 * 1000;
-
-// Real, working caption list editor -- add/edit/remove timed subtitle lines, each with its
-// own start/end time (clip-relative, same clock as trimStartMs/trimEndMs) via the same
-// SliderRow every other time control here uses. Kept purely as an array of plain values
-// (no separate "current caption index" selection state) since captions are typically edited
-// one at a time in order, not jumped between.
-function VideoCaptionsEditor({
-  captions,
-  trimStartMs,
-  trimEndMs,
-  onChange,
-}: {
-  captions: VideoCaption[];
-  trimStartMs: number;
-  trimEndMs: number | null;
-  onChange: (captions: VideoCaption[]) => void;
-}) {
-  const maxMs = trimEndMs ?? MAX_TRIM_MS;
-  const addCaption = () => {
-    const lastEnd = captions.length > 0 ? captions[captions.length - 1].endMs : trimStartMs;
-    const start = Math.min(lastEnd, Math.max(trimStartMs, maxMs - 3000));
-    onChange([...captions, { id: generateId('caption'), text: '', startMs: start, endMs: Math.min(maxMs, start + 3000) }]);
-  };
-  const updateCaption = (id: string, patch: Partial<VideoCaption>) =>
-    onChange(captions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  const removeCaption = (id: string) => onChange(captions.filter((c) => c.id !== id));
-
-  return (
-    <View>
-      {captions.map((caption, idx) => (
-        <View key={caption.id} style={styles.captionCard}>
-          <View style={styles.captionCardHeader}>
-            <Text style={styles.captionCardTitle}>Caption {idx + 1}</Text>
-            <Pressable onPress={() => removeCaption(caption.id)} hitSlop={8}>
-              <Ionicons name="trash-outline" size={16} color="#DC2626" />
-            </Pressable>
-          </View>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Caption text"
-            value={caption.text}
-            onChangeText={(text) => updateCaption(caption.id, { text })}
-            multiline
-          />
-          <SliderRow
-            label="Starts at (s)"
-            value={caption.startMs / 1000}
-            min={trimStartMs / 1000}
-            max={Math.max(trimStartMs, caption.endMs - 200) / 1000}
-            step={0.1}
-            decimals={1}
-            onChange={(v) => updateCaption(caption.id, { startMs: Math.round(v * 1000) })}
-          />
-          <SliderRow
-            label="Ends at (s)"
-            value={caption.endMs / 1000}
-            min={(caption.startMs + 200) / 1000}
-            max={maxMs / 1000}
-            step={0.1}
-            decimals={1}
-            onChange={(v) => updateCaption(caption.id, { endMs: Math.round(v * 1000) })}
-          />
-        </View>
-      ))}
-      <Pressable style={styles.uploadBtn} onPress={addCaption}>
-        <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-        <Text style={styles.uploadBtnText}>Add Caption</Text>
-      </Pressable>
-    </View>
-  );
-}
 
 // Real AI background remove/change for an already-placed image (see editImageBackground in
 // src/services/uploads.ts). Keyed by element.id where it's used below so switching to a
@@ -517,6 +444,14 @@ export default function ElementInspector({ element, allElements, onChange, onDel
     return sellerAccountStore.subscribe(user.uid, (account) => setSellerCurrency(account?.currency));
   }, [user]);
   const sym = currencySymbol(sellerCurrency);
+  // Full-screen video editor launcher -- see VideoEditorModal's own comment for why the
+  // whole timeline/trim/sound/captions experience moved out of this cramped bottom sheet.
+  // ElementInspector itself isn't remounted per selected element (see ImageBackgroundTools'
+  // own key={element.id} above for the same reason), so this resets explicitly whenever the
+  // selection changes -- otherwise switching from one video to another while this modal
+  // happened to be open would carry that open state over onto the newly selected element.
+  const [videoEditorOpen, setVideoEditorOpen] = useState(false);
+  useEffect(() => setVideoEditorOpen(false), [element.id]);
 
   return (
     <View style={styles.container}>
@@ -752,127 +687,20 @@ export default function ElementInspector({ element, allElements, onChange, onDel
             </Pressable>
 
             {!!element.uri && (
-              <>
-                <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Timeline Editor</Text>
-                <Text style={styles.helperText}>
-                  Real cut/split, freeze-frame, and a live scrub preview -- see exactly where you're editing.
-                </Text>
-                <VideoTimelineEditor
-                  uri={element.uri}
-                  segments={element.segments ?? []}
-                  trimStartMs={element.trimStartMs}
-                  trimEndMs={element.trimEndMs}
-                  onChange={(segments) => onChange({ segments } as any)}
-                />
-              </>
+              <Pressable style={[styles.uploadBtn, styles.editVideoBtn]} onPress={() => setVideoEditorOpen(true)}>
+                <Ionicons name="film-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.uploadBtnText}>Edit Video</Text>
+              </Pressable>
             )}
-
-            <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Basic Trim</Text>
-            <Text style={styles.helperText}>Where the clip starts/ends before any cuts -- ignored once you've split or frozen the timeline above.</Text>
-            <SliderRow
-              label="Trim Start (s)"
-              value={element.trimStartMs / 1000}
-              min={0}
-              max={MAX_TRIM_MS / 1000}
-              step={0.5}
-              decimals={1}
-              onChange={(v) => onChange({ trimStartMs: Math.round(v * 1000) } as any)}
-            />
-            <Pressable
-              style={[styles.toggleBtn, element.trimEndMs == null && styles.toggleBtnActive]}
-              onPress={() => onChange({ trimEndMs: element.trimEndMs == null ? element.trimStartMs + 5000 : null } as any)}
-            >
-              <Text style={styles.toggleBtnText}>
-                {element.trimEndMs == null ? 'Playing to natural end' : 'Trimmed end — tap for full clip'}
-              </Text>
-            </Pressable>
-            {element.trimEndMs != null && (
-              <SliderRow
-                label="Trim End (s)"
-                value={element.trimEndMs / 1000}
-                min={(element.trimStartMs + 500) / 1000}
-                max={MAX_TRIM_MS / 1000}
-                step={0.5}
-                decimals={1}
-                onChange={(v) => onChange({ trimEndMs: Math.round(v * 1000) } as any)}
-              />
-            )}
-
-            <View style={styles.rowButtons}>
-              <Pressable
-                style={[styles.toggleBtn, element.muted && styles.toggleBtnActive]}
-                onPress={() => onChange({ muted: !element.muted } as any)}
-              >
-                <Text style={styles.toggleBtnText}>{element.muted ? 'Muted' : 'Sound On'}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.toggleBtn, element.loop && styles.toggleBtnActive]}
-                onPress={() => onChange({ loop: !element.loop } as any)}
-              >
-                <Text style={styles.toggleBtnText}>Loop {element.loop ? 'On' : 'Off'}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.toggleBtn, element.autoPlay && styles.toggleBtnActive]}
-                // Browsers/native players only allow autoplay when muted -- turning this on
-                // forces mute too, rather than silently failing to autoplay later.
-                onPress={() => onChange({ autoPlay: !element.autoPlay, ...(!element.autoPlay ? { muted: true } : null) } as any)}
-              >
-                <Text style={styles.toggleBtnText}>Autoplay {element.autoPlay ? 'On' : 'Off'}</Text>
-              </Pressable>
-            </View>
-
-            <Text style={styles.fieldLabel}>Preview length</Text>
             <Text style={styles.helperText}>
-              Loop just the first few seconds instead of the whole clip -- a short preview instead of the full video.
+              Timeline cuts/freezes, trim, sound, loop, autoplay, preview length, sound source, and captions -- all in
+              one full-screen editor.
             </Text>
-            <View style={styles.rowButtons}>
-              {([null, 3, 5, 10] as const).map((seconds) => (
-                <Pressable
-                  key={String(seconds)}
-                  style={[styles.toggleBtn, element.previewSeconds === seconds && styles.toggleBtnActive]}
-                  onPress={() => onChange({ previewSeconds: seconds } as any)}
-                >
-                  <Text style={styles.toggleBtnText}>{seconds == null ? 'Full clip' : `${seconds}s`}</Text>
-                </Pressable>
-              ))}
-            </View>
 
-            <Text style={styles.fieldLabel}>Sound source (optional)</Text>
-            <Pressable
-              style={styles.uploadBtn}
-              onPress={async () => {
-                const uri = await pickVideo();
-                if (uri) onChange({ audioUri: uri } as any);
-              }}
-            >
-              <Ionicons name="musical-notes-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.uploadBtnText}>{element.audioUri ? 'Replace Sound Source' : 'Pick a Clip for Its Audio'}</Text>
-            </Pressable>
-            {element.audioUri && (
-              <>
-                <Pressable style={styles.removeChip} onPress={() => onChange({ audioUri: null } as any)}>
-                  <Text style={styles.removeChipText}>Remove sound source ✕</Text>
-                </Pressable>
-                <SliderRow
-                  label="Sound Source Volume"
-                  value={element.audioVolume}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  onChange={(v) => onChange({ audioVolume: v } as any)}
-                />
-              </>
-            )}
-
-            <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Captions</Text>
-            <Text style={styles.helperText}>
-              Real, timed subtitles -- each one shows while playback is between its start and end time, then hides.
-            </Text>
-            <VideoCaptionsEditor
-              captions={element.captions ?? []}
-              trimStartMs={element.trimStartMs}
-              trimEndMs={element.trimEndMs}
-              onChange={(captions) => onChange({ captions } as any)}
+            <VideoEditorModal
+              element={videoEditorOpen ? element : null}
+              onChange={(patch) => onChange(patch as any)}
+              onClose={() => setVideoEditorOpen(false)}
             />
           </>
         )}
@@ -1731,6 +1559,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   uploadBtnText: { color: '#FFFFFF', fontWeight: '600' },
+  editVideoBtn: { backgroundColor: '#4338CA' },
   productSummaryCard: {
     flexDirection: 'row',
     alignItems: 'center',

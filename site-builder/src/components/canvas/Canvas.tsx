@@ -205,6 +205,10 @@ interface Props {
   onExtend?: () => void;
   // See DraggableElement's onScrollToY comment.
   onScrollToY?: (y: number) => void;
+  // See DraggableElement's identical `scale` comment -- passed straight through to every
+  // element so drag/resize gestures stay 1:1 with the finger even when EditorScreen has
+  // visually shrunk the whole canvas to fit the screen (Logo/Video/Social pages).
+  scale?: number;
 }
 
 export default function Canvas({
@@ -223,6 +227,7 @@ export default function Canvas({
   isLastPage = true,
   onExtend,
   onScrollToY,
+  scale = 1,
 }: Props) {
   const [outlineVisible, setOutlineVisible] = useState(false);
   // Selecting any element means the user is back to actively designing -- hide the outline so
@@ -285,6 +290,7 @@ export default function Canvas({
           onNavigateToElement={onNavigateToElement ?? onSelect}
           onOpenLink={onOpenLink}
           onScrollToY={onScrollToY}
+          scale={scale}
         />
       ))}
     </>
