@@ -39,7 +39,7 @@ export function NavigationInstructionCard({ step, etaText, distanceRemainingText
   return (
     <View style={[styles.card, { top: insets.top + spacing.md }]}>
       <View style={styles.iconWrap}>
-        <Ionicons name={icon} size={28} color="#FFFFFF" />
+        <Ionicons name={icon} size={30} color="#FFFFFF" />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.instruction} numberOfLines={2}>
@@ -84,8 +84,9 @@ const styles = StyleSheet.create({
   },
   instruction: {
     color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
   meta: {
     color: colors.textFaint,

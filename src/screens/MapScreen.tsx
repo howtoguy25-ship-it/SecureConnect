@@ -65,6 +65,14 @@ export function MapScreen() {
   // web version layers its own Map3DElement over the classic 2D map.
   const [show3D, setShow3D] = useState(false);
 
+  // Apple-Maps-style close-follow camera: tilted, zoomed in, rotates to match the direction
+  // of travel. Uses react-native-maps' own `camera`/`animateCamera` API (pitch/heading/zoom),
+  // NOT the custom Map3DView module above -- this works on both providers (Apple MapKit on
+  // iOS, Google Maps on Android) with zero native-module risk, which matters given the iOS
+  // crash history around the custom 3D module. Defaults on whenever navigation starts, and
+  // the user can drop back to a flat top-down view without exiting navigation entirely.
+  const [followTilt, setFollowTilt] = useState(true);
+
   const currentLatLng = useMemo(
     () =>
       location
@@ -72,6 +80,37 @@ export function MapScreen() {
         : null,
     [location]
   );
+
+  const heading = location?.coords.heading != null && location.coords.heading >= 0
+    ? location.coords.heading
+    : 0;
+
+  // Guards the very first tick after a route starts so the fitToCoordinates overview (below,
+  // in onDestinationSelected) gets a moment on screen before the camera snaps into the tilted
+  // close-follow -- same "show the whole route, then follow" beat Apple Maps uses.
+  const navStartedAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!route || !followTilt || !currentLatLng) return;
+    if (Date.now() - navStartedAtRef.current < 1200) return;
+    mapRef.current?.animateCamera(
+      { center: currentLatLng, heading, pitch: 60, zoom: 18 },
+      { duration: 600 }
+    );
+  }, [route, followTilt, currentLatLng, heading]);
+
+  const toggleFollowTilt = useCallback(() => {
+    setFollowTilt((was) => {
+      const next = !was;
+      if (!next && currentLatLng) {
+        mapRef.current?.animateCamera(
+          { center: currentLatLng, heading: 0, pitch: 0, zoom: 15 },
+          { duration: 500 }
+        );
+      }
+      return next;
+    });
+  }, [currentLatLng]);
 
   // Subscribe to nearby alerts (Phase 3 + Phase 5) whenever position or radius changes meaningfully.
   useEffect(() => {
@@ -158,6 +197,8 @@ export function MapScreen() {
       guidanceRef.current = createGuidanceState();
       setActiveStepIndex(0);
       setRoute(newRoute);
+      navStartedAtRef.current = Date.now();
+      setFollowTilt(true);
       mapRef.current?.fitToCoordinates(newRoute.polyline, {
         edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
         animated: true,
@@ -170,6 +211,7 @@ export function MapScreen() {
     stopSpeaking();
     setRoute(null);
     setActiveStepIndex(0);
+    setFollowTilt(true);
   }, []);
 
   const onShareAlert = useCallback(
@@ -258,7 +300,24 @@ export function MapScreen() {
         />
       )}
 
-      <View style={[styles.topRightControls, { top: insets.top + spacing.md }]}>
+      {/* Pushed below the instruction card while navigating (instead of sharing its top
+          offset) so it never overlaps the turn text -- it used to sit at the same `top` as
+          the full-width card and render on top of its right edge. */}
+      <View
+        style={[
+          styles.topRightControls,
+          { top: insets.top + spacing.md + (route ? 96 : 0) },
+        ]}
+      >
+        {route && (
+          <Pressable
+            style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
+            onPress={toggleFollowTilt}
+            accessibilityLabel={followTilt ? "Exit close-follow view" : "Resume close-follow view"}
+          >
+            <Ionicons name={followTilt ? "close" : "navigate"} size={20} color={colors.text} />
+          </Pressable>
+        )}
         <MuteButton />
         <Pressable
           style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
