@@ -215,9 +215,23 @@ export default function PublishScreen({ navigation, route }: Props) {
           </View>
 
           {isPublished && publishedUrl && (
-            <Pressable onPress={() => Share.share({ message: publishedUrl, url: publishedUrl })}>
-              <Text style={styles.link}>{publishedUrl}</Text>
-            </Pressable>
+            <View style={styles.linkRow}>
+              {/* Tapping the link itself now actually visits the live site, matching what a
+                  displayed URL is expected to do -- it used to only ever open the native Share
+                  sheet, with no way to just open the page. Share moved to its own icon button. */}
+              <Pressable style={styles.linkTextWrap} onPress={() => Linking.openURL(publishedUrl)}>
+                <Text style={styles.link} numberOfLines={1}>
+                  {publishedUrl}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.shareIconBtn}
+                onPress={() => Share.share({ message: publishedUrl, url: publishedUrl })}
+                hitSlop={8}
+              >
+                <Ionicons name="share-outline" size={18} color="#4338CA" />
+              </Pressable>
+            </View>
           )}
 
           {!isPublished && (
@@ -355,7 +369,17 @@ const styles = StyleSheet.create({
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
   cardBody: { fontSize: 13, color: '#64748B', marginTop: 10, lineHeight: 19 },
-  link: { fontSize: 14, color: '#4338CA', fontWeight: '700', marginTop: 10 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  linkTextWrap: { flex: 1 },
+  link: { fontSize: 14, color: '#4338CA', fontWeight: '700' },
+  shareIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   input: {
     marginTop: 14,
     borderWidth: 1,

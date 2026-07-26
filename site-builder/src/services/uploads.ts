@@ -23,6 +23,28 @@ export async function uploadLocalImage(uri: string): Promise<string> {
   return result.data.url;
 }
 
+// A large video's PUT to the signed URL is the one step in this whole flow with no retry of
+// its own (unlike the onCall above, which the Firebase SDK already retries/times-out
+// sensibly) -- on a real phone's flaky mobile connection a single dropped packet mid-upload
+// used to fail the entire publish immediately. Three attempts with a short backoff absorbs a
+// transient blip instead of surfacing "Upload failed" for something that would have gone
+// through on a second try.
+async function putWithRetry(url: string, contentType: string, body: Blob): Promise<Response> {
+  const attempts = 3;
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': contentType }, body });
+      if (res.ok) return res;
+      lastError = new Error(`Upload failed with status ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 800 * (i + 1)));
+  }
+  throw lastError instanceof Error ? lastError : new Error('Upload failed — try again.');
+}
+
 // Video/audio clips are typically too large for the base64-over-onCall approach above --
 // this instead gets a short-lived signed PUT URL from Cloud Functions and uploads the
 // file's bytes straight to Storage, sidestepping onCall's request-size ceiling.
@@ -38,12 +60,8 @@ export async function uploadLocalVideo(uri: string): Promise<string> {
   const { data } = await call({ contentType, extension });
 
   const blob = await (await fetch(uri)).blob();
-  const putResult = await fetch(data.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': contentType },
-    body: blob,
-  });
-  if (!putResult.ok) throw new Error('Upload failed — try again.');
+  const putResult = await putWithRetry(data.uploadUrl, contentType, blob).catch(() => null);
+  if (!putResult || !putResult.ok) throw new Error('Upload failed — try again.');
 
   return data.readUrl;
 }

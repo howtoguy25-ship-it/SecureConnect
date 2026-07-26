@@ -110,6 +110,12 @@ export default function VideoTimelineEditor({
     p.timeUpdateEventInterval = 0.05;
   });
   const [isPlaying, setIsPlaying] = useState(false);
+  // The preview starts muted (so opening the editor never blasts sound unexpectedly), but a
+  // real small icon toggle -- not a text button -- lets you actually hear it while scrubbing.
+  const [previewMuted, setPreviewMuted] = useState(true);
+  useEffect(() => {
+    previewPlayer.muted = previewMuted;
+  }, [previewPlayer, previewMuted]);
   const [durationMs, setDurationMs] = useState<number | null>(trimEndMs);
   useEffect(() => {
     const sub = previewPlayer.addListener('statusChange', (payload) => {
@@ -294,6 +300,9 @@ export default function VideoTimelineEditor({
             <Ionicons name={isPlaying ? 'pause' : 'play'} size={26} color="#FFFFFF" style={isPlaying ? undefined : styles.playIconNudge} />
           </View>
         </Pressable>
+        <Pressable style={styles.previewMuteBtn} onPress={() => setPreviewMuted((m) => !m)} hitSlop={8}>
+          <Ionicons name={previewMuted ? 'volume-mute' : 'volume-high'} size={14} color="#FFFFFF" />
+        </Pressable>
         <View style={styles.previewBadge}>
           <Ionicons name="eye-outline" size={12} color="#FFFFFF" />
           <Text style={styles.previewBadgeText}>{(playheadMs / 1000).toFixed(1)}s / {totalSec.toFixed(1)}s</Text>
@@ -398,6 +407,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   previewBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
+  previewMuteBtn: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(15,23,42,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   scrubHint: { fontSize: 11, color: '#94A3B8', marginBottom: 4 },
   timelineWrap: { height: 68, justifyContent: 'center' },
   timelineRow: { gap: SEG_GAP, alignItems: 'center' },
