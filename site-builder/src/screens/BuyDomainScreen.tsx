@@ -194,14 +194,15 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
             won't be publicly visible.
           </Text>
 
-          <TextInput style={styles.input} placeholder="First name" value={contact.firstName} onChangeText={(v) => setContact({ ...contact, firstName: v })} />
-          <TextInput style={styles.input} placeholder="Last name" value={contact.lastName} onChangeText={(v) => setContact({ ...contact, lastName: v })} />
-          <TextInput style={styles.input} placeholder="Address" value={contact.address1} onChangeText={(v) => setContact({ ...contact, address1: v })} />
-          <TextInput style={styles.input} placeholder="City" value={contact.city} onChangeText={(v) => setContact({ ...contact, city: v })} />
-          <TextInput style={styles.input} placeholder="State / Province" value={contact.stateProvince} onChangeText={(v) => setContact({ ...contact, stateProvince: v })} />
-          <TextInput style={styles.input} placeholder="Postal code" value={contact.postalCode} onChangeText={(v) => setContact({ ...contact, postalCode: v })} />
+          <TextInput style={styles.input} placeholderTextColor="#0F172A" placeholder="First name" value={contact.firstName} onChangeText={(v) => setContact({ ...contact, firstName: v })} />
+          <TextInput style={styles.input} placeholderTextColor="#0F172A" placeholder="Last name" value={contact.lastName} onChangeText={(v) => setContact({ ...contact, lastName: v })} />
+          <TextInput style={styles.input} placeholderTextColor="#0F172A" placeholder="Address" value={contact.address1} onChangeText={(v) => setContact({ ...contact, address1: v })} />
+          <TextInput style={styles.input} placeholderTextColor="#0F172A" placeholder="City" value={contact.city} onChangeText={(v) => setContact({ ...contact, city: v })} />
+          <TextInput style={styles.input} placeholderTextColor="#0F172A" placeholder="State / Province" value={contact.stateProvince} onChangeText={(v) => setContact({ ...contact, stateProvince: v })} />
+          <TextInput style={styles.input} placeholderTextColor="#0F172A" placeholder="Postal code" value={contact.postalCode} onChangeText={(v) => setContact({ ...contact, postalCode: v })} />
           <TextInput
             style={styles.input}
+            placeholderTextColor="#0F172A"
             placeholder="Country code (e.g. AU, US)"
             value={contact.country}
             onChangeText={(v) => setContact({ ...contact, country: v.toUpperCase().slice(0, 2) })}
@@ -210,6 +211,7 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
           />
           <TextInput
             style={styles.input}
+            placeholderTextColor="#0F172A"
             placeholder="Phone (+61.412345678)"
             value={contact.phone}
             onChangeText={(v) => setContact({ ...contact, phone: v })}
@@ -217,6 +219,7 @@ export default function BuyDomainScreen({ navigation, route }: Props) {
           />
           <TextInput
             style={styles.input}
+            placeholderTextColor="#0F172A"
             placeholder="Email"
             value={contact.emailAddress}
             onChangeText={(v) => setContact({ ...contact, emailAddress: v })}
