@@ -1,14 +1,19 @@
-import { Platform } from "react-native";
+import { Alert, Platform } from "react-native";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/services/firebase";
 
-// Apple's own crash reports (.ips files, via Settings -> Analytics Data) only capture the
-// *native* call stack -- when a fatal error originates on the JS side (which is what's been
-// happening: the reports all show the generic RCTExceptionsManager reportFatal: frames, not
-// the actual JS error message or stack), there's no way to see what actually went wrong from
-// the .ips file alone. This hooks React Native's own global JS error handler and best-effort
-// reports the real message/stack to Firestore before the app goes down, so the next crash is
-// actually diagnosable instead of another guessing round.
+// Every crash log seen across this whole debugging cycle -- ads, and now a completely
+// unrelated camera/turbomodule call -- ends in the exact same native frames:
+// `-[RCTExceptionsManager reportFatal:stack:exceptionId:extraDataAsJSON:]` followed by an
+// uncaught ObjC exception and abort(). That's React Native's OWN "please report this fatal
+// JS error" native method crashing while trying to report it -- not the original error
+// itself. Forwarding fatal errors to React Native's default handler is what reaches that
+// broken method and takes the whole app down, regardless of what actually threw in JS.
+//
+// So: still log the real JS error/stack to Firestore for diagnosis (Apple's .ips files never
+// capture it), but for fatal errors specifically, deliberately do NOT hand off to the default
+// handler -- surface it to the user instead and let the app keep running, rather than
+// guaranteed-crashing every time something on the JS side throws fatally.
 export function installCrashReporter(): void {
   const g = globalThis as unknown as {
     ErrorUtils?: { setGlobalHandler: (fn: (error: unknown, isFatal?: boolean) => void) => void; getGlobalHandler?: () => (error: unknown, isFatal?: boolean) => void };
@@ -19,11 +24,21 @@ export function installCrashReporter(): void {
 
   g.ErrorUtils.setGlobalHandler((error, isFatal) => {
     reportCrash(error, isFatal).catch(() => {
-      // Best-effort only -- if the report write itself fails (e.g. offline, or the crash
-      // happened before Firebase finished initializing), there's nothing more useful to do
-      // than let the original handler run.
+      // Best-effort only -- if the report write itself fails (e.g. offline), there's nothing
+      // more useful to do here.
     });
-    previousHandler?.(error, isFatal);
+
+    if (!isFatal) {
+      previousHandler?.(error, isFatal);
+      return;
+    }
+
+    console.error("[fatal, recovered]", error);
+    Alert.alert(
+      "Something went wrong",
+      "TrackLine hit an unexpected error but has recovered. If anything looks off, restart the app.",
+      [{ text: "OK" }]
+    );
   });
 }
 
