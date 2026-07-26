@@ -118,6 +118,18 @@ module.exports = {
         },
       ],
       "./modules/map3d/plugin/withGoogleMaps3DSignatureFix.js",
+      // Only uploads debug symbols/source maps during EAS builds once org/project/authToken
+      // are set (from sentry.io -- Settings -> Auth Tokens for the token) -- harmless no-op
+      // config without them, Sentry.init() below still works and reports crashes either way,
+      // just with unsymbolicated (minified) JS stack traces until these are filled in.
+      [
+        "@sentry/react-native",
+        {
+          organization: process.env.SENTRY_ORG,
+          project: process.env.SENTRY_PROJECT,
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+        },
+      ],
       [
         "react-native-google-mobile-ads",
         {
@@ -145,6 +157,7 @@ module.exports = {
       admobBannerIosUnitId: process.env.ADMOB_IOS_BANNER_UNIT_ID,
       admobAppOpenAndroidUnitId: process.env.ADMOB_ANDROID_APP_OPEN_UNIT_ID,
       admobAppOpenIosUnitId: process.env.ADMOB_IOS_APP_OPEN_UNIT_ID,
+      sentryDsn: process.env.SENTRY_DSN,
       eas: {
         // Not a secret -- EAS project IDs are meant to live directly in config, which is
         // also the only way `eas build`/`eas submit` can reliably find it, since this file

@@ -37,4 +37,7 @@ export const env = {
       (Platform.OS === "android" ? extra.admobAppOpenAndroidUnitId : extra.admobAppOpenIosUnitId) ||
       TestIds.APP_OPEN,
   },
+  // Optional -- Sentry.init() below is a no-op without this, so an empty string here just
+  // means crash reporting stays Firestore-only rather than breaking anything.
+  sentryDsn: extra.sentryDsn ?? "",
 };
