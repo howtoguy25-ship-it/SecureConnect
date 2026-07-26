@@ -587,6 +587,122 @@ export function ProductDetailModal({ element, onClose }: { element: ProductEleme
   );
 }
 
+// One cell of the full-screen collection grid below -- image, badge/discount, name, price,
+// and its own real buy/cart button(s), sized to whatever column width the grid computes so 2
+// cards sit cleanly side by side with no overlap regardless of screen width.
+function CollectionGridCard({ productElement, cardWidth }: { productElement: ProductElement; cardWidth: number }) {
+  const catalogProduct = useCatalogProduct(productElement.productId);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const sym = useSellerCurrencySymbol();
+  const nameFont = useGoogleFont(productElement.nameFontFamily);
+  const priceFont = useGoogleFont(productElement.priceFontFamily);
+
+  if (catalogProduct === undefined) {
+    return (
+      <View style={[styles.placeholder, { width: cardWidth, height: cardWidth, borderRadius: 10 }]}>
+        <ActivityIndicator size="small" color="#94A3B8" />
+      </View>
+    );
+  }
+
+  const product = resolveProductView(productElement, catalogProduct);
+  const inStock = product.inStock !== false;
+
+  return (
+    <View style={{ width: cardWidth, marginBottom: 20 }}>
+      <ProductCardGallery images={product.images} width={cardWidth} height={cardWidth} compact />
+      {!inStock && (
+        <View style={styles.outOfStockBadge}>
+          <Text style={styles.outOfStockBadgeText}>Out of stock</Text>
+        </View>
+      )}
+      <Text numberOfLines={1} style={{ fontSize: 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase', marginTop: 6 }}>
+        {productBadge(product)}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{ fontWeight: '700', fontSize: 13, color: '#0F172A', marginTop: 2, ...(nameFont ? { fontFamily: nameFont } : null) }}
+      >
+        {product.name || 'Untitled product'}
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: '#4338CA', ...(priceFont ? { fontFamily: priceFont } : null) }}>
+          {sym}{product.priceUsd.toFixed(2)}
+        </Text>
+        {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
+          <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+            {sym}{product.compareAtPriceUsd.toFixed(2)}
+          </Text>
+        )}
+      </View>
+      <ProductBuyButtons product={product} compact />
+      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
+    </View>
+  );
+}
+
+// A real full-screen Shopify-style collection page -- a 2-per-row grid, not the cramped
+// name+price list this used to open, so a button/card that links to several products at once
+// shows every one of them fully framed (real photo, price with any discount, its own buy/cart
+// button) with real room to breathe, never overlapping or clipping each other. Mirrors
+// ProductDetailModal's exact header/mounting convention (nullable `element`, mount once) so
+// both the manual "i" tap and a locked button linking to this collection land on the same
+// real page.
+export function CollectionDetailModal({
+  element,
+  allElements,
+  onClose,
+}: {
+  element: CollectionElement | null;
+  allElements: CanvasElement[];
+  onClose: () => void;
+}) {
+  const [gridWidth, setGridWidth] = useState(0);
+  const GRID_GAP = 14;
+  const GRID_PADDING = 20;
+  // gridWidth is measured off the ScrollView's own outer box (onLayout below), which is
+  // BEFORE its contentContainerStyle padding is subtracted -- so the real usable width for
+  // the 2-column grid is gridWidth minus that padding on both sides, not gridWidth itself.
+  const contentWidth = gridWidth > 0 ? gridWidth - GRID_PADDING * 2 : 0;
+  const cardWidth = contentWidth > 0 ? (contentWidth - GRID_GAP) / 2 : 0;
+  const products = element
+    ? element.productIds
+        .map((id) => allElements.find((el) => el.id === id))
+        .filter((el): el is ProductElement => !!el && el.type === 'product')
+    : [];
+
+  return (
+    <Modal visible={!!element} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      <View style={styles.pdpScreen}>
+        <View style={styles.pdpHeader}>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Ionicons name="chevron-back" size={26} color="#0F172A" />
+          </Pressable>
+          <Text style={styles.pdpHeaderTitle} numberOfLines={1}>
+            {element?.name || 'Collection'}
+          </Text>
+          <View style={{ width: 26 }} />
+        </View>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ padding: 20 }}
+          onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}
+        >
+          {products.length === 0 ? (
+            <Text style={styles.detailDescription}>No products in this collection yet.</Text>
+          ) : gridWidth > 0 ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              {products.map((p) => (
+                <CollectionGridCard key={p.id} productElement={p} cardWidth={cardWidth} />
+              ))}
+            </View>
+          ) : null}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 function ProductCardView({ element, width, height, locked }: { element: ProductElement; width: number; height: number; locked?: boolean }) {
   const [showDetail, setShowDetail] = useState(false);
   const catalogProduct = useCatalogProduct(element.productId);
@@ -775,72 +891,6 @@ function CollectionThumb({ productElement, width, height, iconSize }: { productE
   );
 }
 
-function CollectionDetailRow({ productElement, sym }: { productElement: ProductElement; sym: string }) {
-  const catalogProduct = useCatalogProduct(productElement.productId);
-  const nameFont = useGoogleFont(productElement.nameFontFamily);
-  const priceFont = useGoogleFont(productElement.priceFontFamily);
-  const [viewingImage, setViewingImage] = useState<string | null>(null);
-  const product = resolveProductView(productElement, catalogProduct ?? null);
-  return (
-    <View
-      style={{
-        paddingVertical: 10,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#E2E8F0',
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Pressable onPress={() => product.images[0] && setViewingImage(product.images[0])} disabled={!product.images[0]}>
-          {product.images[0] ? (
-            <Image source={{ uri: product.images[0] }} style={{ width: 64, height: 64, borderRadius: 10 }} resizeMode="cover" />
-          ) : (
-            <View style={[styles.placeholder, { width: 64, height: 64 }]}>
-              <Ionicons name="pricetag-outline" size={20} color="#94A3B8" />
-            </View>
-          )}
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontWeight: '700',
-              fontSize: productElement.nameFontSize ?? 14,
-              color: '#0F172A',
-              ...(nameFont ? { fontFamily: nameFont } : null),
-            }}
-          >
-            {product.name || 'Untitled product'}
-          </Text>
-          {!!product.description && (
-            <Text numberOfLines={2} style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
-              {product.description}
-            </Text>
-          )}
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-            <Text
-              style={{
-                fontSize: productElement.priceFontSize ?? 13,
-                color: '#4338CA',
-                fontWeight: '700',
-                ...(priceFont ? { fontFamily: priceFont } : null),
-              }}
-            >
-              {sym}{product.priceUsd.toFixed(2)}
-            </Text>
-            {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
-              <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
-                {sym}{product.compareAtPriceUsd.toFixed(2)}
-              </Text>
-            )}
-          </View>
-        </View>
-      </View>
-      <ProductBuyButtons product={product} compact />
-      <FullImageLightbox uri={viewingImage} onClose={() => setViewingImage(null)} />
-    </View>
-  );
-}
-
 function CollectionView({
   element,
   allElements,
@@ -863,7 +913,6 @@ function CollectionView({
   const showGrid = height - MIN_TEXT_AREA >= 28;
   const gridHeight = showGrid ? Math.min(height * 0.55, height - MIN_TEXT_AREA) : 0;
   const thumbs = products.slice(0, 4);
-  const sym = useSellerCurrencySymbol();
 
   return (
     // See ProductCardView's identical Pressable wrap for why -- lets a locked collection card
@@ -905,24 +954,11 @@ function CollectionView({
         <Ionicons name="information" size={13} color="#FFFFFF" />
       </Pressable>
 
-      <Modal visible={showDetail} transparent animationType="fade" onRequestClose={() => setShowDetail(false)}>
-        <View style={styles.detailBackdrop}>
-          <View style={styles.detailCard}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.detailBadge}>Collection</Text>
-              <Text style={styles.detailName}>{element.name || 'Untitled collection'}</Text>
-              {products.length === 0 ? (
-                <Text style={styles.detailDescription}>No products added yet — edit this collection to pick some.</Text>
-              ) : (
-                products.map((p) => <CollectionDetailRow key={p.id} productElement={p} sym={sym} />)
-              )}
-            </ScrollView>
-            <Pressable style={styles.detailCloseBtn} onPress={() => setShowDetail(false)}>
-              <Text style={styles.detailCloseBtnText}>Close</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <CollectionDetailModal
+        element={showDetail ? element : null}
+        allElements={allElements}
+        onClose={() => setShowDetail(false)}
+      />
     </Pressable>
   );
 }

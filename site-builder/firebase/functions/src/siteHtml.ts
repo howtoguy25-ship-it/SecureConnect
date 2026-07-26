@@ -2043,24 +2043,23 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
         return `<a href="#" onclick="window.scrollTo({top:${el.scrollToY},behavior:'smooth'});return false;" style="${buttonStyle}">${escapeHtml(el.label)}</a>`;
       }
       // A linked Product/Collection takes priority over a raw URL (the inspector already
-      // keeps them mutually exclusive). A Collection still just jumps to its own real card
-      // further down the page via its id="el-{id}" anchor. A Product is different: it opens
-      // that product's real full-screen detail overlay (see the 'product' case's
-      // productDetailOverlay below) -- a genuine separate page-like view (swipeable gallery,
-      // name, discount pricing, description, buy action), matching what tapping the same
-      // button on a real e-commerce site does, instead of just scrolling to a small card.
-      // Only a real, non-empty link/target renders as a clickable <a> -- a button with
-      // nothing set stays a plain div, exactly as before this field existed, instead of a
-      // dead link that goes nowhere or reloads the page.
+      // keeps them mutually exclusive) -- both open their own real full-screen overlay
+      // (a Product's swipeable-gallery detail page, see the 'product' case's
+      // productDetailOverlay below; a Collection's real 2-column product grid, see the
+      // 'collection' case above) instead of just scrolling to a small card, matching what
+      // tapping the same button on a real e-commerce site does. Only a real, non-empty
+      // link/target renders as a clickable <a> -- a button with nothing set stays a plain
+      // div, exactly as before this field existed, instead of a dead link that goes nowhere
+      // or reloads the page.
       const linkTarget = el.linkTargetElementId ? allElements.find((sib) => sib.id === el.linkTargetElementId) : null;
-      if (linkTarget?.type === 'product') {
-        const detailOverlayId = `product-detail-${linkTarget.id}`;
+      if (linkTarget?.type === 'product' || linkTarget?.type === 'collection') {
+        const overlayId = linkTarget.type === 'product' ? `product-detail-${linkTarget.id}` : `collection-modal-${linkTarget.id}`;
         // JSON.stringify's own double-quoted output must be HTML-entity-escaped (escapeAttr)
         // before landing inside this onclick="..." attribute, which is itself double-quoted
         // -- otherwise the embedded raw " characters close the attribute early and corrupt
         // the tag, silently breaking this click handler (confirmed via a real HTML-parser
         // round-trip, not assumed).
-        return `<a href="#" onclick="var m=document.getElementById(${escapeAttr(JSON.stringify(detailOverlayId))});if(m){m.style.display='flex';}return false;" style="${buttonStyle}">${escapeHtml(el.label)}</a>`;
+        return `<a href="#" onclick="var m=document.getElementById(${escapeAttr(JSON.stringify(overlayId))});if(m){m.style.display='flex';}return false;" style="${buttonStyle}">${escapeHtml(el.label)}</a>`;
       }
       const href = el.linkTargetElementId ? `#el-${el.linkTargetElementId}` : el.link?.trim() ? safeUrl(el.link) : null;
       return href
@@ -2598,30 +2597,54 @@ ${productDetailOverlay}`;
             : `<div style="width:50%;height:50%;background:#F1F5F9;"></div>`
         )
         .join('');
-      // Bigger thumb + a description snippet (not just name/price) so a collection's member
-      // list reads as real product previews rather than a scrunched, uninformative row --
-      // still links out to that product's own full card (or full PDP, if it's alone on its
-      // own page) via its #el-{id} anchor rather than duplicating a whole PDP in this modal.
-      const rows = members.length
+      // A real full-screen Shopify-style grid -- 2 products per row, each fully framed (real
+      // photo, price with any discount, its own real buy/cart action) with real room to
+      // breathe, replacing the old cramped name+price list this used to open. Non-variant
+      // products buy directly from the grid; a variant product instead jumps to its own real
+      // card (which has the real variant picker) via its #el-{id} anchor, same deferral
+      // the single-product detail overlay above uses for the same reason.
+      const gridCards = members.length
         ? members
-            .map(
-              ({ id, product: p }) => `<a href="#el-${id}" onclick="document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='none';" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #E2E8F0;text-decoration:none;color:inherit;">
-  ${
-    p.images[0]
-      ? `<img src="${escapeAttr(p.images[0])}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;" />`
-      : `<div style="width:64px;height:64px;border-radius:10px;background:#F1F5F9;flex-shrink:0;"></div>`
-  }
-  <div style="flex:1;min-width:0;">
-    <div style="font-weight:700;font-size:14px;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name || 'Untitled product')}</div>
-    ${p.description ? `<div style="font-size:12px;color:#64748B;margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(p.description)}</div>` : ''}
-    <div style="font-size:13px;color:#4338CA;font-weight:700;margin-top:2px;">${sym}${p.priceUsd.toFixed(2)}${
-      p.compareAtPriceUsd != null && p.compareAtPriceUsd > p.priceUsd
-        ? ` <span style="font-size:11px;color:#94A3B8;font-weight:400;text-decoration:line-through;">${sym}${p.compareAtPriceUsd.toFixed(2)}</span>`
-        : ''
-    }</div>
-  </div>
-</a>`
-            )
+            .map(({ id, product: p }) => {
+              const isReady = !!p.name?.trim() && p.priceUsd > 0;
+              const hasVariants = p.variantOptions.length > 0;
+              const isService = p.saleType === 'service';
+              const buyMode: BuyButtonMode = p.buyButtonMode ?? 'cart';
+              const showBuyNow = buyMode === 'buyNow' || buyMode === 'both';
+              const showCart = buyMode === 'cart' || buyMode === 'both';
+              const closeGrid = `document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='none';`;
+              // Every JSON.stringify(...) here sits inside a double-quoted onclick="..."
+              // attribute -- escapeAttr entity-encodes its raw double quotes (p.name can
+              // contain real quotes/apostrophes a seller typed) so the browser's HTML parser
+              // never treats them as closing the attribute early and corrupting the tag.
+              const buyAction = !isReady
+                ? `<button disabled style="width:100%;box-sizing:border-box;background:#E2E8F0;color:#94A3B8;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:12px;margin-top:6px;">Coming Soon</button>`
+                : hasVariants
+                  ? `<a href="#el-${id}" onclick="${closeGrid}" style="display:block;width:100%;box-sizing:border-box;text-align:center;background:#4338CA;color:#fff;border-radius:8px;padding:8px;font-weight:700;font-size:12px;text-decoration:none;margin-top:6px;">See Options</a>`
+                  : `<div style="display:flex;gap:6px;margin-top:6px;">
+    ${showCart ? `<button onclick="siteSparkCart.add(${escapeAttr(JSON.stringify(id))}, ${escapeAttr(JSON.stringify(p.name))}, ${p.priceUsd}, 1, ${escapeAttr(JSON.stringify(p.saleType))}, null, null);" style="flex:1;background:#4338CA;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:12px;cursor:pointer;">${isService ? 'Book' : 'Add to Cart'}</button>` : ''}
+    ${showBuyNow ? `<button onclick="siteSparkCart.buyNow(${escapeAttr(JSON.stringify(id))}, ${escapeAttr(JSON.stringify(p.name))}, ${p.priceUsd}, 1, ${escapeAttr(JSON.stringify(p.saleType))}, null, null);" style="flex:1;background:#0F172A;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;font-size:12px;cursor:pointer;">${isService ? 'Book' : 'Buy Now'}</button>` : ''}
+  </div>`;
+              return `<div style="width:calc(50% - 7px);">
+  <a href="#el-${id}" onclick="${closeGrid}" style="display:block;text-decoration:none;color:inherit;">
+    ${
+      p.images[0]
+        ? `<img src="${escapeAttr(p.images[0])}" style="width:100%;aspect-ratio:1;border-radius:10px;object-fit:cover;display:block;" />`
+        : `<div style="width:100%;aspect-ratio:1;border-radius:10px;background:#F1F5F9;"></div>`
+    }
+    <div style="font-weight:700;font-size:13px;color:#0F172A;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name || 'Untitled product')}</div>
+    <div style="display:flex;align-items:baseline;gap:6px;margin-top:2px;">
+      <div style="font-size:13px;font-weight:700;color:#4338CA;">${sym}${p.priceUsd.toFixed(2)}</div>
+      ${
+        p.compareAtPriceUsd != null && p.compareAtPriceUsd > p.priceUsd
+          ? `<div style="font-size:11px;color:#94A3B8;text-decoration:line-through;">${sym}${p.compareAtPriceUsd.toFixed(2)}</div>`
+          : ''
+      }
+    </div>
+  </a>
+  ${buyAction}
+</div>`;
+            })
             .join('')
         : `<div style="font-size:13px;color:#94A3B8;padding:12px 0;">No products in this collection yet.</div>`;
 
@@ -2633,13 +2656,12 @@ ${productDetailOverlay}`;
     <div style="font-size:12px;color:#64748B;margin-top:2px;">${members.length} ${members.length === 1 ? 'item' : 'items'}</div>
   </div>
 </div>
-<div id="${modalId}" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000AA;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;" onclick="if(event.target===this)this.style.display='none';">
-  <div style="width:90%;max-width:360px;max-height:75vh;overflow-y:auto;background:#fff;border-radius:16px;padding:18px;">
-    <div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">Collection</div>
-    <div style="font-weight:800;font-size:17px;color:#0F172A;margin-top:2px;margin-bottom:8px;">${escapeHtml(el.name || 'Untitled collection')}</div>
-    ${rows}
-    <button onclick="document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='none';" style="width:100%;margin-top:14px;background:#111827;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:13px;cursor:pointer;">Close</button>
+<div id="${modalId}" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;overflow-y:auto;font-family:-apple-system,sans-serif;flex-direction:column;">
+  <div style="display:flex;align-items:center;padding:14px 16px;border-bottom:1px solid #E2E8F0;position:sticky;top:0;background:#fff;">
+    <button aria-label="Back" onclick="document.getElementById(${escapeAttr(JSON.stringify(modalId))}).style.display='none';" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:#0F172A;padding:2px 10px 2px 0;">&#8249;</button>
+    <div style="flex:1;text-align:center;font-weight:700;font-size:16px;color:#0F172A;margin-right:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(el.name || 'Collection')}</div>
   </div>
+  <div style="padding:20px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px 0;">${gridCards}</div>
 </div>`;
     }
     case 'game':

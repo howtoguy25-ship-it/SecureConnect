@@ -7,7 +7,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/navigation/types';
 import { EditorProvider, useEditor } from '@/context/EditorContext';
 import Canvas from '@/components/canvas/Canvas';
-import { ProductDetailModal } from '@/components/canvas/ElementRenderer';
+import { ProductDetailModal, CollectionDetailModal } from '@/components/canvas/ElementRenderer';
 import ElementsPanel from '@/components/elements/ElementsPanel';
 import AnnouncementPanel from '@/components/elements/AnnouncementPanel';
 import ElementInspector from '@/components/inspector/ElementInspector';
@@ -93,6 +93,10 @@ function EditorInner({ navigation }: Props) {
   // (see navigateToElementOnLockedTap below) instead of just scrolling that product's small
   // card into view -- matches what tapping the same button on the published site does.
   const [productDetailElementId, setProductDetailElementId] = useState<string | null>(null);
+  // Same idea for a Collection: a locked Button linking to one opens the real full-screen
+  // 2-column product grid (see CollectionDetailModal) directly, instead of just scrolling its
+  // small card into view and requiring a second tap on the card's own "i" button.
+  const [collectionDetailElementId, setCollectionDetailElementId] = useState<string | null>(null);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   // null = the global "+ Add to page" flow (lands as a new Section at the bottom of the
   // page); a real section id = "Add columns" from inside that section's own inspector.
@@ -189,12 +193,12 @@ function EditorInner({ navigation }: Props) {
   const canvasCenterY = project.canvasSize.height / 2;
 
   // A locked button linking to a Product/Collection on this page should behave the way it
-  // really does on the published site. For a Product specifically, that means opening the
-  // real full-screen product page (see ProductDetailModal below) -- matching the published
-  // site's own full-screen overlay for the same link -- rather than just scrolling its small
-  // card into view. Anything else (a Collection, or any other element) still just scrolls
-  // into view; selecting would swap the whole bottom UI into the edit inspector, which
-  // defeats the entire point of locking the page to preview it read-only.
+  // really does on the published site: a Product opens its real full-screen detail page (see
+  // ProductDetailModal below), a Collection opens its real full-screen 2-column product grid
+  // (see CollectionDetailModal below) -- both matching the published site's own full-screen
+  // overlays for the same link, rather than just scrolling a small card into view. Anything
+  // else still just scrolls into view; selecting would swap the whole bottom UI into the edit
+  // inspector, which defeats the entire point of locking the page to preview it read-only.
   const navigateToElementOnLockedTap = (id: string) => {
     const target = activeElements.find((el) => el.id === id);
     if (!target) return;
@@ -202,8 +206,15 @@ function EditorInner({ navigation }: Props) {
       setProductDetailElementId(id);
       return;
     }
+    if (target.type === 'collection') {
+      setCollectionDetailElementId(id);
+      return;
+    }
     canvasScrollRef.current?.scrollTo({ y: Math.max(0, target.y - 40), animated: true });
   };
+
+  const collectionDetailElement =
+    (activeElements.find((el) => el.id === collectionDetailElementId && el.type === 'collection') as CollectionElement | undefined) ?? null;
 
   const productDetailElement =
     (activeElements.find((el) => el.id === productDetailElementId && el.type === 'product') as ProductElement | undefined) ?? null;
@@ -1149,6 +1160,11 @@ function EditorInner({ navigation }: Props) {
       />
 
       <ProductDetailModal element={productDetailElement} onClose={() => setProductDetailElementId(null)} />
+      <CollectionDetailModal
+        element={collectionDetailElement}
+        allElements={activeElements}
+        onClose={() => setCollectionDetailElementId(null)}
+      />
 
       <CartSheetModal visible={cartOpen} onClose={() => setCartOpen(false)} />
 
