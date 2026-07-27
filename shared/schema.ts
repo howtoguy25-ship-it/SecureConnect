@@ -348,9 +348,29 @@ export type MessageRequest = typeof messageRequests.$inferSelect;
 export const statuses = pgTable("statuses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // Plaintext path — used only when the poster's story audience is
+  // unbounded ('everyone' mode reaches any user on the platform, including
+  // people with no key-exchange relationship to the poster, so there is no
+  // fixed recipient set to encrypt to). Null on encrypted rows.
   mediaUrl: text("media_url"),
   mediaType: text("media_type"), // 'image' | 'video'
   caption: text("caption"),
+  // E2EE (Stories phase 1) — used whenever the poster's audience is a
+  // closed set (storyPrivacyMode 'contacts' | 'except' | 'only', or a
+  // per-post 'friends'/'custom' override). mediaUrl above still holds the
+  // object path, but the bytes there are an SCM1 ciphertext (the same
+  // chunked-media format chat attachments use) under `mediaKey` — a fresh
+  // random key generated per story. `mediaKeyWraps` holds one nacl.box of
+  // that key per eligible viewer (computed client-side at post time),
+  // keyed by viewerId, sealed with each viewer's identity public key —
+  // the poster's own id is always included so they can re-view their own
+  // story after an app restart. Caption is sealed under the same media
+  // key via nacl.secretbox. The server only ever stores/relays opaque
+  // blobs for encrypted rows.
+  isEncrypted: boolean("is_encrypted").default(false),
+  encryptedCaption: text("encrypted_caption"),
+  captionNonce: text("caption_nonce"),
+  mediaKeyWraps: jsonb("media_key_wraps").$type<Record<string, { wrappedKey: string; nonce: string }>>(),
   privacy: text("privacy").default("everyone"), // 'everyone' | 'friends' | 'custom'
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
@@ -456,8 +476,20 @@ export const friendsRelations = relations(friends, ({ one }) => ({
 export const locationShares = pgTable("location_shares", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // Legacy plaintext columns — no longer written by current clients (see
+  // encryptedLocations below). Kept only so old rows don't error on read;
+  // safe to drop once no pre-E2EE-location client build is in the wild.
   latitude: text("latitude"),
   longitude: text("longitude"),
+  // E2EE (location-sharing phase 1). One entry per currently-approved
+  // viewer: viewerId -> a nacl.box (X25519) of {lat, lng} sealed to that
+  // viewer's identity public key with the sharer's identity secret key.
+  // The server only ever stores/relays these opaque blobs — it cannot
+  // read coordinates. Recomputed and replaced wholesale on every location
+  // tick (the approved-viewer set is small, so re-boxing per tick is
+  // cheap) rather than merged, so a removed friend's old ciphertext
+  // doesn't linger.
+  encryptedLocations: jsonb("encrypted_locations").$type<Record<string, { ciphertext: string; nonce: string }>>().default({}),
   isSharing: boolean("is_sharing").default(false),
   lastUpdated: timestamp("last_updated").defaultNow(),
 });

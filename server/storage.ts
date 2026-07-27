@@ -455,10 +455,6 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async updateMessageTranscription(id: string, transcription: string): Promise<void> {
-    await db.update(messages).set({ transcription }).where(eq(messages.id, id));
-  }
-
   async getMessage(id: string): Promise<Message | undefined> {
     const [message] = await db.select().from(messages).where(eq(messages.id, id));
     return message || undefined;
@@ -1044,7 +1040,13 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async createStatus(userId: string, data: { mediaUrl?: string; mediaType?: string; caption?: string; privacy: string; customViewers?: string[] }): Promise<Status> {
+  async createStatus(userId: string, data: {
+    mediaUrl?: string; mediaType?: string; caption?: string; privacy: string; customViewers?: string[];
+    isEncrypted?: boolean;
+    encryptedCaption?: string | null;
+    captionNonce?: string | null;
+    mediaKeyWraps?: Record<string, { wrappedKey: string; nonce: string }>;
+  }): Promise<Status> {
     const [me] = await db.select().from(users).where(eq(users.id, userId));
     if (me && me.storiesEnabled === false) {
       throw new Error('STORIES_DISABLED');
@@ -1054,7 +1056,12 @@ export class DatabaseStorage implements IStorage {
       userId,
       mediaUrl: data.mediaUrl,
       mediaType: data.mediaType,
-      caption: data.caption,
+      // Encrypted rows never get a plaintext caption column.
+      caption: data.isEncrypted ? null : data.caption,
+      isEncrypted: data.isEncrypted ?? false,
+      encryptedCaption: data.isEncrypted ? (data.encryptedCaption ?? null) : null,
+      captionNonce: data.isEncrypted ? (data.captionNonce ?? null) : null,
+      mediaKeyWraps: data.isEncrypted ? (data.mediaKeyWraps ?? {}) : null,
       privacy: data.privacy,
       expiresAt,
     }).returning();
@@ -1167,7 +1174,21 @@ export class DatabaseStorage implements IStorage {
         if (!row) continue;
       }
 
-      result.push({ ...status, user: { id: poster!.id, displayName: poster!.displayName, avatarUrl: poster!.avatarUrl } });
+      // E2EE: hand back only this viewer's own slice of mediaKeyWraps, never
+      // the whole map (every other eligible viewer's wrapped key too —
+      // unreadable to this caller, but no reason to ship it). A viewer who
+      // passed the visibility gate above but has no wrap yet (e.g. added
+      // to a privacy list after the story was posted, or wasn't part of
+      // the poster's eligible set at post time) simply gets no key and
+      // the client shows it as undecryptable rather than omitting the row.
+      const { mediaKeyWraps, ...statusFields } = status as any;
+      const myWrap = status.isEncrypted ? (mediaKeyWraps as Record<string, any> | null)?.[viewerId] ?? null : null;
+
+      result.push({
+        ...statusFields,
+        mediaKeyWrap: myWrap,
+        user: { id: poster!.id, displayName: poster!.displayName, avatarUrl: poster!.avatarUrl },
+      });
     }
     return result;
   }
@@ -1181,7 +1202,11 @@ export class DatabaseStorage implements IStorage {
     
     return Promise.all(myStatuses.map(async (status) => {
       const views = await db.select().from(statusViews).where(eq(statusViews.statusId, status.id));
-      return { ...status, viewCount: views.length };
+      // Same shape as getStatuses: expose only my own slice (I'm always
+      // eligible for my own story) rather than every viewer's wrapped key.
+      const { mediaKeyWraps, ...statusFields } = status as any;
+      const myWrap = status.isEncrypted ? (mediaKeyWraps as Record<string, any> | null)?.[userId] ?? null : null;
+      return { ...statusFields, mediaKeyWrap: myWrap, viewCount: views.length };
     }));
   }
 
@@ -1305,7 +1330,7 @@ export class DatabaseStorage implements IStorage {
     return share;
   }
 
-  async updateLocationShare(userId: string, data: { latitude?: string; longitude?: string; isSharing?: boolean }): Promise<LocationShare> {
+  async updateLocationShare(userId: string, data: { encryptedLocations?: Record<string, { ciphertext: string; nonce: string }>; isSharing?: boolean }): Promise<LocationShare> {
     const [existing] = await db.select().from(locationShares).where(eq(locationShares.userId, userId));
     
     if (existing) {
@@ -1318,8 +1343,7 @@ export class DatabaseStorage implements IStorage {
     
     const [created] = await db.insert(locationShares).values({
       userId,
-      latitude: data.latitude,
-      longitude: data.longitude,
+      encryptedLocations: data.encryptedLocations ?? {},
       isSharing: data.isSharing ?? false,
     }).returning();
     return created;
@@ -1389,17 +1413,35 @@ export class DatabaseStorage implements IStorage {
     const uniqueFriendIds = [...new Set(friendIds)];
     
     if (uniqueFriendIds.length === 0) return [];
-    
+
     const locations = await db.select()
       .from(locationShares)
       .where(and(
         inArray(locationShares.userId, uniqueFriendIds),
         eq(locationShares.isSharing, true)
       ));
-    
-    return Promise.all(locations.map(async (loc) => {
+
+    // E2EE: only ever hand back the requesting viewer's own slice of a
+    // friend's per-viewer-sealed blobs — never the whole map (which holds
+    // ciphertext for that friend's other viewers too, unreadable to this
+    // caller but no reason to ship it). A friend who hasn't re-sent a
+    // location tick since this viewer was approved simply has no slice
+    // yet, so they're omitted rather than shown with stale/empty data.
+    const withKey = locations
+      .map((loc) => ({ loc, sealed: (loc.encryptedLocations as Record<string, { ciphertext: string; nonce: string }> | null)?.[userId] }))
+      .filter((x): x is { loc: typeof x.loc; sealed: { ciphertext: string; nonce: string } } => !!x.sealed);
+
+    return Promise.all(withKey.map(async ({ loc, sealed }) => {
       const [user] = await db.select().from(users).where(eq(users.id, loc.userId));
-      return { ...loc, user: { id: user?.id, displayName: user?.displayName, avatarUrl: user?.avatarUrl } };
+      return {
+        id: loc.id,
+        userId: loc.userId,
+        ciphertext: sealed.ciphertext,
+        nonce: sealed.nonce,
+        isSharing: loc.isSharing,
+        lastUpdated: loc.lastUpdated,
+        user: { id: user?.id, displayName: user?.displayName, avatarUrl: user?.avatarUrl },
+      };
     }));
   }
 

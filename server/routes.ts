@@ -962,6 +962,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Side-effect-free identity-key lookup. Unlike the prekey bundle route
+  // below, this does NOT consume a one-time prekey — safe to call on a
+  // hot path (e.g. every location-sharing tick) without burning through a
+  // recipient's OTPK supply. Long-term identity keys change rarely, so
+  // callers are expected to cache the result client-side.
+  app.get("/api/e2ee/identity-key/:userId", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const device = await storage.getDeviceForUser(req.params.userId);
+      if (!device) return res.status(404).json({ error: "no_keys" });
+      res.json({ identityPublicKey: device.identityPublicKey });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch identity key" });
+    }
+  });
+
   app.get("/api/e2ee/prekeys/bundle/:userId", authenticateToken, prekeyBundleRateLimit, async (req: AuthRequest, res) => {
     try {
       const targetUserId = req.params.userId;
@@ -2358,47 +2373,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error unsending message:', error);
       res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-
-  app.post('/api/messages/:id/transcribe', authenticateToken, async (req: AuthRequest, res) => {
-    try {
-      const messageId = req.params.id;
-      const message = await storage.getMessage(messageId);
-      
-      if (!message) {
-        return res.status(404).json({ error: 'Message not found' });
-      }
-      
-      if (message.mediaType !== 'audio' || !message.mediaUrl) {
-        return res.status(400).json({ error: 'Not a voice message' });
-      }
-      
-      if (message.transcription) {
-        return res.json({ transcription: message.transcription });
-      }
-      
-      const objectStorageService = new ObjectStorageService();
-      const objectFile = await objectStorageService.getObjectEntityFile(message.mediaUrl);
-      
-      const chunks: Buffer[] = [];
-      const stream = objectFile.createReadStream();
-      for await (const chunk of stream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      const audioBuffer = Buffer.concat(chunks);
-      
-      const { ensureCompatibleFormat } = await import('./replit_integrations/audio/client');
-      const { speechToText } = await import('./replit_integrations/audio/client');
-      const { buffer: compatBuffer, format } = await ensureCompatibleFormat(audioBuffer);
-      const transcription = await speechToText(compatBuffer, format);
-      
-      await storage.updateMessageTranscription(messageId, transcription);
-      
-      res.json({ transcription });
-    } catch (error) {
-      console.error('Error transcribing message:', error);
-      res.status(500).json({ error: 'Failed to transcribe voice message' });
     }
   });
 
@@ -4164,8 +4138,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/statuses', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const { mediaUrl, mediaType, caption, privacy, customViewers } = req.body;
-      const status = await storage.createStatus(req.userId!, { mediaUrl, mediaType, caption, privacy, customViewers });
+      const { mediaUrl, mediaType, caption, privacy, customViewers, isEncrypted, encryptedCaption, captionNonce, mediaKeyWraps } = req.body;
+
+      let statusData: Parameters<typeof storage.createStatus>[1];
+      if (isEncrypted === true) {
+        // E2EE path (closed-audience privacy modes): mediaUrl here is an
+        // SCM1-ciphertext object path (the client already encrypted it via
+        // uploadEncryptedMedia), and the media key is delivered wrapped
+        // per-viewer rather than travelling in the clear.
+        if (!mediaKeyWraps || typeof mediaKeyWraps !== 'object' || Array.isArray(mediaKeyWraps)) {
+          return res.status(400).json({ error: 'mediaKeyWraps is required for an encrypted status' });
+        }
+        const wraps: Record<string, { wrappedKey: string; nonce: string }> = {};
+        for (const viewerId of Object.keys(mediaKeyWraps)) {
+          const entry = mediaKeyWraps[viewerId];
+          // nacl.box of a 32-byte key is always exactly 48 bytes (32 + 16-byte Poly1305 tag).
+          if (!isValidB64(entry?.wrappedKey, 48, 48)) continue;
+          if (!isValidB64(entry?.nonce, 24, 24)) continue;
+          wraps[viewerId] = { wrappedKey: entry.wrappedKey, nonce: entry.nonce };
+        }
+        if (Object.keys(wraps).length === 0) {
+          return res.status(400).json({ error: 'mediaKeyWraps must contain at least one valid entry' });
+        }
+        if (encryptedCaption !== undefined && encryptedCaption !== null) {
+          if (!isValidB64(encryptedCaption, 17, 5_000)) {
+            return res.status(400).json({ error: 'invalid encryptedCaption' });
+          }
+          if (!isValidB64(captionNonce, 24, 24)) {
+            return res.status(400).json({ error: 'invalid captionNonce' });
+          }
+        }
+        statusData = {
+          mediaUrl, mediaType, privacy, customViewers,
+          isEncrypted: true,
+          encryptedCaption: encryptedCaption ?? null,
+          captionNonce: captionNonce ?? null,
+          mediaKeyWraps: wraps,
+        };
+      } else {
+        statusData = { mediaUrl, mediaType, caption, privacy, customViewers };
+      }
+
+      const status = await storage.createStatus(req.userId!, statusData);
       res.json(status);
     } catch (error: any) {
       if (error?.message === 'STORIES_DISABLED') {
@@ -4477,9 +4491,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: 'VIP subscription required' });
       }
       const share = await storage.getLocationShare(req.userId!);
-      res.json(share || { isSharing: false });
+      // Trim to what the client actually needs — no reason to ship our own
+      // outgoing ciphertext blobs back down on every poll.
+      res.json({ isSharing: share?.isSharing ?? false });
     } catch (error) {
       console.error('Error getting location share:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // The set of users currently allowed to see my location — exactly the
+  // recipient set the client must encrypt each location tick against.
+  app.get('/api/location/approved-friend-ids', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user?.isVip) {
+        return res.status(403).json({ error: 'VIP subscription required' });
+      }
+      const ids = await storage.getApprovedFriendIds(req.userId!);
+      res.json({ ids });
+    } catch (error) {
+      console.error('Error getting approved friend ids:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -4490,23 +4522,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user?.isVip) {
         return res.status(403).json({ error: 'VIP subscription required' });
       }
-      const { latitude, longitude } = req.body;
-      const share = await storage.updateLocationShare(req.userId!, { latitude, longitude });
+      // E2EE (location-sharing phase 1): the client sends one sealed blob
+      // per currently-approved viewer — a nacl.box of {lat, lng} under
+      // that viewer's identity key — instead of raw coordinates. The
+      // server only ever stores/relays opaque ciphertext.
+      const { encryptedForFriends } = req.body ?? {};
+      if (!encryptedForFriends || typeof encryptedForFriends !== 'object' || Array.isArray(encryptedForFriends)) {
+        return res.status(400).json({ error: 'encryptedForFriends is required' });
+      }
 
-      const approvedFriends = await storage.getApprovedFriendIds(req.userId!);
-      for (const friendId of approvedFriends) {
+      // Defense in depth: only persist/relay entries for viewers who are
+      // actually approved right now, so a client can't get the server to
+      // fan a location out to anyone beyond who was actually granted
+      // access, regardless of what keys the payload includes.
+      const approvedSet = new Set(await storage.getApprovedFriendIds(req.userId!));
+      const sealed: Record<string, { ciphertext: string; nonce: string }> = {};
+      for (const friendId of Object.keys(encryptedForFriends)) {
+        if (!approvedSet.has(friendId)) continue;
+        const entry = encryptedForFriends[friendId];
+        if (!isValidB64(entry?.ciphertext, 17, 2_000)) continue;
+        if (!isValidB64(entry?.nonce, 24, 24)) continue;
+        sealed[friendId] = { ciphertext: entry.ciphertext, nonce: entry.nonce };
+      }
+
+      await storage.updateLocationShare(req.userId!, { encryptedLocations: sealed, isSharing: true });
+      const lastUpdated = new Date().toISOString();
+
+      for (const friendId of Object.keys(sealed)) {
         io.to(friendId).emit('friend-location-update', {
           userId: req.userId!,
-          latitude,
-          longitude,
+          ciphertext: sealed[friendId].ciphertext,
+          nonce: sealed[friendId].nonce,
           displayName: user.displayName,
           avatarUrl: user.avatarUrl,
-          lastUpdated: new Date().toISOString(),
+          lastUpdated,
           isSharing: true,
         });
       }
 
-      res.json(share);
+      res.json({ success: true, lastUpdated });
     } catch (error) {
       console.error('Error updating location:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -4520,8 +4574,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: 'VIP subscription required' });
       }
       const { isSharing } = req.body;
-      const share = await storage.updateLocationShare(req.userId!, { isSharing });
-      res.json(share);
+      // Clear any sealed blobs when sharing turns off so nothing lingers
+      // server-side once the user stops sharing.
+      const share = await storage.updateLocationShare(req.userId!, {
+        isSharing,
+        ...(isSharing ? {} : { encryptedLocations: {} }),
+      });
+      res.json({ isSharing: share.isSharing });
     } catch (error) {
       console.error('Error toggling location sharing:', error);
       res.status(500).json({ error: 'Internal server error' });

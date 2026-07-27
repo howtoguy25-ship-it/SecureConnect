@@ -11,8 +11,10 @@ import { Button } from "@/components/Button";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { Spacing, BorderRadius } from "@/constants/theme";
-import { apiRequest } from "@/lib/query-client";
+import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { getStoredToken } from "@/lib/api-utils";
 import { getSocket, connectSocket } from "@/lib/socket";
+import { encryptLocationForFriends, decryptLocationFromFriend, fetchApprovedFriendIds } from "@/utils/crypto/locationCrypto";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -91,6 +93,26 @@ export default function LocationScreen() {
     queryKey: ["/api/location/friends"],
     enabled: !!isVip,
     refetchInterval: 15000,
+    // Custom fetch: the server only ever returns per-viewer sealed blobs
+    // (ciphertext/nonce), never coordinates — decrypt each entry client-side
+    // before it lands in the cache so the rest of this screen can keep
+    // reading plain .latitude/.longitude like before.
+    queryFn: async (): Promise<FriendLocation[]> => {
+      const token = await getStoredToken();
+      const baseUrl = getApiUrl();
+      const res = await fetch(new URL("/api/location/friends", baseUrl), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`${res.status}: failed to load friend locations`);
+      const rows: Array<Omit<FriendLocation, "latitude" | "longitude"> & { ciphertext: string; nonce: string }> = await res.json();
+      const decrypted = await Promise.all(rows.map(async (row): Promise<FriendLocation | null> => {
+        const plain = await decryptLocationFromFriend(row.userId, row.ciphertext, row.nonce);
+        if (!plain) return null;
+        const { ciphertext, nonce, ...rest } = row;
+        return { ...rest, latitude: String(plain.latitude), longitude: String(plain.longitude) };
+      }));
+      return decrypted.filter((r): r is FriendLocation => r !== null);
+    },
   });
 
   const { data: friends = [] } = useQuery<Friend[]>({
@@ -144,8 +166,8 @@ export default function LocationScreen() {
               longitude: location.coords.longitude,
             });
             updateLocationMutation.mutate({
-              latitude: location.coords.latitude.toString(),
-              longitude: location.coords.longitude.toString(),
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
             });
           }
         );
@@ -174,31 +196,35 @@ export default function LocationScreen() {
         }
       }
 
-      const handleFriendLocationUpdate = (data: {
+      const handleFriendLocationUpdate = async (data: {
         userId: string;
-        latitude: string;
-        longitude: string;
+        ciphertext: string;
+        nonce: string;
         displayName: string | null;
         avatarUrl: string | null;
         lastUpdated: string;
         isSharing: boolean;
       }) => {
         if (!mounted) return;
+        const plain = await decryptLocationFromFriend(data.userId, data.ciphertext, data.nonce);
+        if (!plain || !mounted) return;
+        const latitude = String(plain.latitude);
+        const longitude = String(plain.longitude);
         queryClient.setQueryData<FriendLocation[]>(["/api/location/friends"], (old) => {
           if (!old) return old;
           const existing = old.find(f => f.userId === data.userId);
           if (existing) {
             return old.map(f =>
               f.userId === data.userId
-                ? { ...f, latitude: data.latitude, longitude: data.longitude, lastUpdated: data.lastUpdated, isSharing: data.isSharing }
+                ? { ...f, latitude, longitude, lastUpdated: data.lastUpdated, isSharing: data.isSharing }
                 : f
             );
           }
           return [...old, {
             id: data.userId,
             userId: data.userId,
-            latitude: data.latitude,
-            longitude: data.longitude,
+            latitude,
+            longitude,
             isSharing: data.isSharing,
             lastUpdated: data.lastUpdated,
             user: { id: data.userId, displayName: data.displayName, avatarUrl: data.avatarUrl },
@@ -240,8 +266,12 @@ export default function LocationScreen() {
   }, [isVip, user?.id, queryClient]);
 
   const updateLocationMutation = useMutation({
-    mutationFn: async (data: { latitude: string; longitude: string }) => {
-      return apiRequest("POST", "/api/location/update", data);
+    mutationFn: async (data: { latitude: number; longitude: number }) => {
+      // E2EE: encrypt one blob per currently-approved viewer before this
+      // ever reaches the server — see client/utils/crypto/locationCrypto.ts.
+      const friendIds = await fetchApprovedFriendIds();
+      const encryptedForFriends = await encryptLocationForFriends(friendIds, data.latitude, data.longitude);
+      return apiRequest("POST", "/api/location/update", { encryptedForFriends });
     },
   });
 

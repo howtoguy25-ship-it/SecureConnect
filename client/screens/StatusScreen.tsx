@@ -18,6 +18,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { getApiUrl, apiRequest } from "@/lib/query-client";
 import { getStoredToken } from "@/lib/auth";
+import naclUtil from "tweetnacl-util";
+import { uploadEncryptedMedia, fetchAndDecryptEncryptedMedia } from "@/utils/crypto/encryptedMediaClient";
+import {
+  computeEligibleViewerIds,
+  encryptStoryForViewers,
+  unwrapStoryMediaKey,
+  decryptStoryCaption,
+} from "@/utils/crypto/statusCrypto";
 import { AdBanner } from "@/components/AdBanner";
 import { AnimatedPressable } from "@/components/AnimatedPressable";
 import { StatusItemSkeleton } from "@/components/Skeleton";
@@ -362,6 +370,12 @@ interface Status {
     avatarUrl: string | null;
   };
   viewCount?: number;
+  // E2EE (Stories phase 1) — present only on closed-audience stories.
+  isEncrypted?: boolean;
+  encryptedCaption?: string | null;
+  captionNonce?: string | null;
+  /** This viewer's own slice of the story's key wraps — see server/storage.ts getStatuses. */
+  mediaKeyWrap?: { wrappedKey: string; nonce: string } | null;
 }
 
 // Helper to resolve media URLs - handles both relative paths and full URLs
@@ -421,8 +435,82 @@ export default function StatusScreen() {
     queryKey: ["/api/friends"],
   });
 
+  // E2EE (Stories phase 1) — decrypt cache for encrypted stories. Keyed by
+  // statusId so the same story isn't re-decrypted on every render; a ref
+  // tracks in-flight decrypts so a fast re-render (e.g. the 15s feed
+  // refetch) doesn't kick off a duplicate attempt for the same story.
+  const [decryptedMedia, setDecryptedMedia] = useState<Record<string, string>>({});
+  const [decryptedCaptions, setDecryptedCaptions] = useState<Record<string, string | null>>({});
+  const [undecryptable, setUndecryptable] = useState<Record<string, boolean>>({});
+  const decryptingRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const allStatuses = [...statuses, ...myStatuses];
+    const pending = allStatuses.filter(
+      (s) => s.isEncrypted && !decryptedMedia[s.id] && !undecryptable[s.id] && !decryptingRef.current.has(s.id),
+    );
+    if (pending.length === 0) return;
+
+    pending.forEach((status) => {
+      decryptingRef.current.add(status.id);
+      (async () => {
+        try {
+          if (!status.mediaKeyWrap) throw new Error("no key for this viewer");
+          const mediaKey = await unwrapStoryMediaKey(status.userId, status.mediaKeyWrap);
+          if (!mediaKey) throw new Error("could not unwrap media key");
+
+          let caption: string | null = null;
+          if (status.encryptedCaption && status.captionNonce) {
+            caption = decryptStoryCaption(status.encryptedCaption, status.captionNonce, mediaKey);
+          }
+
+          const token = await getStoredToken();
+          const baseUrl = getApiUrl();
+          const uri = await fetchAndDecryptEncryptedMedia({
+            envelope: {
+              v: 1,
+              mk: naclUtil.encodeBase64(mediaKey),
+              path: status.mediaUrl || "",
+              mt: (status.mediaType === "video" ? "video" : "image"),
+              size: 0,
+            },
+            token: token ?? "",
+            apiBaseUrl: baseUrl,
+            cacheKey: status.id,
+          });
+
+          setDecryptedMedia((prev) => ({ ...prev, [status.id]: uri }));
+          setDecryptedCaptions((prev) => ({ ...prev, [status.id]: caption }));
+        } catch (e) {
+          console.error("Failed to decrypt story", status.id, e);
+          setUndecryptable((prev) => ({ ...prev, [status.id]: true }));
+        }
+      })();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statuses, myStatuses]);
+
+  /** Resolves the renderable media URI for a status, encrypted or not. */
+  const getDisplayMediaUri = (status: Status): string | null => {
+    if (!status.isEncrypted) return resolveMediaUrl(status.mediaUrl);
+    return decryptedMedia[status.id] ?? null;
+  };
+
+  /** Resolves the caption text for a status, encrypted or not. */
+  const getDisplayCaption = (status: Status): string | null => {
+    if (!status.isEncrypted) return status.caption;
+    return decryptedCaptions[status.id] ?? null;
+  };
+
   const createStatusMutation = useMutation({
-    mutationFn: async (data: { mediaUrl: string; mediaType: string; caption: string; privacy: string; customViewers?: string[] }) => {
+    mutationFn: async (data: {
+      mediaUrl: string; mediaType: string; privacy: string; customViewers?: string[];
+      caption?: string;
+      isEncrypted?: boolean;
+      encryptedCaption?: string | null;
+      captionNonce?: string | null;
+      mediaKeyWraps?: Record<string, { wrappedKey: string; nonce: string }>;
+    }) => {
       return apiRequest("POST", "/api/statuses", data);
     },
     onSuccess: () => {
@@ -551,6 +639,46 @@ export default function StatusScreen() {
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
+
+      // E2EE (Stories phase 1): if this story's audience is a closed set —
+      // either the account-level Settings mode (contacts/except/only) or
+      // this specific post's friends/custom override — encrypt the media
+      // and caption client-side and skip the plaintext upload path below
+      // entirely. 'everyone' with no post-level narrowing has no fixed
+      // recipient set to encrypt to, so it stays on the existing plaintext
+      // path unchanged.
+      const eligibleViewerIds = await computeEligibleViewerIds({
+        storyPrivacyMode: user?.storyPrivacyMode || "everyone",
+        storyPrivacyExceptIds: user?.storyPrivacyExceptIds || [],
+        storyPrivacyOnlyIds: user?.storyPrivacyOnlyIds || [],
+        postPrivacy: privacy,
+        postCustomViewers: privacy === "custom" ? selectedFriends : undefined,
+      });
+
+      if (eligibleViewerIds !== null && user?.id) {
+        const encrypted = await encryptStoryForViewers(caption || null, eligibleViewerIds, user.id);
+        if (!encrypted) {
+          throw new Error("Couldn't set up encryption for this story. Please try again.");
+        }
+        const { envelope } = await uploadEncryptedMedia({
+          uri: selectedImage,
+          mediaType: selectedMediaType === "video" ? "video" : "image",
+          token: token ?? "",
+          apiBaseUrl: baseUrl,
+          mediaKey: encrypted.mediaKey,
+        });
+        await createStatusMutation.mutateAsync({
+          mediaUrl: envelope.path,
+          mediaType: selectedMediaType,
+          privacy,
+          customViewers: privacy === "custom" ? selectedFriends : undefined,
+          isEncrypted: true,
+          encryptedCaption: encrypted.encryptedCaption,
+          captionNonce: encrypted.captionNonce,
+          mediaKeyWraps: encrypted.mediaKeyWraps,
+        });
+        return;
+      }
 
       // Step 1: Get upload URL from object storage
       const uploadUrlResponse = await fetch(new URL("/api/objects/upload", baseUrl), {
@@ -763,16 +891,24 @@ export default function StatusScreen() {
       onLongPress={() => promptMute(item)}
       delayLongPress={350}
     >
-      {item.mediaUrl ? (
+      {item.isEncrypted && !getDisplayMediaUri(item) && !undecryptable[item.id] ? (
+        <View style={[styles.statusPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
+          <ActivityIndicator color={theme.textSecondary} />
+        </View>
+      ) : item.isEncrypted && undecryptable[item.id] ? (
+        <View style={[styles.statusPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
+          <Feather name="lock" size={32} color={theme.textSecondary} />
+        </View>
+      ) : getDisplayMediaUri(item) ? (
         item.mediaType === 'video' ? (
           <View style={styles.statusImage}>
-            <VideoThumb uri={resolveMediaUrl(item.mediaUrl) ?? ''} style={styles.statusImage} />
+            <VideoThumb uri={getDisplayMediaUri(item) ?? ''} style={styles.statusImage} />
             <View style={styles.feedVideoBadge}>
               <Feather name="play" size={22} color="#fff" />
             </View>
           </View>
         ) : (
-          <Image source={{ uri: resolveMediaUrl(item.mediaUrl) ?? '' }} style={styles.statusImage} contentFit="cover" cachePolicy="memory-disk" />
+          <Image source={{ uri: getDisplayMediaUri(item) ?? '' }} style={styles.statusImage} contentFit="cover" cachePolicy="memory-disk" />
         )
       ) : (
         <View style={[styles.statusPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
@@ -794,14 +930,14 @@ export default function StatusScreen() {
             {item.user?.displayName || "Unknown"}
           </ThemedText>
         </View>
-        {item.caption ? (
+        {getDisplayCaption(item) ? (
           <ThemedText type="small" style={styles.caption} numberOfLines={2}>
-            {item.caption}
+            {getDisplayCaption(item)}
           </ThemedText>
         ) : null}
       </View>
     </Pressable>
-  ), [theme, promptMute]);
+  ), [theme, promptMute, decryptedMedia, decryptedCaptions, undecryptable]);
 
   const renderMyStatus = () => (
     <View style={styles.myStatusSection}>
@@ -839,10 +975,18 @@ export default function StatusScreen() {
                 style={[styles.myStatusThumb, { backgroundColor: theme.backgroundDefault, borderColor: theme.primary }]} 
                 onPress={() => openOwnStatus(item)}
               >
-                {item.mediaUrl ? (
+                {item.isEncrypted && !getDisplayMediaUri(item) ? (
+                  <View style={[styles.thumbPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
+                    {undecryptable[item.id] ? (
+                      <Feather name="lock" size={20} color={theme.textSecondary} />
+                    ) : (
+                      <ActivityIndicator color={theme.textSecondary} />
+                    )}
+                  </View>
+                ) : getDisplayMediaUri(item) ? (
                   item.mediaType === 'video' ? (
                     <View style={styles.thumbImageContainer}>
-                      <VideoThumb uri={resolveMediaUrl(item.mediaUrl) ?? ''} style={styles.thumbImage} />
+                      <VideoThumb uri={getDisplayMediaUri(item) ?? ''} style={styles.thumbImage} />
                       <View style={styles.videoIndicator}>
                         <View style={styles.playIconCircle}>
                           <Feather name="play" size={14} color="#fff" />
@@ -851,7 +995,7 @@ export default function StatusScreen() {
                     </View>
                   ) : (
                     <View style={styles.thumbImageContainer}>
-                      <Image source={{ uri: resolveMediaUrl(item.mediaUrl) ?? '' }} style={styles.thumbImage} contentFit="cover" cachePolicy="memory-disk" />
+                      <Image source={{ uri: getDisplayMediaUri(item) ?? '' }} style={styles.thumbImage} contentFit="cover" cachePolicy="memory-disk" />
                     </View>
                   )
                 ) : (
@@ -961,6 +1105,27 @@ export default function StatusScreen() {
               </ThemedText>
               <Feather name="chevron-right" size={20} color={theme.textSecondary} />
             </Pressable>
+
+            {/* This story's audience is only encryptable when it's bounded
+                to a specific set of people. 'Everyone' — both your account
+                setting and this post — reaches anyone on the platform, so
+                there's no fixed recipient list to encrypt to; be upfront
+                about that rather than silently posting it in the clear. */}
+            {(user?.storyPrivacyMode ?? "everyone") === "everyone" && privacy === "everyone" ? (
+              <View style={styles.encryptionNotice}>
+                <Feather name="unlock" size={13} color={theme.textSecondary} />
+                <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: 6 }}>
+                  Public — visible to anyone, not end-to-end encrypted
+                </ThemedText>
+              </View>
+            ) : (
+              <View style={styles.encryptionNotice}>
+                <Feather name="lock" size={13} color={theme.textSecondary} />
+                <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: 6 }}>
+                  End-to-end encrypted for the people who can see it
+                </ThemedText>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -1072,13 +1237,20 @@ export default function StatusScreen() {
             </Pressable>
           </View>
 
-          {viewingStatus?.mediaUrl ? (
+          {viewingStatus?.isEncrypted && undecryptable[viewingStatus.id] ? (
+            <View style={styles.statusImageContainer}>
+              <Feather name="lock" size={40} color="#fff" />
+              <ThemedText type="body" style={{ color: "#fff", marginTop: Spacing.md }}>
+                Couldn't decrypt this story
+              </ThemedText>
+            </View>
+          ) : viewingStatus && getDisplayMediaUri(viewingStatus) ? (
             viewingStatus.mediaType === "video" ? (
-              <StatusVideoPlayer uri={resolveMediaUrl(viewingStatus.mediaUrl) ?? ''} style={styles.statusViewerImage} />
+              <StatusVideoPlayer uri={getDisplayMediaUri(viewingStatus) ?? ''} style={styles.statusViewerImage} />
             ) : (
               <View style={styles.statusImageContainer}>
-                <Image 
-                  source={{ uri: resolveMediaUrl(viewingStatus.mediaUrl) ?? '' }} 
+                <Image
+                  source={{ uri: getDisplayMediaUri(viewingStatus) ?? '' }}
                   style={styles.statusViewerImage}
                   contentFit="contain"
                   cachePolicy="memory-disk"
@@ -1096,10 +1268,10 @@ export default function StatusScreen() {
             </View>
           )}
 
-          {viewingStatus?.caption ? (
+          {viewingStatus && getDisplayCaption(viewingStatus) ? (
             <View style={[styles.statusViewerCaption, { bottom: 120 + insets.bottom }]}>
               <ThemedText type="body" style={{ color: "#fff" }}>
-                {viewingStatus.caption}
+                {getDisplayCaption(viewingStatus)}
               </ThemedText>
             </View>
           ) : null}
@@ -1357,6 +1529,12 @@ const styles = StyleSheet.create({
   },
   privacyText: {
     flex: 1,
+  },
+  encryptionNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.xs,
   },
   privacyOptions: {
     padding: Spacing.lg,

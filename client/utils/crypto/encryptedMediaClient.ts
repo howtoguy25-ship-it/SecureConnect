@@ -115,6 +115,13 @@ export async function uploadEncryptedMedia(args: {
   token: string;
   apiBaseUrl: string;
   ext?: string;
+  /**
+   * Caller-supplied 32-byte key instead of a freshly generated one. Used by
+   * Stories, where one key is shared across the media blob AND wrapped
+   * per-viewer separately (see statusCrypto.ts) — a chat message, by
+   * contrast, always generates its own single-use key here.
+   */
+  mediaKey?: Uint8Array;
 }): Promise<UploadResult> {
   const { uri, mediaType, token, apiBaseUrl, ext } = args;
 
@@ -128,7 +135,7 @@ export async function uploadEncryptedMedia(args: {
   }
 
   // 2. Encrypt.
-  const mediaKey = generateMediaKey();
+  const mediaKey = args.mediaKey ?? generateMediaKey();
   const { ciphertext } = encryptMedia(plaintext, mediaKey);
 
   // 3. Get signed PUT URL.
