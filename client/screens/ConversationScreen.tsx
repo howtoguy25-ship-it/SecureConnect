@@ -174,7 +174,6 @@ export default function ConversationScreen() {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
-  const [transcribingMessageId, setTranscribingMessageId] = useState<string | null>(null);
   const messageSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -2002,36 +2001,6 @@ export default function ConversationScreen() {
     }
   };
 
-  const transcribeVoiceMessage = async (messageId: string) => {
-    try {
-      setTranscribingMessageId(messageId);
-      const token = await getStoredToken();
-      const baseUrl = getApiUrl();
-      const response = await fetch(new URL(`/api/messages/${messageId}/transcribe`, baseUrl), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setMessages((prev) => prev.map((m) => 
-          m.id === messageId ? { ...m, transcription: data.transcription } : m
-        ));
-        haptics.success();
-      } else {
-        Alert.alert('Transcription Error', 'Could not transcribe the voice message.');
-      }
-    } catch (error) {
-      console.error('Failed to transcribe voice message:', error);
-      Alert.alert('Transcription Error', 'Could not transcribe the voice message.');
-    } finally {
-      setTranscribingMessageId(null);
-    }
-  };
-
   const handlePickFile = async () => {
     setShowAttachmentMenu(false);
     try {
@@ -2877,22 +2846,7 @@ export default function ConversationScreen() {
                 <ThemedText style={[styles.transcriptionText, { color: isOwn ? 'rgba(255,255,255,0.9)' : theme.text }]}>
                   {item.transcription}
                 </ThemedText>
-              ) : (
-                <Pressable
-                  onPress={() => transcribeVoiceMessage(item.id)}
-                  disabled={transcribingMessageId === item.id}
-                  style={styles.transcribeButton}
-                >
-                  {transcribingMessageId === item.id ? (
-                    <ActivityIndicator size={12} color={isOwn ? 'rgba(255,255,255,0.7)' : theme.primary} />
-                  ) : (
-                    <Feather name="type" size={12} color={isOwn ? 'rgba(255,255,255,0.7)' : theme.primary} />
-                  )}
-                  <ThemedText style={[styles.transcribeText, { color: isOwn ? 'rgba(255,255,255,0.7)' : theme.primary }]}>
-                    {transcribingMessageId === item.id ? 'Transcribing...' : 'Transcribe'}
-                  </ThemedText>
-                </Pressable>
-              )}
+              ) : null}
             </View>
           ) : null}
           
@@ -4692,17 +4646,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
     lineHeight: 18,
     fontStyle: 'italic',
-  },
-  transcribeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-    paddingVertical: 2,
-  },
-  transcribeText: {
-    fontSize: 12,
-    fontWeight: '500',
   },
   hiddenMessage: {
     flexDirection: "row",
