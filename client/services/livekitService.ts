@@ -135,7 +135,7 @@ class LiveKitService {
       // SDK). Without this branch web fell into connectSimulated() which
       // faked the connection — the call rang but no mic capture or audio
       // playback ever happened, so neither side could hear the other.
-      return this.connectWeb(url, token);
+      return this.connectWeb(url, token, options.e2eeKey);
     }
 
     const sdkLoaded = await this.loadSDK();
@@ -152,17 +152,44 @@ class LiveKitService {
   // disconnect (otherwise stale elements pile up across calls).
   private webAudioElements: Map<string, HTMLAudioElement> = new Map();
 
-  private async connectWeb(url: string, token: string): Promise<LiveKitRoom | null> {
+  private async connectWeb(url: string, token: string, e2eeKey?: Uint8Array): Promise<LiveKitRoom | null> {
     try {
       const lkWeb: any = await import('livekit-client');
-      const { Room, RoomEvent, Track } = lkWeb;
+      const { Room, RoomEvent, Track, ExternalE2EEKeyProvider } = lkWeb;
 
       this.LiveKit = lkWeb; // so isNativeAvailable / Track lookups elsewhere work
-      this.room = new Room({
-        adaptiveStream: true,
-        dynacast: true,
-      });
-      this.e2eeActive = false; // frame E2EE not wired on web (RN-only manager)
+      this.e2eeActive = false;
+
+      // Frame-level E2EE on web via the browser's WebRTC Insertable
+      // Streams API, wrapping livekit-client's own worker-based E2EE
+      // manager. Mirrors the native path: same X25519+HKDF-derived
+      // per-call key (see negotiateCallKey in lib/callE2EE.ts), just a
+      // different manager implementation because RNE2EEManager is
+      // React-Native-only. Any failure here (unsupported browser, worker
+      // load failure) falls back to a plain transport-only Room exactly
+      // like a failed native key exchange does — never blocks the call
+      // from connecting.
+      let keyProvider: any = null;
+      if (e2eeKey && ExternalE2EEKeyProvider) {
+        try {
+          const worker = new Worker(new URL('livekit-client/e2ee-worker', import.meta.url), { type: 'module' });
+          keyProvider = new ExternalE2EEKeyProvider();
+          this.room = new Room({
+            adaptiveStream: true,
+            dynacast: true,
+            e2ee: { keyProvider, worker },
+          });
+        } catch (e) {
+          console.warn('[LiveKit web] E2EE worker setup failed, falling back to transport-only:', e);
+          keyProvider = null;
+        }
+      }
+      if (!this.room) {
+        this.room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+      }
 
       this.room.on(RoomEvent.Connected, () => {
         const info: LiveKitRoom = {
@@ -258,6 +285,17 @@ class LiveKitService {
       });
 
       await this.room.connect(url, token);
+
+      if (keyProvider) {
+        try {
+          await keyProvider.setKey(e2eeKey!.buffer as ArrayBuffer);
+          await this.room.setE2EEEnabled(true);
+          this.e2eeActive = true;
+        } catch (e) {
+          console.warn('[LiveKit web] setE2EEEnabled failed, continuing transport-only:', e);
+          this.e2eeActive = false;
+        }
+      }
 
       // Capture mic. setMicrophoneEnabled(true) calls getUserMedia under the
       // hood — browser will show the mic permission prompt the first time.
