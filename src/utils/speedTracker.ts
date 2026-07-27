@@ -223,5 +223,15 @@ export function createSpeedTracker() {
     return result;
   }
 
-  return { update };
+  // Every id currently held onto internally, including ones mid-grace-period that didn't
+  // produce a box in this frame's `update()` result. Callers caching per-vehicle state (plate
+  // OCR reads) need to prune against THIS, not against `update()`'s own return value -- a
+  // track surviving a single missed detection frame emits nothing in `result` for that frame,
+  // so pruning off `result` alone would wipe that cached state on the very miss the grace
+  // period exists to ride out.
+  function liveTrackIds(): Set<number> {
+    return new Set(tracks.map((t) => t.id));
+  }
+
+  return { update, liveTrackIds };
 }

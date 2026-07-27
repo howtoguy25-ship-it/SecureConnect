@@ -5,9 +5,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { detectVehiclesInPhoto, warmUpModel } from "@/services/vehicleDetection";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
+import { locatePlateRegion } from "@/utils/plateLocator";
+import { readPlateText } from "@/services/plateOcr";
 import { colors, radius, spacing, pressedOpacity } from "@/theme/tokens";
 
 const CAPTURE_INTERVAL_MS = 1200;
+// Attempts (each tied to one capture pass, ~1.2s apart) before giving up on a persistently
+// unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
+// forever on one that's obscured, too far, or at a bad angle.
+const MAX_PLATE_ATTEMPTS = 6;
 
 interface Props {
   onClose: () => void;
@@ -22,11 +28,21 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   const [boxes, setBoxes] = useState<TrackedBox[]>([]);
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null);
+  // Plate text is display-only -- keyed by track id, never written anywhere but this
+  // component's own state, cleared the moment a vehicle's track is pruned (see
+  // pruneStalePlateState below). Nothing here is persisted or sent off-device.
+  const [plateTexts, setPlateTexts] = useState<Map<number, string>>(new Map());
 
   const cameraRef = useRef<CameraView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const capturingRef = useRef(false);
   const speedTrackerRef = useRef(createSpeedTracker());
+  const plateAttemptsRef = useRef(new Map<number, number>());
+  const platesReadingRef = useRef(new Set<number>());
+  // Mirrors `plateTexts` state so captureAndDetect can check it without depending on the
+  // state itself -- keeps captureAndDetect referentially stable (empty deps), so the capture
+  // interval effect below doesn't tear down and rebuild every time a plate read resolves.
+  const plateTextsRef = useRef(new Map<number, string>());
 
   useEffect(() => {
     warmUpModel()
@@ -47,6 +63,43 @@ export function VehicleDetectionScreen({ onClose }: Props) {
       const detected = await detectVehiclesInPhoto(photo.uri);
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
       setBoxes(tracked);
+
+      // Prune cached plate state for any track id the tracker has fully dropped (not just
+      // ones missing from this frame's `tracked` -- a track survives a short grace period on
+      // a single missed detection, and pruning off `tracked` alone would wipe a legitimately
+      // in-progress read on that miss).
+      const liveIds = speedTrackerRef.current.liveTrackIds();
+      for (const id of plateAttemptsRef.current.keys()) {
+        if (!liveIds.has(id)) plateAttemptsRef.current.delete(id);
+      }
+      let pruned = false;
+      for (const id of plateTextsRef.current.keys()) {
+        if (!liveIds.has(id)) {
+          plateTextsRef.current.delete(id);
+          pruned = true;
+        }
+      }
+      if (pruned) setPlateTexts(new Map(plateTextsRef.current));
+
+      for (const box of tracked) {
+        if (plateTextsRef.current.has(box.id) || platesReadingRef.current.has(box.id)) continue;
+        const attempts = plateAttemptsRef.current.get(box.id) ?? 0;
+        if (attempts >= MAX_PLATE_ATTEMPTS) continue;
+        const region = locatePlateRegion(box.bbox);
+        if (!region) continue;
+
+        plateAttemptsRef.current.set(box.id, attempts + 1);
+        platesReadingRef.current.add(box.id);
+        const trackId = box.id;
+        readPlateText(photo.uri, region)
+          .then((text) => {
+            if (!text) return;
+            plateTextsRef.current.set(trackId, text);
+            setPlateTexts(new Map(plateTextsRef.current));
+          })
+          .catch((err) => console.warn("[vehicle-detection] plate OCR failed", err))
+          .finally(() => platesReadingRef.current.delete(trackId));
+      }
     } catch (err) {
       console.warn("[vehicle-detection] capture/detect failed", err);
     } finally {
@@ -69,6 +122,10 @@ export function VehicleDetectionScreen({ onClose }: Props) {
 
   const toggleFacing = useCallback(() => {
     setBoxes([]);
+    plateAttemptsRef.current.clear();
+    platesReadingRef.current.clear();
+    plateTextsRef.current = new Map();
+    setPlateTexts(new Map());
     setFacing((prev) => (prev === "back" ? "front" : "back"));
   }, []);
 
@@ -108,6 +165,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         boxes.map((box) => {
           const [x, y, w, h] = box.bbox;
           const isEmergency = box.label !== "Vehicle";
+          const plateText = plateTexts.get(box.id);
           const speedLabel =
             box.state === "parked"
               ? "PARKED"
@@ -143,6 +201,16 @@ export function VehicleDetectionScreen({ onClose }: Props) {
                   {speedLabel}
                 </Text>
               )}
+              {/* Plate text only ever appears once on-device OCR actually confirms a real
+                  read (see plateOcr.ts) -- never a location guess with nothing behind it, and
+                  never stored or sent anywhere, just held in this screen's own state for as
+                  long as the vehicle stays tracked. Anchored bottom-center so it never
+                  competes with the type/speed badges at the top of the box. */}
+              {plateText && (
+                <View style={styles.plateLabelWrap} pointerEvents="none">
+                  <Text style={styles.plateLabel}>{plateText}</Text>
+                </View>
+              )}
             </View>
           );
         })}
@@ -160,8 +228,12 @@ export function VehicleDetectionScreen({ onClose }: Props) {
             custom-trained model guesses ambulance/fire truck/police car (red box, shown
             with its confidence %) when confident enough, generic "Vehicle" (amber box)
             otherwise. It's trained on a modest ~500-image dataset — a real but imperfect
-            guess, not certified identification. Speed is a rough estimate (assumes average
-            car width, no calibration) — not radar-accurate.
+            guess, not certified identification. Speed (top-right of box) is a rough estimate
+            (assumes average car width, no calibration) — not radar-accurate, and shows
+            "PARKED" once a vehicle has been still for a couple of seconds. A plate number
+            (bottom of box, cyan) only ever appears once real on-device text recognition
+            actually reads one from a face-on vehicle — it's never stored or sent anywhere,
+            just shown live while that vehicle stays in view.
           </Text>
         )}
         {status === "error" && (
@@ -264,6 +336,25 @@ const styles = StyleSheet.create({
   },
   speedLabelParked: {
     backgroundColor: "#4B5563",
+  },
+  plateLabelWrap: {
+    position: "absolute",
+    bottom: -24,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  plateLabel: {
+    backgroundColor: "#22D3EE",
+    color: "#111827",
+    fontSize: 12,
+    fontWeight: "800",
+    fontFamily: "monospace",
+    letterSpacing: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    overflow: "hidden",
   },
   banner: {
     position: "absolute",

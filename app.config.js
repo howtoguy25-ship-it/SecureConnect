@@ -110,6 +110,14 @@ module.exports = {
             "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
         },
       ],
+      // On-device (Google ML Kit) text recognition for the plate-number display in Live
+      // Vehicle Detection -- runs entirely on-device, no network call, no cloud API, nothing
+      // stored, matching the same privacy shape as the web app's Tesseract-based plate OCR
+      // (see web/src/services/plateOcr.ts). Bundled models only (ocrUseBundled) so there's no
+      // separate on-first-use model download. `ocrModels: ["latin"]` -- the default (no
+      // ocrModels set) bundles all five script models (Chinese/Japanese/Korean/Devanagari
+      // too), which just adds app size/build weight with nothing an AU plate would ever use.
+      ["rn-mlkit-ocr", { ocrModels: ["latin"], ocrUseBundled: true }],
       [
         "./modules/map3d/plugin/withMap3D.js",
         {
