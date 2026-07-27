@@ -1,0 +1,136 @@
+# Implementation Prompt: Virtual Numbers + Sealed Sender (Phase 3)
+
+You are implementing sealed sender for virtual numbers in SecureConnect. An audit has already mapped the codebase. Your job is to close every gap that audit found, in working code, with tests, and produce the design doc that explains what you built and — equally important — what you deliberately did not build.
+
+**Scope:** SecureConnect ↔ SecureConnect, 1:1 conversations, virtual-number routing. Group chat and external SMS are out of scope for the feature itself but the external-SMS plaintext leak (`/api/webhooks/twilio/sms`) must be fixed as part of this work because it contradicts the security claim. Do not ship sealed sender while plaintext SMS bodies still land in `messages.content`.
+
+-----
+
+## Non-negotiable principles
+
+1. **Don’t overclaim.** The badge, the doc, and any user-facing copy must describe what is actually true after your changes. If the server still sees the sender’s IP via TLS termination, the badge does not say “sender identity hidden from server.” It says “sender identity not stored with message” or similar. Write the doc’s threat model first, then pick the badge copy from it.
+1. **No second crypto layer.** Reuse the existing Signal Protocol. Sealed sender is a metadata change (what the server stores and forwards), not a new encryption scheme.
+1. **Plaintext never written to the messages table.** This is the single biggest existing leak and the work is not done until it is closed.
+1. **Forward-only.** Pre-existing messages keep their existing `senderId`. Do not back-fill, do not null out historical data. The doc states this explicitly.
+1. **Every route that touches a `virtual_numbers` row verifies ownership.** Today the check is implicit via `user.virtualNumberId`. Make it explicit via a helper, even where the current attack surface is small, because phase-3 adds routes that take a `virtualNumberId` parameter.
+
+-----
+
+## Work items
+
+### 1. Schema changes (`shared/schema.ts`)
+
+- Add `messages.outerSenderVirtualNumberId` (uuid, nullable, FK → `virtual_numbers.id`, `onDelete: set null`). This is the *only* sender-identifying field the server uses for routing and for the recipient payload on sealed-sender messages.
+- Add `messages.sealedSender` (boolean, default false). When true, `senderId` MUST NOT be included in any payload sent to the recipient (REST, socket, push). When false, behavior is unchanged.
+- Keep `messages.senderId` as-is. It still exists for the sender’s own outbox, audit, and abuse-reporting paths. It is never sent to the recipient when `sealedSender = true`.
+- Add a new table `external_sms` with columns: `id`, `virtualNumberId` (FK), `fromPhoneE164`, `body` (text, plaintext — this is carrier SMS, it was never E2EE), `receivedAt`, `deliveredToUserId`. This is where the Twilio webhook writes. Carrier SMS is a separate, clearly-labeled channel; it does not pollute the E2EE message table.
+- Do **not** rename `virtual_numbers.assignedUserId`. The audit’s recommendation stands: rename costs a migration with zero security value. The route-layer helper carries the semantic name.
+
+Write the migration. Include up and down. Test the migration on a copy of the dev DB before committing.
+
+### 2. Ownership helper (`server/storage.ts` or a new `server/authz.ts`)
+
+```
+async function ownsVirtualNumber(userId: string, virtualNumberId: string): Promise<boolean>
+```
+
+Returns true iff a row exists with `id = virtualNumberId AND assignedUserId = userId AND status = 'active'`. Note the `status` check — `released` and `suspended` numbers do not count as owned for the purpose of sending.
+
+Call this helper from:
+
+- `POST /api/virtual-number/provision` — assert the user does not already own an active number (existing check, keep it).
+- `DELETE /api/virtual-number` — assert ownership before release. Today the check is implicit through `user.virtualNumberId`; make it explicit.
+- The new `POST /api/messages/send-sealed` route (see §4).
+- Any future route that accepts a `virtualNumberId` in the request body or path.
+
+### 3. Fix the Twilio webhook (`POST /api/webhooks/twilio/sms`, `server/routes.ts:3763`)
+
+Change the handler to write to `external_sms`, not `messages`. The conversation surface in the client decides how to render external_sms rows — they appear in the same inbox as the virtual number’s conversations but are visually labeled “SMS — not end-to-end encrypted” and the composer for replies (if you choose to support reply at all) goes through Twilio’s send API, not Signal.
+
+If you decide replying via carrier SMS is out of scope for this PR, make the row read-only on the client and label it clearly. Do not silently drop inbound SMS — users need to see it arrived.
+
+### 4. New send path: `POST /api/messages/send-sealed`
+
+Request body: `{ recipientUserId, virtualNumberId, ciphertext, ... }` (whatever the existing Signal envelope requires).
+
+Handler:
+
+1. `ownsVirtualNumber(req.userId, virtualNumberId)` — 403 if false.
+1. Verify recipient exists and accepts messages from this sender’s virtual number (existing block-list check, if any).
+1. Insert into `messages` with: `senderId = req.userId` (kept server-side), `outerSenderVirtualNumberId = virtualNumberId`, `sealedSender = true`, `content = ciphertext`, `isEncrypted = true`.
+1. Deliver to recipient via the audited surfaces in §5.
+
+### 5. Audit every surface that currently carries `senderId` to the recipient
+
+This is the part the audit flagged as the real architectural work. For each of the following, decide and implement: when `sealedSender = true`, what does the recipient see?
+
+|Surface                                              |Current payload                        |Sealed-sender payload                                                                                                |
+|-----------------------------------------------------|---------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+|`GET /api/messages/:conversationId` REST             |includes `senderId`                    |strip `senderId`; include `senderVirtualNumber` (E.164) and `senderDisplayName` resolved from the virtual_numbers row|
+|Socket.IO `new-message` event (`routes.ts:3801-3809`)|includes `senderId`                    |same as REST — strip `senderId`, include virtual number + display name only                                          |
+|Socket.IO `message-notification` event               |includes `senderId`                    |same                                                                                                                 |
+|APNs/FCM push payload                                |includes `senderId` and often a preview|strip `senderId`; preview shows virtual number + display name; ciphertext-only if push-preview is disabled           |
+|Read receipts / typing indicators                    |currently keyed by `senderId`          |keyed by `outerSenderVirtualNumberId` when the underlying message was sealed                                         |
+
+The recipient client’s existing “fetch sender profile by id” code path must be gated: if a message has no `senderId` in the payload, the client renders from the virtual number + display name only and does not fetch a profile. Add a client-side assertion that throws in dev if code tries to access `message.senderId` on a sealed-sender message.
+
+### 6. Composer UI (`client/screens/ConversationScreen.tsx` and new component)
+
+- Add an “active sending identity” surface above the composer. It shows: virtual number (E.164), display name, and a status pill. This is the *caller’s* outgoing identity, not the recipient’s number.
+- Add the badge: “**E2EE · sender identity not stored with this message**” (or whatever copy you settle on in §8 — but it must be honest about what the server still sees).
+- If the user’s virtual number `status !== 'active'`, disable the composer and show an inactive/revoked error state. Today the column exists but the client doesn’t gate on it.
+- The send button calls `/api/messages/send-sealed` instead of `/api/messages` when (a) `preferredNumberType === 'app'` AND (b) the conversation is 1:1 AND (c) the recipient supports sealed-sender receive (add a capability flag to the user profile, default true for new clients, fall back to the existing route for old clients).
+
+### 7. Tests (`tests/sealed-sender/`)
+
+Scaffold the HTTP test harness the audit said does not exist. Use supertest + a real Postgres test database (testcontainers or a docker-compose service in CI). Do not mock the DB — the whole point is to verify what actually lands in rows.
+
+Required tests:
+
+- **Ownership 403**: user A calls `POST /api/messages/send-sealed` with user B’s `virtualNumberId`. Expect 403. Expect no row in `messages`.
+- **Ownership 403 on released number**: user A’s number is released. They call send-sealed with their old `virtualNumberId`. Expect 403.
+- **Sealed-sender row shape**: after a successful send, query the `messages` row directly. Assert `sealedSender = true`, `outerSenderVirtualNumberId` matches, `senderId` matches the real sender (server-side), `content` is ciphertext (binary or base64, not readable English).
+- **Grep DB for plaintext**: send a message with a known plaintext marker via the Signal client harness. Run `SELECT content FROM messages WHERE ...` and assert the marker does NOT appear. Run the same against `external_sms` — for that table, plaintext IS expected, document why.
+- **Recipient payload has no senderId**: fetch the message as the recipient via REST and via a connected socket. Assert the response objects do not contain a `senderId` field. Use a strict equality check, not `=== undefined`, to catch accidental serialization of the real id.
+- **Push payload has no senderId**: mock the push gateway, send a sealed message, assert the payload sent to the gateway omits `senderId`.
+- **External SMS lands in external_sms not messages**: simulate a Twilio webhook POST with a valid signature. Assert the row is in `external_sms`. Assert nothing was written to `messages`.
+- **Twilio signature still validated**: invalid signature → 403, nothing written anywhere.
+- **Old client fallback**: a recipient whose profile says `supportsSealedSender = false` receives via the non-sealed path; assert no regression for them.
+
+### 8. The doc: `docs/e2ee/sealed-sender.md`
+
+Write it last, after the code works. Structure:
+
+1. **Threat model and explicit non-goals.** State what is protected and what is not. Server still sees: sender’s IP (TLS termination), push token destination (server picks which device gets the notification), timing, message size, recipient identity, the fact that *some* user sent *some* message at *some* time. Server does not see, in the stored message row sent to the recipient: which real user account sent it. That is the entire claim. Anything more is overclaiming.
+1. **Scope.** SecureConnect↔SecureConnect 1:1 over virtual numbers. External SMS is a separate channel with its own table and its own non-E2EE label. Group chat: not supported.
+1. **Schema changes** with the column list from §1 and the rationale for keeping `assignedUserId` named as-is.
+1. **The `senderId` flow audit** — the table from §5, reproduced, as the canonical reference for what gets stripped where.
+1. **Badge copy and why it says what it says.** Show the rejected options (“sender identity hidden from server” — rejected because IP, push token, timing; “fully anonymous” — rejected obviously) and the chosen copy with its justification.
+1. **Forward-only migration.** Pre-existing messages keep `senderId`. No back-fill. State the cutover date in the doc.
+1. **External SMS handling.** The new `external_sms` table, the UI label, the decision on reply support.
+1. **Known residual leaks.** IP, push token, timing, size, recipient identity, abuse-reporting path (the server retains `senderId` on the message row for abuse reports — this is intentional and is itself a residual exposure if the server is compromised; say so).
+1. **What would be required to close the residual leaks** — anonymous credentials at upload, unlinkable push delivery, Tor/oblivious-HTTP for transport. Not in scope for this phase. Listed so future work has a starting point.
+
+-----
+
+## Order of operations
+
+1. Write the threat-model section of the doc first (just §1 and §2 of the doc). Get it reviewed before writing code. The code’s job is to make that doc true; if the doc is wrong, the code will be wrong.
+1. Migration + schema.
+1. Ownership helper + retrofit existing routes to use it.
+1. Fix the Twilio webhook (close the plaintext leak before adding any sealed-sender code, so there is never a window where the security claim is louder than the reality).
+1. Test harness scaffolding (supertest + test DB).
+1. `send-sealed` route + the §5 surface audit changes.
+1. Client composer + badge + inactive-state handling.
+1. Finish the doc with what you actually built.
+
+## Definition of done
+
+- All §7 tests pass in CI against a real Postgres.
+- A manual `grep`-the-DB run after a test conversation shows no plaintext message bodies in `messages`. External_sms contains plaintext, as designed and documented.
+- The recipient client, with dev assertions on, never accesses `message.senderId` on a sealed-sender message across a full conversation flow including reply, read receipt, typing indicator, and push notification tap-through.
+- `docs/e2ee/sealed-sender.md` exists and a teammate who did not write the code can read it and correctly answer: “what does the server learn about who sent this message?”
+
+## What to push back on
+
+If during implementation you find that closing a residual leak would require breaking the scope (e.g. push delivery genuinely cannot be made unlinkable without a new service), stop and write it up. Do not silently expand scope, and do not silently weaken the badge copy to match what you shipped. The doc’s job is to be honest about both.

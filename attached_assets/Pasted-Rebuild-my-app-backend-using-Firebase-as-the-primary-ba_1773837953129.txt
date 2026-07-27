@@ -1,0 +1,291 @@
+Rebuild my app backend using Firebase as the primary backend and implement real Signal-style end-to-end encrypted direct messaging.
+
+Main goal:
+Create a production-grade backend and messaging system where private direct messages are end-to-end encrypted. Only the sender and recipient devices can read message contents. Firebase and the server must never be able to decrypt plaintext direct messages.
+
+Critical truth requirements:
+- Do not fake encryption
+- Do not simulate encryption in UI only
+- Do not use one shared hardcoded app-wide key
+- Do not invent custom cryptographic algorithms
+- Do not send private encryption keys to Firebase or any backend
+- Do not store plaintext direct messages in Firestore, Realtime Database, logs, analytics, or admin tools
+- Do not mark a chat as encrypted unless true E2EE is active
+
+Architecture choice:
+Use Firebase for:
+- Authentication
+- Firestore or Realtime Database for app data
+- Cloud Functions for server logic where needed
+- Cloud Storage for media storage
+- FCM for notifications
+- App Check where possible
+- Security Rules for strict access control
+
+Use Signal-style messaging concepts for encrypted direct messages:
+- per-device identity key pair
+- signed prekeys
+- one-time prekeys
+- secure session establishment using a reputable Signal-style protocol/library
+- per-message ratcheting / fresh message keys
+- forward secrecy where supported
+
+Do not build homemade crypto.
+Use a reputable maintained library if available for the client platforms being used.
+
+Project requirement:
+This must be a real implementation, not sample code, not pseudo-code, and not mock architecture.
+Keep the rest of the app stable while upgrading messaging security.
+
+Tech stack target:
+- Firebase Authentication for login
+- Firestore for metadata and encrypted message routing data
+- Cloud Storage for encrypted media blobs if attachments are used
+- Cloud Functions only for non-sensitive backend logic, notifications, delivery bookkeeping, validation, and moderation metadata
+- Client-side encryption and decryption only
+- Client apps handle all private key generation and session state locally
+
+Authentication requirements:
+- Implement Firebase Authentication securely
+- Support phone auth and/or email auth depending on current app requirements
+- All message APIs and reads must require authenticated users
+- Validate Firebase auth tokens on protected access
+- Prevent users from reading or writing other users’ secure data
+- Add rate limiting and abuse protections where possible
+- Add App Check integration where practical
+- Ensure only authenticated devices can register keys and fetch their own secure message queues
+
+Direct messaging security requirements:
+Build encrypted 1-to-1 messaging with these rules:
+- Generate identity key pairs on the client/device only
+- Generate signed prekeys on the client/device only
+- Generate one-time prekeys on the client/device only
+- Upload only public key material to Firebase
+- On first secure message:
+  - fetch recipient prekey bundle
+  - establish secure session locally
+  - encrypt outgoing message locally
+- On receiving:
+  - decrypt message only on recipient device
+- On later messages:
+  - use ratcheting session state for fresh keys
+- Support safe retries and duplicate protection
+- Structure code to support future safety number / fingerprint verification
+
+Private keys and session state:
+- Store all private identity keys locally only
+- Store session ratchet state locally only
+- Use secure device storage where available
+- Never sync private keys to Firebase in plaintext
+- Never expose private keys to Cloud Functions
+- Detect corrupt or missing session state and force secure session reset when needed
+
+Firebase data model:
+Create a secure data structure such as:
+- users
+- userDevices
+- publicIdentityKeys
+- signedPrekeys
+- oneTimePrekeys
+- encryptedThreads
+- encryptedMessages
+- messageDeliveryStatus
+- reports
+- moderationMetadata
+- securityAuditMetadata
+
+Rules for stored data:
+Firebase may store only:
+- user id
+- device id
+- public identity key
+- signed prekey public data and signature
+- one-time prekey public data
+- ciphertext payloads
+- encrypted message headers if needed
+- timestamps
+- delivery status
+- minimal routing metadata
+
+Firebase must never store:
+- plaintext DM content
+- plaintext message previews
+- plaintext attachment contents
+- private keys
+- decrypted ratchet state
+- raw secrets in logs
+
+Firestore / Security Rules:
+Write strict Firebase Security Rules to ensure:
+- users can only access their own device key material where appropriate
+- users can only pull encrypted messages intended for them
+- users cannot enumerate or access other users’ secure sessions
+- public key bundles are readable only as needed for secure messaging
+- write access is validated carefully
+- admin/owner tools do not bypass private message encryption
+- moderation tools can manage reports and metadata only, not read private DM plaintext
+
+Cloud Functions requirements:
+Use Cloud Functions only for safe backend tasks:
+- validate authenticated requests
+- manage notification triggers without plaintext leakage
+- handle delivery receipts metadata
+- remove one-time prekeys after first use if architecture requires it
+- process abuse reports on user-submitted reported content only
+- maintain non-sensitive counters and routing metadata
+- queue encrypted notifications safely
+
+Cloud Functions must never:
+- decrypt messages
+- handle private keys
+- generate client private secrets
+- log plaintext content
+- expose encrypted data broadly
+
+Push notification requirements:
+- Use FCM
+- Never include plaintext message body in notification payloads
+- Use generic notification text like “New message”
+- Fetch and decrypt content only inside the authenticated client app
+
+Attachments and media:
+- Build architecture for encrypted media
+- If attachments are enabled:
+  - encrypt media on client before upload
+  - upload encrypted blob to Cloud Storage
+  - store only encrypted references and metadata in Firebase
+- Do not expose direct public URLs to private media
+- Use signed/authenticated access patterns if needed
+- Keep media decryption client-side only
+
+Owner/admin restrictions:
+I may have owner/admin controls for user management, reports, verification, and moderation.
+These owner/admin tools must NEVER decrypt or expose private DM contents.
+Owner/admin can:
+- ban users
+- verify users
+- review reports
+- manage metadata
+- view public platform data
+Owner/admin cannot:
+- read encrypted direct message plaintext
+- access private keys
+- bypass E2EE in direct messages
+
+Legacy compatibility:
+- Preserve the rest of my app
+- Separate legacy chat logic from secure chat logic
+- Mark legacy chats as non-encrypted if they are not truly E2EE
+- All new secure chats must use the encrypted architecture only
+- Do not break uploads, profiles, feed, notifications, wallet, or settings
+
+UI / UX requirements:
+Add real encrypted chat states:
+- Securing chat…
+- Encrypted
+- Waiting for recipient keys
+- Session reset required
+- Verify safety code
+- Secure send failed
+- Message retrying securely
+
+Do not display “encrypted” unless true end-to-end encryption is active.
+
+Error handling:
+Implement defensive handling for:
+- missing recipient key bundle
+- invalid signatures
+- duplicate messages
+- replayed messages
+- corrupt local ratchet state
+- device change
+- reinstall/reset
+- expired auth
+- invalid ciphertext
+- malformed writes
+- unauthorized access
+- missing one-time prekeys
+- unsupported protocol version
+
+Hardening requirements:
+Harden the whole app, not just encryption:
+- remove insecure console logs
+- remove plaintext debug prints
+- sanitize all inputs
+- validate schemas strictly
+- protect against IDOR and broken access control
+- secure Firebase rules thoroughly
+- lock down Cloud Storage rules
+- secure secrets in environment variables
+- avoid hardcoded credentials
+- add abuse throttling
+- add integrity checks where possible
+- use least-privilege design
+
+Testing requirements:
+Write production-grade tests for:
+- user/device key generation
+- signed prekey registration
+- one-time prekey upload and depletion
+- first secure session creation
+- later ratcheting messages
+- encrypt/decrypt correctness
+- unauthorized message access rejection
+- duplicate/replay rejection
+- corrupt session recovery
+- app reinstall / device reset behavior
+- encrypted message queue delivery
+- encrypted media upload/download if implemented
+- Firebase rules preventing unauthorized reads/writes
+- confirmation that plaintext is never stored in Firebase
+- confirmation that private keys never leave client
+- confirmation that admin cannot read private DMs
+
+Code quality requirements:
+- write clean modular production code
+- separate encryption layer from Firebase services
+- separate auth layer from message layer
+- separate notification layer from message content
+- document trust boundaries clearly
+- avoid placeholders and TODOs for critical security logic
+- keep implementation maintainable and strict
+- do not break existing app behavior
+
+Implementation modules:
+Create/refactor modules such as:
+- firebase auth service
+- secure device registration service
+- key bundle service
+- prekey management service
+- encrypted messaging service
+- encrypted media service
+- delivery receipt service
+- notification service
+- secure local storage wrapper
+- security rules definitions
+- Cloud Functions handlers
+- protocol/session manager
+
+Final output requirements:
+At the end output:
+1. all files created and modified
+2. Firebase collections/tables/schema structure
+3. Firestore Security Rules
+4. Cloud Storage Rules
+5. Cloud Functions added
+6. environment variables and Firebase config needed
+7. crypto library selected and why
+8. trust boundaries
+9. exact local test instructions for two users
+10. exact Firebase deployment steps
+11. security checklist confirming:
+   - Firebase cannot decrypt DMs
+   - plaintext is not stored
+   - private keys never leave client
+   - owner/admin cannot read private DMs
+   - encrypted badge only appears when true E2EE is active
+
+Important final instruction:
+Do not cut corners.
+Do not fake Signal-like encryption.
+Build this as a real Firebase-backed app with client-side end-to-end encrypted messaging modeled on Signal-style architecture using reputable libraries and safe design.

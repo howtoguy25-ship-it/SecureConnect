@@ -1,0 +1,24 @@
+1. No crash reporting wired up (that I can see)
+Sentry is listed as available in your dependencies, but I haven't seen it actually initialized. Without crash reporting, when a user reports "the app crashed when I tried X", you have no logs and no stack trace. High-leverage 30-minute fix for Build 66.
+
+2. Single Postgres on Replit
+Fine for ~10K active users. At 50K+ DAU you'll need read replicas, connection pooling tuned, and probably a managed Postgres (Neon, Supabase, or RDS). Not urgent — but plan for it before you hit the wall.
+
+3. Replit Deployment can sleep
+If you're not on the Reserved VM plan, your backend can cold-start. Cold-starts during a call setup = call fails. Check your deployment tier. For a messenger this should be Reserved VM, not Autoscale.
+
+4. Push notifications on iOS background/killed states
+Push delivery works (Expo + APNs), but iOS aggressively kills apps in low-memory states. Users on older iPhones (XR, 11) may report "I didn't get the notification until I opened the app." This is partially Apple's problem, partially fixable with content-available: 1 silent pushes — worth investigating after launch when you have real user reports.
+
+5. Group calls untested above ~6 people
+LiveKit Cloud handles it fine technically, but UI grid layout, identification of speakers, and bandwidth on weak connections aren't stress-tested. Real users will try a 10-person group call and find rough edges.
+
+6. Hidden Locker PIN security
+I haven't audited the PIN storage. If it's plain SHA-256 of the PIN, that's bruteforceable in seconds. Should use Argon2 or scrypt with a per-user salt. Worth a one-hour audit before marketing the Locker feature heavily.
+
+7. Twilio abuse limits
+Your SMS rate limiting (added Build 61) protects you from cost runaway, but a determined attacker hitting your /send-otp endpoint from rotating IPs can still burn $100s per night. Consider adding Cloudflare Turnstile or hCaptcha on the OTP endpoint before any kind of public marketing push.
+
+8. App Store listing name mismatch
+Listing says "SecureConnect Messenger" but the app shows "Pryvo" everywhere. Apple usually doesn't flag this, but it's confusing for users searching the store. Plan to update the listing name with Build 66 or 67.
+

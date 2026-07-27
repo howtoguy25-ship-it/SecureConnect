@@ -1,0 +1,52 @@
+URGENT APP STORE REJECTION FIX — Guideline 2.1(a): OTP phone number bug.
+
+Apple rejected build 1.0 (56) because an error message appeared when they entered a phone number to get an OTP on iPhone 17 Pro Max, iOS 26.4.2, active internet.
+
+Fix this properly and production-ready, not with placeholders.
+
+1. Reproduce the issue
+- Test signup/login OTP flow on fresh install.
+- Test on iPhone Pro Max sizes, small iPhones, Android, Expo Go/dev build, and production build.
+- Test with clean app storage and no previous account/session.
+- Test weak internet, normal internet, and API failure cases.
+
+2. Fix phone number input
+- Use real international phone validation.
+- Support country code selection.
+- Format numbers into E.164 format before sending OTP.
+- Show clear errors only when the number is invalid.
+- Do not crash or show raw backend errors.
+- Disable “Send OTP” while loading to prevent duplicate requests.
+
+3. Fix OTP backend/API
+- Confirm the OTP provider/API keys are correctly configured for production.
+- Confirm iOS production build uses the correct environment variables, not localhost/dev URLs.
+- Confirm the API endpoint is reachable from real devices.
+- Add timeout handling, retry handling, and clean user-friendly error messages.
+- Log the exact backend error internally for debugging.
+
+4. Apple reviewer compatibility
+- Make sure OTP works on iPhone 17 Pro Max and latest iOS.
+- Make sure SafeArea/layout works on all iPhone sizes.
+- Make sure buttons are visible, clickable, and not blocked by keyboard or safe areas.
+- Make sure keyboard submit and tap buttons both work.
+- Make sure there is no broken loading state.
+
+5. Test account / review support
+- Add a working Apple review demo phone number and OTP code if the real OTP provider blocks reviewer numbers.
+- Add this demo number/code into App Store Review Notes.
+- Do not expose demo login publicly unless protected for review/testing only.
+
+6. Final verification
+- Run lint/typecheck/build.
+- Run the app as a fresh install.
+- Complete full OTP flow from phone number → OTP sent → OTP entered → user logged in.
+- Confirm there are no console errors, red screens, or failed network requests.
+- Give me a short report showing:
+  - cause of the bug
+  - files changed
+  - how it was fixed
+  - exact test steps completed
+  - confirmation it works on iOS production build
+
+Do not mark this complete until OTP works on a real device production-style build and the app can pass Apple review.

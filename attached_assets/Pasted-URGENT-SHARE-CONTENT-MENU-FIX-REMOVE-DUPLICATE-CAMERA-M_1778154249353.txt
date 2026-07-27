@@ -1,0 +1,188 @@
+URGENT SHARE CONTENT MENU FIX — REMOVE DUPLICATE CAMERA + MAKE ALL ATTACHMENT FEATURES WORK
+
+My chat plus (+) attachment menu currently has broken buttons and duplicate features. Fix it properly without breaking the existing chat, messages, reactions, encryption, or send button.
+
+CURRENT ISSUES:
+- Camera inside the plus (+) menu does not work.
+- Contacts button does not work.
+- Emoji button does not work properly.
+- GIF button does not work properly.
+- File/media buttons need to be reorganized.
+- There is already a camera button on the right side beside the send button, so the camera button inside the plus menu must be removed.
+
+GOAL:
+Clean up the plus (+) attachment menu and make every remaining option fully functional.
+
+REQUIRED MENU STRUCTURE:
+Remove:
+- Camera button from the plus menu completely.
+
+Keep and fix:
+- Media / Photos
+- Files
+- Contacts
+- Emoji
+- GIF
+
+Rename:
+- Change Photo/Video into one button called “Media” or “Photos”.
+- This button must include both photos and videos.
+
+Keep Files separate:
+- Files must remain its own separate option/tab/section for documents and other file types.
+
+====================================================
+PERMISSION HANDLING
+====================================================
+
+Implement real permission handling properly.
+
+For Media / Photos:
+- Ask photo/video library permission only the first time.
+- If user allows permission, never show the permission request again for that section.
+- If denied, show a clean message telling user they must enable permission in settings.
+
+For Contacts:
+- Ask contacts permission only the first time.
+- If user allows permission, never show the permission request again for contacts.
+- If denied, show a clean message telling user contacts cannot be shared until permission is allowed.
+
+For Files:
+- Open file picker without unnecessary repeated permission popups.
+- Do not ask permission every time if already granted/handled by system picker.
+
+For GIFs:
+- No device permission should be required.
+- Load GIFs from a real online GIF provider/API.
+- Add trending GIFs and GIF search.
+
+For Emojis:
+- No device permission should be required.
+- Open a real emoji picker instantly.
+
+====================================================
+MEDIA / PHOTOS FEATURE
+====================================================
+
+When user taps Media / Photos:
+- Open real device photo/video picker.
+- Allow selecting photos.
+- Allow selecting videos.
+- Allow multi-select if supported.
+- Show selected media preview.
+- Add send button.
+- Add cancel button.
+- Upload/send selected media into the chat.
+- Show loading/upload progress.
+- Compress media safely before sending.
+- Prevent crashes from large videos or images.
+
+====================================================
+FILES FEATURE
+====================================================
+
+When user taps Files:
+- Open real file picker.
+- Allow PDFs, docs, audio, ZIPs, images, videos, and common file types.
+- Show filename and file size before sending.
+- Add send button.
+- Add cancel button.
+- Show upload progress.
+- Send files into the chat properly.
+- Keep files separate from media/photos in the UI.
+
+====================================================
+CONTACTS FEATURE
+====================================================
+
+When user taps Contacts:
+- Ask permission once if needed.
+- Load real phone contacts after permission is allowed.
+- Add contact search.
+- Let user select one or more contacts.
+- Preview contact card before sending.
+- Send contact card into chat.
+
+Contact card must show:
+- name
+- phone number
+- optional avatar if available
+
+Handle:
+- denied permissions
+- empty contacts list
+- contacts without phone numbers
+- slow loading
+- errors without crashing
+
+====================================================
+EMOJI FEATURE
+====================================================
+
+When user taps Emoji:
+- Open full emoji picker.
+- Include standard emoji categories.
+- Add recent emojis.
+- Add search.
+- Allow sending emoji into chat/message input.
+- Keep UI smooth and modern.
+
+====================================================
+GIF FEATURE
+====================================================
+
+When user taps GIF:
+- Open real GIF picker.
+- Load trending GIFs.
+- Add search bar.
+- Allow selecting GIF.
+- Preview GIF before sending.
+- Send GIF into chat.
+- Cache GIFs for performance.
+- Prevent freezing/crashing from large GIFs.
+
+====================================================
+IMPORTANT UI RULES
+====================================================
+
+- Remove duplicate Camera from plus menu.
+- Keep the existing camera button beside the send button.
+- Plus menu must look clean, modern, and consistent.
+- No broken buttons.
+- No placeholder features.
+- No repeated permission popups after permission is granted.
+- No crashes.
+- No “Something went wrong” screen.
+- No duplicate modals.
+- No old UI.
+
+====================================================
+DO NOT BREAK
+====================================================
+
+Do not break:
+- message sending
+- receiving messages
+- encryption
+- reactions
+- hold message menu
+- chat navigation
+- keyboard handling
+- existing camera button beside send button
+- realtime updates
+
+====================================================
+FINAL TESTING REQUIRED
+====================================================
+
+Verify:
+- Camera is removed from plus menu.
+- Camera beside send button still works.
+- Media/Photos opens photos and videos.
+- Files opens file picker.
+- Contacts opens contacts after permission.
+- Emoji picker works.
+- GIF picker works.
+- Permissions only ask once when allowed.
+- Send buttons actually send content into chat.
+- No crashes or broken UI.

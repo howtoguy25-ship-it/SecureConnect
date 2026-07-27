@@ -1,0 +1,115 @@
+I need you to do a complete top-to-bottom functional audit of my iOS app to confirm that everything actually works — every button, every feature, every purchase, every flow. Don't assume anything works just because the code exists. Trace it, verify it, and report back with evidence.
+
+**Audit scope — go through every section and report findings with file paths + line numbers:**
+
+---
+
+**1. Every button and interactive element**
+
+- Find every button, tappable element, switch, toggle, slider, and menu item in the app
+- For each one, confirm:
+  - It has an `onPress` / `onClick` handler attached (not a dead button)
+  - The handler actually does something meaningful (not a `console.log` stub or empty function)
+  - It navigates to the correct screen / triggers the correct action
+  - It has proper loading states and error handling
+  - It's not hidden behind a condition that never becomes true
+- Flag every dead button, every stub handler, and every "TODO" left in production code
+
+---
+
+**2. Every feature — does it actually do what the UI claims?**
+
+- List every feature advertised in the app (messaging, calls, status, settings, profile, notifications, etc.)
+- For each feature, trace the full flow from UI tap → logic → backend call → response → UI update
+- Confirm:
+  - The feature works end-to-end, not just the UI shell
+  - Error states are handled (network failure, server error, permission denied)
+  - Empty states are handled (no messages, no contacts, no status)
+  - Loading states are shown
+- Flag any feature that's visible in the UI but not actually wired up
+
+---
+
+**3. VIP In-App Purchase — does buying it actually deliver VIP?**
+
+- Find every place VIP status is checked (`isVIP`, `vip`, `premium`, `subscription`, etc.)
+- List every feature gated behind VIP
+- For each gated feature, confirm:
+  - The VIP check runs before the feature unlocks
+  - The check pulls from a reliable, validated source — not a spoofable local flag
+  - There's no bypass path
+- Confirm the purchase flow:
+  - Product ID matches App Store Connect exactly
+  - Purchase completes and unlocks VIP immediately
+  - Receipt is validated (ideally server-side)
+  - VIP persists across app restarts and reinstalls
+  - `restorePurchases` correctly restores VIP
+  - Subscription renewal and expiration are handled correctly
+- Flag any "VIP feature" that isn't actually gated, or any gate that can be bypassed
+
+---
+
+**4. Ad Removal In-App Purchase — does it actually remove ads?**
+
+- Find the Ad Removal flow and the flag it sets (`adsRemoved`, `noAds`, etc.)
+- Find every AdMob ad call (banner, interstitial, rewarded, app open)
+- Confirm each ad call checks the Ad Removal flag (and VIP flag, if VIP also includes ad-free) before firing
+- Confirm the flag persists across restarts and reinstalls
+- Confirm `restorePurchases` correctly restores Ad Removal
+- Flag any ad placement that still fires after Ad Removal is purchased
+
+---
+
+**5. All In-App Purchases — are they real and wired up correctly?**
+
+- List every IAP product ID referenced in the code
+- Confirm each one matches an actual product configured in App Store Connect (flag mismatches)
+- Confirm the IAP library (e.g., `react-native-iap`, `expo-in-app-purchases`) is initialized correctly on app launch
+- Confirm error handling: failed purchase, cancelled purchase, network failure, deferred purchase (Ask to Buy), already-owned product
+- Confirm receipts are validated — ideally server-side, not just trusting the client
+- Confirm purchase restoration works (Apple requires it for non-consumables and subscriptions)
+- Confirm sandbox testing works with no hardcoded conditions that break in production
+- Flag any product ID that exists in code but not in App Store Connect, or vice versa
+
+---
+
+**6. Ads — are they actually loading and displaying real ads?**
+
+- Confirm the AdMob iOS App ID in `app.config.js` matches the AdMob console for the current bundle ID
+- Confirm every ad unit ID is a real, active production ad unit — not a leftover Google test ID
+- Confirm AdMob SDK is initialized before any ad request
+- Confirm `SKAdNetwork` identifiers are present in Info.plist
+- Confirm ATT (App Tracking Transparency) prompt is implemented and shown before personalized ad requests
+- Confirm GDPR / UMP consent is handled for EU users
+- Flag any ad call that could fail silently with no fallback or any test ID still in production
+
+---
+
+**7. Authentication and Sign in with Apple**
+
+- Confirm Sign in with Apple capability is enabled in entitlements
+- Confirm bundle ID and Services ID are correctly configured for the current bundle
+- Trace the full sign-in flow: tap → Apple token returned → token verified → session created → user lands authenticated
+- Confirm the identity token signature is verified, not blindly trusted
+- Confirm the user identifier (`sub` claim) is the stable account key — NOT email (Apple can return a private relay email or no email on returning sign-ins)
+- Confirm the flow handles first-time sign-in (name + email returned once), returning sign-in (only user ID returned), and revocation
+- Flag any code that assumes email is always present
+
+---
+
+**Output format:**
+
+For each of the 7 sections, give me:
+- ✅ What's working correctly (with file paths + line references)
+- ⚠️ What's risky, fragile, or unverifiable from code alone (with explanation)
+- ❌ What's broken, missing, or fake (with file paths + what to fix)
+
+End with a single prioritized fix list ranked by severity:
+1. Revenue-impacting (broken IAPs, ads not loading, VIP not unlocking)
+2. Auth-impacting (sign-in broken, sessions lost)
+3. Feature-impacting (dead buttons, broken flows)
+4. Polish (missing loading states, weak error handling)
+
+Don't be vague. If you can't verify something from the code alone (server-side receipt validation, App Store Connect product configuration, AdMob console state, live ad fill), say so explicitly and tell me exactly what I need to check manually outside the codebase.
+
+Start by listing every file you're going to inspect, then go through them systematically.

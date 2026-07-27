@@ -1,0 +1,93 @@
+CRITICAL APP STORE REJECTION FIX — DO NOT BREAK EXISTING CODE
+
+Apple rejected SecureConnect Messenger under Guideline 2.1(a) because phone authentication failed during review on iPad Air 11-inch (M3).
+
+Exact reviewer error:
+“Could not send a verification code.”
+
+This means the real SMS / OTP authentication system is failing on iOS/iPad devices or failing under App Review conditions.
+
+You must fully audit, debug, and repair the ENTIRE authentication flow from frontend to backend without breaking existing app functionality.
+
+REQUIRED FIXES:
+
+1. PHONE AUTHENTICATION MUST WORK 100%
+- Ensure real SMS OTP codes send successfully on:
+  - iPhone
+  - iPad
+  - TestFlight
+  - App Store Review devices
+- Validate all international phone formats correctly
+- Ensure country code parsing works properly
+- Ensure no silent failures occur
+- Handle retry attempts safely
+- Ensure OTP requests never hang infinitely
+
+2. FIX FIREBASE / AUTH PROVIDER CONFIGURATION
+- Audit Firebase Authentication setup completely
+- Verify:
+  - APNs certificates
+  - Push capability
+  - reCAPTCHA handling
+  - Device verification
+  - Authorized domains
+  - iOS bundle identifiers
+  - Production vs development configs
+  - API keys
+  - SHA keys if needed
+- Ensure iOS release builds work, not only development builds
+
+3. IPAD COMPATIBILITY FIX
+Apple specifically reviewed on:
+iPad Air 11-inch (M3)
+
+You MUST:
+- test and fix layout + auth behavior for iPad devices
+- ensure OTP modal/input renders correctly on tablets
+- ensure keyboard does not break submission
+- ensure all auth buttons remain clickable on iPad
+
+4. ADD ROBUST ERROR HANDLING
+Replace vague failures with real actionable errors:
+- invalid number
+- rate limited
+- network unavailable
+- SMS provider unavailable
+- verification timeout
+- backend auth failure
+
+Never show generic broken states.
+
+5. ADD REVIEWER SAFE FALLBACK
+If SMS verification temporarily fails:
+- gracefully retry automatically
+- prevent blank loading states
+- prevent frozen UI
+- prevent permanent lockout
+
+6. RELEASE BUILD TESTING
+Test the EXACT production/release build flow:
+- cold install
+- fresh account creation
+- OTP send
+- OTP verification
+- login persistence
+- logout/login cycle
+
+Do NOT only test Expo Go or development mode.
+
+7. STABILITY REQUIREMENTS
+- No crashes
+- No hanging auth screens
+- No infinite loading
+- No broken state after failed OTP
+- All buttons responsive
+- Real network timeout handling
+- Proper async cleanup
+
+8. FINAL REQUIREMENT
+Do not redesign the app.
+Do not modify unrelated systems.
+Do not break chats, UI, storage, navigation, or existing features.
+
+Focus ONLY on making the authentication + verification flow production-grade, App Store compliant, and fully stable for Apple review.

@@ -1,0 +1,67 @@
+Fix these app issues exactly without changing unrelated UI or business logic.
+
+Problems to fix:
+
+1. Status delete is not working
+- Uploading a status works
+- Deleting a status does not work
+- Find the full status delete flow across frontend, API route, storage/database, and state refresh
+- Make delete actually remove the status from the backend and immediately update the UI without needing a manual refresh
+- Add proper success/error handling
+
+2. Locker improvements
+When a locker already exists, add:
+- Change Password / Change PIN button
+- Reset Locker button
+
+Reset Locker must:
+- wipe all images/videos/files stored inside the locker
+- clear locker data safely
+- return the locker to its original first-time setup state
+- let the user create a completely new PIN/password again
+
+Change Password / Change PIN must:
+- require current PIN/password first if one exists
+- securely update the locker credential
+- not break access to the locker after change
+
+3. Settings buttons not working
+Fix these buttons so they work end-to-end:
+- Delete Account
+- Help and Support
+
+Delete Account must:
+- show a confirmation dialog
+- delete the user account and associated user-owned data safely
+- sign the user out
+- redirect to auth/onboarding screen
+- handle errors cleanly
+
+Help and Support must:
+- open a real working support flow
+- if there is already a support screen, route to it correctly
+- if not, create a simple working support page with email/contact/help text and a way to submit or start contact
+
+Technical requirements:
+- Trace each broken button from UI -> handler -> navigation/API -> backend/storage
+- Fix missing onPress / click handlers
+- Fix navigation routes if broken
+- Fix missing API endpoints if needed
+- Fix backend delete/reset/account actions if incomplete
+- Refresh local state/query cache after successful actions
+- Keep all existing design and features intact
+- Do not break upload, auth, or locker creation
+- Add user-facing error alerts/toasts where actions fail
+- Make the fixes production-safe
+
+After making changes, verify these exact flows:
+1. upload status -> delete status works
+2. create locker -> change PIN works
+3. create locker -> reset locker clears all contents and returns setup state
+4. settings -> delete account works fully
+5. settings -> help and support opens a working screen/flow
+
+When finished, show me:
+- which files were changed
+- what was broken in each issue
+- what exact fixes were made

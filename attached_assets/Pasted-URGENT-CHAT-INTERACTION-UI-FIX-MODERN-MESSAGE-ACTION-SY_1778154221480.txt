@@ -1,0 +1,188 @@
+URGENT CHAT INTERACTION UI FIX + MODERN MESSAGE ACTION SYSTEM
+
+My messenger app currently has TWO conflicting message interaction systems and the old one must be removed properly without breaking the new modern hold menu.
+
+CURRENT PROBLEM:
+- When tapping/clicking a message, the OLD popup/actions appear.
+- The old UI contains outdated delete/copy/share/send popups.
+- This conflicts with the NEW hold-to-react/message-action system.
+- The app feels buggy because both systems are active.
+
+GOAL:
+Keep ONLY the NEW modern hold interaction system and completely remove the OLD tap popup/action system.
+
+IMPORTANT:
+DO NOT remove or break:
+- current hold-on-message interaction
+- reactions
+- emoji picker
+- reply
+- forward
+- delete
+- copy
+- select
+- encrypted message info
+- pinning
+- realtime updates
+- chat performance
+- message rendering
+- animations
+
+====================================================
+REMOVE OLD MESSAGE TAP UI COMPLETELY
+====================================================
+
+Find and remove:
+- old onPress message action handlers
+- legacy popup menus
+- outdated modal/action sheet logic
+- duplicate tap interactions
+- conflicting event listeners
+- old alert popups
+- duplicated share/delete/copy systems
+
+Messages should:
+- open NOTHING on normal tap
+- ONLY activate interactions on HOLD/LONG PRESS
+
+====================================================
+KEEP + UPGRADE THE CURRENT HOLD MENU
+====================================================
+
+Keep the current hold-on-message system but upgrade it into a premium modern interaction UI like Signal/Telegram/iMessage.
+
+When user HOLDS a message:
+- Background should blur smoothly
+- Selected message should elevate/focus cleanly
+- Modern reactions row should appear above message
+- Smooth animation in/out
+- No lag
+- No flickering
+- No overlapping modals
+- No duplicated popups
+
+Reaction bar requirements:
+- 5 quick reactions visible
+- + button for full emoji picker
+- remove reaction option if already reacted
+- smooth realtime update
+- no app refreshes
+- no crashes
+
+====================================================
+MODERN MESSAGE ACTION MENU
+====================================================
+
+Under the selected message show modern rounded action buttons:
+
+- Reply
+- Copy
+- Forward
+- Select
+- Pin
+- Message Info
+- Delete
+
+Requirements:
+- modern dark glassmorphism style
+- smooth spring animations
+- responsive on iPhone
+- proper spacing
+- no old Android-style alerts
+- no duplicate menus
+- no stacked overlays
+
+====================================================
+CAMERA BUTTON FIX + UPGRADE
+====================================================
+
+The camera button inside chat must be rebuilt professionally.
+
+CURRENT ISSUE:
+- camera button is unstable/broken/outdated
+
+REBUILD IT PROPERLY:
+When tapping camera:
+- Open real in-app camera instantly
+- Smooth transition animation
+- Ask for camera permissions first time only
+- If denied:
+  - show proper permission modal
+  - prevent usage until enabled
+
+Add:
+- front/back camera switch
+- flash toggle
+- hold-to-record video
+- hands-free video recording
+- photo capture
+- preview before sending
+- send button
+- retake button
+- cancel button
+
+Requirements:
+- stable on iOS
+- no freezes
+- no black screens
+- no crashing after capture
+- media sends directly into chat
+- compressed uploads
+- loading indicator while sending
+
+====================================================
+PERFORMANCE + STABILITY FIXES
+====================================================
+
+Fix:
+- duplicate renders
+- modal conflicts
+- stale state
+- async race conditions
+- overlay stacking
+- memory leaks
+- keyboard conflicts
+- gesture conflicts
+- navigation glitches
+
+Ensure:
+- message hold works every time
+- no accidental taps triggering old menus
+- no “Something went wrong” crashes
+- smooth 60fps feel
+- stable on mobile devices
+
+====================================================
+IMPORTANT RULES
+====================================================
+
+DO NOT:
+- rewrite the whole app
+- break encryption
+- remove reactions
+- remove existing chat architecture
+- remove realtime messaging
+- remove current hold system
+
+DO:
+- remove ONLY the outdated tap popup system
+- keep modern hold interaction
+- professionally rebuild the interaction layer
+- maintain existing backend functionality
+- clean duplicate logic safely
+
+====================================================
+FINAL TESTING REQUIRED
+====================================================
+
+Verify:
+- tapping message does NOTHING
+- holding message opens ONLY the new modern menu
+- no old popup appears
+- reactions work
+- delete/copy/share work
+- camera works fully
+- no crashes
+- no UI overlap
+- smooth animations everywhere
+- stable on iPhone/mobile

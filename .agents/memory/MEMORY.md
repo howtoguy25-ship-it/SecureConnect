@@ -1,0 +1,5 @@
+- [App Store rejection checklists](app-store-rejection-checklists.md) — validate pasted "5.x fix" lists against real code (no Firebase, keep reviewer bypass, name already Pryvo); 10s fetch-timeout convention, never on uploads.
+- [Welcome country picker](welcome-country-picker.md) — country-list geo merge fix and phone-row overflow notes.
+- [EAS build & App Store submit ownership](eas-build-submit-ownership.md) — agent cannot run eas build/submit (no EXPO_TOKEN, Apple 2FA); preps config + hands off commands to user.
+- [Sealed sender conversation gate](sealed-sender-conversation-gate.md) — sealed route is virtual-conversation-only; legacy fallback on its 400 sentinel is safe, capability-unknown fallback is not.
+- [Dynamic import('react-native') fatal](rn-dynamic-namespace-import-fatal.md) — never dynamic-namespace-import react-native (getter walk hits PushNotificationIOS → device SIGABRT); use `[CLIENT CRASH]` prod logs for device-only fatals.

@@ -1,0 +1,64 @@
+Work on my existing Secure Connect project.
+
+Do everything in this exact order:
+
+1. First, scan the whole project and find the real login/auth flow, message send flow, notification system, user storage/database schema, and encryption files.
+
+2. Check if encryption is actually being used before messages are sent and after messages are received. Do not just check if crypto files exist. Confirm the message flow uses encrypt/decrypt properly.
+
+3. Do not remove my existing encryption files. Fix and connect them properly if they are not fully active.
+
+4. Add a “Generated Special Safe Code” feature:
+- Generate one unique safe code for every user.
+- Generate it only once when the user signs up or first logs in if they do not already have one.
+- Show the safe code to the user clearly.
+- Tell the user: “Save this code somewhere safe. You may need it to recover or verify your account.”
+- Do not store the plain safe code in the database.
+- Store only a secure hash of the safe code.
+- Add a screen where users can confirm they saved it.
+
+5. Add login security alerts:
+- Every time a user logs in, record the login event.
+- Save device name, IP address if available, approximate location if available, date, time, and user ID.
+- Send the user a notification saying: “New login detected on your Secure Connect account.”
+- If possible, include device and location in the alert.
+- Show this login history inside the Security or Trusted Devices screen.
+
+6. Add suspicious login protection:
+- If login is from a new device, show a warning.
+- Let the user mark the device as trusted.
+- Let the user remove trusted devices.
+- Add a “Log out all other devices” button if possible.
+
+7. Check key storage:
+- Private keys must not be stored in plain AsyncStorage.
+- Use secure storage where possible.
+- Make sure private keys, encryption keys, Stripe secrets, API secrets, and server secrets are never exposed in frontend/client files.
+
+8. Check backend routes:
+- Make sure protected routes require authentication.
+- Make sure one user cannot access another user’s messages, safe code data, login history, or trusted devices.
+
+9. Add clear UI:
+- In SecurityScreen, add:
+  - Safe Code section
+  - Login Alerts section
+  - Trusted Devices section
+  - Recent Login History section
+- Keep the design matching my current app.
+
+10. After changes, run the project and fix all TypeScript, import, dependency, and runtime errors.
+
+11. Do not break existing features:
+- Messaging must still work.
+- Login/signup must still work.
+- Notifications must still work.
+- Calls must still work.
+- Existing screens must still open.
+
+12. At the end, give me a short report:
+- What files you changed
+- Whether encryption is active in real message flow
+- How the safe code works
+- How login alerts work
+- Any remaining security warnings

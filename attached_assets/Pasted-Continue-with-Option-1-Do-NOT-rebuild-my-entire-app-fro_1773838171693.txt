@@ -1,0 +1,190 @@
+Continue with Option 1.
+
+Do NOT rebuild my entire app from scratch.
+Do NOT do a full Firebase migration right now.
+Keep my current app fully working and upgrade the existing direct messaging system to real end-to-end encryption using a Signal-style architecture with Double Ratchet and forward secrecy.
+
+Main objective:
+Add production-grade end-to-end encryption to my existing messaging system while preserving the rest of the app, UI, existing routes, uploads, profiles, feed, notifications, wallet/settings, and current user flows.
+
+Important:
+The app must stay functional during and after this upgrade.
+This is a security upgrade to the current stack, not a full rewrite.
+
+Core requirements:
+- Upgrade private 1-to-1 direct messages to real E2EE
+- Use a Signal-style architecture:
+  - per-device identity key pair
+  - signed prekeys
+  - one-time prekeys
+  - secure session establishment
+  - Double Ratchet for message key rotation
+  - forward secrecy where supported
+- Keep private keys on client/device only
+- Server stores only public key material, ciphertext, and minimal routing metadata
+- Server must never decrypt message contents
+- Do not use fake encryption
+- Do not use one shared global AES key
+- Do not invent custom cryptography
+- Use a reputable maintained library where possible
+
+Critical instruction:
+Preserve my existing app structure and features.
+Do not wipe, replace, or rebuild unrelated systems.
+Refactor only the messaging and security layers necessary to support true E2EE.
+
+Implementation strategy:
+1. Audit the current direct-message architecture
+2. Identify all existing plain-message code paths
+3. Replace plaintext send/store/read flow with encrypted flow
+4. Preserve existing chat UI as much as possible
+5. Add secure state handling and encrypted delivery on top of the current app
+6. Keep legacy messages marked as legacy/non-encrypted if needed
+7. All new secure messages must use the upgraded E2EE path only
+
+Client-side encryption requirements:
+- Generate identity key pairs on the client only
+- Generate signed prekeys on the client only
+- Generate one-time prekeys on the client only
+- Store private keys and ratchet session state locally in secure storage
+- Never send private keys to the backend
+- Encrypt messages locally before sending
+- Decrypt messages locally only on recipient device
+- Support secure session setup on first message
+- Support ratcheting for later messages
+- Support safe retries, duplicate protection, and session reset handling
+
+Server requirements:
+Keep the existing backend stack, but upgrade messaging endpoints/services to support E2EE.
+Server may store only:
+- user id
+- device id
+- public identity key
+- signed prekey public part and signature
+- one-time prekeys public parts
+- ciphertext payload
+- encrypted message envelope/header if required
+- timestamps
+- delivery status
+- read status metadata
+- minimal routing metadata
+
+Server must never store:
+- plaintext message content
+- plaintext previews
+- private encryption keys
+- decrypted ratchet state
+- debug copies of decrypted messages
+
+Required backend/API support:
+- device registration endpoint/service
+- public identity key registration
+- signed prekey upload/refresh
+- one-time prekey upload
+- recipient prekey bundle fetch
+- encrypted message send
+- encrypted message retrieval
+- delivery acknowledgement
+- read receipt metadata only
+- secure session reset workflow
+
+Security hardening requirements:
+- Validate auth on all messaging routes
+- Ensure users can only access their own device/session data
+- Prevent unauthorized message retrieval
+- Add replay protection
+- Add duplicate message detection
+- Add malformed payload rejection
+- Add rate limiting for messaging endpoints
+- Remove insecure console logs or plaintext logs
+- Prevent sensitive data leakage in analytics/debugging
+- Ensure owner/admin tools do not bypass E2EE
+- Owner/admin can manage reports and metadata only, never read private DM plaintext
+
+UI/UX requirements:
+Preserve my current messaging UI where possible, but add real secure states:
+- Securing chat…
+- Encrypted
+- Waiting for recipient keys
+- Session reset required
+- Secure send failed
+- Retry securely
+- Verify safety code (future-ready structure)
+Only show encrypted indicators when real E2EE is active.
+
+Legacy compatibility:
+- Do not delete existing chat tables/collections until migration is safe
+- Legacy plaintext messages may remain visible as legacy if already stored
+- All new secure chats/messages must use encrypted flow
+- Clearly separate legacy message handling from secure message handling in code
+- Do not break feed, uploads, profiles, search, activity, wallet, or other app areas
+
+Database/schema changes:
+Add only the minimum new schema needed for secure messaging, such as:
+- user_devices
+- public_identity_keys
+- signed_prekeys
+- one_time_prekeys
+- encrypted_messages
+- message_delivery_status
+- encrypted_threads metadata
+No schema may store plaintext private message content after this upgrade.
+
+Testing requirements:
+Write production-grade tests for:
+- key generation
+- signed prekey registration
+- one-time prekey upload and use
+- first-message session establishment
+- later-message ratchet advancement
+- encrypt/decrypt correctness
+- duplicate message rejection
+- replay protection
+- unauthorized access rejection
+- corrupt session recovery
+- device reset/reinstall handling
+- offline encrypted delivery
+- no plaintext stored in database
+- no plaintext written to logs
+- private keys never leave client
+- owner/admin cannot read private DMs
+
+Code quality requirements:
+- Keep the code modular
+- Separate crypto logic from transport logic
+- Separate auth middleware from message handlers
+- Add strict validation to all messaging payloads
+- Document trust boundaries clearly
+- Do not leave critical TODOs
+- Do not add mock encryption or placeholder security
+- Do not refactor unrelated app systems unless necessary for stability
+
+Performance requirements:
+- Do not slow down the whole app
+- Keep message sending and receiving responsive
+- Handle secure retries cleanly
+- Support queued/offline ciphertext delivery if current architecture supports it
+- Keep payloads minimal without sacrificing security
+
+Final output requirements:
+At the end, output:
+1. all files modified and created
+2. exact schema/database changes
+3. all new or updated API endpoints/services
+4. chosen cryptography library and why
+5. local secure storage method used
+6. trust boundaries
+7. known limitations
+8. exact steps to test secure messaging between two users
+9. confirmation checklist showing:
+   - server cannot decrypt DMs
+   - plaintext is not stored
+   - private keys never leave client
+   - owner/admin cannot read private DMs
+   - encrypted badge appears only when real E2EE is active
+
+Final instruction:
+This is an upgrade to my current app, not a rebuild.
+Preserve the app.
+Keep everything stable.
+Add real Signal-style E2EE with Double Ratchet carefully and correctly.

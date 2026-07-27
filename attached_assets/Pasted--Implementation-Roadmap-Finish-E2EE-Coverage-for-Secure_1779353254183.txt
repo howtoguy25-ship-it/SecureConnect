@@ -1,0 +1,164 @@
+# Implementation Roadmap: Finish E2EE Coverage for SecureConnect
+
+You are completing the E2EE story for SecureConnect across three phases. Build 63 server-side sealed sender shipped (server code + 8/8 integration tests green). This roadmap finishes the work that turns the badge on and closes the build-62 E2EE coverage audit gaps for media and voice calls.
+
+**Groups are explicitly out of scope.** Do not implement Sender Keys, group ratchets, or any multi-party encryption. If the user requests group features mid-roadmap, stop and ask — that is a separate project, not a phase here.
+
+-----
+
+## Non-negotiable principles (same as Phase 3)
+
+1. **Don’t overclaim.** Each phase has a specific user-facing claim. The claim must be true after that phase ships. If a surface still leaks, the claim doesn’t go live — the surface gets fixed.
+1. **No second crypto layer.** Reuse Signal Protocol for key material wherever possible. For media, derive symmetric keys from the Signal session. For voice, use the LiveKit E2EE primitive — do not roll custom transport encryption.
+1. **Plaintext never written to the server’s persistent stores.** Already true for sealed-sender messages. Must become true for media (today partial) and voice frames (today plaintext).
+1. **Forward-only.** Pre-existing media stays as-is. No back-fill. Cutover date documented per phase.
+1. **Every phase has a test gate.** Server changes do not merge without integration tests proving the claim. Client changes do not merge without the test harness extended to cover them.
+
+-----
+
+## Phase A — Sealed-sender client UI (build 63 completion)
+
+**Scope:** Turn the badge on. Server is already done.
+
+**Work items:**
+
+1. Composer “active sending identity” surface in `client/screens/ConversationScreen.tsx` (and any other composer entry point). Shows: virtual number (E.164), display name, status pill.
+1. Badge above the composer with the locked copy: **“End-to-end encrypted · sender identity not sent to recipient”**. Do not edit the copy. It was chosen specifically because it’s true; rewording risks overclaiming.
+1. Send button branching: if `preferredNumberType === 'app'`, the conversation is 1:1, and `/api/auth/me` returns `supportsSealedSender = true`, call `POST /api/messages/send-sealed`. Otherwise fall back to existing `/api/messages`.
+1. Inactive/revoked state: if the user’s virtual number `status !== 'active'`, disable the composer and show an inactive error. The `status` column exists; client must gate on it.
+1. Dev-mode assertion: client code that touches `message.senderId` on a message with `sealedSender = true` throws in dev. This catches accidental profile fetches on sealed messages.
+1. Recipient-side rendering: when a message arrives with no `senderId` and `sealedSender = true`, render from virtual number + display name only. Do not fetch the sender profile.
+
+**Test gate (extend existing supertest+Postgres harness):**
+
+- E2E flow: sender client (simulated) calls `/send-sealed`, recipient client (simulated) receives via REST, socket, and push. Assert no `senderId` reaches the recipient on any surface.
+- Inactive-number gating: composer is disabled when status is `released` or `suspended`.
+- Old-client fallback: a recipient profile with `supportsSealedSender = false` still receives messages correctly via the legacy path.
+
+**Phase A stop-gate:** before merge, paste the actual rendered payload (or the React component output) showing sender identity displayed as virtual number + display name with `senderId` absent. Stop and wait for sign-off. Do not start Phase B.
+
+**Phase A definition of done:** badge visible in app, tests green, doc Appendix B all ✅.
+
+-----
+
+## Phase B — Media E2EE (photos, video, voice notes, other file attachments)
+
+**Scope:** Close the four PARTIAL rows in the build-62 audit. All 1:1 attachments encrypted client-side before upload; server stores ciphertext only; recipient decrypts client-side.
+
+**Read first:** `docs/e2ee/phase-2-media.md` (the existing media-encryption design doc). If the design there is implementable and consistent with the current schema, follow it. If it conflicts with what shipped in build 63 (sealed sender, new tables, etc.), stop and write `docs/e2ee/phase-b-media-update.md` reconciling them before any code.
+
+**Architecture (subject to the design doc):**
+
+1. **Per-attachment symmetric key.** Derive from the Signal session (HKDF with a per-message salt) OR generate fresh and wrap with the Signal session. Pick one per the design doc. Document the choice.
+1. **AEAD: XChaCha20-Poly1305** (or AES-256-GCM if XChaCha is not available in the client’s crypto stack on all target platforms). Whichever is chosen, it must be available cross-platform; do not pick something only the web client supports.
+1. **Encrypt client-side before upload.** Server receives an opaque ciphertext blob. Server stores: ciphertext blob, nonce, AEAD tag, content-type *category* only (image/video/audio/file — no filename, no EXIF, no thumbnail derived server-side).
+1. **Thumbnails** are generated client-side from the plaintext, encrypted with a separate per-thumbnail key (or same key with a different nonce — pick one and document), and uploaded alongside.
+1. **Voice notes** follow the same path as audio attachments. No streaming required for 1:1 voice notes.
+1. **Other files** (PDF, generic) follow the same path. Filename is part of the encrypted payload, not metadata.
+
+**Server-side work:**
+
+- Storage layer: add a media-blob storage path that accepts opaque ciphertext. If you’re using S3/equivalent, no changes there — but the route that issues upload URLs must not log or persist filenames or content-type beyond the broad category.
+- Message row references the encrypted blob via opaque ID, plus the AEAD nonce/tag, plus the wrapped key (or HKDF salt — depends on key derivation choice).
+- No server-side image processing. No EXIF stripping (the client must strip before encrypting; server never sees plaintext to strip from). No server-side thumbnail generation.
+- Existing media-content moderation paths: if the server currently scans uploads, that path must be removed or moved client-side. Document the trade-off in the doc — content moderation on E2EE media is fundamentally a client-side or reporting-based problem.
+
+**Client-side work:**
+
+- Encrypt before upload, decrypt after download. Streaming decryption for video so the user doesn’t wait for the full file.
+- EXIF / metadata stripping client-side, before encryption.
+- Thumbnail generation client-side, before encryption.
+- Cache decrypted media locally with the same protections as other local secrets (the app should already have a secure cache pattern from text messages — reuse it).
+- “Media encrypted” indicator in the UI on attachment send and receive. Same honesty rules as the sealed-sender badge — copy must be accurate. Suggested: **“End-to-end encrypted media”**. Reject anything stronger like “fully private” or “server cannot see.”
+
+**Test gate (extend the harness):**
+
+- Round-trip: client A encrypts a known-plaintext image, uploads, client B downloads and decrypts, asserts byte-equality.
+- DB plaintext grep: after a media send, grep the media blob store and the messages table for the known plaintext marker. Marker must not appear anywhere on the server.
+- EXIF strip: send a photo with known EXIF GPS coordinates, recipient decrypts, assert the GPS data is gone (proves client-side strip happened before encryption).
+- Wrong-key fails: tamper with the wrapped key, assert decryption fails closed (no plaintext leaked, clean error).
+- Thumbnail: thumbnail decrypts independently and matches a scaled version of the original.
+- Old-media fallback: pre-Phase-B media still loads via the legacy path. No back-fill, but no regression either.
+
+**Phase B stop-gate:** before merge, paste the result of the DB plaintext grep test and the EXIF strip test. Both are the headline assertions for this phase. Stop and wait for sign-off. Do not start Phase C.
+
+**Phase B definition of done:** four PARTIAL rows in the build-62 audit flip to ✅. Media badge visible. Tests green. Doc updated.
+
+**Realistic timeline:** roughly 1-2 weeks of agent work if the existing `phase-2-media.md` design is sound. Add a week if it needs reconciliation.
+
+-----
+
+## Phase C — Voice/video call E2EE (LiveKit SFU)
+
+**Scope:** Close the PLAINTEXT row for 1:1 voice calls. Today LiveKit’s SFU sees decrypted media frames. After this phase, the SFU sees ciphertext only.
+
+**Read first:** LiveKit’s E2EE documentation. This phase depends on three external facts you must verify before writing code:
+
+1. **Does your LiveKit deployment plan support E2EE?** LiveKit’s E2EE feature requires Insertable Streams support and may require a paid plan or self-hosted SFU. If self-hosted, additional SFU config is required. If the plan does not support it, stop and tell the user — this phase cannot be done without it, and the right answer might be migrating to a different provider rather than building around the limitation.
+1. **Are all target clients (iOS, Android, web) on a LiveKit SDK version that supports E2EE?** If not, list which clients need upgrades.
+1. **Key distribution.** LiveKit’s E2EE primitive needs a shared key between call participants. The right answer is: derive it from the Signal session between the two users. Do not invent a new key exchange.
+
+**Architecture:**
+
+1. **Pre-call key agreement.** When user A initiates a call to user B, derive a call-specific symmetric key from their Signal session (HKDF with a call-id salt). Both clients derive the same key.
+1. **LiveKit E2EE enabled** with that key as the shared secret. Insertable Streams encrypts/decrypts frames at the client.
+1. **SFU sees encrypted frames only.** Metadata (call duration, participant identity at the LiveKit layer, network statistics) is still visible to the SFU. Document this honestly.
+1. **Key rotation.** If the call lasts longer than a threshold (define in doc, suggest 1 hour) or a participant rejoins, derive a fresh key. Document the rotation policy.
+1. **Failure mode.** If E2EE setup fails (client doesn’t support it, key agreement fails), the call **must not silently fall back to unencrypted**. Either it fails closed with a clear error to the user, or it proceeds with a prominent “not end-to-end encrypted” indicator. Pick one in the doc and stick to it. Recommendation: fail closed.
+
+**Server-side work:**
+
+- Token issuance for LiveKit room joins must include the E2EE-required claims.
+- No server access to the call key. The server hands out room tokens; the clients derive the encryption key from their Signal session. Server never sees the key.
+
+**Client-side work:**
+
+- Pre-call: derive shared key, configure LiveKit client with E2EE enabled and the derived key.
+- In-call: “End-to-end encrypted call” indicator. Same honesty rules — say what’s actually true. Suggested: **“End-to-end encrypted · server cannot hear call audio”**. The SFU sees metadata; the badge does not claim otherwise.
+- Failure UI: if E2EE setup fails, show the failure state. Do not start the call unencrypted.
+
+**Test gate:**
+
+- Wireshark-equivalent test: capture the SFU-bound traffic during a test call, assert frames are not decryptable without the call key. This may require a manual test step documented in the test plan — automated frame-level inspection in CI is hard. If automated, use a recorded fixture; if manual, document the procedure and require it as part of the release checklist.
+- Key derivation determinism: both ends derive the same key from the same Signal session + call-id.
+- Failure mode: simulate an E2EE setup failure, assert the call fails closed and the user sees the error.
+- Key rotation: simulate the rotation trigger, assert a new key is derived and the call continues without interruption.
+
+**Phase C stop-gate:** before merge, paste the captured SFU-bound traffic showing encrypted frames, and the failure-mode test result. Stop and wait for sign-off.
+
+**Phase C definition of done:** voice-call row in the audit flips from PLAINTEXT to ENCRYPTED E2E with documented SFU-visible metadata. Call badge visible. Tests green. Doc updated.
+
+**Realistic timeline:** roughly 2-4 weeks of agent work. LiveKit E2EE has real integration complexity and depends on infrastructure decisions that may not be in the agent’s hands.
+
+-----
+
+## Cross-phase: what stays true throughout
+
+- The sealed-sender server invariants from build 63 are not regressed. Any new route that touches messages must go through the existing sanitizer chokepoint or have an equivalent of its own.
+- The “honest copy” rule applies to every new badge. Reject anything that could be read as stronger than what the implementation actually delivers.
+- Every phase ships its own doc section (`docs/e2ee/phase-a-client.md`, `docs/e2ee/phase-b-media.md`, `docs/e2ee/phase-c-calls.md`) with the same structure as the sealed-sender doc: threat model, scope, schema/architecture changes, residual leaks, future work.
+- After each phase ships, the build-62 audit table is updated in the repo. Rows flip from PARTIAL/PLAINTEXT to ENCRYPTED E2E with a link to the phase that closed them.
+
+## Order of operations
+
+1. **Phase A** — client UI for sealed sender. Smallest, fastest, finishes what’s started.
+1. **Stop. Sign off.**
+1. **Phase B** — media E2EE. Biggest single piece of crypto work. Read `phase-2-media.md` first.
+1. **Stop. Sign off.**
+1. **Phase C** — voice call E2EE. Most external-dependency risk (LiveKit plan, SDK versions).
+1. **Stop. Sign off.**
+1. Update the build-62 audit table in the repo to reflect the final state.
+
+## What to push back on
+
+- “Let’s do A and B together” — no. A is half a day; B is two weeks. Different scope, different review.
+- “We can skip the test gate for Phase C because frame-level inspection is hard” — no. If automated is hard, manual is required and documented in the release checklist. The gate doesn’t get skipped.
+- “The badge for Phase B should say ‘fully encrypted’” — no. The honest copy rule is non-negotiable. Server still sees metadata (file size, timing, recipient). Badge says what’s true.
+- “Group support would be a small addition to Phase B” — no. Groups need Sender Keys, which is its own months-long project. Out of scope.
+- Any pressure to ship a phase before its test gate passes — no. You watched build 63 succeed because the gates held. Hold them.
+
+## Realistic total timeline
+
+If everything goes clean: Phase A is days, Phase B is 1-2 weeks, Phase C is 2-4 weeks. Plus review time between phases. **Total: roughly 4-7 weeks of agent work with review gates**, possibly longer if LiveKit infrastructure decisions need to happen.
+
+This is the honest number. If the user expects it faster, the answer is to cut scope (e.g., ship Phase A only, defer B and C) — not to compress the gates.

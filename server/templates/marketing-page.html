@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pryvo - Encrypted Messaging App</title>
+    <meta name="description" content="Pryvo is a military-grade encrypted messaging app with secure voice and video calls, virtual phone numbers, and VIP features.">
+    <link rel="icon" type="image/png" href="/assets/images/icon.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #000000;
+            color: #FFFFFF;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* Header */
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: #FFFFFF;
+        }
+        
+        .logo img {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+        }
+        
+        .logo span {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 32px;
+            list-style: none;
+        }
+        
+        .nav-links a {
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover {
+            color: #007AFF;
+        }
+        
+        .download-btn {
+            background: #007AFF;
+            color: #FFFFFF;
+            padding: 10px 24px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        .download-btn:hover {
+            background: #0056b3;
+        }
+        
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 120px 20px 80px;
+            background: linear-gradient(180deg, #000000 0%, #0a0a0a 100%);
+        }
+        
+        .hero-content {
+            max-width: 800px;
+        }
+        
+        .hero-icon {
+            width: 120px;
+            height: 120px;
+            border-radius: 28px;
+            margin-bottom: 32px;
+            box-shadow: 0 20px 60px rgba(122, 71, 255, 0.3);
+        }
+        
+        .hero h1 {
+            font-size: 56px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            background: linear-gradient(135deg, #FFFFFF 0%, #007AFF 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .hero p {
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 40px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .hero-badges {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        
+        .badge svg {
+            width: 16px;
+            height: 16px;
+            fill: #007AFF;
+        }
+        
+        .store-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        
+        .store-btn {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 28px;
+            background: #FFFFFF;
+            color: #000000;
+            border-radius: 12px;
+            text-decoration: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .store-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 122, 255, 0.3);
+        }
+        
+        .store-btn img {
+            width: 28px;
+            height: 28px;
+        }
+        
+        .store-btn-text {
+            text-align: left;
+        }
+        
+        .store-btn-text small {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+        
+        .store-btn-text strong {
+            display: block;
+            font-size: 16px;
+        }
+        
+        /* Features Section */
+        .features {
+            padding: 100px 20px;
+            background: #0a0a0a;
+        }
+        
+        .section-title {
+            text-align: center;
+            font-size: 40px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        
+        .section-subtitle {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 18px;
+            margin-bottom: 60px;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 32px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .feature-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 32px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(0, 122, 255, 0.5);
+        }
+        
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .feature-icon svg {
+            width: 28px;
+            height: 28px;
+            fill: #FFFFFF;
+        }
+        
+        .feature-card h3 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .feature-card p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 15px;
+        }
+        
+        /* VIP Section */
+        .vip {
+            padding: 100px 20px;
+            background: linear-gradient(180deg, #0a0a0a 0%, #1a0a2e 50%, #0a0a0a 100%);
+        }
+        
+        .vip-card {
+            max-width: 600px;
+            margin: 0 auto;
+            background: linear-gradient(135deg, rgba(122, 71, 255, 0.2) 0%, rgba(0, 122, 255, 0.2) 100%);
+            border: 1px solid rgba(122, 71, 255, 0.3);
+            border-radius: 24px;
+            padding: 48px;
+            text-align: center;
+        }
+        
+        .vip-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+            color: #000000;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            letter-spacing: 1px;
+        }
+        
+        .vip h2 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        
+        .vip-price {
+            font-size: 48px;
+            font-weight: 700;
+            color: #007AFF;
+            margin-bottom: 8px;
+        }
+        
+        .vip-price span {
+            font-size: 18px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .vip-features {
+            list-style: none;
+            margin: 32px 0;
+            text-align: left;
+        }
+        
+        .vip-features li {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .vip-features li:last-child {
+            border-bottom: none;
+        }
+        
+        .vip-features svg {
+            width: 20px;
+            height: 20px;
+            fill: #34C759;
+            flex-shrink: 0;
+        }
+        
+        /* Security Section */
+        .security {
+            padding: 100px 20px;
+            background: #000000;
+            text-align: center;
+        }
+        
+        .security-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 32px;
+        }
+        
+        .security-icon svg {
+            width: 100%;
+            height: 100%;
+            fill: #007AFF;
+        }
+        
+        .security h2 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 24px;
+        }
+        
+        .security p {
+            max-width: 600px;
+            margin: 0 auto 40px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 18px;
+        }
+        
+        .encryption-badges {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        
+        .encryption-badge {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            min-width: 140px;
+        }
+        
+        .encryption-badge strong {
+            font-size: 24px;
+            color: #007AFF;
+        }
+        
+        .encryption-badge span {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        /* Footer */
+        footer {
+            padding: 60px 20px;
+            background: #0a0a0a;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 24px;
+        }
+        
+        .footer-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .footer-logo img {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+        }
+        
+        .footer-links {
+            display: flex;
+            gap: 32px;
+        }
+        
+        .footer-links a {
+            color: rgba(255, 255, 255, 0.6);
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        
+        .footer-links a:hover {
+            color: #007AFF;
+        }
+        
+        .copyright {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 14px;
+        }
+        
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+            
+            .hero h1 {
+                font-size: 36px;
+            }
+            
+            .hero p {
+                font-size: 16px;
+            }
+            
+            .hero-icon {
+                width: 80px;
+                height: 80px;
+            }
+            
+            .section-title {
+                font-size: 28px;
+            }
+            
+            .vip-card {
+                padding: 32px 24px;
+            }
+            
+            .vip h2 {
+                font-size: 28px;
+            }
+            
+            .vip-price {
+                font-size: 36px;
+            }
+            
+            .footer-content {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .footer-links {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/" class="logo">
+                <img src="/assets/images/icon.png" alt="Pryvo">
+                <span>Pryvo</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#vip">VIP</a></li>
+                <li><a href="#security">Security</a></li>
+                <li><a href="/support">Support</a></li>
+            </ul>
+            <a href="/app" class="download-btn">Sign In</a>
+        </nav>
+    </header>
+
+    <section class="hero" id="download">
+        <div class="hero-content">
+            <img src="/assets/images/icon.png" alt="Pryvo" class="hero-icon">
+            <h1>Pryvo</h1>
+            <p>Military-grade encrypted messaging with secure voice and video calls. Your conversations are protected with end-to-end encryption.</p>
+            
+            <div class="hero-badges">
+                <div class="badge">
+                    <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+                    End-to-End Encrypted
+                </div>
+                <div class="badge">
+                    <svg viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+                    Secure Calls
+                </div>
+                <div class="badge">
+                    <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+                    Virtual Numbers
+                </div>
+            </div>
+            
+            <div class="store-buttons">
+                <a href="/app" class="store-btn" style="background:linear-gradient(135deg,#7c5cff 0%,#5b3df5 100%);border-color:transparent;color:#fff;">
+                    <svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:currentColor;"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                    <div class="store-btn-text">
+                        <small>Use it now in your browser</small>
+                        <strong>Sign In / Sign Up</strong>
+                    </div>
+                </a>
+                <a href="https://apps.apple.com/app/secureconnect-encrypted/id6756967188" class="store-btn" target="_blank">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg" alt="Apple">
+                    <div class="store-btn-text">
+                        <small>Download on the</small>
+                        <strong>App Store</strong>
+                    </div>
+                </a>
+                <a href="exps://EXPS_URL_PLACEHOLDER" class="store-btn">
+                    <svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:currentColor;"><path d="M12 2L2 22h20L12 2zm0 4.5L18.5 19h-13L12 6.5z"/></svg>
+                    <div class="store-btn-text">
+                        <small>Test instantly with</small>
+                        <strong>Expo Go</strong>
+                    </div>
+                </a>
+                <a href="#" class="store-btn" style="opacity: 0.5; pointer-events: none;">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/d/d7/Android_robot.svg" alt="Android">
+                    <div class="store-btn-text">
+                        <small>Coming soon on</small>
+                        <strong>Google Play</strong>
+                    </div>
+                </a>
+            </div>
+            <p style="margin-top:1rem;font-size:0.85rem;opacity:0.75;max-width:520px;">
+                No download needed — tap <strong>Sign In / Sign Up</strong> to use APP_NAME_PLACEHOLDER right in your browser. Or install <a href="https://expo.dev/go" target="_blank" style="color:inherit;text-decoration:underline;">Expo Go</a> and tap "Test instantly with Expo Go" on your phone.
+            </p>
+        </div>
+    </section>
+
+    <section class="features" id="features">
+        <div class="container">
+            <h2 class="section-title">Powerful Features</h2>
+            <p class="section-subtitle">Everything you need for secure communication</p>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+                    </div>
+                    <h3>Encrypted Messages</h3>
+                    <p>Send text, photos, videos, and files with military-grade AES-256 encryption that only you and your recipient can read.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+                    </div>
+                    <h3>Video Calls</h3>
+                    <p>Crystal-clear encrypted video calls with your contacts. No one can intercept or listen to your conversations.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+                    </div>
+                    <h3>Voice Calls</h3>
+                    <p>High-quality encrypted voice calls that work anywhere. Your voice communications stay completely private.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                    </div>
+                    <h3>Status Stories</h3>
+                    <p>Share moments with friends through 24-hour disappearing stories. Control exactly who sees your updates.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                    </div>
+                    <h3>Location Sharing</h3>
+                    <p>Share your real-time location with trusted friends. VIP members get live location updates every 30 seconds.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                    </div>
+                    <h3>Hidden Locker</h3>
+                    <p>VIP feature to hide sensitive messages and media in a secure vault protected by biometrics or PIN.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="vip" id="vip">
+        <div class="vip-card">
+            <span class="vip-badge">VIP MEMBERSHIP</span>
+            <h2>Unlock Premium Features</h2>
+            <div class="vip-price">$4.99 <span>/month</span></div>
+            
+            <ul class="vip-features">
+                <li>
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Custom Chat Backgrounds - Personalize your conversations
+                </li>
+                <li>
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Real-time Location Sharing - Share live GPS with friends
+                </li>
+                <li>
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Hidden Message Locker - Secure vault for sensitive content
+                </li>
+                <li>
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    3-Month Ad-Free Experience - Enjoy no ads for your first 3 months
+                </li>
+                <li>
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Priority Support - Get help when you need it
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="security" id="security">
+        <div class="security-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+        </div>
+        <h2>Military-Grade Security</h2>
+        <p>Your privacy is our top priority. Every message, call, and file is protected with industry-leading encryption that even we cannot access.</p>
+        
+        <div class="encryption-badges">
+            <div class="encryption-badge">
+                <strong>AES-256</strong>
+                <span>Encryption</span>
+            </div>
+            <div class="encryption-badge">
+                <strong>E2E</strong>
+                <span>End-to-End</span>
+            </div>
+            <div class="encryption-badge">
+                <strong>Zero</strong>
+                <span>Knowledge</span>
+            </div>
+            <div class="encryption-badge">
+                <strong>TLS 1.3</strong>
+                <span>Transport</span>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-content">
+            <div class="footer-logo">
+                <img src="/assets/images/icon.png" alt="Pryvo">
+                <span>Pryvo</span>
+            </div>
+            <div class="footer-links">
+                <a href="/privacy">Privacy Policy</a>
+                <a href="/support">Support</a>
+                <a href="/terms">Terms of Service</a>
+            </div>
+            <div class="copyright">
+                2025 Pryvo. All rights reserved.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

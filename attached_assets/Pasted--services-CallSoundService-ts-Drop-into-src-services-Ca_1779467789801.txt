@@ -1,0 +1,205 @@
+// services/CallSoundService.ts
+// Drop into: /src/services/CallSoundService.ts
+// Works on React Native (iOS + Android) and Web via platform detection.
+// Requires: expo-av (or react-native-sound) for native, native HTMLAudioElement for web.
+
+import { Platform } from 'react-native';
+
+// ============================================================
+// TYPES
+// ============================================================
+type SoundVariant = 'ringback' | 'ringtone';
+type CallSoundState = 'idle' | 'playing';
+
+interface ICallSoundService {
+  playRingback(): Promise<void>;
+  playRingtone(): Promise<void>;
+  stop(): Promise<void>;
+  previewRingtone(variant: SoundVariant): Promise<void>;
+  cleanup(): Promise<void>;
+}
+
+// ============================================================
+// ASSET PATHS
+// ============================================================
+// Place files in /assets/sounds/calls/
+// Native bundler will resolve via require(); web uses public URL.
+const SOUND_ASSETS = {
+  ringback: {
+    native: require('../../assets/sounds/calls/pryvo_ringback.m4a'),
+    web: '/assets/sounds/calls/pryvo_ringback.mp3',
+  },
+  ringtone: {
+    native: require('../../assets/sounds/calls/pryvo_ringtone.m4a'),
+    web: '/assets/sounds/calls/pryvo_ringtone.mp3',
+  },
+};
+
+// ============================================================
+// WEB IMPLEMENTATION
+// ============================================================
+class WebCallSoundService implements ICallSoundService {
+  private audio: HTMLAudioElement | null = null;
+  private state: CallSoundState = 'idle';
+
+  private async play(variant: SoundVariant): Promise<void> {
+    await this.stop();
+    try {
+      this.audio = new Audio(SOUND_ASSETS[variant].web);
+      this.audio.loop = true;
+      this.audio.preload = 'auto';
+      this.audio.volume = variant === 'ringback' ? 0.6 : 0.9;
+      await this.audio.play();
+      this.state = 'playing';
+    } catch (err) {
+      // Autoplay can be blocked until user gesture; fail silently and log
+      console.warn('[CallSoundService] Web playback failed:', err);
+      this.state = 'idle';
+    }
+  }
+
+  async playRingback(): Promise<void> {
+    return this.play('ringback');
+  }
+
+  async playRingtone(): Promise<void> {
+    return this.play('ringtone');
+  }
+
+  async stop(): Promise<void> {
+    if (this.audio) {
+      try {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+        this.audio.src = '';
+        this.audio.load();
+      } catch (err) {
+        console.warn('[CallSoundService] Web stop failed:', err);
+      }
+      this.audio = null;
+    }
+    this.state = 'idle';
+  }
+
+  async previewRingtone(variant: SoundVariant): Promise<void> {
+    await this.play(variant);
+    // Auto-stop preview after one loop cycle (~5s)
+    setTimeout(() => this.stop(), 5000);
+  }
+
+  async cleanup(): Promise<void> {
+    await this.stop();
+  }
+}
+
+// ============================================================
+// NATIVE IMPLEMENTATION (expo-av)
+// ============================================================
+// If you're not on Expo, swap expo-av for react-native-sound — the public
+// interface here stays identical so the rest of the app doesn't change.
+class NativeCallSoundService implements ICallSoundService {
+  private sound: any = null; // expo-av Audio.Sound instance
+  private state: CallSoundState = 'idle';
+  private hapticInterval: NodeJS.Timeout | null = null;
+
+  private async configureAudioSession(): Promise<void> {
+    try {
+      const { Audio } = await import('expo-av');
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: false, // respect silent mode
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+        interruptionModeIOS: 1, // DoNotMix
+        interruptionModeAndroid: 1, // DoNotMix
+      });
+    } catch (err) {
+      console.warn('[CallSoundService] Audio session config failed:', err);
+    }
+  }
+
+  private async startHaptics(): Promise<void> {
+    try {
+      const Haptics = await import('expo-haptics');
+      // Light impact every ~2.5s to match ring cycle
+      this.hapticInterval = setInterval(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }, 2500);
+    } catch (err) {
+      // Haptics optional — fail silently
+    }
+  }
+
+  private stopHaptics(): void {
+    if (this.hapticInterval) {
+      clearInterval(this.hapticInterval);
+      this.hapticInterval = null;
+    }
+  }
+
+  private async play(variant: SoundVariant): Promise<void> {
+    await this.stop();
+    try {
+      await this.configureAudioSession();
+      const { Audio } = await import('expo-av');
+
+      const { sound } = await Audio.Sound.createAsync(
+        SOUND_ASSETS[variant].native,
+        {
+          isLooping: true,
+          volume: variant === 'ringback' ? 0.6 : 0.9,
+          shouldPlay: true,
+        }
+      );
+
+      this.sound = sound;
+      this.state = 'playing';
+      await this.startHaptics();
+    } catch (err) {
+      console.warn('[CallSoundService] Native playback failed:', err);
+      this.state = 'idle';
+    }
+  }
+
+  async playRingback(): Promise<void> {
+    return this.play('ringback');
+  }
+
+  async playRingtone(): Promise<void> {
+    return this.play('ringtone');
+  }
+
+  async stop(): Promise<void> {
+    this.stopHaptics();
+    if (this.sound) {
+      try {
+        await this.sound.stopAsync();
+        await this.sound.unloadAsync();
+      } catch (err) {
+        console.warn('[CallSoundService] Native stop failed:', err);
+      }
+      this.sound = null;
+    }
+    this.state = 'idle';
+  }
+
+  async previewRingtone(variant: SoundVariant): Promise<void> {
+    await this.play(variant);
+    setTimeout(() => this.stop(), 5000);
+  }
+
+  async cleanup(): Promise<void> {
+    await this.stop();
+  }
+}
+
+// ============================================================
+// SINGLETON EXPORT
+// ============================================================
+const CallSoundService: ICallSoundService =
+  Platform.OS === 'web'
+    ? new WebCallSoundService()
+    : new NativeCallSoundService();
+
+export default CallSoundService;

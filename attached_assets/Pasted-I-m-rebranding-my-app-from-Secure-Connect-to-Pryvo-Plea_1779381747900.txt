@@ -1,0 +1,45 @@
+I'm rebranding my app from "Secure Connect" to "Pryvo." Please make the following updates throughout the entire codebase:
+
+**Keep the bundle identifier as-is** (com.adhamsalameh.secureconnectlive) — do NOT change it.
+
+**New logo:**
+- I've uploaded a new logo image. Please replace the existing app logo with this new image everywhere it appears, including:
+ - The in-app logo (header, splash screen, loading screens, onboarding, about page)
+ - App icon assets (all sizes/resolutions for iOS and Android — flag if you need me to provide additional sizes)
+ - Favicon if there's a web component
+ - Any marketing or placeholder logo images in the assets folder
+- Preserve the original file names where possible so existing references still work, OR update all references to point to the new file
+
+**Text replacements — change every instance of "Secure Connect" (and variants) to "Pryvo":**
+1. All UI text, headers, titles, splash screens, onboarding flows, and user-facing strings
+2. The app display name in Info.plist (CFBundleDisplayName and CFBundleName)
+3. package.json name field (if applicable)
+4. app.json / app.config.js name and slug (if Expo)
+5. Android AndroidManifest.xml app label and strings.xml
+6. README and any documentation files
+7. Privacy Policy — every reference to "Secure Connect" → "Pryvo"
+8. Terms of Service / Terms & Conditions — same
+9. Help & Support pages and FAQ content
+10. Support / Contact pages, including any support email display text (e.g., "Secure Connect Support" → "Pryvo Support")
+11. Settings page, About page, version info screens
+12. Email templates, notification copy, and any system-generated messages
+13. Localization / translation files (all languages)
+14. Meta tags, page titles, and SEO descriptions if there's a web component
+15. Loading messages, error messages, and toast notifications referencing the app name
+
+**Variants to also catch and replace:**
+- "Secure Connect" → "Pryvo"
+- "SecureConnect" → "Pryvo"
+- "secureconnect" → "pryvo" (only in user-facing strings, NOT in the bundle ID or anything tied to com.adhamsalameh.secureconnectlive)
+- "Secure Connect Live" → "Pryvo"
+
+**Important — do NOT change:**
+- The bundle identifier (com.adhamsalameh.secureconnectlive) — leave it exactly as is
+- Any encryption logic, API keys, database schemas, or backend endpoints
+- Any URL schemes, deep links, or file paths that include "secureconnect" if they're tied to the bundle ID — ask me first before touching those
+- Folder names or class names that could break imports — flag them for me to review
+
+**When you're done:**
+- Show me a summary of every file changed
+- List any places where you found "secureconnect" but didn't change it (and why)
+- Give me a checklist of manual steps I still need to do (replacing app icon in Xcode asset catalog, updating App Store Connect listing, updating any external services like Firebase or support email signatures, etc.)

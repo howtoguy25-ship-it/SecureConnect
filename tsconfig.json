@@ -1,13 +1,14 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": "expo/tsconfig.base.json",
   "compilerOptions": {
     "strict": true,
-    "ignoreDeprecations": "6.0",
-    "baseUrl": ".",
+    "esModuleInterop": true,
     "paths": {
-      "@/*": ["src/*"]
-    }
+      "@/*": ["./client/*"],
+      "@shared/*": ["./shared/*"]
+    },
+    "types": ["node"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "web", "modules/**/android", "modules/**/ios", "legacy"]
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
 }

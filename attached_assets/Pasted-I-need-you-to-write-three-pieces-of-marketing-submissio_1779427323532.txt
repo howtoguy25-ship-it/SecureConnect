@@ -1,0 +1,64 @@
+I need you to write three pieces of marketing/submission copy for my iOS app. Read this entire brief carefully before writing anything — I need copy that reflects what the app actually does, not generic app-store filler.
+
+**About the app:**
+- Name: Pryvo (tagline: "Secure Connect")
+- Bundle ID: com.adhamsalameh.pryvomessenger
+- Platform: iOS (built with React Native / Expo, configured via app.config.js)
+- Category: Secure messenger / communication app
+- Core features: encrypted messaging, voice/video calls, status updates, push notifications for calls and messages
+- Monetization: free with ads (AdMob) + two in-app purchases — VIP subscription and Ad Removal
+- Authentication: Sign in with Apple supported
+- Positioning: a privacy-first, secure-by-default alternative to mainstream messengers — built for people who want their conversations to actually stay private
+
+**What I need you to write — three separate deliverables, clearly labeled:**
+
+---
+
+**1. App Store description (the public-facing one users see on the App Store listing)**
+
+- Length: ~3,500–4,000 characters (use the space; don't write a short blurb)
+- Structure: punchy opening hook → short paragraph on what Pryvo is → bulleted feature list (messaging, calls, status, security, VIP perks, ad-free option) → closing line that reinforces the privacy/security promise
+- Tone: confident, modern, privacy-focused — not corporate, not gimmicky
+- Must mention: end-to-end secure messaging, voice & video calls, status updates, VIP features, ad-free upgrade option
+- Must NOT: make medical/legal/financial claims, promise "unhackable" or "military-grade" encryption (Apple rejects this), or compare Pryvo to specific competitors by name
+- Include a short "What's New" style closing line inviting users to join
+
+---
+
+**2. App Review Notes (the private notes submitted to Apple's review team in App Store Connect → App Review Information → Notes)**
+
+- Audience: Apple reviewer, not end users
+- Purpose: help the reviewer test the app without friction and avoid a rejection
+- Must include:
+  - A 2–3 sentence summary of what the app does
+  - Test account credentials placeholder (format: `Username: [TO FILL] / Password: [TO FILL]`)
+  - How to test core flows: sign up / sign in (including Sign in with Apple), send a message, make a call, view status, trigger a push notification
+  - How to test the in-app purchases (VIP and Ad Removal) using a sandbox account
+  - A note that AdMob ads will appear for non-VIP / non-Ad-Removal users — this is intentional, not a bug
+  - Contact email placeholder: `[TO FILL]`
+  - A note clarifying any encryption usage for export compliance (standard HTTPS / standard iOS crypto APIs, no proprietary crypto)
+- Tone: factual, concise, respectful of the reviewer's time
+
+---
+
+**3. TestFlight Beta Test Description (the "What to Test" field shown to TestFlight beta testers)**
+
+- Audience: external beta testers
+- Length: short — 4–8 sentences max
+- Must include:
+  - A one-line description of Pryvo
+  - The specific things you want testers to try (messaging, calls, status, push notifications, VIP purchase flow, Ad Removal purchase flow)
+  - A request to report bugs, crashes, UI glitches, and notification delivery issues
+  - A note that this is a beta build and some features may be unstable
+  - A friendly closing thanking testers
+- Tone: warm, casual, clear
+
+---
+
+**Formatting rules for your response:**
+- Label each of the three sections clearly with a heading
+- Put each deliverable in its own code block so I can copy it cleanly
+- Don't add extra commentary, intros, or outros between sections — just the labeled deliverables
+- If you need to make assumptions (e.g., specific VIP features), make them reasonable and flag them at the bottom in a short "Assumptions" note so I can correct them
+
+Before writing, ask me any clarifying questions if you genuinely need them — otherwise proceed.

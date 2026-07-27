@@ -1,0 +1,21 @@
+BUG: Pryvo Messenger crashes ("Pryvo Messenger" Crashed dialog) immediately after the user enters the SMS verification code, right after phone number entry. This is happening on a TestFlight/production build.
+
+Investigate and fix the crash in the OTP verification flow:
+
+1. Find the code screen/component that handles OTP entry after phone number submission (likely something like OTPVerificationScreen, VerifyCodeScreen, or similar in the auth flow).
+
+2. Check for these common crash causes and fix whichever applies:
+   - Unhandled promise rejection or unguarded async call when confirming the OTP with Firebase Auth (confirmationResult.confirm(code) or similar) — wrap in try/catch and handle errors gracefully instead of letting them throw uncaught.
+   - Null/undefined access on the Firebase confirmationResult object if it wasn't properly stored in state/context between the phone number screen and the code screen.
+   - Race condition where navigation to the next screen happens before the auth state listener has resolved, causing a null user object to be accessed downstream.
+   - Reviewer OTP bypass path (555-1234567 in routes.ts) — confirm this bypass logic isn't being triggered incorrectly for real numbers, and that it doesn't skip state initialization that later screens depend on.
+   - Any place where the verification code input reads e.g. code[6] or assumes a fixed length without bounds checking.
+   - Missing null check when reading route params passed from the phone number screen to the code screen (e.g. verificationId, phoneNumber).
+
+3. Add defensive error handling around the entire OTP confirm step: if confirmation fails or throws, show an in-app error message ("Invalid code, please try again") instead of crashing, and log the actual error (console.error or your logging setup) so we can see the real stack trace next time.
+
+4. Add a try/catch around any code that runs immediately after successful verification (e.g. writing user profile to Firestore, setting auth context, navigation) since a crash "after entering code" often means it's actually crashing during the post-verification setup, not the verification call itself.
+
+5. Test the full flow end to end: phone number entry -> receive/enter code -> successful verification -> lands on home/main screen without crashing, for phone, and confirm the Google/Apple sign-in paths aren't affected by whatever fix you apply.
+
+Report back with the specific root cause you found and the fix applied, plus the file(s) changed.

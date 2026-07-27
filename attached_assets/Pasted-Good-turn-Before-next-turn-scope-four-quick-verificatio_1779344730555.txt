@@ -1,0 +1,30 @@
+Good turn. Before next-turn scope, four quick verifications on what just shipped — answer inline, don't burn a turn on them unless something's actually wrong:
+
+1. Rate limit storage: confirm the 600/min/user limiter is in-memory only. Add a TODO.md item: "Move media endpoint rate limit to Redis or equivalent before horizontal scale — in-memory limits break silently across instances."
+
+2. E2EE_MEDIA_ENABLED: confirm this is a client-side constant (revert by shipping a build, no server coordination needed). If it's server-driven, document where and how to flip it.
+
+3. Decrypted-media cache wipe: confirm wipeDecryptedMediaCache() is called on (a) explicit logout via clearAuth, AND (b) app foreground after a kill/relaunch, AND ideally (c) on background → suspended after N minutes. If only (a), file a TODO for (b) and (c).
+
+4. /api/media/encrypted/*objectPath authorization: confirm the "path-prefix sniff" is actually checking the requesting user has access to the conversation that owns the object — not just that the path starts with /encrypted/. If it's only path validation, that's a privilege-escalation bug (any authenticated user can fetch any other user's ciphertext). Ciphertext alone is useless without keys, but it still leaks metadata (file sizes, who's communicating with whom by upload timing) and we shouldn't ship that. Fix in this turn if the gap exists.
+
+Next-turn scope, reshuffled:
+
+1. Prekey endpoint rate limits (Phase 1 carry-over — stop carrying it).
+   - /api/e2ee/prekeys/signed: 10/hour/user (client debounces hourly anyway; this is the safety net).
+   - /api/e2ee/prekeys/one-time upload batch: 5/hour/user.
+   - /api/e2ee/prekeys/bundle (fetch peer's bundle): 120/min/user (legitimate clients hit this often when starting new conversations).
+   - All in-memory for now, same TODO.md note as the media endpoint.
+
+2. Delete-account hardening — full turn on its own.
+   - pendingDeletionAt timestamp column on users table (migration).
+   - Re-authentication required to initiate (password or biometric).
+   - 30-day grace period — account marked pending, login during window cancels deletion with explicit confirmation.
+   - Daily sweep job: when pendingDeletionAt + 30d < now(), execute hard cascade.
+   - Hard cascade scope: user row, all messages where user is sender, all messages where user is recipient (own copy only — don't delete the other party's record of the conversation), prekeys (signed + one-time), device registrations, GCS encrypted blobs owned by user, push notification tokens, contact entries pointing TO this user (set to "deleted user" placeholder, don't break other people's contact lists).
+   - Surface the pending-deletion state in settings with cancel option.
+   - Confirm with re-auth at the moment of cancel as well.
+
+3. Dead-button audit fixes (HomeScreen/ModalScreen — delete if truly unreachable, wire if reachable; verify ProfileScreen:453 conditional pattern).
+
+Go in that order. Stop after prekey rate limits and confirm before starting delete-account — it's the biggest single change on the list and I want to see the migration plan first.

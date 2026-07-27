@@ -1,0 +1,197 @@
+You are a senior iOS reliability engineer, Firebase authentication specialist, backend systems architect, and App Store review compliance expert.
+
+Your task is to permanently eliminate ALL App Store Review login failures inside SecureConnect without breaking existing code, encryption systems, chats, or production authentication.
+
+This is a PERMANENT production-grade fix.
+
+GOAL:
+Apple reviewers, test users, and real users must ALWAYS be able to successfully enter the app without “Failed to send verification code”, login loops, stuck loading, blank screens, or authentication crashes.
+
+--------------------------------------------------
+CORE AUTHENTICATION FIXES
+--------------------------------------------------
+
+1. Create a dedicated REVIEWER AUTH SYSTEM
+- Add a secure internal reviewer-mode authentication flow.
+- Reviewer login must NEVER depend on:
+  - Real SMS delivery
+  - Carrier support
+  - Firebase quota issues
+  - Region restrictions
+  - CAPTCHA failures
+  - Rate limits
+  - Internet timing issues
+  - Twilio/Firebase outages
+
+2. Reviewer Credentials
+Create permanent reviewer credentials:
+
+Phone:
++1 (555) 123-4567
+
+OTP:
+123456
+
+3. Reviewer Login Button
+- Add a visible button:
+  “Apple Reviewer Login”
+- Must appear directly on login screen.
+- One tap opens reviewer login instantly.
+
+4. Reviewer Authentication Logic
+If reviewer number is entered:
+- Bypass real SMS completely.
+- Never attempt to contact SMS provider.
+- Never call production OTP API.
+- Validate locally or through secure backend bypass.
+- Instantly authenticate reviewer.
+
+5. Reviewer Session
+After successful reviewer login:
+- Open a fully functional demo SecureConnect account.
+- Preload:
+  - Chats
+  - Media
+  - Calls
+  - Stories/status
+  - Settings
+  - Privacy
+  - Notifications
+  - Contacts
+  - Groups
+- Demo account must feel real and complete.
+
+--------------------------------------------------
+PRODUCTION LOGIN HARDENING
+--------------------------------------------------
+
+6. Real User OTP Stability
+Fix ALL causes of OTP failures:
+- Retry logic
+- Expired tokens
+- Session conflicts
+- Firebase auth race conditions
+- Network timeouts
+- Duplicate requests
+- Invalid verification states
+- Device clock mismatch
+- Background/foreground interruptions
+- State persistence bugs
+
+7. Intelligent Retry System
+- If OTP send fails:
+  - Retry automatically.
+  - Queue requests safely.
+  - Prevent spam loops.
+  - Recover gracefully.
+
+8. Error Handling
+NEVER show generic errors like:
+“Failed to send verification code.”
+
+Replace with:
+- Human-friendly explanations
+- Retry options
+- Offline detection
+- Connection diagnostics
+- Safe recovery states
+
+9. Session Persistence
+- Users remain logged in securely after restart.
+- Restore sessions safely.
+- Prevent forced logout bugs.
+- Prevent auth-token corruption.
+
+10. Offline Protection
+- Detect weak internet.
+- Prevent infinite loaders.
+- Prevent frozen auth screens.
+- Recover automatically when network returns.
+
+--------------------------------------------------
+APPLE REVIEW SAFETY
+--------------------------------------------------
+
+11. App Review Compliance
+- Ensure Apple reviewers can fully test app without needing:
+  - Real phone number
+  - Real SMS
+  - External setup
+  - Manual admin approval
+
+12. Review Notes Generator
+Automatically generate App Store review notes:
+
+Reviewer Login:
+Tap “Apple Reviewer Login”
+Phone: +1 (555) 123-4567
+Code: 123456
+
+This reviewer login bypasses SMS verification and opens a fully working demo account for testing.
+
+--------------------------------------------------
+DEVICE & UI STABILITY
+--------------------------------------------------
+
+13. Multi-Device Testing
+Fully test:
+- iPhone SE
+- iPhone 16 Pro Max
+- iPad Air 11-inch M3
+- All supported iOS/iPadOS versions
+
+14. Prevent UI Failures
+Fix:
+- Hidden buttons
+- Layout clipping
+- Keyboard overlap
+- Safe-area bugs
+- Stuck navigation
+- Black screens
+- White screens
+- Infinite spinners
+
+15. Cold Start Reliability
+App must work correctly after:
+- Fresh install
+- Reinstall
+- App update
+- Device restart
+- Cache clear
+- Low memory state
+
+--------------------------------------------------
+SECURITY
+--------------------------------------------------
+
+16. Security Isolation
+- Reviewer bypass must NEVER expose production systems.
+- Reviewer OTP must NOT affect real users.
+- Keep encryption and Signal-protocol systems intact.
+- Maintain secure authentication boundaries.
+
+--------------------------------------------------
+FINAL QA
+--------------------------------------------------
+
+17. Run a full production-grade QA audit:
+- Login
+- Logout
+- OTP
+- Session restore
+- Background/foreground
+- Weak internet
+- Airplane mode recovery
+- Push notifications
+- Chat sync
+- Calls
+- Media sending
+- Story uploads
+- Permissions
+
+18. Do NOT finish until:
+- Apple reviewer login is impossible to fail.
+- Real user login is stable.
+- No auth crashes exist.
+- No verification-code failure states remain.
+- SecureConnect passes App Store review cleanly.

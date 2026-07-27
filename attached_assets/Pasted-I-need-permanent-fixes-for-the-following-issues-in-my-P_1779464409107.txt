@@ -1,0 +1,39 @@
+I need permanent fixes for the following issues in my Pryvo messenger app. These fixes must work consistently on both native (iOS/Android) and web. Do not use quick patches — apply proper responsive, accessible solutions.
+
+Bug 1 — GIF picker overlapping category buttons (Trending, Funny, Reactions, Love)
+When the GIF grid loads, the thumbnails render on top of the category filter row instead of below it. Fix by:
+- Wrapping the GIF picker in a flex column container with `flex-direction: column` and explicit z-index stacking.
+- The category chips row must have `position: sticky; top: [search bar height]; z-index: 10; background: #000;` so it stays above the scrolling grid.
+- The GIF grid below must have its own scroll container with `overflow-y: auto` and proper `margin-top` / `padding-top` equal to the combined height of the search bar + chips row.
+- Do NOT use absolute positioning for the grid. Use normal document flow inside a flex parent.
+
+Bug 2 — Settings list items (Privacy & Messaging, Stories) descriptions get cut off / overlap chevron
+Long description text ("Read receipts, typing, notification preview, disapp…") is truncated by the right-side chevron. Fix by:
+- Each row should be `display: flex; align-items: center; gap: 12px;` with the icon, a flex-1 text column, and the chevron.
+- The text column needs `min-width: 0; flex: 1;` so it can shrink properly.
+- Apply `white-space: normal; overflow-wrap: break-word;` to descriptions and allow up to 2 lines with `display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;`.
+- Row height should be `min-height` (not fixed height) so it grows when description wraps.
+- Right-pad the text column so it never sits under the chevron.
+
+Bug 3 — Phone number entry screen: input box overflows viewport on the right
+The "Phone number" input extends past the right edge of the screen. Fix by:
+- The form container should use `width: 100%; max-width: 100%; padding: 0 16px; box-sizing: border-box;`.
+- The row containing the country selector (`US +1`) and the phone input should use `display: flex; gap: 8px; width: 100%;` with the input as `flex: 1; min-width: 0;`.
+- Remove any fixed pixel widths on the input. Use `width: 100%`.
+- Ensure parent containers also have `overflow-x: hidden` as a safety net.
+- Test at 320px, 375px, 414px, and 768px+ widths.
+
+Feature — Ringback / buzz sound on outgoing audio + video calls
+Currently the call screen shows "Ringing…" silently. Add:
+- A looping ringback tone that plays from when the call initiates until the recipient answers, declines, or the caller ends. Use a short, soft buzz/ring loop similar in feel to WhatsApp/Snapchat (not a loud telephone bell).
+- On native: use the platform audio APIs (AVAudioPlayer on iOS, MediaPlayer/SoundPool on Android) with the audio session category set to playback so it routes correctly to speaker/earpiece based on the Speaker toggle state.
+- On web: use the HTML5 `Audio` API with `loop = true`, preloaded, and tied to the call state. Stop and release the audio on call connect, decline, end, or component unmount to prevent leaks.
+- Add haptic feedback on native (light impact every ring cycle) for parity with iMessage/WhatsApp.
+- Add a corresponding incoming-call ringtone for the recipient side.
+- Place the audio file in a shared assets folder and reference it through one call service so behavior stays consistent across platforms.
+
+General requirements
+- All fixes must use the app's existing dark theme variables — no hardcoded colors.
+- Test on the smallest supported viewport (iPhone SE / 320px web) and the largest.
+- Add safe-area-inset padding for notched devices on every screen touched.
+- No regressions to existing chat, call, or settings flows.

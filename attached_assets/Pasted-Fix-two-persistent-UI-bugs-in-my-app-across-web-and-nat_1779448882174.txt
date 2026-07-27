@@ -1,0 +1,39 @@
+Fix two persistent UI bugs in my app across web and native (iOS + Android). I need real, permanent, production-ready fixes — not temporary patches or workarounds. Investigate root causes, then implement strong, durable solutions.
+
+ISSUE 1 — Profile picture upload and display broken
+- When a user uploads a profile picture, it does not load or persist correctly
+- The image area only shows a black square / black background instead of the uploaded image
+- This happens on both web and native (iOS/Android)
+- Likely culprits to investigate and fix:
+ • Image picker returning a local URI that isn't being read/uploaded properly
+ • Missing or incorrect upload to storage (e.g., Supabase/Firebase/S3) — file is referenced but never actually uploaded
+ • Public URL not being saved back to the user profile / database
+ • Incorrect MIME type, base64 vs blob handling, or FormData issues on web vs native
+ • Image component receiving an empty/invalid src, causing the black fallback
+ • CORS or permissions blocking the image from rendering on web
+ • Cache not invalidating after new upload
+- Required fix:
+ • Implement a single, unified upload flow that works on web and native
+ • Properly handle file conversion (blob/base64/FormData) per platform
+ • Upload to storage, get the public URL, save URL to the user record, then display from that URL
+ • Add loading state, error state, and a default avatar fallback (never a black box)
+ • Force cache bust after new upload so the new image shows immediately
+
+ISSUE 2 — Bottom tab bar titles missing and overlapped by iOS system UI
+- Tab titles/labels under the icons are not showing
+- The tab bar is being overlapped by the iOS home indicator / bottom safe area
+- Layout is also broken on web
+- Required fix:
+ • Use react-native-safe-area-context properly (SafeAreaProvider at root, useSafeAreaInsets in the tab bar)
+ • Configure the bottom tab navigator with tabBarShowLabel: true, correct tabBarLabelStyle, tabBarIconStyle, and a tabBarStyle height that accounts for insets.bottom
+ • Ensure the tab bar sits ABOVE the iOS gesture bar, not under it
+ • Make titles visible under every icon with proper font size, color, and spacing
+ • Ensure the same component renders correctly on iOS (with and without home indicator), Android, and web
+
+DELIVERABLES
+1. Identify the exact files that need to change
+2. Provide full updated code for each file (no snippets without context)
+3. Explain briefly WHY each change fixes the root cause so the bug doesn't return
+4. Confirm the fix works on: iPhone with home indicator, iPhone with home button, Android, and web (desktop + mobile breakpoints)
+
+Tech stack: [FILL IN — e.g., React Native + Expo Router, Expo Image Picker, Supabase Storage, React Navigation bottom tabs]

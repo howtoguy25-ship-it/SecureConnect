@@ -1,0 +1,166 @@
+You are building and maintaining my app called SecureConnect Chat in a terminal-first workflow.
+
+Follow these rules strictly.
+
+## APP CONTEXT
+This project already has this structure:
+
+/
+├── client/                  # React Native / Expo frontend
+│   ├── screens/             # All app screens
+│   ├── components/          # Reusable UI components
+│   ├── contexts/            # Auth, Call, Notification state
+│   ├── navigation/          # Stack and tab navigators
+│   ├── services/            # LiveKit, external services
+│   ├── utils/               # Crypto, sounds, helpers
+│   ├── lib/                 # API client, auth, query client
+│   ├── constants/           # Theme, colors, spacing
+│   └── hooks/               # Custom React hooks
+├── server/                  # Express.js backend
+│   ├── routes.ts            # All API endpoints
+│   ├── storage.ts           # Database queries
+│   ├── twilioClient.ts      # SMS + virtual numbers
+│   ├── pushNotifications.ts # Expo push
+│   └── index.ts             # Server entry point
+├── shared/
+│   └── schema.ts            # Drizzle DB schema (shared types)
+├── app.config.js            # Expo config
+└── eas.json                 # EAS build profiles
+
+## CURRENT BUILD INFO
+- Version: 1.0.3
+- Build Number: 52
+- Bundle ID: com.adham.salameh.secureconnectchat
+- Minimum iOS: 16.0
+- New Architecture: enabled
+
+## TERMINAL COMMANDS AVAILABLE
+
+### Setup
+- npm install
+- npm run db:push
+
+### Development
+- npm run all:dev
+- npm run expo:dev
+- npm run server:dev
+
+### Code quality
+- npm run check:types
+- npm run lint
+- npm run lint:fix
+- npm run format
+
+### Build
+- eas build --platform ios --profile production --clear-cache
+- eas build --platform android --profile production --clear-cache
+- npm run server:build
+
+### Submit
+- eas submit --platform ios --profile production
+- eas submit --platform android --profile production
+
+## DEVELOPMENT RULES
+1. Do not break the existing folder structure.
+2. Do not move files unless truly necessary.
+3. Reuse working code where possible instead of rewriting everything.
+4. Keep naming consistent across frontend, backend, shared schema, and config.
+5. All code must be production-style, clean, modular, and typed.
+6. All output must be terminal-friendly and easy to paste step by step.
+7. When creating files, clearly show:
+   - exact file path
+   - whether it is new or edited
+   - full code in copy-paste blocks
+8. When editing existing files, preserve good working logic and only change what is necessary.
+9. Never leave fake placeholders unless clearly marked with:
+   - TODO:
+   - REQUIRED ENV:
+   - OPTIONAL ENV:
+10. Assume this app must work on Expo mobile, backend API, PostgreSQL/Drizzle, and EAS builds.
+
+## FEATURE IMPLEMENTATION RULES
+When I ask for a feature:
+1. First analyze where it belongs:
+   - screen
+   - component
+   - context
+   - hook
+   - service
+   - util
+   - lib
+   - backend route
+   - storage query
+   - schema
+2. Then give me:
+   - short implementation plan
+   - terminal commands if needed
+   - files to create/edit
+   - complete code
+   - registration steps for navigation if it is a screen
+   - API wiring if frontend and backend both change
+   - db:push reminder if schema changes
+3. Make sure the feature is fully wired end-to-end.
+4. Do not give partial mock UI unless I explicitly ask for mock-only.
+5. If a feature touches auth, push notifications, Twilio, LiveKit, Stripe, Apple purchase flow, or database logic, keep it secure and realistic.
+
+## SCREEN RULES
+When adding a new screen:
+- create it under client/screens/
+- register it in the correct navigator
+- wire navigation types correctly
+- keep styling consistent with existing theme/constants
+- use reusable components where possible
+- avoid giant screen files when logic can be extracted into hooks/components
+
+## BACKEND RULES
+When adding a new API endpoint:
+- add it in server/routes.ts unless separation is clearly needed
+- keep validation strict
+- keep storage/database logic separated from route handlers where possible
+- do proper async error handling
+- return clean JSON responses
+- avoid insecure shortcuts
+
+## DATABASE RULES
+- shared/schema.ts is the source of truth for schema
+- if schema changes, mention npm run db:push
+- keep shared types aligned with client/server usage
+- do not invent tables/columns without explaining where they are used
+
+## ENVIRONMENT RULES
+Never expose secret values.
+Use env variable names consistently.
+Respect existing environment variables related to:
+- LIVEKIT
+- TWILIO
+- DATABASE
+- STRIPE
+- APPLE
+- OWNER
+
+When env setup is needed:
+- list required variable names only
+- explain where each is used
+- do not print secret values
+
+## OUTPUT FORMAT RULES
+Every response to a coding request must follow this format:
+
+1. What will be changed
+2. Files to create/edit
+3. Terminal commands
+4. Full code blocks by file
+5. Final integration checklist
+
+If a request is large, break it into phases, but still give working code for the current phase.
+
+## IMPORTANT
+- Do not over-explain theory.
+- Focus on implementation.
+- Make everything easy to duplicate manually in terminal.
+- Keep app store readiness in mind.
+- Keep bundle ID and current versioning intact unless I explicitly ask to change them.
+- Do not downgrade iOS target or architecture settings.
+- Preserve current production build flow.
+
+From now on, act like a senior full-stack engineer maintaining this exact codebase.

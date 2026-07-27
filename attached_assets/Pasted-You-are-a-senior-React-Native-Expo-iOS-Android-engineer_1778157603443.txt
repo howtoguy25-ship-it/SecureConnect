@@ -1,0 +1,207 @@
+You are a senior React Native / Expo / iOS / Android engineer. Audit and fully fix all broken device permissions and native integrations inside my app. The Camera, Location, and Contacts features currently do NOT work correctly.
+
+Your task is to implement REAL working functionality across both iOS and Android with production-level stability.
+
+========================
+FIX ALL PERMISSION ISSUES
+========================
+
+The following MUST work properly:
+
+1. Camera
+2. Location
+3. Contacts
+
+Current problems:
+- Buttons do nothing
+- Permissions fail
+- Features open then instantly close
+- Some devices never show permission popup
+- iOS permissions may be missing
+- Android permissions may be misconfigured
+- Features are not connected to real APIs
+
+========================
+CAMERA FIX REQUIREMENTS
+========================
+
+Implement REAL camera functionality:
+- Open native device camera instantly
+- Allow:
+  - Photo capture
+  - Video capture
+  - Front/back camera switching
+- Add proper loading states
+- Prevent crashes when camera denied
+- Add retry flow if permission denied
+- Add graceful fallback UI
+
+Fix:
+- Camera button not responding
+- Blank screen issues
+- Frozen preview
+- Black screen camera bug
+- Camera not saving media
+- Media picker failing
+
+Use proper libraries:
+- expo-camera OR react-native-vision-camera
+- expo-image-picker where needed
+
+Ensure:
+- Camera preview renders correctly
+- Captured media uploads correctly
+- Compression works
+- Permissions requested ONLY when needed
+- Permissions are remembered after approval
+
+========================
+LOCATION FIX REQUIREMENTS
+========================
+
+Implement REAL live location support:
+- Request precise location permission
+- Fetch real coordinates
+- Reverse geocode address
+- Handle:
+  - denied permission
+  - restricted mode
+  - timeout
+  - airplane mode
+  - no GPS
+
+Fix:
+- Location button not responding
+- Infinite loading
+- Null coordinates
+- Fake location data
+- App freezing during fetch
+
+Use:
+- expo-location
+
+Add:
+- Real-time loading indicator
+- Error messages
+- Permission explanation UI
+- Retry button
+
+Location must:
+- Work in background-safe mode
+- Return accurate coordinates
+- Open maps properly
+- Share real location in chats if applicable
+
+========================
+CONTACTS FIX REQUIREMENTS
+========================
+
+Implement REAL contacts integration:
+- Request contacts permission properly
+- Load actual device contacts
+- Display:
+  - Name
+  - Number
+  - Optional image/avatar
+- Add searchable contacts list
+- Add loading states
+- Handle empty contact list
+
+Fix:
+- Contacts button not opening
+- Permission popup never appearing
+- Blank contact screen
+- Crashes on open
+- Contacts not importing
+
+Use:
+- expo-contacts
+
+Must support:
+- iOS contacts
+- Android contacts
+- Modern permission handling
+- Proper async loading
+
+========================
+IOS FIXES
+========================
+
+Audit and fix:
+- Info.plist permissions
+- NSCameraUsageDescription
+- NSPhotoLibraryUsageDescription
+- NSLocationWhenInUseUsageDescription
+- NSContactsUsageDescription
+- Microphone permissions if video enabled
+
+Ensure:
+- All permission descriptions are professional
+- No missing permission strings
+- No iOS native crashes
+- Works on TestFlight and production builds
+
+========================
+ANDROID FIXES
+========================
+
+Audit and fix:
+- AndroidManifest.xml permissions
+- Runtime permission requests
+- Android 13+ media permissions
+- Scoped storage compatibility
+
+Ensure:
+- No crashes on Android 12/13/14
+- Permissions persist correctly
+- Media picker works on all versions
+
+========================
+UX / UI IMPROVEMENTS
+========================
+
+Improve the entire permissions experience:
+- Modern permission modals
+- Professional UI
+- Smooth animations
+- Proper error handling
+- Skeleton loaders
+- Retry buttons
+- Disabled states while loading
+
+If permission denied:
+- Explain WHY permission is needed
+- Add button to open system settings
+- Never spam permission popups repeatedly
+
+========================
+CODE QUALITY
+========================
+
+Requirements:
+- Clean architecture
+- Production-grade code
+- No fake/demo implementations
+- Remove deprecated APIs
+- Proper TypeScript typing
+- Memory-safe implementation
+- No console errors
+- No warning logs
+- No duplicate permission requests
+
+========================
+FINAL REQUIREMENTS
+========================
+
+After fixing:
+- Verify Camera works fully
+- Verify Contacts load correctly
+- Verify Location returns real data
+- Test on real iPhone + Android devices
+- Ensure Expo Doctor passes
+- Ensure EAS production builds succeed
+- Ensure no crashes on launch
+- Ensure all features work inside TestFlight builds
+
+Do NOT redesign unrelated parts of the app.
+ONLY fix and professionally upgrade the Camera, Location, and Contacts systems with REAL native functionality and flawless permission handling.

@@ -1,0 +1,115 @@
+Add maximum real privacy and security to my app so users feel fully protected and trust that their messages stay between them and the other person only.
+
+GOAL
+Build a serious, modern private messaging architecture for my app with real end-to-end encryption, strong key handling, secure sessions, and encrypted backup restore using a one-time recovery code. Messages must stay between the sender and recipient only. The server must not be able to read message contents.
+
+CORE REQUIREMENTS
+
+1. TRUE END-TO-END ENCRYPTION
+- Encrypt every message on the user’s device before upload
+- Decrypt messages only on authorized recipient devices
+- Messages must stay between the sender and the intended recipient only
+- Server must store ciphertext only, never plaintext message contents
+- Use modern audited crypto:
+  - X25519 for key exchange
+  - Ed25519 for signing where needed
+  - AES-256-GCM or XChaCha20-Poly1305 for authenticated encryption
+- Generate unique conversation keys per chat
+- Add proper nonce/IV handling
+- Add integrity protection so messages cannot be tampered with silently
+
+2. PRIVACY PROMISE IN THE SYSTEM DESIGN
+- Design the system so message contents cannot be viewed by admins, backend, databases, hosting providers, or internal tools
+- Only the sender and intended recipient devices should be able to decrypt messages
+- Do not log plaintext messages anywhere
+- Do not store plaintext drafts, plaintext backups, or raw encryption keys on the server
+- Minimize metadata exposure where possible
+
+3. SECURE KEY MANAGEMENT
+- Generate device keys on-device
+- Store private keys only in secure device storage:
+  - iOS Keychain / Secure Enclave where possible
+  - Android Keystore
+- Never store raw private keys in plain local storage
+- Never send plaintext private keys to the server
+- Support trusted-device management
+
+4. ENCRYPTED BACKUPS WITH RECOVERY CODE
+- Replace password-based restore with a one-time generated recovery code
+- Generate a high-entropy recovery secret on-device
+- Convert it into a user-friendly recovery code format
+- Use the recovery code to encrypt/protect the backup key
+- Upload only encrypted backup blobs to the server
+- Never store the raw recovery code on the server
+- If the recovery code is lost, backup restore must be impossible
+
+5. USER WARNING TEXT
+Display this exact message under the recovery code:
+“Hide this and keep this safe. If you ever lose access to your messages, this will help restore them. If you lose this code, your encrypted messages cannot be recovered.”
+
+6. IN-APP PRIVACY TEXT
+Add clear privacy text in the messaging/security setup screens:
+“Your messages are end-to-end encrypted and stay between you and the person you are talking to. Only your authorized devices can read them.”
+
+7. RESTORE FLOW
+- On a new device, verify account ownership first
+- Prompt user for the recovery code
+- Download encrypted backup blob from server
+- Decrypt backup locally on-device
+- Restore message keys locally
+- Restore messages only if the recovery code is valid
+- No insecure fallback recovery that bypasses encryption
+
+8. SECURE SESSION MANAGEMENT
+- Use short-lived access tokens
+- Use rotating refresh tokens
+- Support session revocation
+- Store session tokens securely
+- Keep session/auth logic separate from message encryption keys
+- Ensure sign out fully clears local session/auth data
+
+9. BACKEND/API SECURITY
+Create or harden backend endpoints for:
+- sending encrypted messages
+- fetching encrypted messages
+- uploading encrypted backup blobs
+- fetching encrypted backup blobs
+- registering/fetching public keys
+- device/session management
+Backend must only handle encrypted data and key metadata, never plaintext message content.
+
+10. APP HARDENING
+- Enforce TLS for all traffic
+- Add rate limits where needed
+- Add safe security logging without exposing secrets
+- Add replay/tampering protections where practical
+- Add secure error handling with no secret leakage
+
+11. UI / TRUST FEATURES
+Add UI that makes users feel safe and informed:
+- Secure setup screen
+- Recovery code screen
+- “Code saved” confirmation step
+- Trusted devices screen
+- Session/device management screen
+- Clear privacy wording that messages stay between the user and recipient only
+- Keep the current app style but make it feel premium and security-focused
+
+12. TESTING
+Add tests for:
+- encrypted send/receive
+- unauthorized server cannot read message contents
+- restore with valid recovery code
+- failed restore with invalid recovery code
+- unrecoverable backup when code is lost
+- logout clears session securely
+- unauthorized device cannot decrypt messages
+- plaintext messages are never stored on the server
+
+IMPORTANT
+- Do not use fake or placeholder encryption
+- Do not store plaintext messages on the server
+- Do not store raw private keys insecurely
+- Do not create insecure recovery bypasses
+- Implement this end-to-end for real using the existing app structure
+- Keep improving until the full private messaging/security flow works correctly on web and mobile

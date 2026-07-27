@@ -1,178 +1,239 @@
-require("dotenv/config");
-
-/** @type {import('@expo/config-types').ExpoConfig} */
-module.exports = {
-  expo: {
-    name: "TrackLine",
-    slug: "trackline",
-    version: "1.0.0",
-    orientation: "portrait",
-    icon: "./assets/icon.png",
-    userInterfaceStyle: "automatic",
-    assetBundlePatterns: ["**/*"],
-    ios: {
-      // Phone-only -- TrackLine is a live driving/navigation app, not something meant to run
-      // on an iPad mounted somewhere, and this avoids App Store Connect requiring a whole
-      // separate set of iPad screenshots for a form factor the app isn't really designed for.
-      supportsTablet: false,
-      bundleIdentifier: "com.trackline.navigate",
-      infoPlist: {
-        NSLocationWhenInUseUsageDescription:
-          "TrackLine uses your location to show your position on the map and provide turn-by-turn navigation.",
-        NSLocationAlwaysAndWhenInUseUsageDescription:
-          "TrackLine can track your location in the background to keep navigation and nearby-alert notifications accurate.",
-        NSMicrophoneUsageDescription:
-          "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device in real time and is never recorded or stored.",
-        NSCameraUsageDescription:
-          "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
-        UIBackgroundModes: ["audio", "location", "fetch"],
-        // App only uses standard HTTPS/TLS (Firebase, Google Maps, AdMob) -- no custom
-        // encryption -- so it qualifies as exempt. Declaring this here answers Apple's
-        // export-compliance question automatically on every build/submit instead of
-        // App Store Connect prompting for it by hand each time.
-        ITSAppUsesNonExemptEncryption: false,
+module.exports = () => {
+  return {
+    expo: {
+      name: "Pryvo",
+      slug: "secure-connect",
+      version: "1.0.5",
+      orientation: "default",
+      icon: "./assets/images/icon.png",
+      scheme: "secureconnect",
+      userInterfaceStyle: "automatic",
+      newArchEnabled: true,
+      ios: {
+        supportsTablet: true,
+        requireFullScreen: false,
+        buildNumber: "76",
+        bundleIdentifier: "com.adham.salameh.secureconnectchat",
+        icon: "./assets/images/icon.png",
+        privacyManifests: {
+          NSPrivacyAccessedAPITypes: [],
+        },
+        infoPlist: {
+          UIDeviceFamily: [1, 2],
+          MinimumOSVersion: "16.0",
+          UIRequiresFullScreen: false,
+          UISupportedInterfaceOrientations: ["UIInterfaceOrientationPortrait"],
+          "UISupportedInterfaceOrientations~ipad": [
+            "UIInterfaceOrientationPortrait",
+            "UIInterfaceOrientationPortraitUpsideDown",
+            "UIInterfaceOrientationLandscapeLeft",
+            "UIInterfaceOrientationLandscapeRight",
+          ],
+          NSCameraUsageDescription: "Pryvo needs camera access for video calls and photos",
+          NSMicrophoneUsageDescription: "Pryvo needs microphone access for voice and video calls",
+          NSPhotoLibraryUsageDescription: "Pryvo needs photo library access to share photos",
+          NSPhotoLibraryAddUsageDescription: "Pryvo saves photos and videos you receive in chats to your photo library when you tap save.",
+          NSContactsUsageDescription: "Pryvo uses your contacts to let you start chats and calls with people you already know. Your contacts stay on your device and are never uploaded.",
+          NSLocationWhenInUseUsageDescription: "Pryvo uses your location only when you tap Share Location in a chat, so the friend you're messaging can see where you are.",
+          NSFaceIDUsageDescription: "Pryvo uses Face ID to unlock your hidden message locker.",
+          NSUserTrackingUsageDescription: "Your data will be used to deliver ads that are more relevant to you. Pryvo shares your device identifier with ad partners only if you allow tracking.",
+          // App Store Guideline 2.5.4: only declare background modes we actually implement.
+          // We rely on standard remote notifications + foreground signaling for calls.
+          // CallKit/PushKit (true VoIP) will be added in a future native dev build.
+          UIBackgroundModes: ["audio", "remote-notification"],
+          // Pryvo uses standard encryption (Signal Protocol X3DH + Double Ratchet for
+          // messages, X25519+HKDF for LiveKit call-frame E2EE) that qualifies for the
+          // §740.17(b)(1) mass-market exemption under U.S. Export Administration
+          // Regulations (Category 5 Part 2). Per Apple's flow, "qualifies for an
+          // exemption" === set this to FALSE — that tells Apple no BIS classification
+          // docs are needed. Setting TRUE means "non-exempt" and triggers Apple's
+          // "App Encryption Documentation" upload requirement (BIS annual self-class
+          // report). Same path Signal/WhatsApp/Telegram use. (Build 64 correction —
+          // builds 62/63 wrongly set true + tried to claim exemption, which is a
+          // contradiction and triggered error 90592 on TestFlight upload.)
+          ITSAppUsesNonExemptEncryption: false,
+        },
+      },
+      android: {
+        adaptiveIcon: {
+          backgroundColor: "#000000",
+          foregroundImage: "./assets/images/icon.png",
+        },
+        package: "com.securechat.app",
+        edgeToEdgeEnabled: true,
+        predictiveBackGestureEnabled: false,
+        permissions: [
+          "android.permission.CAMERA",
+          "android.permission.RECORD_AUDIO",
+          "android.permission.READ_CONTACTS",
+          "android.permission.ACCESS_FINE_LOCATION",
+          "android.permission.ACCESS_COARSE_LOCATION",
+          "android.permission.READ_EXTERNAL_STORAGE",
+          "android.permission.WRITE_EXTERNAL_STORAGE",
+          "android.permission.WRITE_CONTACTS",
+        ],
+      },
+      web: {
+        output: "single",
+        favicon: "./assets/images/favicon.png",
+      },
+      plugins: [
+        "react-native-iap",
+        [
+          "expo-build-properties",
+          {
+            android: {
+              kotlinVersion: "2.2.0",
+            },
+            ios: {
+              deploymentTarget: "16.0",
+            },
+          },
+        ],
+        [
+          "expo-splash-screen",
+          {
+            image: "./assets/images/splash-icon.png",
+            imageWidth: 280,
+            resizeMode: "contain",
+            backgroundColor: "#000000",
+            dark: {
+              backgroundColor: "#000000",
+            },
+          },
+        ],
+        "expo-web-browser",
+        [
+          "expo-tracking-transparency",
+          {
+            userTrackingPermission: "Your data will be used to deliver ads that are more relevant to you. Pryvo shares your device identifier with ad partners only if you allow tracking.",
+          },
+        ],
+        [
+          "expo-camera",
+          {
+            cameraPermission: "Pryvo needs camera access for video calls",
+            microphonePermission: "Pryvo needs microphone access for calls",
+            recordAudioAndroid: true,
+          },
+        ],
+        [
+          "expo-location",
+          {
+            locationAlwaysAndWhenInUsePermission: "Pryvo needs location access to share your location with friends",
+          },
+        ],
+        [
+          "expo-contacts",
+          {
+            contactsPermission: "Pryvo needs contacts access to find your friends",
+          },
+        ],
+        [
+          "expo-image-picker",
+          {
+            photosPermission: "Pryvo needs photo library access to share photos",
+          },
+        ],
+        [
+          "expo-notifications",
+          {
+            icon: "./assets/images/icon.png",
+            color: "#007AFF",
+            sounds: [
+              "./assets/sounds/notification.wav",
+              "./assets/sounds/ringtone.wav",
+            ],
+          },
+        ],
+        [
+          "react-native-google-mobile-ads",
+          {
+            // TODO(admob-android): no Android app is registered in AdMob yet — this
+            // value is actually the iOS App ID being reused. Register an Android app
+            // in AdMob → Apps → Add app → Android (bundle id com.securechat.app) and
+            // paste the resulting ca-app-pub-…~XXX value here. Until then, Android
+            // builds will silently fail to load ads.
+            androidAppId: "ca-app-pub-6423632749110820~9916919786",
+            iosAppId: "ca-app-pub-6423632749110820~9916919786",
+            userTrackingUsageDescription: "Your data will be used to deliver ads that are more relevant to you. Pryvo shares your device identifier with ad partners only if you allow tracking.",
+            skAdNetworkItems: [
+              "cstr6suwn9.skadnetwork",
+              "4fzdc2evr5.skadnetwork",
+              "4pfyvq9l8r.skadnetwork",
+              "2fnua5tdw4.skadnetwork",
+              "ydx93a7ass.skadnetwork",
+              "5a6flpkh64.skadnetwork",
+              "p78axxw29g.skadnetwork",
+              "v72qych5uu.skadnetwork",
+              "ludvb6z3bs.skadnetwork",
+              "cp8zw746q7.skadnetwork",
+              "3sh42y64q3.skadnetwork",
+              "c6k4g5qg8m.skadnetwork",
+              "s39g8k73mm.skadnetwork",
+              "3qy4746246.skadnetwork",
+              "f38h382jlk.skadnetwork",
+              "hs6bdukanm.skadnetwork",
+              "v4nxqhlyqp.skadnetwork",
+              "wzmmz9fp6w.skadnetwork",
+              "yclnxrl5pm.skadnetwork",
+              "t38b2kh725.skadnetwork",
+              "7ug5zh24hu.skadnetwork",
+              "9rd848q2bz.skadnetwork",
+              "n6fk4nfna4.skadnetwork",
+              "kbd757ywx3.skadnetwork",
+              "9t245vhmpl.skadnetwork",
+              "a2p9lx4jpn.skadnetwork",
+              "22mmun2rn5.skadnetwork",
+              "4468km3ulz.skadnetwork",
+              "2u9pt9hc89.skadnetwork",
+              "8s468mfl3y.skadnetwork",
+              "klf5c3l5u5.skadnetwork",
+              "ppxm28t8ap.skadnetwork",
+              "ecpz2srf59.skadnetwork",
+              "uw77j35x4d.skadnetwork",
+              "pwa73g5rt2.skadnetwork",
+              "mlmmfzh3r3.skadnetwork",
+              "578prtvx9j.skadnetwork",
+              "4dzt52r2t5.skadnetwork",
+              "e5fvkxwrpn.skadnetwork",
+              "8c4e2ghe7u.skadnetwork",
+              "zq492l623r.skadnetwork",
+              "3rd42ekr43.skadnetwork",
+              "3qcr597p9d.skadnetwork",
+            ],
+          },
+        ],
+      ],
+      experiments: {
+        reactCompiler: true,
+        ...(process.env.EXPO_BASE_URL
+          ? { baseUrl: process.env.EXPO_BASE_URL }
+          : {}),
+      },
+      updates: {
+        enabled: true,
+        fallbackToCacheTimeout: 0,
+        url: "https://u.expo.dev/1aa05952-d27c-4274-bdec-dc721710646d",
+      },
+      runtimeVersion: {
+        policy: "appVersion",
+      },
+      extra: {
+        eas: {
+          projectId: "1aa05952-d27c-4274-bdec-dc721710646d",
+        },
+        admob: {
+          appId: "ca-app-pub-6423632749110820~9916919786",
+          bannerAdUnitId: "ca-app-pub-6423632749110820/4920432330",
+          rewardedAdUnitId: "ca-app-pub-6423632749110820/5374205390",
+          interstitialAdUnitId: "ca-app-pub-6423632749110820/1982589445",
+        },
+        API_URL: process.env.EXPO_PUBLIC_DOMAIN
+          ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+          : "https://pryvoapp.com",
+        OWNER_PHONE_NUMBER: process.env.OWNER_PHONE_NUMBER || "",
       },
     },
-    android: {
-      adaptiveIcon: {
-        foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#0B1220",
-      },
-      package: "com.trackline.navigate",
-      permissions: [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "RECORD_AUDIO",
-        "CAMERA",
-        "FOREGROUND_SERVICE",
-      ],
-      config: {
-        googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
-        },
-      },
-    },
-    plugins: [
-      "expo-font",
-      "expo-asset",
-      "expo-tracking-transparency",
-      // expo-splash-screen's own plugin, not the legacy top-level `splash` config field --
-      // that legacy field left Android's actual splashscreen_background color resource
-      // hardcoded to white regardless of what backgroundColor was set to (confirmed by
-      // inspecting the generated android/app/src/main/res/values/colors.xml), so the logo
-      // always showed on a white box instead of this color. This plugin properly treats the
-      // image as a centered icon over a real background color on both platforms, so the
-      // transparent-cutout logo (assets/logo-transparent.png, background removed from the
-      // original opaque icon.png) sits cleanly on the color with no box/seam around it.
-      [
-        "expo-splash-screen",
-        {
-          image: "./assets/logo-transparent.png",
-          resizeMode: "contain",
-          backgroundColor: "#0B1220",
-          imageWidth: 200,
-        },
-      ],
-      "expo-status-bar",
-      // Deliberately using react-native-maps' own config plugin here instead of the old
-      // `ios.config.googleMapsApiKey` field -- that field triggers a legacy, unmaintained
-      // plugin bundled in @expo/config-plugins (node_modules/@expo/config-plugins/build/
-      // ios/Maps.js) that injects `pod 'react-native-google-maps', ...` into the Podfile, a
-      // pod name that hasn't existed since old react-native-maps versions -- current
-      // react-native-maps (1.x) ships its own plugin that correctly adds
-      // `pod 'react-native-maps/Google', ...` (a real subspec) instead. Real error this was
-      // causing: "[!] No podspec found for `react-native-google-maps`" failing `pod install`.
-      [
-        "react-native-maps",
-        {
-          iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
-        },
-      ],
-      [
-        "expo-location",
-        {
-          locationAlwaysAndWhenInUsePermission:
-            "TrackLine uses your location for live navigation and to show/report nearby alerts.",
-        },
-      ],
-      [
-        "expo-audio",
-        {
-          microphonePermission:
-            "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
-        },
-      ],
-      [
-        "expo-camera",
-        {
-          cameraPermission:
-            "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
-        },
-      ],
-      // On-device (Google ML Kit) text recognition for the plate-number display in Live
-      // Vehicle Detection -- runs entirely on-device, no network call, no cloud API, nothing
-      // stored, matching the same privacy shape as the web app's Tesseract-based plate OCR
-      // (see web/src/services/plateOcr.ts). Bundled models only (ocrUseBundled) so there's no
-      // separate on-first-use model download. `ocrModels: ["latin"]` -- the default (no
-      // ocrModels set) bundles all five script models (Chinese/Japanese/Korean/Devanagari
-      // too), which just adds app size/build weight with nothing an AU plate would ever use.
-      ["rn-mlkit-ocr", { ocrModels: ["latin"], ocrUseBundled: true }],
-      [
-        "./modules/map3d/plugin/withMap3D.js",
-        {
-          androidApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
-          iosApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY,
-        },
-      ],
-      "./modules/map3d/plugin/withGoogleMaps3DSignatureFix.js",
-      // Only uploads debug symbols/source maps during EAS builds once org/project/authToken
-      // are set (from sentry.io -- Settings -> Auth Tokens for the token) -- harmless no-op
-      // config without them, Sentry.init() below still works and reports crashes either way,
-      // just with unsymbolicated (minified) JS stack traces until these are filled in.
-      [
-        "@sentry/react-native",
-        {
-          organization: process.env.SENTRY_ORG,
-          project: process.env.SENTRY_PROJECT,
-          authToken: process.env.SENTRY_AUTH_TOKEN,
-        },
-      ],
-      [
-        "react-native-google-mobile-ads",
-        {
-          // Google's own public test App IDs as the fallback -- real Google Mobile Ads
-          // account App IDs (format ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY, from
-          // admob.google.com -> Apps -> App settings) override via env vars once set up.
-          // Ads work out of the box with real (Google-served) test ads either way.
-          androidAppId: process.env.ADMOB_ANDROID_APP_ID || "ca-app-pub-3940256099942544~3347511713",
-          iosAppId: process.env.ADMOB_IOS_APP_ID || "ca-app-pub-3940256099942544~1458002511",
-          userTrackingUsageDescription:
-            "TrackLine shows ads to help keep the app free. Allowing tracking lets those ads be more relevant -- you can decline and the app works the same either way.",
-        },
-      ],
-    ],
-    extra: {
-      googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY,
-      googleDirectionsApiKey: process.env.GOOGLE_DIRECTIONS_API_KEY,
-      firebaseApiKey: process.env.FIREBASE_API_KEY,
-      firebaseAuthDomain: process.env.FIREBASE_AUTH_DOMAIN,
-      firebaseProjectId: process.env.FIREBASE_PROJECT_ID,
-      firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-      firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-      firebaseAppId: process.env.FIREBASE_APP_ID,
-      admobBannerAndroidUnitId: process.env.ADMOB_ANDROID_BANNER_UNIT_ID,
-      admobBannerIosUnitId: process.env.ADMOB_IOS_BANNER_UNIT_ID,
-      admobAppOpenAndroidUnitId: process.env.ADMOB_ANDROID_APP_OPEN_UNIT_ID,
-      admobAppOpenIosUnitId: process.env.ADMOB_IOS_APP_OPEN_UNIT_ID,
-      sentryDsn: process.env.SENTRY_DSN,
-      eas: {
-        // Not a secret -- EAS project IDs are meant to live directly in config, which is
-        // also the only way `eas build`/`eas submit` can reliably find it, since this file
-        // being a dynamic app.config.js (not static app.json) means the EAS CLI can't write
-        // to it automatically the way `eas init` normally would.
-        projectId: "dd1665d0-24fa-41ce-99d8-d94adf93788d",
-      },
-    },
-  },
+  };
 };

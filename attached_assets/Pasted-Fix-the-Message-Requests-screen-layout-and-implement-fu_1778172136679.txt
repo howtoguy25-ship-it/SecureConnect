@@ -1,0 +1,93 @@
+Fix the Message Requests screen layout and implement fully working Push Notifications settings.
+
+UI LAYOUT ISSUE — MESSAGE REQUESTS
+The selection checkmark/tick on the right side is badly positioned and overlaps/crowds the text area.
+
+REQUIREMENTS:
+- Redesign the row spacing professionally.
+- Move the checkmark further right with proper padding/margins.
+- Ensure the icon never overlaps or crowds text on any device size.
+- Add balanced spacing between:
+  - Left icon
+  - Text content
+  - Right checkmark
+- Vertically center all row content correctly.
+- Maintain a premium modern messenger UI style similar to Signal/Telegram/iMessage.
+- Ensure responsiveness across:
+  - iPhone standard sizes
+  - Pro Max devices
+  - smaller screens
+  - Android devices
+- Prevent text wrapping/collision issues.
+- Ensure tap areas remain large and smooth.
+
+TECHNICAL REQUIREMENTS:
+- Use proper flex layout.
+- Add dedicated container spacing:
+  - justifyContent: 'space-between'
+  - alignItems: 'center'
+- Add proper right padding for checkmark area.
+- Prevent icon from shrinking into text area.
+- Keep row heights visually balanced.
+
+PUSH NOTIFICATIONS — CURRENTLY BROKEN
+The Push Notifications button/settings do not work at all.
+
+IMPLEMENT REAL PUSH NOTIFICATION SYSTEM:
+
+SETTINGS REQUIREMENTS:
+- Add a real Push Notifications toggle/button.
+- Tapping the toggle must:
+  - Request native iOS/Android notification permissions
+  - Save the user preference
+  - Update UI instantly
+- If denied:
+  - Show proper alert/message
+  - Allow user to retry enabling later
+- If accepted:
+  - Register push token/device correctly
+  - Save token to backend
+  - Enable live notifications immediately
+
+NOTIFICATION FEATURES:
+- Real incoming message notifications
+- Call notifications
+- Story/status notifications
+- Message preview support tied to privacy settings
+- Silent notifications when previews disabled
+- Background notifications when app closed
+- Foreground notification handling
+- Badge counts
+
+FUNCTIONAL LOGIC:
+- Push toggle ON:
+  - Notifications enabled
+  - Device token registered
+  - Backend sync active
+- Push toggle OFF:
+  - Notifications disabled locally
+  - Device unsubscribed/deactivated
+  - Backend push delivery disabled for that device
+
+PERSISTENCE:
+- Save notification preference permanently.
+- Restore correct state after app restart/reinstall/login.
+- Sync settings with backend account preferences.
+
+IOS/ANDROID REQUIREMENTS:
+- Configure real Expo/Native push notification setup.
+- Verify Info.plist permissions.
+- Verify Android notification channels.
+- Configure foreground/background handlers.
+- Fix permission request flow.
+- Ensure production/TestFlight compatibility.
+
+FINAL TESTS:
+- Toggle notifications ON → receive real message push.
+- Toggle notifications OFF → no notifications received.
+- Restart app → setting remains correct.
+- Lock phone → notifications still work.
+- Disable message previews → notifications only show “New encrypted message”.
+- Ensure no UI overlap or spacing bugs remain on Message Requests screen.
+
+Do not redesign the whole page. Keep the existing theme/style but fix spacing, alignment, and broken notification functionality professionally.

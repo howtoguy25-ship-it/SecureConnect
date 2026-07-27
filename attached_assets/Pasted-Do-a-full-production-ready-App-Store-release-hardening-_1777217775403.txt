@@ -1,0 +1,98 @@
+Do a full production-ready App Store release hardening pass across the entire app.
+
+Goal: zero crashes, zero broken buttons, zero layout overlap, zero permission bugs, and clean iPhone/Android/web behavior.
+
+Fix and verify ALL of the following:
+
+1. Layout + safe areas
+- Audit every screen on iPhone, Android, tablet, and web.
+- Use SafeAreaView from react-native-safe-area-context correctly.
+- No content hidden behind tab bar, ads, FABs, keyboard, notch, or home indicator.
+- Ads may use absolute positioning ONLY if contentContainerStyle has enough bottom padding.
+- FlatLists/ScrollViews must have safe bottom padding.
+- FABs and floating buttons must use insets.bottom and never get clipped.
+
+2. App Store crash prevention
+- Remove all console-breaking errors.
+- Fix all TypeScript errors.
+- Fix all missing imports.
+- Fix all undefined variables.
+- Fix all async crashes with try/catch.
+- Add loading, empty, and error states everywhere data loads.
+
+3. Buttons + navigation
+- Test every button end-to-end.
+- Every button must either navigate, submit, open modal, close modal, or show a clear disabled/loading state.
+- No dead buttons.
+- No duplicate taps causing crashes.
+- Add debounce/disabled loading states for submit/payment/auth buttons.
+
+4. Auth + login
+- Apple login must work correctly on iOS.
+- Email/social login must handle errors clearly.
+- User session must persist after app restart.
+- Logout must fully clear session.
+- Do not ask permissions repeatedly after login.
+
+5. Camera, mic, speaker, media
+- Ask camera/mic permissions only when needed.
+- Ask once, remember the result, and show a clear settings message if denied.
+- Video upload, playback, sound, mute/unmute, recording, camera switch, and flashlight must work.
+- Remove broken audio UI if system volume controls are intended.
+
+6. Ads + monetisation
+- Verify ad banners do not overlap UI.
+- Ads should not block core actions.
+- Use test ads in development and production IDs only in release config.
+- App must still work if ads fail to load.
+
+7. Web compatibility
+- App must compile and run on web.
+- Mobile-only APIs must be guarded with Platform checks.
+- Camera/mic/native modules must not crash web.
+- Layout must resize properly on laptop and desktop.
+
+8. Performance
+- Fix laggy screens and heavy re-renders.
+- Memoize expensive components.
+- Use FlatList properly for long lists.
+- Compress/limit media where needed.
+- No memory leaks from listeners, timers, sockets, or subscriptions.
+
+9. App Store requirements
+- Add/verify app icon, splash screen, bundle ID, version, build number.
+- Add correct iOS permission descriptions in app config.
+- Add privacy policy link placeholder if missing.
+- Remove debug banners, fake test text, unused dev screens, and sensitive logs.
+- Ensure no private API usage or hardcoded secrets.
+
+10. Final verification
+Run:
+- npm install
+- npx expo install --fix
+- npx tsc --noEmit
+- npm run lint if available
+- npx expo-doctor
+- npx expo export --platform all
+- npx expo prebuild --clean
+
+Do not stop after partial fixes. Search the repository for unsafe patterns:
+tabBarHeight
+paddingBottom:
+position: 'absolute'
+bottom:
+useSafeAreaInsets
+SafeAreaView
+FlatList
+ScrollView
+AdBanner
+FAB
+KeyboardAvoidingView
+Platform.OS
+
+Fix each issue properly, then give me a final report:
+- Files changed
+- Bugs fixed
+- Tests run
+- Remaining risks
+- Exact commands I should run next for iOS App Store build

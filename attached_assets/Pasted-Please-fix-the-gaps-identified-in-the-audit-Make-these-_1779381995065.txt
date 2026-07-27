@@ -1,0 +1,54 @@
+Please fix the gaps identified in the audit. Make these changes carefully — do NOT break any currently working behavior. Build 61 is live, so preserve all existing functionality exactly.
+
+**1. Storage layer — add missing named methods**
+
+In the storage module, add these as properly named methods (currently they don't exist as named methods):
+- getUserPrivacy
+- deleteForMe
+- setReplyTo
+- deleteForEveryone
+
+If the underlying logic already exists inline somewhere, refactor it into these named methods and update all call sites to use them. If the logic doesn't exist yet, flag it before implementing so I can confirm the expected behavior.
+
+**2. Socket event naming mismatch**
+
+The plan specifies `message-expired` (singular) but the live code emits `messages-expired` (plural, batch).
+
+- Check both the client listener and the server emitter
+- Standardize on ONE name across client and server
+- Recommendation: keep `messages-expired` (plural, batch) since it's already live and batching is more efficient — but update the plan/docs to match, and make sure the client handler properly processes the batch array
+- If you change the name instead, update BOTH ends in the same commit so nothing breaks
+- Tell me which direction you're going before making the change
+
+**3. Extract inline components into named files**
+
+Currently inline in `ConversationScreen.tsx`. Extract each into its own component file with no behavior change — purely cosmetic refactor for maintainability:
+
+- `MessageActionsMenu.tsx` — currently inline at the `onLongPress` handler around line 2670 (action sheet logic)
+- `ReplyPreviewBar.tsx` — currently inline at line 3332 (the `{replyTo ? ... }` block)
+- `PinnedMessageBanner.tsx` — currently inline at line 3051
+- `MessageInfoSheet.tsx` — currently inline modal at line 4316
+- `DeleteConfirmSheet.tsx` — currently uses `Alert.alert` in the delete handler; wrap it into a proper component file matching the pattern of the others (or flag if `Alert.alert` should stay as-is and we just document it that way)
+
+**Extraction rules:**
+- Place each in the appropriate components folder (match the existing structure)
+- Pass all required props explicitly — no hidden coupling
+- Keep all existing styling, animations, and behavior identical
+- Update `ConversationScreen.tsx` to import and render the new components in place of the inline code
+- Do NOT change any logic, state management, or handlers — only move code
+- After each extraction, the app should behave exactly the same
+
+**Important guardrails:**
+- Do this in small, testable steps — one component at a time
+- After each extraction, confirm the file compiles and the screen still renders before moving to the next
+- Do NOT touch encryption logic, socket auth, or backend code
+- Do NOT change the bundle identifier or app name
+- Show me a summary of changes after each component is extracted
+- If any inline code has dependencies on local state or refs in ConversationScreen, surface that clearly and let me decide how to handle it (lift state vs. pass callbacks)
+
+**When done:**
+- Summary of every file created and every file modified
+- Confirmation that all 5 components are now in their own files (or noted exceptions like DeleteConfirmSheet if Alert.alert stays)
+- Confirmation that the socket event name is consistent on both ends
+- Confirmation that the 4 storage methods exist as named exports and all call sites use them
+- A short test checklist I can run on the device to verify nothing broke (send message, long-press, reply, pin, delete for me, delete for everyone, view message info)

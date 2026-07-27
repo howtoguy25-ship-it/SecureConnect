@@ -1,0 +1,26 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ITaYB1vVsnIMt1LgX8XtK"
+uri = "file://client/assets/sounds/pryvo-ringback.mp3"
+type = "audio"
+title = "Pryvo Ringback (what the caller hears)"
+
+[[outputs]]
+id = "dAvY2p8F2tbAXS9zPnIux"
+uri = "file://client/assets/sounds/pryvo-ringtone.mp3"
+type = "audio"
+title = "Pryvo Ringtone (what the receiver hears)"
+
+[[outputs]]
+id = "lvCqLbHCtxwsI4iSBB4cs"
+uri = "file://docs/app-store/description.md"
+type = "text"
+title = "App Store description — Pryvo (Build 65)"
+
+[[outputs]]
+id = "QEnGd49g5fdoP-c4Kr1Cv"
+uri = "file://docs/app-store/reviewer-notes.md"
+type = "text"
+title = "App Review notes for Apple — Pryvo (Build 65)"

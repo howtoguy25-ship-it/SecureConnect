@@ -1,0 +1,34 @@
+I need a production-readiness assessment of this app. Don't take my word for what's done — verify against the code. Phase A (sealed-sender client UI for E2EE messaging) is claimed complete; Phase B (encrypted media) is not started.
+
+Please do the following and report back:
+
+1. Verify Phase A claims against the actual code. The claimed surface is:
+- server/routes.ts — /auth/me joins virtualNumber row; /users/:id/contact-info returns supportsSealedSender
+- client/lib/api-utils.ts — User type includes supportsSealedSender and virtualNumber
+- client/lib/sealedSender.ts — checkSealedSenderEligibility, sendSealedMessage, assertNoSenderIdLeak, strict 409 sentinel for fallback
+- client/screens/ConversationScreen.tsx — sealed-sender routing for text/location/contact-card, decrypt fallback to otherUserId when senderId is null, vnInactive/guardVnInactive on every composer entry point, lock badge in three states
+- tests/integration/sealedSender.test.ts — Assertion 7 plus stop-gate dump
+- docs/e2ee/phase-a-client.md
+
+Confirm each file exists, the functions/types are exported, and the behavior matches the description. Flag anything missing or different.
+
+2. Run the tests. Execute `npx jest --config tests/integration/jest.config.js --forceExit --runInBand` and report pass/fail count plus any flakes. Also run any other test suites in the repo and report results.
+
+3. Check for sender-ID leaks beyond the assertion. Grep the client for any path that sends a message and confirm every one routes through sendSealedMessage when eligible. Specifically check: attach, camera, voice notes, location, contact card, reply, forward, edit, retry. Report any that bypass.
+
+4. Review the decrypt fallback. The fallback to otherUserId when senderId is null — does it work for group threads, or 1:1 only? If groups exist in the schema, this is a bug.
+
+5. Production-readiness checklist beyond the E2EE work:
+- Auth: session handling, token refresh, logout, password reset
+- Error handling: unhandled promise rejections, network failures, server 5xx
+- Logging: are sender IDs, VNs, message contents, or keys logged anywhere?
+- Secrets: any hardcoded keys, tokens, or URLs in the client bundle?
+- Rate limiting and abuse protection on send endpoints
+- Database migrations: are they reversible and tested?
+- Build: does a production build succeed with no warnings about missing env vars?
+- Dependencies: any with known CVEs (npm audit)?
+- Crash/error reporting wired up?
+
+6. Phase B blockers. List anything in the current code that will need to change for encrypted media to layer on cleanly — not redesign, just things that were shortcut for text-only.
+
+Give me a verdict at the end: ready / not ready / ready with caveats, and if not ready, the ordered list of what to fix first.

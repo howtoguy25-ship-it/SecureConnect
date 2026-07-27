@@ -1,0 +1,62 @@
+Do a full functional QA pass on this app as if you were a release engineer signing off for App Store submission. Do not trust any claim in the code comments, docs, commit messages, or my prior statements — verify everything by actually exercising the code paths.
+
+For every user-facing feature, confirm three things:
+1. The UI element exists and is reachable from a normal user flow (not just by deep-linking).
+2. Tapping/clicking/submitting it actually does what its label and surrounding copy say it does — end to end, including the server round-trip and the resulting state change.
+3. It handles failure cleanly: no silent failures, no stuck spinners, no buttons that appear to work but don't, no success toasts on failed operations.
+
+Specifically audit these areas and report each as PASS / FAIL / PARTIAL with evidence:
+
+AUTH AND ACCOUNT
+- Sign up: account is actually created in the database, verification email/SMS actually sends and the link/code works.
+- Login: credentials validated server-side, session token issued, persisted across app restart.
+- Logout: session is actually destroyed server-side AND client-side. After logout, protected endpoints must reject the old token. Confirm by calling a protected route with the post-logout token — it must 401.
+- Password reset: email/SMS sends, link expires, new password actually replaces the old one, old password stops working.
+- Session expiry and refresh: expired tokens are refreshed silently or force a clean re-login, not a crash.
+- Account deletion (if present): data is actually removed or anonymized per the description.
+
+MESSAGING (E2EE / sealed sender)
+- Send text: arrives at recipient, decrypts, shows correct sender identity, no sender ID leak in payload.
+- Send to inactive VN: blocked with clear UI, not a silent failure.
+- Attach, camera, voice note, location, contact card: each one sends, arrives, renders correctly on the recipient side. If any are placeholders, say so.
+- Reply, forward, edit, delete, retry-on-failure: each works and updates both sides.
+- Group threads (if supported): sender resolution works, decrypt works for every member, no fallback-to-otherUserId bug.
+- Read receipts, typing indicators, delivery status: match reality, not faked.
+- Offline send: queued and delivered on reconnect, not lost.
+- Push notifications: actually fire, deep-link to the right thread, don't leak message content if the user has previews off.
+
+NAVIGATION AND UI
+- Every button, link, and tab in the app: tap it and confirm it goes where its label implies.
+- Every back button and swipe-back: returns to the expected screen with state intact.
+- Every form: validation messages are accurate, submit actually submits, error states are visible.
+- Every loading state has a terminal state (success or error) — no infinite spinners.
+- Every empty state renders correctly (zero messages, zero contacts, zero notifications).
+
+DATA AND PERSISTENCE
+- Killing and relaunching the app: user stays logged in, drafts persist, unread counts are correct.
+- Switching networks (wifi to cellular, online to offline to online): app recovers without manual reload.
+- Background and foreground transitions: no stale data, no duplicate sends, no missed messages.
+
+PERMISSIONS
+- Camera, microphone, contacts, notifications, location: each request fires at the right moment, denial is handled gracefully, the feature degrades instead of crashing.
+
+ERROR HANDLING
+- Server 500, 502, 503, timeout, no network: each produces a user-visible message, not a crash or silent failure.
+- Force-quit mid-operation: no corrupted local state on relaunch.
+
+APP STORE READINESS
+- App icon, launch screen, all required screen sizes present.
+- Privacy policy and terms URLs resolve and match what the app actually does (especially around E2EE claims and data collection).
+- Info.plist usage strings (NSCameraUsageDescription, NSMicrophoneUsageDescription, NSContactsUsageDescription, NSLocationWhenInUseUsageDescription, etc.) present and accurate.
+- No debug menus, test accounts, console.logs of sensitive data, or TODO/FIXME comments in user-visible paths.
+- No hardcoded localhost URLs, dev API keys, or staging endpoints in the production build.
+- Crash reporting wired up and tested with a forced crash.
+- App builds for release (not just debug) with no warnings.
+- Tested on the oldest iOS version the app claims to support, and on a small device (SE-class) for layout.
+
+OUTPUT FORMAT
+For each item: PASS / FAIL / PARTIAL, one line of evidence (file:line, test name, or what you observed), and for any FAIL or PARTIAL, the specific fix required.
+
+End with a single verdict: READY FOR APP STORE / NOT READY, and if not ready, an ordered list of blockers (must-fix before submission) separated from non-blockers (should-fix soon).
+
+Do not mark anything PASS based on the code "looking right." Only PASS items you actually executed or have a passing test for.

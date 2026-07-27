@@ -1,0 +1,111 @@
+Creating Gymfile
+Gymfile created
+Successfully loaded '/Users/expo/workingdir/build/ios/Gymfile' 📄
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                  Detected Values from './Gymfile'                                                                   |
++-----------------------+---------------------------------------------------------------------------------------------------------------------------------------------+
+| suppress_xcode_output | true                                                                                                                                        |
+| clean                 | false                                                                                                                                       |
+| scheme                | Pryvo                                                                                                                                       |
+| configuration         | Release                                                                                                                                     |
+| export_options        |                                                                                                                                             |
+| export_xcargs         | OTHER_CODE_SIGN_FLAGS="--keychain /var/folders/5_/4knlryn57n39p2c_jw8567z00000gn/T/eas-build-69150a29-3713-4a0e-ac10-b5f46258d099.keychain" |
+| disable_xcpretty      | true                                                                                                                                        |
+| buildlog_path         | /Users/expo/workingdir/logs                                                                                                                 |
+| derived_data_path     | ./build                                                                                                                                     |
+| result_bundle         | true                                                                                                                                        |
+| result_bundle_path    | /var/folders/5_/4knlryn57n39p2c_jw8567z00000gn/T/result-bundle-1783526114799.xcresult                                                       |
+| output_directory      | ./build                                                                                                                                     |
++-----------------------+---------------------------------------------------------------------------------------------------------------------------------------------+
+Resolving Swift Package Manager dependencies...
+$ xcodebuild -resolvePackageDependencies -workspace ./Pryvo.xcworkspace -scheme Pryvo -configuration Release -derivedDataPath ./build
+▸ Command line invocation:
+▸     /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -resolvePackageDependencies -workspace ./Pryvo.xcworkspace -scheme Pryvo -configuration Release -derivedDataPath ./build
+▸ resolved source packages:
+$ xcodebuild -showBuildSettings -workspace ./Pryvo.xcworkspace -scheme Pryvo -configuration Release -derivedDataPath ./build 2>&1
+Detected provisioning profile mapping: {:"com.adham.salameh.secureconnectchat"=>"f2ed53b8-aa09-4a1a-8bb3-5fee8267df35"}
+
++-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                Summary for gym 2.228.0                                                                                                |
++-------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------+
+| workspace                                                               | ./Pryvo.xcworkspace                                                                                                                         |
+| scheme                                                                  | Pryvo                                                                                                                                       |
+| clean                                                                   | false                                                                                                                                       |
+| output_directory                                                        | ./build                                                                                                                                     |
+| output_name                                                             | Pryvo                                                                                                                                       |
+| configuration                                                           | Release                                                                                                                                     |
+| silent                                                                  | false                                                                                                                                       |
+| skip_package_ipa                                                        | false                                                                                                                                       |
+| skip_package_pkg                                                        | false                                                                                                                                       |
+| export_options.method                                                   | app-store                                                                                                                                   |
+| export_options.provisioningProfiles.com.adham.salameh.secureconnectchat | f2ed53b8-aa09-4a1a-8bb3-5fee8267df35                                                                                                        |
+| export_xcargs                                                           | OTHER_CODE_SIGN_FLAGS="--keychain /var/folders/5_/4knlryn57n39p2c_jw8567z00000gn/T/eas-build-69150a29-3713-4a0e-ac10-b5f46258d099.keychain" |
+| build_path                                                              | /Users/expo/Library/Developer/Xcode/Archives/2026-07-08                                                                                     |
+| derived_data_path                                                       | ./build                                                                                                                                     |
+| result_bundle                                                           | true                                                                                                                                        |
+| result_bundle_path                                                      | /var/folders/5_/4knlryn57n39p2c_jw8567z00000gn/T/result-bundle-1783526114799.xcresult                                                       |
+| buildlog_path                                                           | /Users/expo/workingdir/logs                                                                                                                 |
+| destination                                                             | generic/platform=iOS                                                                                                                        |
+| suppress_xcode_output                                                   | true                                                                                                                                        |
+| xcodebuild_formatter                                                    | xcpretty                                                                                                                                    |
+| build_timing_summary                                                    | false                                                                                                                                       |
+| disable_xcpretty                                                        | true                                                                                                                                        |
+| skip_profile_detection                                                  | false                                                                                                                                       |
+| xcodebuild_command                                                      | xcodebuild                                                                                                                                  |
+| skip_package_dependencies_resolution                                    | false                                                                                                                                       |
+| disable_package_automatic_updates                                       | false                                                                                                                                       |
+| use_system_scm                                                          | false                                                                                                                                       |
+| xcode_path                                                              | /Applications/Xcode.app                                                                                                                     |
++-------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------+
+$ set -o pipefail && xcodebuild -workspace ./Pryvo.xcworkspace -scheme Pryvo -configuration Release -derivedDataPath ./build -destination 'generic/platform=iOS' -archivePath /Users/expo/Library/Developer/Xcode/Archives/2026-07-08/Pryvo\ 2026-07-08\ 08.55.19.xcarchive -resultBundlePath '/var/folders/5_/4knlryn57n39p2c_jw8567z00000gn/T/result-bundle-1783526114799.xcresult' archive | tee /Users/expo/workingdir/logs/Pryvo-Pryvo.log > /dev/null
+› Executing react-native Pods/hermes-engine » [CP-User] [Hermes] Replace Hermes for the right configuration, if needed
+› Executing react-native Pods/ReactNativeDependencies » [CP-User] [RNDeps] Replace React Native Dependencies for the right configuration, if needed
+
+❌  Script '[CP-User] [RNDeps] Replace React Native Dependencies for the right configuration, if needed' failed
+   └─Pods/ReactNativeDependencies
+RED_PRECOMPS_DIR\=/Users/expo/workingdir/build/ios/build/Build/Intermediates.noindex/ArchiveIntermediates/Pryvo/PrecompiledHeaders
+/ios
+Node found at: /Users/expo/.nvm/versions/node/v20.19.4/bin/node
+Preparing the final location ReactNativeDependencies/framework
+Extracting the tarball /Users/expo/workingdir/build/ios/Pods/ReactNativeDependencies-artifacts/reactnative-dependencies-0.81.5-release.tar.gz
+tar: Error opening archive: Unrecognized archive format
+Resolving ReactNativeDependencies.xcframework folder structure
+/Users/expo/workingdir/build/node_modules/react-native/third-party-podspecs/replace_dependencies_version.js:83
+Error: Expected ReactNativeDependencies.xcframework to be at ReactNativeDependencies/framework/packages/react-native/third-party/ReactNativeDependencies.xcframework, but it was not found.
+Node.js v20.19.4
+
+▸ ** ARCHIVE INTERRUPTED **
+▸ The following build commands failed:
+▸ 	PhaseScriptExecution [CP-User]\ [RNDeps]\ Replace\ React\ Native\ Dependencies\ for\ the\ right\ configuration,\ if\ needed /Users/expo/workingdir/build/ios/build/Build/Intermediates.noindex/ArchiveIntermediates/Pryvo/IntermediateBuildFilesPath/Pods.build/Release-iphoneos/ReactNativeDependencies.build/Script-46EB2E0002DC20.sh (in target 'ReactNativeDependencies' from project 'Pods')
+▸ (1 failure)
+› Executing [CP] Copy XCFrameworks
+
+❌  error: Internal inconsistency error: never received target ended message for target ID '13' (in target 'ExpoClipboard' from project 'Pods').
+
+
+⚠️  Script has ambiguous dependencies causing it to run on every build.
+   To fix, go to: Xcode » Pryvo/Pryvo » Build Phases » '[CP-User] [RNGoogleMobileAds] Configuration'
+   Either: Uncheck "Based on dependency analysis", or select output files to trigger the script
+
+⚠️  Pods/SDWebImage-SDWebImage: iOS@9.0 deployment version mismatch, expected >= 2.0 <= 26.0.99
+Exit status: 75
+
++---------------------------------------+
+|           Build environment           |
++-------------+-------------------------+
+| xcode_path  | /Applications/Xcode.app |
+| gym_version | 2.228.0                 |
+| sdk         | iPhoneOS26.0.sdk        |
++-------------+-------------------------+
+Looks like fastlane ran into a build/archive error with your project
+It's hard to tell what's causing the error, so we wrote some guides on how
+to troubleshoot build and signing issues: https://docs.fastlane.tools/codesigning/getting-started/
+Before submitting an issue on GitHub, please follow the guide above and make
+sure your project is set up correctly.
+fastlane uses `xcodebuild` commands to generate your binary, you can see the
+the full commands printed out in yellow in the above log.
+Make sure to inspect the output above, as usually you'll find more error information there
+[!] Error building the application - see the log above
+Error: The "Run fastlane" step failed because of an error in the Xcode build process. We automatically detected following errors in your Xcode build logs:
+- Internal inconsistency error: never received target ended message for target ID '13' (in target 'ExpoClipboard' from project 'Pods').
+Refer to "Xcode Logs" below for additional, more detailed logs.

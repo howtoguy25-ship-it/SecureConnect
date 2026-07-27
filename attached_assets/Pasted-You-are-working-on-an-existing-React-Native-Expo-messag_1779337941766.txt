@@ -1,0 +1,169 @@
+You are working on an existing React Native + Expo messaging app with Signal Protocol E2EE already implemented in client/utils/crypto/. The server is Node/TypeScript in server/. DO NOT rewrite or restructure existing working code. Add new features as new files where possible, and make minimal, surgical edits to existing files.
+
+═══════════════════════════════════════════════════════════════
+HARD RULES — READ FIRST, FOLLOW ALL
+═══════════════════════════════════════════════════════════════
+
+1. WORK IN PHASES. Complete one phase fully, run `npx tsc --noEmit` and `npx expo prebuild --no-install` (or the project's existing build/lint command — check package.json scripts first), confirm zero errors, THEN move to the next phase. Do NOT batch all phases into one giant change.
+
+2. NEVER touch these files unless the phase explicitly says to:
+   - client/utils/crypto/x3dh.ts
+   - client/utils/crypto/doubleRatchet.ts
+   - client/utils/crypto/signalProtocol.ts
+   - client/utils/crypto/hkdf.ts
+   - server/routes.ts message POST handler (line ~928) — only ADD new endpoints, don't modify the existing /api/messages handler unless the phase explicitly requires it.
+
+3. PRESERVE BACKWARD COMPATIBILITY. Existing messages, sessions, and backups in the wild must keep working. Use version fields ("v2-signal" already exists; new things go to "v3" or add a new field, do NOT change "v2-signal" semantics).
+
+4. NO NEW DEPENDENCIES without checking package.json first. If a package is needed (e.g. expo-screen-capture, react-native-quick-crypto), add it to package.json and run `npm install`, then verify the app still builds. Prefer packages already in the project.
+
+5. ASK BEFORE DELETING. If something looks broken or unused, leave it and add a `// TODO:` comment. Don't delete.
+
+6. EVERY new file gets a top-of-file comment explaining what it does and how it's used.
+
+7. After each phase, output: (a) list of files created, (b) list of files modified with line ranges, (c) the exact commands you ran to verify the build, (d) any TODOs left for me.
+
+8. If you hit an ambiguity, STOP and ask. Do not guess on crypto.
+
+═══════════════════════════════════════════════════════════════
+PHASE 0 — BASELINE (do this first, do not skip)
+═══════════════════════════════════════════════════════════════
+
+- Run the project's typecheck and build commands. Record any pre-existing errors so we know what's "your fault" vs "already broken."
+- Read client/utils/crypto/*.ts end to end. Read client/screens/ConversationScreen.tsx fully. Read server/routes.ts message endpoint.
+- Output a one-paragraph summary of what you found and what scripts exist in package.json. Wait for me to say "go" before Phase 1.
+
+═══════════════════════════════════════════════════════════════
+PHASE 1 — FIX BROKEN/WEAK EXISTING CRYPTO (highest priority)
+═══════════════════════════════════════════════════════════════
+
+1A. Fix clearAllSessions in client/utils/crypto/keyStorage.ts
+    - The current function only handles Platform.OS === "web" and silently returns on native.
+    - On native, you need to track session keys. Add a SESSION_INDEX key ("e2ee_session_index") that stores a JSON array of all theirUserIds with active sessions.
+    - Update saveSession to add the userId to the index, and the null branch to remove it.
+    - Update clearAllSessions to read the index and delete each session on native.
+    - Add a unit-style smoke test in a comment showing how it should work.
+
+1B. Strengthen PBKDF2 fallback in client/utils/crypto/backupCrypto.ts
+    - The current fallback runs 1000 iterations of nacl.hash. Bump to 100,000.
+    - Add a version field to BackupBlob (e.g. kdfVersion: 1 for old, 2 for new) so old backups still decrypt.
+    - decryptAndRestoreBackup must check kdfVersion and use the matching iteration count.
+
+1C. Add signed prekey rotation
+    - In client/utils/crypto/prekeyManager.ts, add a function rotateSignedPreKeyIfStale(token, apiBase) that:
+      * Stores the SPK creation timestamp alongside the key (extend the JSON blob, not a new SecureStore key).
+      * If the active SPK is older than 7 days, generate a new one, upload it, and keep the old SPK around for 30 days so in-flight messages still decrypt.
+    - Call this from client/MainApp.tsx on app foreground (use AppState listener; don't block startup).
+    - Do NOT delete old SPKs immediately — keep them for the grace period.
+
+After 1A/1B/1C: typecheck, confirm zero new errors, report back.
+
+═══════════════════════════════════════════════════════════════
+PHASE 2 — MEDIA ENCRYPTION (most important user-facing fix)
+═══════════════════════════════════════════════════════════════
+
+Goal: photos, voice notes, and any other media uploaded in a chat must be encrypted client-side before upload, with the key transported inside the existing Signal-encrypted message.
+
+2A. Create client/utils/crypto/mediaCrypto.ts with:
+    - generateMediaKey(): returns a 32-byte random key (base64).
+    - encryptFile(uri: string, keyBase64: string): reads file via expo-file-system, encrypts with nacl.secretbox using a random 24-byte nonce, writes ciphertext to a temp file, returns { encryptedUri, nonce }.
+    - decryptFile(encryptedUri: string, keyBase64: string, nonceBase64: string): reverse; returns plaintext local file URI.
+    - For large files (>5MB) use chunked encryption (e.g. 1MB chunks each with their own nonce derived from a base nonce + counter) to avoid loading the whole file into memory. Document the chunk format clearly at the top of the file.
+
+2B. Modify the media upload flow in client/screens/ConversationScreen.tsx (around line 740-820):
+    - Before upload: generate media key, encrypt the file, upload the encrypted file (not the plaintext).
+    - Do NOT set ACL to public anymore. Keep storage private; recipient fetches via authenticated endpoint.
+    - In the message, the "content" field becomes a Signal-encrypted JSON envelope containing { mediaKey, nonce, mediaUrl, mediaType, originalSize, mimeType }. The mediaUrl on the message row can stay so the server knows there's an attachment, but the KEY must be inside the encrypted content.
+
+2C. Server side (server/routes.ts and server/objectStorage.ts):
+    - Add a new endpoint to fetch encrypted media that requires auth and checks the requester is a participant in the conversation that owns the message.
+    - Do NOT change existing endpoints. Add /api/media/encrypted/:objectPath as a new route.
+
+2D. Recipient side (ConversationScreen render path):
+    - When rendering a message with media: after Signal-decrypting the content envelope, fetch the encrypted blob, decrypt with the embedded key+nonce, render from the local decrypted URI.
+    - Cache decrypted media in a session-only cache (Map in memory, cleared on screen unmount) — never write the decrypted file to a persistent location.
+
+After Phase 2: send a photo on iOS sim, send a voice note, confirm both decrypt correctly on the other side. Confirm by checking object storage that the file bytes are ciphertext, not the original image.
+
+═══════════════════════════════════════════════════════════════
+PHASE 3 — LIVEKIT E2EE FOR CALLS
+═══════════════════════════════════════════════════════════════
+
+3A. In client/services/livekitService.ts:
+    - Before connecting to a room, derive a per-call symmetric key by Signal-encrypting a random 32-byte secret to the other party (or to all parties for groups in the future).
+    - Pass the key to LiveKit via Room.setE2EEEnabled / e2ee option as documented at https://docs.livekit.io/home/client/tracks/encryption/ for react-native.
+    - If the LiveKit react-native SDK in this project doesn't support E2EE yet, add a TODO comment and an in-app banner "Call encryption: transport-only (E2EE in next update)" rather than silently shipping unencrypted.
+
+3B. The key exchange: piggy-back on the existing Signal session. Send a special "call-key" Signal-encrypted message before the call invite that contains the LiveKit E2EE key.
+
+═══════════════════════════════════════════════════════════════
+PHASE 4 — SAFETY NUMBERS (MITM verification)
+═══════════════════════════════════════════════════════════════
+
+4A. Create client/utils/crypto/safetyNumber.ts:
+    - generateSafetyNumber(myIdentityPubBase64, theirIdentityPubBase64, myUserId, theirUserId): sorts the two identity public keys, hashes them together with SHA-512, formats as 60 decimal digits in 12 groups of 5 (Signal's format).
+    - Also export the raw bytes for QR encoding.
+
+4B. Add a new screen client/screens/VerifyContactScreen.tsx:
+    - Shows the 60-digit safety number.
+    - Shows a QR code (use a QR lib already in the project; if none, add react-native-qrcode-svg).
+    - "Scan their code" button to camera-scan the other party's QR.
+    - "Mark as verified" toggle stored locally in SecureStore as e2ee_verified_<userId>.
+
+4C. In ConversationScreen header, show a small "✓ Verified" or "Unverified" badge based on that flag. Tapping opens VerifyContactScreen.
+
+═══════════════════════════════════════════════════════════════
+PHASE 5 — USER-VISIBLE PRIVACY FEATURES
+═══════════════════════════════════════════════════════════════
+
+Do these as separate sub-phases. After each, build & verify.
+
+5A. Screenshot detection
+    - Use expo-screen-capture. Add a listener in ConversationScreen that, when a screenshot is taken, sends a system-message ("Alex took a screenshot") into the conversation. Use a new message type so it renders differently.
+
+5B. View-once media
+    - Add a "view once" toggle when attaching media. Set viewOnce: true inside the encrypted media envelope.
+    - On receipt, render once, then on screen unmount or after viewing, delete the decrypted local cache AND send a tombstone message to delete the original encrypted blob from server storage.
+
+5C. Incognito keyboard
+    - On the chat text input in ConversationScreen, set autoCorrect={false}, autoComplete="off", textContentType="none", keyboardType="default" (already default), and on Android pass importantForAutofill="no" + add a contextMenuHidden option if available. Document that this is best-effort — system keyboards may still learn.
+
+5D. App lock with decoy PIN
+    - Extend the existing HiddenLockerScreen. Add a settings screen client/screens/AppLockSettingsScreen.tsx where the user can set:
+      * Primary PIN / Face ID
+      * Decoy PIN (optional)
+    - On app open, prompt for unlock. Primary PIN → real app. Decoy PIN → a parallel "decoy" mode where only conversations marked decoy are visible (or an empty inbox if they've set up none). Store the decoy flag as a separate SecureStore key.
+    - This is sensitive UX — do NOT proceed if you're unsure; ask me to mock up the flow first.
+
+5E. EXIF stripping
+    - Before uploading any image (already in ConversationScreen), pass it through a strip step. Use expo-image-manipulator with no operations — re-encoding strips EXIF. Confirm by testing with an image that has GPS data.
+
+═══════════════════════════════════════════════════════════════
+PHASE 6 — DEFER, ASK BEFORE STARTING
+═══════════════════════════════════════════════════════════════
+
+These are big and easy to get wrong. Do NOT start them without my go-ahead:
+
+- Sealed sender (server protocol change)
+- Encrypted local database / SQLCipher migration
+- Self-destructing account (background scheduling)
+- Anti-forensics secure delete
+- Onion routing / Tor
+
+After Phase 5, list these and stop. I'll prioritize.
+
+═══════════════════════════════════════════════════════════════
+FINAL CHECKLIST BEFORE YOU SAY "DONE"
+═══════════════════════════════════════════════════════════════
+
+- [ ] `npx tsc --noEmit` passes with no new errors vs. Phase 0 baseline.
+- [ ] The project's existing lint command passes.
+- [ ] `npx expo prebuild` (or equivalent) completes without errors.
+- [ ] A clean send-text → receive-text flow still works end-to-end (smoke test in simulator).
+- [ ] A send-photo → receive-photo flow works AND the bytes in object storage are ciphertext (verify by downloading the raw object).
+- [ ] Old messages in the database still decrypt (backward compat).
+- [ ] No console.log of plaintext, keys, or recovery codes anywhere you added.
+- [ ] No "any" types added in new crypto files.
+- [ ] Each new file has a header comment.
+
+Start with Phase 0 only. Report back. Wait for "go" before Phase 1.

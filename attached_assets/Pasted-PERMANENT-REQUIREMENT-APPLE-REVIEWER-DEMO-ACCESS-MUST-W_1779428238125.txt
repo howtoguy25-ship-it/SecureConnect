@@ -1,0 +1,111 @@
+PERMANENT REQUIREMENT — APPLE REVIEWER DEMO ACCESS MUST WORK
+End-to-End Verification Before Every App Store Submission
+
+Before submitting any build to App Store Connect, the Apple reviewer
+demo path MUST be verified working in BOTH places below. If either
+side is broken, the submission WILL be rejected and the review cycle
+restarts (3–7 days lost per rejection).
+
+────────────────────────────────────────────────────────────────────
+PART A — App Store Connect "App Review Information" (Developer Side)
+────────────────────────────────────────────────────────────────────
+
+In App Store Connect → My Apps → [this app] → [version] → 
+App Review Information, the following MUST be filled in and current
+for every submission:
+
+Sign-in required:           YES
+Demo account phone number:  555-1234567
+Demo account OTP code:      (whatever code the bypass accepts —
+                             document the exact value here)
+Contact information:        valid name, email, phone the reviewer
+                             can actually reach
+Notes for reviewer:         Must explain:
+                              - This app uses phone + OTP only
+                              - Enter 555-1234567 as the phone number
+                              - Enter [OTP code] when prompted
+                              - The account has full VIP access so 
+                                all paid features can be evaluated
+                              - Any non-obvious flows (where to find
+                                the ad-supported screens, where VIP
+                                features unlock, etc.)
+
+Rules:
+- Do NOT leave "Sign-in required" set to NO if the app gates content
+  behind login — reviewer will fail at the welcome screen and reject.
+- Do NOT submit with stale demo credentials from a prior build.
+- Do NOT rely on the reviewer to "figure it out" — spell out the 
+  exact phone number and OTP code in the notes field.
+- If the demo OTP code ever changes in routes.ts, update the App 
+  Store Connect notes BEFORE submitting the build that contains the
+  change.
+- Keep the contact phone/email monitored during review — Apple will
+  call/email if the demo account fails and you have ~24h to respond
+  before auto-rejection.
+
+────────────────────────────────────────────────────────────────────
+PART B — In-App Demo Path (Client/Server Side)
+────────────────────────────────────────────────────────────────────
+
+The 555-1234567 reviewer bypass must work end-to-end on the EXACT
+build being submitted. Test on a fresh device or simulator with the
+production-configured build (TestFlight build or release build,
+NOT dev), running against the production backend the submission will
+hit.
+
+Full verification flow — every item must pass:
+
+[ ] Fresh install, cold start
+[ ] ATT prompt appears (per the ATT timing requirement)
+[ ] WelcomeScreen.tsx accepts 555-1234567 as the phone number
+[ ] OTP screen accepts the documented bypass code
+[ ] Login succeeds — session token issued, no error toasts
+[ ] User lands on the main app screen
+[ ] VIP/premium entitlement is active on this account
+[ ] All paid features are accessible (no paywall, no "upgrade" 
+    prompts, no locked screens)
+[ ] Ads still render correctly (do not hide ads for the reviewer 
+    account — Apple needs to see the real experience)
+[ ] Sign out → sign back in with 555-1234567 still works
+[ ] No rate limiting, no geo block, no "suspicious activity" lock
+    triggers on repeated logins from new IPs/devices (reviewers
+    often test from multiple locations)
+
+Server-side checks against production backend:
+
+[ ] routes.ts:344–357 bypass is present in the deployed server code,
+    not just in the local repo
+[ ] Deployed server grants VIP entitlement to 555-1234567
+[ ] No environment variable or feature flag in production disables
+    the bypass (e.g., NODE_ENV=production must not skip the bypass)
+[ ] No fraud/abuse system (rate limiter, IP blocklist, device 
+    fingerprint check) flags or blocks this number
+[ ] Logs confirm a successful test login from 555-1234567 within
+    24 hours of submission
+
+────────────────────────────────────────────────────────────────────
+PRE-SUBMISSION CHECKLIST (run every time, no exceptions)
+────────────────────────────────────────────────────────────────────
+
+[ ] Part A: App Store Connect "App Review Information" updated for
+    this specific build
+[ ] Part B: Full end-to-end login + VIP access verified on the exact
+    build being submitted, against production backend
+[ ] OTP code in App Store Connect notes matches what routes.ts
+    currently accepts
+[ ] Reviewer notes explain phone+OTP flow clearly
+[ ] Contact email/phone in App Review Information is monitored
+
+If ANY box is unchecked, do not submit. Fix it first.
+
+────────────────────────────────────────────────────────────────────
+ENFORCEMENT
+────────────────────────────────────────────────────────────────────
+
+Before any task that prepares a build for App Store submission, 
+re-read this prompt and walk through both checklists. If you cannot
+confirm an item, say so explicitly rather than assuming it works.
+If the reviewer bypass appears to be broken at any point during 
+development (e.g., a refactor changed routes.ts, a new fraud rule
+was added, the OTP code changed), flag it immediately — this is a
+ship-blocker.

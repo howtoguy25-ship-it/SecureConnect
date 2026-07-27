@@ -1,0 +1,68 @@
+Fix the Privacy & Messaging settings immediately. The current toggles are broken.
+
+ISSUES:
+1. Read Receipts, Typing Indicators, and Show Message Preview are linked together incorrectly.
+2. When I tap one toggle, all three turn off/on at the same time.
+3. Each setting must be independent and control only itself.
+4. Default Disappearing Timer does not save.
+5. When I choose “5 minutes” and exit, it resets back to Off.
+6. There is no clear Save/Done button after selecting a disappearing timer.
+
+REQUIREMENTS:
+
+PRIVACY TOGGLES
+- Read Receipts must have its own separate state/key.
+- Typing Indicators must have its own separate state/key.
+- Show Message Preview must have its own separate state/key.
+- Tapping one toggle must never affect the others.
+- Persist each setting locally and/or in backend user settings.
+- Reload the saved values correctly when the app restarts.
+- Make the UI update instantly after tapping.
+- Add safe fallback defaults:
+  - Read Receipts: ON
+  - Typing Indicators: ON
+  - Show Message Preview: ON
+
+FUNCTIONAL BEHAVIOUR
+- Read Receipts OFF: do not send/display read status for this user.
+- Typing Indicators OFF: do not send typing events from this user and do not show typing indicators if disabled.
+- Show Message Preview OFF: notifications must only show “New encrypted message”, not message text.
+
+DISAPPEARING MESSAGES
+- Fix Default Disappearing Timer so selected values save properly.
+- Add real selectable options:
+  - Off
+  - 5 minutes
+  - 8 hours
+  - 12 hours
+  - 18 hours
+  - 24 hours
+- Add a clear Save or Done button at the top/bottom of the timer selection screen.
+- Highlight the currently selected timer.
+- After pressing Save/Done, return to Privacy & Messaging and display the selected value beside “Default Disappearing Timer”.
+- Persist the setting so it remains after closing/reopening the app.
+- Apply the selected default timer to all new chats started after the setting is changed.
+- Do not affect existing chats unless they have no custom timer set.
+
+TECHNICAL FIX
+- Audit the settings state management.
+- Remove any shared boolean/state variable controlling multiple toggles.
+- Use unique keys, for example:
+  - privacy.readReceiptsEnabled
+  - privacy.typingIndicatorsEnabled
+  - privacy.showMessagePreviewEnabled
+  - privacy.defaultDisappearingTimer
+- Fix all onPress/onValueChange handlers.
+- Add logs/tests to confirm each setting changes independently.
+- Make sure there are no race conditions or overwritten settings when saving.
+- Ensure settings sync correctly between UI, local storage, backend, and notification logic.
+
+FINAL TESTS REQUIRED:
+- Toggle Read Receipts only: Typing Indicators and Show Message Preview must not change.
+- Toggle Typing Indicators only: other toggles must not change.
+- Toggle Show Message Preview only: other toggles must not change.
+- Select 5 minutes disappearing timer, press Save/Done, exit, reopen settings: must still show 5 minutes.
+- Restart app: all saved privacy settings must remain correct.
+- Send/receive messages and confirm read receipts, typing indicators, previews, and disappearing timer all behave correctly.
+
+Do not redesign the page. Keep the current UI style, only fix the broken logic and add the missing real save/select functionality.

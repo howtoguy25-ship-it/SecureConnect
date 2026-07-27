@@ -1,0 +1,205 @@
+┌─────────────────────────────────────────────────────────────┐
+│       PERMANENT FIX & E2E ENCRYPTION IMPLEMENTATION         │
+│                     ENGINEERING PROMPT                      │
+└─────────────────────────────────────────────────────────────┘
+
+You are tasked with permanently fixing the following critical
+security and feature gaps. Do NOT patch superficially. Build
+real, server-backed end-to-end encryption with proper key
+management, and implement every missing feature in full.
+Deliver production-grade code, migrations, tests, and docs.
+
+═══════════════════════════════════════════════════════════════
+PART A — END-TO-END ENCRYPTION (REAL, NOT COSMETIC)
+═══════════════════════════════════════════════════════════════
+
+Implement true E2EE across CHAT, STATUS, LOCKER, and CALLS
+using an established protocol. Requirements:
+
+1. PROTOCOL
+  • Use Signal Protocol (libsignal) for chat + status
+  • Use SRTP + DTLS-SRTP with E2EE key exchange for calls
+  • Use per-user master key derived via Argon2id from a
+    passphrase + server-stored salt for locker
+  • NO custom crypto. NO rolling your own primitives.
+
+2. KEY MANAGEMENT (SERVER-SIDE INFRASTRUCTURE)
+  • Build a Key Distribution Server with these tables:
+      - identity_keys (userId, publicKey, createdAt)
+      - signed_prekeys (userId, keyId, publicKey, signature,
+        createdAt, expiresAt)
+      - one_time_prekeys (userId, keyId, publicKey, used)
+      - device_keys (userId, deviceId, registrationId)
+  • Server stores ONLY public keys. Private keys never leave
+    the device.
+  • Endpoints:
+      POST /api/keys/register
+      GET  /api/keys/bundle/:userId
+      POST /api/keys/replenish-prekeys
+      DELETE /api/keys/:deviceId
+  • Rotate signed prekeys every 7 days. Auto-replenish
+    one-time prekeys when count drops below 10.
+
+3. CLIENT-SIDE KEYSTORE
+  • Store private keys in iOS Keychain / Android Keystore
+    (hardware-backed where available)
+  • Use expo-secure-store with requireAuthentication: true
+  • Never log, export, or transmit private keys
+
+4. VERIFICATION
+  • Show safety numbers / key fingerprints in chat info
+  • Warn on key change ("Security code changed")
+  • Optional QR scan for out-of-band verification
+
+═══════════════════════════════════════════════════════════════
+PART B — LOCKER: COMPLETE REBUILD
+═══════════════════════════════════════════════════════════════
+
+Current state is broken. Rebuild as follows:
+
+1. ENCRYPTION AT REST
+  • Derive locker key: Argon2id(PIN + serverSalt + userSalt)
+    — params: memory=64MB, iterations=3, parallelism=4
+  • Encrypt every item client-side with AES-256-GCM before
+    upload (unique IV per item)
+  • Server stores ONLY ciphertext + IV + auth tag. Never the
+    PIN, never the derived key, never plaintext.
+  • DB schema change:
+      hidden_locker_items:
+        - ciphertext (bytea)
+        - iv (bytea)
+        - auth_tag (bytea)
+        - encrypted_media_key (bytea)  ← for media items
+      REMOVE: content (text), media_url (plain)
+  • Media files in GCS: encrypt blob client-side, upload
+    ciphertext only. Signed URL grants access to ciphertext;
+    decryption key never touches server.
+
+2. BIOMETRIC UNLOCK
+  • Integrate expo-local-authentication
+  • Flow: biometric prompt → unlocks Keychain-stored locker
+    key → decrypts items
+  • Fallback to PIN if biometric fails or is disabled
+
+3. FAILED-ATTEMPT LOCKOUT
+  • Add columns: locker_failed_attempts (int),
+    locker_locked_until (timestamp)
+  • Policy: 5 wrong PINs → 1 min lockout
+           10 wrong → 15 min
+           15 wrong → 1 hour
+           20 wrong → wipe locker (with prior warning at 15)
+  • Rate-limit /api/locker/verify-pin server-side: max 5
+    attempts per 15 min per userId + IP
+  • Reset counter on successful unlock
+
+4. PIN STRENGTH + RECOVERY WARNING
+  • Require minimum 6-digit PIN (allow alphanumeric option)
+  • At creation, display modal:
+    "If you forget your PIN, your locker contents CANNOT be
+    recovered. Anthropic-style E2EE means we cannot help.
+    Write your PIN somewhere safe or set up a recovery
+    phrase below." [Confirm] [Set Recovery Phrase]
+  • Optional BIP-39 12-word recovery phrase encrypted by the
+    same locker key (stored encrypted on device only)
+
+5. SIGNED URL HARDENING
+  • Signed URLs expire in 60 seconds (not hours)
+  • URLs require bearer token + userId match server-side
+    before signing
+  • Add /api/locker/media/:itemId endpoint that re-signs on
+    each request after auth check
+  • Never store the signed URL in DB — generate on demand
+
+6. SCREENSHOT BLOCKING
+  • Add expo-screen-capture
+  • In HiddenLockerScreen.tsx and locker item viewer:
+      useEffect(() => {
+        preventScreenCaptureAsync();
+        return () => allowScreenCaptureAsync();
+      }, []);
+  • On Android, set FLAG_SECURE on the activity
+  • Detect screenshot attempts and log to audit table
+
+═══════════════════════════════════════════════════════════════
+PART C — STATUS / STORIES: MISSING FEATURES
+═══════════════════════════════════════════════════════════════
+
+1. REPLY TO STATUS (INLINE)
+  • Add "Reply" input at bottom of status viewer
+  • On send: create a chat message with statusReplyRef
+    metadata (statusId, thumbnail, snippet)
+  • Message renders in chat with a quoted-status preview
+    bubble above the reply text
+  • Schema: messages table gets nullable
+    status_reply_ref jsonb column
+
+2. MUTE STATUS FROM A USER
+  • DB: add muted_status_user_ids (jsonb array) to users
+    table, OR a dedicated muted_status table (userId,
+    mutedUserId, mutedAt) — prefer the latter for indexing
+  • Endpoints:
+      POST   /api/status/mute/:userId
+      DELETE /api/status/mute/:userId
+      GET    /api/status/muted
+  • Status feed query filters out muted users
+  • UI: long-press a user's status ring → "Mute" option
+
+═══════════════════════════════════════════════════════════════
+PART D — ACCEPTANCE CRITERIA (MUST ALL PASS)
+═══════════════════════════════════════════════════════════════
+
+Before marking complete, verify with evidence:
+
+[ ] DB dump of hidden_locker_items shows only ciphertext.
+   No plaintext content, no plain media_url.
+[ ] GCS bucket inspection: downloaded blobs are unreadable
+   without the client-derived key.
+[ ] Brute-forcing /api/locker/verify-pin is blocked after 5
+   attempts (proven with a script).
+[ ] Screenshot attempt on locker screen produces black image
+   on iOS and is blocked on Android.
+[ ] Biometric unlock works on iOS Face ID and Android
+   fingerprint; falls back to PIN cleanly.
+[ ] Chat messages: server logs show only ciphertext payloads.
+   Decrypting requires the recipient's private key.
+[ ] Key bundle endpoint returns valid Signal-format bundle.
+[ ] Safety number changes trigger UI warning.
+[ ] Call SDP shows DTLS-SRTP fingerprints; media packets are
+   encrypted (verified via Wireshark on test build).
+[ ] "Reply to status" creates a message with proper status
+   reference rendered as a quote bubble.
+[ ] Muting a user hides their status from the feed within
+   one refresh cycle and persists across sessions.
+
+═══════════════════════════════════════════════════════════════
+PART E — DELIVERABLES
+═══════════════════════════════════════════════════════════════
+
+1. Migration files for all schema changes
+2. New/updated API endpoints with input validation + tests
+3. Client code with no plaintext leaving the device for any
+  E2EE-scoped feature
+4. Unit tests for crypto operations (encrypt/decrypt
+  round-trips, key derivation determinism)
+5. Integration tests for lockout, screenshot blocking, mute,
+  status reply
+6. Security doc (SECURITY.md) describing threat model, key
+  rotation, recovery limitations, and what the server can
+  and cannot see
+7. Migration plan for existing users: re-encrypt locker on
+  next unlock; generate Signal keys on next login
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════════════
+
+• Do NOT ship symbolic encryption (base64, XOR, etc.)
+• Do NOT store any key material server-side that could
+ decrypt user content
+• Do NOT use deprecated primitives (MD5, SHA-1, RC4, DES,
+ ECB mode, PKCS#1 v1.5)
+• Do NOT skip the migration path for existing users
+• If a library is unavailable in Expo managed workflow, eject
+ to bare workflow or use a config plugin — document the
+ choice
+└─────────────────────────────────────────────────────────────┘

@@ -1,0 +1,40 @@
+URGENT BUG FIX — DO NOT BREAK EXISTING FEATURES
+
+My app is crashing/glitching in the messages/chat area.
+
+Issues to fix:
+1. When I tap a chat from the messages list, it glitches and does not open properly the first time.
+2. I have to tap the chat again before it opens.
+3. When I react to a message with an emoji/reaction, the reaction applies successfully, but the app immediately kicks me out/crashes.
+4. After the crash, the app shows: “Something went wrong — Please reload the app to continue.”
+
+Fix this properly without removing or breaking any existing chat, message, encryption, reaction, UI, navigation, or user features.
+
+Requirements:
+- Diagnose the exact cause of the chat opening glitch.
+- Fix double-tap/first-tap navigation issues.
+- Fix reaction handling so selecting an emoji updates the message smoothly without crashing.
+- Make sure reaction state updates safely and does not trigger a full app error boundary.
+- Prevent duplicate renders, invalid state updates, undefined message data, bad route params, stale selected message state, or broken async calls.
+- Add proper error handling around message reactions so one failed reaction never crashes the whole app.
+- Keep the user inside the chat after reacting.
+- Reaction should instantly appear on the message.
+- If the backend/update fails, show a small non-blocking toast instead of crashing.
+- Make sure long-press message menu, emoji picker, reactions, chat opening, and message list navigation all work smoothly together.
+- Test on mobile screen size and make sure no “Something went wrong” crash appears.
+
+Important:
+- Do not rewrite the whole app.
+- Do not change the app design unless required for the fix.
+- Do not remove existing functionality.
+- Do not create fake reactions.
+- Do not break real-time messages.
+- Do not break encryption or message sending.
+- Only patch the root cause cleanly and safely.
+
+After fixing, run the app and verify:
+- First tap on a chat opens the chat correctly.
+- Reactions apply without kicking the user out.
+- The chat stays open after reacting.
+- No crash/error screen appears.
+- Existing messages, sending, receiving, and reactions still work.

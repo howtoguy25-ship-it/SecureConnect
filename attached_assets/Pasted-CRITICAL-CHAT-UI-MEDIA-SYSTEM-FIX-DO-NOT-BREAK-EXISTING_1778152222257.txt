@@ -1,0 +1,215 @@
+CRITICAL CHAT UI + MEDIA SYSTEM FIX — DO NOT BREAK EXISTING FEATURES
+
+My messaging screen currently has multiple broken/unfinished features that must be rebuilt professionally and work like a real production messenger app similar to Signal/Telegram/iMessage.
+
+MAIN ISSUES TO FIX:
+1. Remove the ugly blue square/border around the text input area.
+2. Redesign the message composer/input area to look clean, premium, modern, and professional like Signal:
+   - Smooth rounded container
+   - Proper spacing/padding
+   - Auto-resize text area
+   - No broken focus states
+   - No flashing blue outline
+   - Proper keyboard handling
+   - Smooth animations
+   - Stable on iOS mobile screens
+
+3. Fix all “Share Content” buttons so they are REAL WORKING FEATURES — not placeholders.
+
+IMPORTANT:
+DO NOT break:
+- chats
+- encryption
+- reactions
+- sending/receiving messages
+- navigation
+- realtime updates
+- existing backend logic
+
+Only professionally upgrade and repair the current implementation.
+
+====================================================
+REAL CAMERA FEATURE
+====================================================
+
+When user taps “Camera”:
+- Open REAL in-app camera
+- Ask for real camera permissions on first use
+- If denied:
+  - Show proper permission warning
+  - Prevent camera usage until enabled
+- Add:
+  - Front/back camera switch
+  - Capture photo button
+  - Hold-to-record video
+  - Hands-free video mode
+  - Flash toggle
+  - Preview screen after capture
+  - Send button
+  - Retake button
+- Allow sending captured media directly into the chat
+- Camera must feel smooth and modern like Signal/Telegram
+
+====================================================
+REAL PHOTOS/VIDEOS FEATURE
+====================================================
+
+Rename “Photo” and “Video” into ONE button called:
+- “Photos”
+
+When clicked:
+- Ask for real gallery/media permissions
+- If denied:
+  - User cannot upload until permissions allowed
+- Allow:
+  - Selecting photos
+  - Selecting videos
+  - Multi-select
+  - Preview before sending
+  - Compression optimization
+  - Upload progress
+  - Cancel upload
+- Sent media must appear properly inside the chat
+
+====================================================
+REAL EMOJI SYSTEM
+====================================================
+
+Fix emoji system completely.
+
+When clicking Emoji:
+- Open full real emoji picker
+- Support all standard emojis
+- Smooth search
+- Recent emojis
+- Emoji categories
+- Fast performance
+
+Add:
+- “Custom Emoji” button
+
+Custom emoji system requirements:
+- Users can upload their own images/emojis
+- Save custom emojis locally/account-based
+- Automatically appear inside emoji picker
+- Allow sending custom emojis in chats
+- Prevent crashes from large image uploads
+- Proper image resizing/optimization
+
+====================================================
+REAL FILE SHARING
+====================================================
+
+Fix File button completely.
+
+When clicked:
+- Open real file picker
+- Allow:
+  - PDFs
+  - Docs
+  - ZIPs
+  - Audio
+  - Images
+  - Videos
+  - Other supported files
+- Show upload progress
+- Show filename + file size
+- Allow cancel before sending
+- Files must send successfully in chat
+- Ensure encrypted file transfer still works
+
+====================================================
+REAL CONTACT SHARING
+====================================================
+
+Fix Contacts feature completely.
+
+When clicked:
+- Ask for real contacts permission
+- If denied:
+  - User cannot access contacts
+- If allowed:
+  - Load device contacts
+  - Search contacts
+  - Select contact
+  - Send contact card into chat
+- Contact card should display:
+  - Name
+  - Phone number
+  - Optional avatar
+- Prevent app crashes if contacts list is empty
+
+====================================================
+REAL GIF SYSTEM
+====================================================
+
+Fix GIF button completely.
+
+Requirements:
+- Integrate real online GIF provider/API
+- Load trending GIFs
+- Search GIFs
+- Fast loading
+- Smooth scrolling
+- Preview before sending
+- Send GIFs directly into chat
+- Cache GIFs for performance
+- Prevent freezes/crashes from large GIFs
+
+====================================================
+UI + PERFORMANCE REQUIREMENTS
+====================================================
+
+Fix and improve:
+- Keyboard overlap issues
+- Input lag
+- Re-renders
+- Broken focus states
+- Layout jumping
+- Chat flickering
+- Overlay glitches
+- Modal stacking bugs
+- Memory leaks
+- Async state issues
+- iOS mobile responsiveness
+
+====================================================
+IMPORTANT DEVELOPMENT RULES
+====================================================
+
+DO NOT:
+- rewrite the entire app unnecessarily
+- remove encryption
+- remove reactions
+- remove existing messages
+- break realtime messaging
+- change backend architecture unless required
+- use fake/demo placeholders
+
+DO:
+- patch the current architecture properly
+- use production-safe implementations
+- add proper permission handling
+- add proper loading states
+- add proper error handling
+- add fallback handling so features never crash the whole app
+- ensure all features work together smoothly
+
+====================================================
+FINAL TESTING REQUIRED
+====================================================
+
+After implementation verify:
+- Chat opens correctly first tap
+- No crashes
+- No “Something went wrong” screen
+- Camera works
+- Photos upload
+- Videos upload
+- GIFs send
+- Contacts send
+- Files send
+- Emojis/custom emojis work
+- Keyboard behaves correctly
+- Text input looks premium/professional
+- Everything works smoothly on iPhone/mobile view

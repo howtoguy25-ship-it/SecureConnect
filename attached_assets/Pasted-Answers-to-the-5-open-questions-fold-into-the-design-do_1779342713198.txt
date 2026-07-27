@@ -1,0 +1,37 @@
+Answers to the 5 open questions — fold into the design doc, then proceed to Phase 2 implementation:
+
+1. Cipher: stay on nacl.secretbox (XSalsa20-Poly1305). It's already in the project and the security margin vs XChaCha20-IETF isn't meaningful here. Don't introduce a new primitive just for media. Note the decision and rationale in the doc.
+
+2. Multi-device fan-out: confirmed — each device decrypts independently. Sender encrypts the per-attachment key once per recipient device session, transported inside the existing Signal envelope.
+
+3. Voice-note transcription: drop for v1. No server-side transcription. Client-side ML is a later conversation, opt-in only. Add to TODO.md.
+
+4. Stories: do NOT defer indefinitely. Plan:
+   - Phase 2 (this phase): media encryption only. No Stories code.
+   - Phase 3 (immediately after Phase 2 ships): full Stories implementation.
+   - Locked Stories decisions for the Phase 3 design doc:
+     * Visibility: all mutual contacts (WhatsApp/Signal model). No per-story audience picker in v1.
+     * Expiry: user-configurable per story — 1h / 24h / 7d. Default 24h.
+     * Encryption: same media-encryption primitives as Phase 2. Per-story symmetric key, fanned out to each recipient device via existing Signal envelope. No new crypto primitives.
+     * Server-side TTL deletion must be verifiable (hard delete from GCS, not just a flag).
+     * View receipts: yes, encrypted, sender-only.
+     * Replies-to-stories: route into the existing 1:1 DM, quoting the story.
+   - Create docs/stories/phase-3-design.md as a stub now with these locked decisions, so it's ready to expand the moment Phase 2 ships. Do NOT write Stories code in Phase 2.
+
+5. Plaintext-media migration: no migration. Legacy /objects route stays readable for 60 days post-Phase-2, then returns 410 GONE. In-app notice 14 days before cutover ("media older than X will no longer be viewable"). Add the user-facing notice to TODO.md.
+
+Phase 2 must-have features (not crypto-specific, but required for v1 to ship):
+- Logout button working from settings, clears local key material and session tokens.
+- Delete account flow — full account deletion that wipes server-side user record, all messages where this user is sender, encrypted blobs in GCS owned by this user, prekeys, and device registrations. 30-day grace period with recovery, then hard delete. Confirm flow with re-authentication required.
+- All settings screen buttons functional (no dead UI).
+Audit the app for any dead buttons or stub screens before Phase 2 ships. List anything found in TODO.md and fix as part of Phase 2 if low-effort, or schedule explicitly.
+
+Other confirmations:
+- Thumbnail/chat-list UX downgrade to "Photo"/"Video"/"Voice message" placeholders: approved.
+- 50 MB max attachment, hard fail both ends: approved.
+- 1 MiB chunks, per-chunk Poly1305, "SCM1" header magic: approved.
+- New authenticated GET /api/media/encrypted/:objectPath endpoint: approved. Legacy /objects/*objectPath tightened to 410 GONE 60 days post-Phase-2.
+
+Build plan: build 61 = Apple compliance + Phase 1, build 62 = Phase 2 (media encryption + logout/delete-account/dead-button audit), build 63 = Phase 3 (Stories). Don't bundle 62 and 63.
+
+Go. Start Phase 2 implementation. Wire the test runner for prekeyRotation.test.ts as part of this phase so the placeholder becomes a real passing test.

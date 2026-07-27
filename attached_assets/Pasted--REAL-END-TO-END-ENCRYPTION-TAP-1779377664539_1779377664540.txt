@@ -1,0 +1,302 @@
+┌─────────────────────────────────────────────────────────────┐
+│   REAL END-TO-END ENCRYPTION — TAP-PROOF IMPLEMENTATION     │
+│              NON-NEGOTIABLE BUILD SPEC                      │
+└─────────────────────────────────────────────────────────────┘
+
+GOAL: Chat, Status, Locker, and Calls must be encrypted such
+that NO ONE — not the server operator, not Anthropic, not
+your hosting provider, not a state actor with a subpoena,
+not someone who steals your database — can read user content.
+Only the intended recipient's device can decrypt.
+
+If any step below is skipped, the system is NOT end-to-end
+encrypted. Build all of it.
+
+═══════════════════════════════════════════════════════════════
+CORE PRINCIPLE
+═══════════════════════════════════════════════════════════════
+
+PRIVATE KEYS NEVER LEAVE THE USER'S DEVICE. EVER.
+The server stores ONLY:
+ • Public keys
+ • Ciphertext (encrypted blobs the server cannot read)
+ • Metadata required for routing (sender, recipient, time)
+
+If the server can decrypt it, it is not E2EE. Period.
+
+═══════════════════════════════════════════════════════════════
+1. CHAT — SIGNAL PROTOCOL (libsignal)
+═══════════════════════════════════════════════════════════════
+
+WHY SIGNAL: It is the gold standard. Used by Signal,
+WhatsApp, Google Messages. Audited. Open source. Provides
+forward secrecy and post-compromise security.
+
+DO NOT WRITE YOUR OWN. Use @signalapp/libsignal-client
+(official) on the client. Wrap in a service module.
+
+IMPLEMENTATION:
+
+a) On account creation, client generates:
+  • Identity key pair (Curve25519, long-term)
+  • Signed prekey (rotated every 7 days)
+  • 100 one-time prekeys
+  Upload PUBLIC halves to server. Store PRIVATE halves in
+  hardware-backed keystore (iOS Secure Enclave / Android
+  StrongBox via expo-secure-store with
+  requireAuthentication: true, keychainAccessible:
+  WHEN_UNLOCKED_THIS_DEVICE_ONLY).
+
+b) Server tables (public keys only):
+    identity_keys(user_id, public_key, created_at)
+    signed_prekeys(user_id, key_id, public_key, signature,
+                   created_at, expires_at)
+    one_time_prekeys(user_id, key_id, public_key, used_at)
+
+c) Sending a message:
+  • Fetch recipient's prekey bundle from server
+  • Establish X3DH session → derive shared secret
+  • Encrypt with Double Ratchet (AES-256-CBC + HMAC-SHA256
+    per Signal spec, or AES-256-GCM per modern variant)
+  • Send only ciphertext + ratchet headers to server
+  • Server message table:
+      messages(id, sender_id, recipient_id, ciphertext,
+               ratchet_header, timestamp)
+    — NO plaintext column. NO "content" field. Ever.
+
+d) Receiving:
+  • Client pulls ciphertext, runs ratchet, decrypts locally
+  • Decrypted plaintext is held in memory and rendered;
+    persisted to local encrypted SQLite (SQLCipher with key
+    from Keychain), never re-uploaded
+
+e) Group chats: use Sender Keys (Signal's group protocol).
+  Each member encrypts to a group sender key; key changes
+  on membership change.
+
+f) Safety numbers: display SHA-256 fingerprint of both
+  identity keys in chat info. Warn on key change with a
+  yellow banner: "Security code changed — verify with
+  [contact] before sending sensitive info."
+
+═══════════════════════════════════════════════════════════════
+2. STATUS / STORIES — SENDER KEYS
+═══════════════════════════════════════════════════════════════
+
+Status is a one-to-many broadcast. Use Signal Sender Keys:
+
+a) Poster generates an ephemeral sender key per status post
+b) Encrypts the status payload (text/photo/video) once with
+  AES-256-GCM using that sender key
+c) Encrypts the sender key individually to each authorized
+  viewer using their Signal session (from chat E2EE above)
+d) Server stores:
+    statuses(id, poster_id, ciphertext, iv, auth_tag,
+             expires_at)
+    status_keys(status_id, viewer_id, encrypted_sender_key)
+e) Viewer fetches their encrypted_sender_key, decrypts with
+  their Signal session, then decrypts the status payload
+f) Media uploaded to GCS is the ENCRYPTED blob. Server and
+  GCS see only ciphertext.
+g) 24h expiry: server deletes ciphertext + all
+  encrypted_sender_key rows. Client also wipes local cache.
+
+═══════════════════════════════════════════════════════════════
+3. LOCKER — CLIENT-SIDE ENCRYPTION WITH HARDWARE BACKING
+═══════════════════════════════════════════════════════════════
+
+The locker is single-user (you encrypting to yourself), so
+no key exchange — but the threat model is identical: server
+must never see plaintext or keys.
+
+a) Key derivation:
+  • User sets passphrase (min 8 chars, or 6-digit PIN with
+    mandatory biometric)
+  • Derive locker_key = Argon2id(
+        passphrase,
+        salt = device_salt (32 bytes, stored in Keychain),
+        memory = 64 MB,
+        iterations = 3,
+        parallelism = 4,
+        output = 32 bytes)
+  • locker_key is held in memory only while locker is open.
+    Cleared on lock, app background, screen off.
+
+b) Wrap locker_key with hardware key:
+  • Generate a hardware-bound key in Secure Enclave /
+    StrongBox (non-exportable, requires biometric to use)
+  • Use it to wrap locker_key for biometric unlock path
+  • PIN path re-derives via Argon2id each time
+
+c) Item encryption:
+  • Each item gets a unique data_key (32 random bytes)
+  • Encrypt content with AES-256-GCM(data_key, random_iv)
+  • Wrap data_key with locker_key:
+    wrapped_dk = AES-256-GCM(locker_key, wrap_iv, data_key)
+  • Upload to server:
+      locker_items(id, user_id, ciphertext, iv, auth_tag,
+                   wrapped_data_key, wrap_iv,
+                   wrap_auth_tag, content_type)
+  • Server never sees data_key, locker_key, or plaintext
+
+d) Media files (photos/videos):
+  • Encrypt blob client-side with its own data_key
+  • Upload ciphertext to GCS (private bucket, signed URL
+    valid 60s, server-issued only after auth check)
+  • Store wrapped_data_key in DB row, NOT in the blob name
+    or URL
+
+e) Brute-force protection:
+  • Server endpoint /api/locker/verify-attempt rate-limited:
+    5 fails / 15 min / userId, then 1 hr, then 24 hr
+  • Client-side: 5 fails → 1 min, 10 → 15 min, 15 →
+    warning, 20 → wipe all locker_items rows + local cache
+  • Track in users table:
+    locker_failed_attempts, locker_locked_until
+
+f) Screenshot blocking:
+  • iOS: expo-screen-capture preventScreenCaptureAsync()
+    in HiddenLockerScreen and locker viewer
+  • Android: FLAG_SECURE on the activity via config plugin
+  • Detect attempts → log to audit_log table
+
+g) Recovery: NONE by default. Forgotten PIN = lost data.
+  Display warning at PIN creation. Offer optional BIP-39
+  recovery phrase encrypted with the same locker_key,
+  stored locally only (user writes it down on paper).
+
+═══════════════════════════════════════════════════════════════
+4. CALLS — DTLS-SRTP WITH ZRTP OR SIGNAL CALLING
+═══════════════════════════════════════════════════════════════
+
+WebRTC alone is NOT E2EE if your TURN/SFU server can see
+media. Use one of:
+
+OPTION A (recommended for 1:1): Direct WebRTC with
+DTLS-SRTP, no media server in the path
+  • Peers exchange SDP via your signaling server
+    (signaling carries no media)
+  • DTLS handshake derives SRTP keys directly between
+    peers
+  • Server sees encrypted SRTP packets only (or nothing,
+    if direct P2P succeeds)
+  • Use STUN for NAT traversal; TURN only as relay (TURN
+    relays encrypted SRTP — still cannot decrypt)
+  • Verify fingerprints out-of-band or via Signal session
+    to prevent MitM at signaling layer
+
+OPTION B (for group calls): Signal's group calling with
+SFrame (Secure Frames) end-to-end encryption layer on top
+of SRTP, so the SFU forwards but cannot decrypt
+  • Each participant encrypts media frames with a group
+    key derived from Signal sessions
+  • SFU sees ciphertext frames only
+
+IMPLEMENTATION CHECKLIST:
+  • Use react-native-webrtc with DTLS-SRTP enforced
+    (refuse SDP without a=fingerprint)
+  • Authenticate the DTLS fingerprint via the Signal chat
+    session (send expected fingerprint as an encrypted
+    chat message before the call connects)
+  • For groups: implement SFrame layer above SRTP
+  • Display in-call security indicator: green lock +
+    short authentication string (2 words derived from
+    SRTP keys) that both users can read aloud to verify
+
+PROHIBITED:
+  • Routing media through your server unencrypted "for
+    recording" or "for quality" — this breaks E2EE
+  • Using Agora, Twilio Video, or similar SDKs without
+    their explicit E2EE add-ons (most do not have real
+    E2EE)
+
+═══════════════════════════════════════════════════════════════
+5. TRANSPORT + INFRASTRUCTURE HARDENING
+═══════════════════════════════════════════════════════════════
+
+E2EE protects payloads. Wrap everything in defense in depth:
+
+a) TLS 1.3 only on all API endpoints. Certificate pinning
+  in the mobile app (pin to your CA's intermediate, with
+  a backup pin). Reject TLS 1.2 and below.
+
+b) Disable all server-side message logging that captures
+  payloads. Audit logs may record event types and IDs but
+  never ciphertext content (and never plaintext, since
+  server cannot see it anyway).
+
+c) Database at-rest encryption (Postgres TDE / GCP CMEK)
+  — defense in depth, not a substitute for E2EE.
+
+d) Backups: only ciphertext is backed up. Never back up
+  Keychain contents to iCloud/Google. Set
+  kSecAttrSynchronizable = false.
+
+e) Logs scrubbing: ensure no path logs request bodies for
+  /api/messages, /api/status, /api/locker.
+
+f) No analytics SDKs (Firebase, Mixpanel, Sentry) in
+  screens that handle plaintext, OR strip all event
+  payloads to opaque IDs.
+
+═══════════════════════════════════════════════════════════════
+6. VERIFICATION — PROVE IT WORKS
+═══════════════════════════════════════════════════════════════
+
+Before declaring done, demonstrate ALL of these:
+
+[ ] SELECT * FROM messages → only ciphertext columns
+[ ] SELECT * FROM statuses → only ciphertext columns
+[ ] SELECT * FROM locker_items → only ciphertext columns
+[ ] Download a GCS blob → file is unreadable without key
+[ ] Run Wireshark on a call → SRTP packets, no plaintext
+[ ] Dump the device Keychain → keys are present but
+   require biometric/passcode to access
+[ ] Restore a phone backup to a new device → locker items
+   are UNRECOVERABLE without the PIN (proves keys aren't
+   backed up to cloud)
+[ ] Brute-force PIN endpoint → blocked after 5 attempts
+[ ] Screenshot locker → black/blocked
+[ ] MitM the signaling channel → call fails fingerprint
+   verification
+[ ] Swap recipient identity key server-side → sender's
+   client shows "Security code changed" warning
+[ ] Subpoena simulation: as the database operator, attempt
+   to read any user's chat/status/locker. Document that
+   you CANNOT.
+
+═══════════════════════════════════════════════════════════════
+7. WHAT NOT TO DO
+═══════════════════════════════════════════════════════════════
+
+✗ Do not roll your own crypto. Use libsignal, libsodium,
+ WebCrypto, or platform native crypto only.
+✗ Do not store private keys server-side "for recovery."
+ That makes you a target and breaks E2EE.
+✗ Do not implement "encryption" by hashing or base64.
+✗ Do not use ECB mode. Ever.
+✗ Do not use a single shared key for all users.
+✗ Do not derive keys from usernames, emails, or other
+ low-entropy inputs without Argon2id and a per-user salt.
+✗ Do not log decrypted content for "debugging."
+✗ Do not add a backdoor "admin decrypt" endpoint.
+✗ Do not skip key rotation. Signed prekeys rotate weekly.
+
+═══════════════════════════════════════════════════════════════
+8. DELIVERABLES
+═══════════════════════════════════════════════════════════════
+
+1. libsignal integration for chat + status sender keys
+2. Argon2id + AES-256-GCM locker with hardware key wrap
+3. DTLS-SRTP calls with fingerprint verification (and
+  SFrame for groups)
+4. Migration scripts: existing plaintext data → encrypted
+  on next login/unlock, with user notice
+5. SECURITY.md: threat model, what server can/cannot see,
+  key rotation policy, recovery policy (none by design)
+6. Third-party audit recommended before public launch.
+  Budget for one. Anything less and you cannot honestly
+  tell users "we cannot read your messages."
+
+THIS IS THE BAR. Anything less is security theater.
+└─────────────────────────────────────────────────────────────┘

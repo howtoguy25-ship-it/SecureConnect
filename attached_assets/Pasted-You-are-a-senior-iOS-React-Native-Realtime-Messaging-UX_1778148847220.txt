@@ -1,0 +1,294 @@
+You are a senior iOS + React Native + Realtime Messaging UX engineer working on my SecureConnect messenger app.
+
+Your task is to COMPLETELY redesign and fix the message hold interaction system so it behaves like a premium modern messaging app (Signal/Telegram/iMessage quality) with smooth animations, real reactions, and proper layering.
+
+The current implementation is oversized, buggy, inconsistent, and feels disconnected from the selected message.
+
+I want the ENTIRE hold interaction rebuilt professionally.
+
+⸻
+
+CORE GOAL
+
+When a user LONG PRESSES a message:
+
+* The selected message should smoothly lift upward slightly
+* Background should blur + darken elegantly
+* The actual held message should remain visible above the menu
+* The action sheet should appear MINIMISED and COMPACT beneath the selected message
+* Everything must feel attached to the selected bubble
+* No fullscreen oversized menu
+* No awkward spacing
+* No copy/select glitches
+* No duplicated selection layers
+* No broken gestures
+
+The interaction must feel fluid, premium, native, and modern.
+
+⸻
+
+REQUIRED UI STRUCTURE
+
+1. BLURRED BACKGROUND
+
+When holding a message:
+
+* Apply REAL iOS-style blur background
+* Add slight dark overlay behind blur
+* Blur intensity around 25–35%
+* Background tap dismisses modal smoothly
+* No harsh black background
+
+Use:
+
+* expo-blur / native blur implementation
+* smooth fade animation
+
+⸻
+
+2. MESSAGE PREVIEW ON TOP
+
+The ACTUAL selected message bubble must appear at the top.
+
+Requirements:
+
+* Same exact message styling
+* Same sender colors
+* Same timestamps
+* Same reactions
+* Same bubble radius
+* Same reply previews
+* Same media rendering
+
+The held message should:
+
+* slightly scale to 1.02
+* elevate with shadow
+* animate upward smoothly
+* remain fully readable
+
+DO NOT create a fake duplicated message card.
+
+Use the REAL rendered message component.
+
+⸻
+
+3. REAL REACTION BAR
+
+Above the held message show a horizontal reaction tray.
+
+Include EXACTLY:
+
+👍 ❤️ 😂 😮 😢 ➕
+
+Requirements:
+
+* Smooth pop animation
+* Modern glassmorphism container
+* Rounded capsule design
+* Tap instantly reacts in realtime
+* Reactions sync live between users
+* Multiple users can react simultaneously
+* Existing reactions update live
+
+⸻
+
+4. PLUS BUTTON FUNCTIONALITY
+
+The ➕ reaction button must:
+
+* Open real emoji picker
+* Allow selecting ANY emoji
+* Allow replacing existing reaction
+* Allow adding a different emoji
+* Support skin tones
+* Support search
+* Support recent emojis
+
+⸻
+
+5. REMOVE REACTION SUPPORT
+
+If the user already reacted:
+
+Holding the same reaction again should:
+
+* remove the reaction
+
+OR:
+
+Show:
+“Remove Reaction”
+
+Requirements:
+
+* realtime sync
+* instant UI update
+* smooth removal animation
+* reaction counts update instantly
+
+⸻
+
+6. COMPACT ACTION MENU BELOW MESSAGE
+
+Under the selected message show a MINIMISED compact action menu.
+
+NOT fullscreen.
+
+The menu must hug the selected message.
+
+STYLE:
+
+* floating card
+* blurred/glass background
+* rounded 28px corners
+* compact spacing
+* soft shadow
+* native iOS feel
+
+⸻
+
+MENU OPTIONS
+
+Keep these:
+
+* Reply
+* Copy
+* Select
+* Pin
+* Message Info
+* Share
+* Hide to Locker
+* Delete
+
+BUT:
+
+* smaller
+* tighter
+* cleaner
+* smoother
+* better typography
+* modern spacing
+* icons perfectly aligned
+
+⸻
+
+DELETE BEHAVIOUR
+
+Delete must open secondary confirmation sheet:
+
+* Delete for Me
+* Delete for Everyone
+* Cancel
+
+Animated professionally.
+
+⸻
+
+MESSAGE INFO
+
+Message info must show REAL encrypted info:
+
+* Sent time
+* Delivered time
+* Read time
+* Encryption status
+* Device delivery status
+* Reaction history
+* Edited status
+
+NOT fake placeholders.
+
+⸻
+
+GESTURE FIXES
+
+Fix ALL current bugs:
+
+* text selecting accidentally
+* duplicate overlays
+* scrolling conflicts
+* gesture freezing
+* reaction tray disappearing
+* menu clipping
+* modal flickering
+* broken dismiss animation
+* delayed taps
+* multiple menus opening
+* hold lag
+
+Use:
+
+* react-native-gesture-handler
+* reanimated
+* proper z-index hierarchy
+* portal/modal layering
+
+⸻
+
+ANIMATIONS
+
+ALL animations must feel premium:
+
+* spring physics
+* soft easing
+* no jitter
+* no frame drops
+* 60fps
+* smooth open/close
+* smooth reaction pop
+* smooth dismiss
+
+Use Reanimated shared values.
+
+⸻
+
+POSITIONING RULES
+
+Menu placement must intelligently adapt:
+
+If message is:
+
+* near top → menu expands downward
+* near bottom → menu expands upward
+* near edges → auto reposition
+
+Never clip offscreen.
+
+⸻
+
+PERFORMANCE
+
+Must support:
+
+* large chats
+* thousands of messages
+* realtime reactions
+* low-end devices
+
+Avoid rerendering the entire chat list.
+
+Use:
+
+* memoization
+* FlashList optimizations
+* portal rendering
+* isolated state updates
+
+⸻
+
+FINAL RESULT
+
+The final experience should feel:
+
+* identical quality to Signal/iMessage
+* compact
+* elegant
+* modern
+* fluid
+* native
+* premium
+* realtime
+* bug free
+
+The user should feel like the message itself expands into an intelligent interaction layer instead of opening a giant disconnected popup.

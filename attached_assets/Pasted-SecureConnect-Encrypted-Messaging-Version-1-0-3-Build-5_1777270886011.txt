@@ -1,0 +1,60 @@
+SecureConnect — Encrypted Messaging
+Version 1.0.3 (Build 54)
+
+DEMO ACCOUNT FOR REVIEW
+Phone number: +1 555 123 4567
+Verification code: 123456
+
+This bypasses real SMS for App Review. After entering the code,
+the account is automatically granted VIP status so all subscription-gated
+features can be tested without making a purchase.
+
+HOW TO TEST CORE FEATURES
+1. Sign in with the demo number above (country: United States, +1).
+2. Enter code 123456 when prompted.
+3. On first launch you will be shown your Safe Code (a 24-character
+   recovery code). Tap "I've Saved It" to continue. This code lets a user
+   restore their end-to-end-encrypted keys on a new device.
+4. Tap the floating compose button on the Chats tab to start a new chat.
+   You can search any phone number; messages between two demo accounts
+   are end-to-end encrypted using the Signal Protocol (X3DH + Double Ratchet).
+5. Long-press any message to add a reaction (heart, thumbs up, etc.).
+6. Tap the phone icon in a chat header to start a voice or video call
+   (powered by LiveKit). Calls are encrypted end-to-end.
+7. Tap the camera icon at the top of the Chats tab to post a Status update
+   (Instagram-style, expires after 24 hours).
+8. Settings → Security shows the Safe Code, Trusted Devices, and recent
+   Login History. Settings → VIP shows the subscription paywall.
+9. Settings → Hidden Locker (VIP only) is a private folder protected by
+   Face ID / Touch ID for storing sensitive media.
+
+PERMISSIONS RATIONALE
+- Camera / Microphone: voice and video calls, sending photos and voice notes.
+- Photos: attaching media to messages and Status posts.
+- Contacts: finding friends already on SecureConnect (optional — manual
+  entry by phone number is always available).
+- Location: optional real-time location sharing within a chat.
+- Notifications: incoming calls, new messages, login alerts.
+- App Tracking Transparency: shown once on launch; required for AdMob
+  personalized ads only. Declining is fully supported.
+- Face ID / Touch ID: unlocking the Hidden Locker (VIP feature).
+
+ENCRYPTION DECLARATION
+The app uses standard end-to-end encryption (Signal Protocol: X3DH key
+agreement + Double Ratchet, XSalsa20-Poly1305, Curve25519, HKDF-SHA256)
+and HTTPS/TLS for transport. ITSAppUsesNonExemptEncryption is set to
+false because the app qualifies for the Note 4 exemption (standard
+encryption used to protect user content).
+
+THIRD-PARTY SERVICES
+- Twilio: SMS verification only (skipped for the demo number above).
+- LiveKit Cloud: encrypted voice and video call signaling and media.
+- Stripe: subscription billing for the VIP plan on web; on iOS, VIP is
+  sold via In-App Purchase (product ID secureconnect.vip.monthly.2025)
+  and Ad Removal (secureconnect.removeads.2025) with server-side receipt
+  verification.
+- Google AdMob: banner, interstitial, and rewarded ads (free tier only;
+  hidden for VIP users and after one-time Ad Removal purchase).
+
+CONTACT
+adisssal7@hotmail.com

@@ -1,0 +1,64 @@
+Upgrade the Chat Settings bottom sheet UI to look modern, premium, and polished without breaking any existing functionality.
+
+IMPORTANT:
+- Do not remove or break any current features.
+- Do not change existing navigation logic.
+- Do not change backend logic.
+- Only improve the UI/UX, spacing, animations, and visual polish.
+
+UPGRADE REQUIREMENTS:
+- Make the Chat Settings sheet look more professional and modern.
+- Use a clean rounded bottom-sheet design with proper padding.
+- Add a subtle blurred/dimmed background behind the sheet.
+- Add a small drag handle at the top.
+- Keep the close X button but align it properly.
+- Improve spacing between each option card.
+- Make every row/card equal height and professionally aligned.
+- Ensure icons, titles, and descriptions are perfectly spaced.
+- Add subtle press/tap animations.
+- Add smooth open/close animation.
+- Add clear visual feedback when tapping an option.
+- Keep dark mode styling consistent with the rest of the app.
+- Improve typography:
+  - Bold clean titles
+  - Softer grey descriptions
+  - Better line spacing
+- Make cards feel premium:
+  - Rounded corners
+  - Subtle borders or shadow
+  - Clean dark background
+  - Better icon containers
+
+CHAT SETTINGS OPTIONS TO KEEP:
+- Set Chat Background
+- Disappearing Messages
+- Block User
+- Any other existing options already in the sheet
+
+FUNCTIONAL SAFETY:
+- Set Chat Background must still open the photo/media picker.
+- Disappearing Messages must still open the timer options.
+- Block User must still open the confirmation/block flow.
+- Do not rename state variables unless necessary.
+- Do not remove existing handlers.
+- Do not create duplicate screens.
+- Do not break mobile responsiveness.
+
+RESPONSIVE REQUIREMENTS:
+- Must look good on small iPhones, Pro Max iPhones, and Android.
+- No text overlap.
+- No cropped buttons.
+- No bottom navigation/browser bar overlap.
+- Sheet should respect safe areas.
+- Content should scroll if needed.
+
+FINAL TESTS:
+- Open Chat Settings: smooth animation and clean layout.
+- Tap each option: original feature still works.
+- Close button works.
+- Tap outside/dismiss works if already supported.
+- No crashes.
+- No layout bugs.
+- No broken chat/settings code.
+
+Keep the current app theme, but make this Chat Settings panel feel like a polished modern messenger app.

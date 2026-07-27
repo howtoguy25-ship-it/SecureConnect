@@ -1,0 +1,79 @@
+┌─────────────────────────────────────────────────────────────┐
+│           APP FEATURE & SECURITY TESTING PROMPT             │
+└─────────────────────────────────────────────────────────────┘
+
+Perform a comprehensive QA test on the app and verify the
+following features work as intended. For each item, report:
+✅ Pass, ❌ Fail (with details), or ⚠️ Partial (with notes).
+
+───────────────────────────────────────────────────────────────
+1. CHAT
+───────────────────────────────────────────────────────────────
+• Send/receive text, media, voice notes, and files
+• Confirm end-to-end encryption is active (protocol, key
+ exchange, indicators)
+• Test delivery, read receipts, typing indicators, offline
+ queueing
+• Verify forward secrecy and that messages can't be read
+ server-side
+
+───────────────────────────────────────────────────────────────
+2. STATUS / STORIES
+───────────────────────────────────────────────────────────────
+• Post text, photo, and video statuses
+• Confirm 24-hour expiry and auto-deletion
+• Test privacy controls (who can view, mute, reply)
+• Verify encryption in transit and at rest
+
+───────────────────────────────────────────────────────────────
+3. LOCKER
+───────────────────────────────────────────────────────────────
+• Confirm files/media are encrypted at rest (state algorithm,
+ e.g., AES-256)
+• Test PIN/biometric lock, failed-attempt handling, recovery
+• Verify contents inaccessible outside the app (file system,
+ backups, screenshots)
+
+───────────────────────────────────────────────────────────────
+4. CALLS (AUDIO & VIDEO)
+───────────────────────────────────────────────────────────────
+• Place/receive 1:1 and group calls
+• Confirm BOTH audio and video are end-to-end encrypted
+ (SRTP/DTLS or equivalent — state which)
+• Test quality, reconnection, mute, camera switch, screen share
+• Verify no media is stored or routed unencrypted through
+ servers
+
+───────────────────────────────────────────────────────────────
+5. LOGOUT
+───────────────────────────────────────────────────────────────
+• Confirm logout clears session tokens, cached data,
+ notifications
+• Verify user must re-authenticate fully to return
+• Check no residual data remains on device
+
+───────────────────────────────────────────────────────────────
+6. DELETE ACCOUNT
+───────────────────────────────────────────────────────────────
+• Confirm full deletion: profile, chats, status, locker,
+ contacts, media, backups
+• Verify deletion propagates server-side (not just local)
+• Confirm username/number can't reach a "ghost" account
+• Test grace period (if any) and final irreversible state
+
+───────────────────────────────────────────────────────────────
+7. VIRTUAL PHONE NUMBERS
+───────────────────────────────────────────────────────────────
+• Generate, assign, and verify a virtual number
+• Test inbound/outbound calls and SMS on the virtual number
+• Confirm the user's real number is never exposed
+• Test number recycling, deletion, and porting (if supported)
+
+───────────────────────────────────────────────────────────────
+DELIVERABLE
+───────────────────────────────────────────────────────────────
+A pass/fail report per feature, with screenshots or logs for
+any failures, plus a security summary specifically confirming
+encryption status for chat, locker, calls (audio + video),
+and status.
+└─────────────────────────────────────────────────────────────┘

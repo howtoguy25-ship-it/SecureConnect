@@ -1,0 +1,133 @@
+Final SecureConnect hardening + production security pass.
+
+The current implementation is good, but now do a full security + privacy hardening pass before final release.
+
+CRITICAL:
+Do not rewrite working systems unnecessarily.
+Focus on:
+- eliminating metadata leaks
+- preventing plaintext exposure
+- reducing attack surface
+- improving realtime reliability
+- improving encrypted storage hygiene
+- tightening notification privacy
+- preventing replay/spoof abuse
+- improving performance
+
+REPLY SECURITY:
+- Keep reply previews fully local-device rendered only.
+- Never transmit plaintext reply previews through REST, sockets, push payloads, analytics, logs, or navigation params.
+- Only transmit:
+  - replyToMessageId
+  - encrypted payload
+  - metadata safe for transport
+
+MESSAGE SECURITY:
+- Add replay protection using unique message IDs/nonces.
+- Reject duplicate message IDs.
+- Add timestamp validation tolerance.
+- Prevent forged delete-for-everyone events.
+- Prevent spoofed read receipts.
+- Prevent spoofed typing indicators.
+- Validate authenticated sender on all socket events.
+
+SOCKET HARDENING:
+- Add socket reconnect recovery.
+- Queue outbound encrypted actions offline safely.
+- Retry failed encrypted events.
+- Prevent duplicate socket listeners.
+- Add heartbeat/ping timeout handling.
+- Gracefully recover after app background/foreground transitions.
+
+ENCRYPTED STORAGE:
+- Ensure decrypted message cache is device-local only.
+- Do not persist decrypted cache unnecessarily.
+- Securely clear expired/disappeared message cache.
+- Wipe temporary media cache after expiry/delete.
+- Avoid writing plaintext into async storage, logs, crash reports, or debug output.
+
+NOTIFICATION PRIVACY:
+When notification previews are OFF:
+- Push payload must not include plaintext message body.
+- Lock screen must only show:
+  - sender name
+  - “New encrypted message”
+- Hide previews in:
+  - notification center
+  - lock screen
+  - banners
+  - wearable sync if applicable
+
+DISAPPEARING MESSAGE HARDENING:
+- Expired messages must:
+  - disappear from search
+  - disappear from pinned section
+  - disappear from replies
+  - disappear from forwarded content
+- If media expired:
+  - revoke media access
+  - delete cached local file
+  - prevent reopening old URI references
+- Ensure expired messages cannot reappear after sync conflicts.
+
+STORY SECURITY:
+- Story viewer list must respect View Receipts toggle both ways.
+- Do not leak story viewers when receipts disabled.
+- Secure media URLs using authenticated signed access.
+- Expired stories must fully disappear from:
+  - feed
+  - cache
+  - previews
+  - viewer lists
+- Prevent unauthorized viewing via direct URL access.
+
+BACKUPS:
+Add optional encrypted backup architecture planning:
+- user-controlled backup key
+- encrypted export
+- restore flow
+- no server-side plaintext access
+
+PERFORMANCE:
+- Reduce unnecessary rerenders in large chats.
+- Virtualize long message lists properly.
+- Debounce typing indicators.
+- Optimize story feed rendering.
+- Avoid memory leaks from listeners/timers.
+- Keep animations smooth at 60fps.
+
+IOS POLISH:
+- Improve haptics.
+- Improve keyboard transitions.
+- Smooth modal animations.
+- Native-feeling swipe gestures.
+- Blur/glass materials matching iOS modern design.
+- Proper safe-area handling on all iPhones.
+
+FINAL TESTING:
+Run full regression testing:
+- offline/online transitions
+- airplane mode
+- reconnect
+- delete-for-everyone
+- disappearing messages
+- read receipts
+- typing indicators
+- stories privacy
+- blocked users
+- push notification privacy
+- multi-device sync
+- media expiry
+- app reload/reinstall
+- large chats
+- rapid message spam
+- duplicate event handling
+
+Then provide:
+1. Remaining known weaknesses
+2. Security tradeoffs
+3. Recommended future upgrades
+4. Production deployment checklist
+5. Database migration summary
+6. Socket event list
+7. Privacy architecture summary

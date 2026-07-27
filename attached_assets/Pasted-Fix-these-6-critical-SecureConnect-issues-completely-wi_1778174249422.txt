@@ -1,0 +1,134 @@
+Fix these 6 critical SecureConnect issues completely without breaking existing code, navigation, chat, or settings.
+
+CRITICAL RULE:
+Do not redesign the whole app. Do not remove working features. Fix the broken logic, sizing, permissions, APIs, and persistence properly.
+
+ISSUE 1 — MESSAGE INFO ENCRYPTION NAME
+Current Message Info says:
+“End-to-end (Signal)”
+
+Change it to:
+“End-to-end (SecureConnect)”
+
+Requirements:
+- Remove the word Signal everywhere in user-facing message info UI.
+- Keep encryption logic untouched.
+- Do not break sent/delivered/read timestamps.
+
+ISSUE 2 — PUSH NOTIFICATIONS BUTTON BROKEN + BAD SIZE
+The Push Notifications toggle does not work and the switch is oversized/out of place.
+
+Fix requirements:
+- Make the toggle fit correctly inside the row on all phone sizes.
+- No clipping, overflow, or text collision.
+- Use proper flex layout and safe right padding.
+- Tapping the toggle must request real notification permission.
+- If accepted, register the device push token.
+- Save push preference locally and to backend.
+- If turned off, disable push notifications for this device.
+- Restore correct state after app restart.
+- Respect Show Message Preview privacy setting.
+- Test on small iPhone, Pro Max, and Android layouts.
+
+ISSUE 3 — GIFS NOT DISPLAYING
+GIF panel opens but shows “No GIFs found”.
+
+Fix requirements:
+- Implement real GIF loading using the current Tenor/GIPHY provider.
+- Verify API key/env variable is correctly loaded.
+- Trending tab must load real trending GIFs.
+- Search must return real GIF results.
+- Category chips must load real category results:
+  - Trending
+  - Funny
+  - Reactions
+  - Love
+- Show loading state while fetching.
+- Show error state if API fails.
+- Tapping a GIF must send it into the chat as a real message.
+- Keep “Powered by Tenor” only if Tenor is actually used.
+- Do not hardcode fake GIFs unless API fails, and only use fallback for testing.
+
+ISSUE 4 — VOICE MESSAGE BUTTON DOES NOT WORK
+The microphone button does not click or record.
+
+Fix requirements:
+- Make microphone button tappable with correct hitbox.
+- Request microphone permission the first time.
+- Add press-and-hold voice recording OR tap-to-record flow.
+- Show recording UI:
+  - recording timer
+  - cancel option
+  - send option
+- Save and send audio message in chat.
+- Playback must work after sending.
+- Upload/store audio correctly if backend storage is required.
+- Do not let the browser bottom bar block the button.
+- Respect safe area and keyboard positioning.
+
+ISSUE 5 — CAMERA WORKS BUT VIDEO RECORDING DOES NOT
+Camera opens but does not allow recording.
+
+Fix requirements:
+- Add a real video recording mode inside camera.
+- Add visible Photo / Video toggle or video record button.
+- Photo button captures photos.
+- Video button starts/stops recording.
+- Request camera and microphone permissions for video.
+- Show recording timer while recording video.
+- Allow preview before sending.
+- Send recorded video into chat.
+- Save/upload video correctly.
+- Handle cancel, retake, and send.
+- Must work on iOS and Android native builds.
+
+ISSUE 6 — DISAPPEARING MESSAGES NOT SAVING
+Disappearing Messages resets to Never/Off and the save button disappeared.
+
+Fix requirements:
+- Restore a clear Save/Done button.
+- Add real options:
+  - Never/Off
+  - 5 minutes
+  - 8 hours
+  - 12 hours
+  - 18 hours
+  - 24 hours
+- Selecting an option must visually highlight it.
+- Pressing Save/Done must persist the selected value.
+- Returning to Chat Settings must show the saved value.
+- Closing/reopening chat must keep the saved value.
+- Restarting app must keep the saved value.
+- Apply disappearing timer to this chat correctly.
+- Do not reset to Never unless user selects Never/Off.
+- Fix any state overwrite/race condition causing the reset.
+
+TECHNICAL REQUIREMENTS:
+- Audit all broken onPress/onValueChange handlers.
+- Fix z-index, safe area, and browser preview overlay issues.
+- Do not use one shared state for unrelated settings.
+- Use unique persisted keys:
+  - settings.pushNotificationsEnabled
+  - chat.disappearingTimer
+  - privacy.showMessagePreviewEnabled
+  - media.gifProvider
+  - voice.recordingEnabled
+- Add proper error handling and logs.
+- Make all buttons respond instantly.
+- Keep app styling dark, modern, and consistent.
+- Do not introduce TypeScript/build errors.
+- Run full app test after fixes.
+
+FINAL ACCEPTANCE TESTS:
+1. Message Info shows “End-to-end (SecureConnect)”.
+2. Push Notifications toggle fits perfectly and actually enables/disables notifications.
+3. GIF panel loads real trending GIFs and search results.
+4. Tapping a GIF sends it in chat.
+5. Microphone button records and sends playable voice messages.
+6. Camera can take photos and record videos.
+7. Video preview/send/retake works.
+8. Disappearing Messages saves 5 minutes and does not reset.
+9. Restart app and all settings remain saved.
+10. No existing chat, settings, camera, message, or navigation features break.
+
+Finish the job fully. Do not stop at UI-only changes. Implement the real working functionality.

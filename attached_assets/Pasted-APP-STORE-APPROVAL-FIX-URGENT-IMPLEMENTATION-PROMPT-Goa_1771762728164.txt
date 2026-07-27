@@ -1,0 +1,57 @@
+APP STORE APPROVAL FIX — URGENT IMPLEMENTATION PROMPT
+
+Goal:
+Update the iOS app to meet Apple App Store Review Guidelines and prevent rejection related to account access and user data control.
+
+Tasks to Implement:
+
+1. Account Deletion (Required by Apple Guideline 5.1.1)
+• Add a clearly visible “Delete Account” button inside Settings.
+• The button must be accessible when the user is logged in.
+• When tapped:
+  - Show confirmation popup: “Are you sure you want to permanently delete your account?”
+  - On confirmation, permanently delete:
+    • User profile data
+    • Messages
+    • Authentication credentials
+    • Stored phone number
+• Deletion must occur server-side, not just locally.
+• After deletion, automatically log the user out and return to login screen.
+
+2. Fix Reviewer Login (Phone Number Authentication)
+Apple reviewers must be able to log in without issues.
+
+Implement the following fixes:
+• Ensure phone login works globally without SMS region restrictions.
+• Remove rate limits or OTP blocks for test accounts.
+• Guarantee OTP delivery works reliably in test mode.
+• Add fallback test login option:
+
+REVIEWER LOGIN MODE:
+• Allow Apple reviewer to log in using a predefined test phone number without requiring real SMS verification.
+• Example behavior:
+  - If phone number = REVIEWER_TEST_NUMBER
+  - Automatically bypass OTP and log in successfully.
+
+3. Stability for All iOS Devices
+• Ensure login flow works on latest iOS versions.
+• Fix any crashes during:
+  - OTP verification
+  - Account creation
+  - Session loading
+• Maintain persistent login sessions after successful authentication.
+
+4. Compliance Requirements
+• Account deletion must be:
+  - Easy to find
+  - Immediate
+  - Permanent
+• Login must function 100% reliably during review.
+
+Expected Result:
+After implementation, the app must:
+• Allow Apple reviewers to log in instantly without SMS failures.
+• Provide a fully functional in-app account deletion option.
+• Meet Apple App Store privacy and data control guidelines to avoid rejection.
+
+Priority Level: CRITICAL — REQUIRED FOR APP STORE APPROVAL

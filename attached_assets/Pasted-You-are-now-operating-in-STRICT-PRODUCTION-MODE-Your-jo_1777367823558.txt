@@ -1,0 +1,92 @@
+You are now operating in STRICT PRODUCTION MODE.
+
+Your job is to ensure this app is 100% stable, responsive, and ready for App Store approval AND real users at scale.
+
+MANDATORY RULES:
+
+1. ERROR MANAGEMENT (CRITICAL)
+- Scan the entire codebase for ALL TypeScript errors (currently ~94)
+- Categorize them:
+  a) Critical (can cause runtime crash or broken UI)
+  b) Medium (logic inconsistencies, async issues, API misuse)
+  c) Low (types, warnings, unused variables)
+- Immediately FIX all Critical and Medium errors
+- Reduce total errors to near zero without breaking functionality
+- Do NOT ignore or suppress errors — resolve them properly
+
+2. REAL-TIME ISSUE FIXING SYSTEM
+- Implement a global error handler (frontend + backend)
+- Add logging for:
+  - API failures
+  - UI crashes
+  - user actions failing
+- ANY detected issue must:
+  → be logged
+  → be traced to source
+  → be automatically fixed or flagged with exact file + line
+- No silent failures allowed
+
+3. APP FUNCTIONALITY GUARANTEE
+Ensure ALL core systems work flawlessly:
+- Authentication (login/signup/Apple login)
+- Messaging (send/receive instantly)
+- Encryption flow (no delays or failures)
+- Calls (audio/video connect properly)
+- UI buttons (ALL clickable and responsive)
+- Navigation (no dead routes or blank screens)
+
+4. PERFORMANCE OPTIMIZATION
+- Eliminate lag, freezing, or delayed rendering
+- Ensure:
+  → instant screen load
+  → smooth scrolling
+  → zero video/audio glitches
+- Optimize API calls (debounce, caching where needed)
+
+5. ENCRYPTION SAFETY CHECK
+- Review current encryption implementation
+- Validate:
+  → message send/receive consistency
+  → no key mismatch issues
+- Add fallback handling if encryption fails (no app crash)
+
+6. ADS + CONFIG VALIDATION
+- Detect incorrect AdMob setup (iOS/Android IDs must differ)
+- Fix configuration automatically
+- Ensure ads do NOT break UI or performance
+
+7. UI/UX POLISH FOR APPLE REVIEW
+- Replace empty states with:
+  → demo messages
+  → demo call logs
+  → demo statuses
+- Ensure app looks ACTIVE and REAL
+- No blank or dead screens anywhere
+
+8. STABILITY BEFORE FEATURES
+- DO NOT add new features until:
+  → app is fully stable
+  → no critical bugs exist
+- Stability > features
+
+9. FINAL VALIDATION CHECK
+Run a full system test:
+- Simulate real user actions
+- Confirm:
+  → no crashes
+  → no broken flows
+  → all APIs return correctly
+- Output a FINAL REPORT:
+  ✔ Issues found
+  ✔ Issues fixed
+  ✔ Remaining risks (if any)
+
+GOAL:
+This app must behave like a polished production app comparable to top-tier apps.
+No glitches, no broken buttons, no delays.
+
+If ANY issue is found during testing:
+→ FIX IT IMMEDIATELY
+→ DO NOT CONTINUE until resolved
+
+EXECUTE NOW.

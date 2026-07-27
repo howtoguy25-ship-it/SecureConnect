@@ -1,0 +1,53 @@
+I'm debugging a critical bug in Pryvo Messenger: phone sign-in fails with 
+"Request failed (403)" when tapping Send Code, and the app then crashes 
+entirely. This works fine in the web version but fails in the iOS 
+(TestFlight/production) build. Fix both the root cause and add proper 
+error handling.
+
+CONTEXT:
+- Backend: Replit Express server (routes.ts) handling phone auth
+- Client: React Native/Expo app
+- There is a reviewer OTP bypass for Apple review using phone number 
+  555-1234567 in routes.ts — this MUST remain intact and unaffected by 
+  any fix
+- This same server/auth flow also handles Google and Apple sign-in, 
+  which may share the same underlying issue
+
+INVESTIGATE THE 403 ROOT CAUSE — check each of these and report findings 
+before fixing:
+1. Compare the API base URL the mobile client is hitting vs the web 
+   client. Confirm they point to the same deployed server, not a stale 
+   or cached staging URL baked into the mobile build.
+2. Check the send-code route in routes.ts for any middleware that could 
+   403 requests from the mobile app specifically — CORS/origin checks, 
+   App Check verification, custom header requirements, or rate limiting 
+   that might treat the app's requests differently from the browser's.
+3. Verify all required env vars/secrets (Twilio credentials, Firebase 
+   Admin SDK config, any auth provider keys) are actually present and 
+   loaded in the current deployment — not just referenced in code.
+4. Check if there's IP-based or device-based rate limiting that could be 
+   triggered by repeated testing with the reviewer bypass number.
+5. Log the exact response body and headers the server returns on this 
+   403, and print that to server logs so we can see the real reason, 
+   not just the status code.
+
+FIX THE CRASH — regardless of the 403 root cause, the app should never 
+crash on a failed auth request:
+1. Find where the phone sign-in response is handled on the client and 
+   confirm it safely handles non-2xx responses (403, 500, etc.) instead 
+   of assuming a success JSON shape.
+2. Add a try/catch (or equivalent) around the fetch/response parsing so 
+   a non-JSON or error response can't throw an unhandled exception.
+3. Show the user a clear, non-crashing error message (e.g. "Couldn't 
+   send code, please try again") on failure.
+4. Apply the same defensive handling to the Google and Apple sign-in 
+   flows if they share this response-handling code, since the same 
+   crash risk likely applies there too.
+
+AFTER FIXING:
+- Confirm the reviewer bypass number 555-1234567 still works end-to-end 
+  and was not touched by any middleware/rate-limit changes.
+- Test phone, Google, and Apple sign-in all succeed and fail gracefully 
+  without crashing.
+- Summarize the actual root cause you found for the 403, and what 
+  specifically was different between web and mobile.

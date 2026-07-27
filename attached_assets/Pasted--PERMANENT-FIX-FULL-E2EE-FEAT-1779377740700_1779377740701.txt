@@ -1,0 +1,364 @@
+┌─────────────────────────────────────────────────────────────┐
+│   PERMANENT FIX — FULL E2EE + FEATURE COMPLETION PROMPT     │
+│           CLOSE EVERY GAP, VERIFY ON REAL DEVICE            │
+└─────────────────────────────────────────────────────────────┘
+
+CONTEXT: An architecture review confirmed call media E2EE is
+correctly designed (private scalars stay on device, SFU sees
+only public keys + AES-GCM-encrypted frames). However:
+ • Locker is NOT actually encrypted (plaintext in DB/GCS)
+ • Call E2EE is not yet device-verified on an EAS build
+ • Push token is not cleared on logout
+ • Outbound SMS unverified end-to-end
+ • Virtual number recycling + porting incomplete
+
+This prompt fixes every remaining gap PERMANENTLY. Do not
+mark any item done until its acceptance test passes on a
+real device build.
+
+═══════════════════════════════════════════════════════════════
+GAP 1 — LOCKER: CLOSE THE PLAINTEXT GAP (HIGHEST PRIORITY)
+═══════════════════════════════════════════════════════════════
+
+CURRENT STATE: PIN gates the API. Database stores content
+in cleartext. GCS stores media at plain signed URLs. Anyone
+with DB or bucket access reads everything. This contradicts
+the security claim shown to users.
+
+REQUIRED IMPLEMENTATION:
+
+a) KEY DERIVATION (CLIENT ONLY)
+  • locker_master_key = Argon2id(
+        passphrase = user PIN/passphrase,
+        salt       = per-user 32-byte salt (generated once,
+                     stored in iOS Keychain / Android
+                     Keystore — NEVER server-side),
+        memory     = 64 MiB,
+        iterations = 3,
+        parallelism = 4,
+        output     = 32 bytes)
+  • Held in memory only while locker is unlocked. Wiped on
+    lock, background, or screen-off.
+
+b) HARDWARE-BACKED WRAPPING (FOR BIOMETRIC UNLOCK)
+  • Generate non-exportable key in Secure Enclave (iOS) /
+    StrongBox (Android), guarded by biometric.
+  • Use it to wrap locker_master_key for biometric path.
+  • PIN path re-derives via Argon2id each unlock.
+
+c) PER-ITEM ENCRYPTION
+  • For each locker item:
+      data_key   = 32 random bytes (CSPRNG)
+      iv         = 12 random bytes
+      ciphertext = AES-256-GCM(data_key, iv, plaintext)
+      wrap_iv    = 12 random bytes
+      wrapped_dk = AES-256-GCM(locker_master_key, wrap_iv,
+                               data_key)
+  • Server row:
+      hidden_locker_items(
+        id, user_id, content_type,
+        ciphertext      BYTEA,
+        iv              BYTEA,
+        auth_tag        BYTEA,
+        wrapped_data_key BYTEA,
+        wrap_iv         BYTEA,
+        wrap_auth_tag   BYTEA,
+        created_at)
+  • DROP COLUMNS: content (text), media_url (plain).
+    Migration: re-encrypt on next unlock; mark unmigrated
+    rows and force user through migration flow.
+
+d) MEDIA BLOBS
+  • Encrypt blob client-side with its own data_key BEFORE
+    upload.
+  • Upload ciphertext to GCS in a private bucket. No
+    public access, no long-lived URLs.
+  • Signed URL valid 60 seconds, generated only after
+    server-side auth check (userId match + valid session).
+  • Never store the signed URL in DB. Endpoint
+    GET /api/locker/media/:itemId re-signs on demand.
+
+e) BRUTE-FORCE LOCKOUT
+  • users table additions:
+      locker_failed_attempts INT DEFAULT 0,
+      locker_locked_until    TIMESTAMP NULL
+  • Server endpoint /api/locker/verify-attempt:
+      5 fails  → 1 min lock
+      10 fails → 15 min lock
+      15 fails → warning shown next unlock
+      20 fails → wipe all hidden_locker_items rows
+  • Rate limit per userId AND per source IP.
+  • Reset counter on success.
+
+f) SCREENSHOT BLOCKING
+  • expo-screen-capture preventScreenCaptureAsync() on
+    HiddenLockerScreen mount + item viewer mount.
+  • Android FLAG_SECURE via config plugin so the OS
+    blocks screenshots and recent-apps thumbnails.
+  • Detected attempts → audit_log row.
+
+g) RECOVERY POLICY
+  • Default: no recovery. Forgotten PIN = lost data.
+  • At PIN creation, modal:
+    "If you forget this PIN, your locker cannot be
+     recovered. The encryption keys live only on this
+     device. Write the PIN somewhere safe, or set up an
+     optional recovery phrase below."
+  • Optional BIP-39 12-word phrase encrypted with the
+    locker_master_key, stored locally only.
+
+ACCEPTANCE TESTS (must all pass):
+[ ] SELECT * FROM hidden_locker_items returns only
+   ciphertext columns. No readable content.
+[ ] Download a GCS blob directly — file is unreadable
+   without the wrapped_data_key + locker_master_key.
+[ ] Brute-force script against /api/locker/verify-attempt
+   is blocked after 5 attempts.
+[ ] Screenshot attempt on locker → black image (iOS) or
+   blocked (Android).
+[ ] Restore device backup to new phone → locker items
+   cannot be decrypted without PIN (proves keys aren't
+   in iCloud/Google backup).
+
+═══════════════════════════════════════════════════════════════
+GAP 2 — CALL E2EE: DEVICE-VERIFY ON EAS BUILD
+═══════════════════════════════════════════════════════════════
+
+CURRENT STATE: Handshake logic correct. room.setE2EEEnabled
+(true) confirmed in code. Not yet verified on a real EAS
+build because Expo Go does not bundle the native E2EE
+worker.
+
+REQUIRED:
+
+a) BUILD VERIFICATION
+  • Run: eas build --profile development --platform ios
+                                             --platform android
+  • Install on real device pairs (iPhone + Android, two
+    iPhones, two Androids).
+  • Confirm livekit-client native module loads E2EE worker
+    successfully (check console for "E2EE worker ready").
+
+b) WIRESHARK / PROXY CAPTURE
+  • Capture media packets between client and SFU.
+  • Verify frames are AES-GCM encrypted at application
+    layer (not just SRTP transport). Encrypted payload
+    should remain encrypted even after SRTP unwrap.
+
+c) SFU LOG INSPECTION
+  • Pull SFU logs during a test call.
+  • Confirm SFU sees only:
+      - Public keys (callerE2eePubkey, receiverE2eePubkey)
+      - Encrypted frames
+    NO plaintext audio/video samples anywhere.
+
+d) KEY MISMATCH TEST
+  • Manually corrupt one peer's public key on the server.
+  • Confirm call fails to decrypt and shows a clear error
+    ("Could not verify call security — call ended").
+
+e) IN-CALL SECURITY INDICATOR
+  • Display green lock + 2-word Short Authentication
+    String (SAS) derived from the shared secret.
+  • Both users read it aloud to confirm no MitM at
+    signaling.
+
+ACCEPTANCE TESTS:
+[ ] EAS build runs E2EE on iOS + Android.
+[ ] Wireshark capture confirms double encryption.
+[ ] SFU logs show no plaintext media.
+[ ] Tampered public key → call fails safely.
+[ ] SAS displays and matches across both devices.
+
+═══════════════════════════════════════════════════════════════
+GAP 3 — LOGOUT: CLEAR PUSH TOKEN
+═══════════════════════════════════════════════════════════════
+
+CURRENT STATE: Push token stays registered until next login
+overwrites it. Low risk but residual.
+
+REQUIRED:
+
+a) On logout (client):
+  • Call POST /api/push-token with body { pushToken: null }
+  • Then revoke the FCM/APNs token locally via
+    Notifications.unregisterForNotificationsAsync()
+  • Clear any stored token in SecureStore.
+
+b) Server endpoint:
+  • Accept { pushToken: null } → set
+    users.push_token = NULL, users.push_platform = NULL
+  • Insert audit_log row: event = 'push_token_cleared'
+
+c) Defensive cleanup on account deletion:
+  • Same clearing happens, plus push_token row is also
+    hard-deleted (not just nulled) in the device_tokens
+    table if you maintain one.
+
+ACCEPTANCE TESTS:
+[ ] After logout, users.push_token IS NULL in DB.
+[ ] Sending a test push to that user returns "no token".
+[ ] Re-login overwrites with fresh token cleanly.
+
+═══════════════════════════════════════════════════════════════
+GAP 4 — VIRTUAL NUMBERS: SMS, RECYCLING, PORTING
+═══════════════════════════════════════════════════════════════
+
+a) OUTBOUND SMS — DEVICE VERIFY
+  • Provision a real Twilio number (toll-free or 10DLC
+    depending on region; comply with A2P 10DLC
+    registration in the US).
+  • Send a real SMS from app → external phone. Confirm
+    delivery receipt from Twilio.
+  • Confirm sender ID shows the virtual number, NOT the
+    user's real number.
+  • Test inbound reply → routes back into app correctly.
+
+  ACCEPTANCE:
+  [ ] Real SMS delivered to external device.
+  [ ] Twilio status callback recorded in DB.
+  [ ] Reply arrives in-app within 5 seconds.
+
+b) RECYCLING POLICY — DECIDE AND IMPLEMENT
+  • Confirm intent: should VNs auto-rotate (every N days),
+    or only release on account deletion?
+  • If auto-rotate is desired:
+      - Add virtual_numbers.rotation_policy ENUM
+        ('manual', '30d', '90d', 'never')
+      - Cron job (daily) releases expired numbers via
+        Twilio API, provisions replacement, notifies user
+        with old → new mapping.
+      - Grace period: 7 days where old number forwards to
+        new before full release.
+  • If manual only:
+      - Add explicit "Rotate my number" button in
+        settings.
+      - Same provision/release flow on demand.
+
+  ACCEPTANCE:
+  [ ] Decision documented in code comments + SECURITY.md.
+  [ ] Rotation (auto or manual) tested end-to-end with
+      Twilio API.
+  [ ] User notified of new number; old number released
+      cleanly.
+
+c) PORTING — IMPLEMENT OR EXPLICITLY DEFER
+  • Twilio supports port-in and port-out via Hosted SMS
+    and Number Porting APIs.
+  • Port-in flow (user brings existing number into app):
+      - Collect LOA (Letter of Authorization)
+      - Submit port request via Twilio Porting API
+      - Track status: pending → approved → completed
+      - UI: settings → "Port my existing number"
+  • Port-out flow (user takes number elsewhere):
+      - Provide account number + PIN to releasing carrier
+      - UI: settings → "Release this number to another
+        carrier" with warning that the number will leave
+        the app permanently
+  • If deferring: explicitly document in SECURITY.md and
+    remove any mention of porting from marketing copy.
+
+  ACCEPTANCE:
+  [ ] Either: port-in + port-out work end-to-end with
+      Twilio sandbox, OR
+  [ ] Feature explicitly marked "not supported" with no
+      UI hint suggesting otherwise.
+
+═══════════════════════════════════════════════════════════════
+GAP 5 — STORAGE & TRANSPORT CLAIMS: RECONCILE THE TABLE
+═══════════════════════════════════════════════════════════════
+
+Update the public security claims table to match reality.
+Anything still ❌ blocks launch.
+
+After fixes above, table should read:
+
+ Chat content          ✅ Ciphertext only
+ Status content        ✅ Ciphertext only
+ Locker contents       ✅ Ciphertext in DB + GCS
+                          (post GAP 1 implementation)
+ Audio call media      ✅ SRTP+DTLS + AES-GCM frame E2EE
+                          (device-verified, post GAP 2)
+ Video call media      ✅ Same as audio
+ Push tokens cleared   ✅ On logout + deletion (post GAP 3)
+ Outbound SMS          ✅ Verified on Twilio real number
+                          (post GAP 4a)
+ VN recycling          ✅ Policy implemented + documented
+                          (post GAP 4b)
+ Porting               ✅ Implemented OR ❌ explicitly
+                          unsupported (post GAP 4c)
+
+═══════════════════════════════════════════════════════════════
+GAP 6 — MIGRATION FOR EXISTING USERS
+═══════════════════════════════════════════════════════════════
+
+Existing locker data is plaintext. Cannot ship the new
+schema without a migration path.
+
+a) On first launch post-update:
+  • Prompt user to set/confirm locker PIN.
+  • Derive locker_master_key.
+  • Encrypt every existing item client-side.
+  • Upload ciphertext, delete plaintext row server-side
+    in same transaction.
+  • Re-upload media as ciphertext, delete old plain blob
+    from GCS.
+
+b) Server enforces:
+  • New /api/locker/items endpoint refuses plaintext
+    payloads (validates presence of ciphertext + iv +
+    auth_tag columns).
+  • Old endpoint deprecated, returns 410 Gone after
+    grace window.
+
+c) Audit log every migration with userId, item count,
+  completion timestamp.
+
+ACCEPTANCE:
+[ ] Test account with pre-existing plaintext items
+   migrates cleanly on update.
+[ ] Post-migration: no plaintext anywhere in DB or GCS
+   for that user.
+[ ] Migration is resumable if interrupted (idempotent).
+
+═══════════════════════════════════════════════════════════════
+GAP 7 — FINAL VERIFICATION GATE
+═══════════════════════════════════════════════════════════════
+
+Do not mark project complete until ALL of these are signed
+off in writing by the implementing engineer + one reviewer:
+
+[ ] GAP 1 acceptance tests all pass on EAS build
+[ ] GAP 2 acceptance tests all pass on EAS build
+[ ] GAP 3 acceptance tests all pass
+[ ] GAP 4a, 4b, 4c each pass or explicitly deferred with
+   user-facing copy updated
+[ ] GAP 5 claims table matches implementation reality
+[ ] GAP 6 migration tested on staging copy of production
+   data (anonymized)
+[ ] SECURITY.md updated: threat model, key locations, what
+   server can/cannot see, recovery policy, rotation
+   policy, porting status
+[ ] Third-party security review scheduled before public
+   launch (budget allocated)
+[ ] All marketing copy claiming "end-to-end encrypted"
+   reviewed against implementation — remove or qualify
+   any claim that is not literally true
+
+═══════════════════════════════════════════════════════════════
+HARD RULES (NON-NEGOTIABLE)
+═══════════════════════════════════════════════════════════════
+
+✗ No private key ever leaves the user's device.
+✗ No plaintext ever lands in the database for content
+ that is claimed to be E2EE.
+✗ No "admin decrypt" / "support decrypt" endpoints.
+✗ No analytics SDKs capturing payloads on E2EE screens.
+✗ No iCloud / Google Drive backup of Keychain entries
+ holding private keys (kSecAttrSynchronizable = false).
+✗ No deprecated crypto (MD5, SHA-1, RC4, DES, ECB, PKCS#1v1.5).
+✗ No marketing claim of E2EE that the code does not back up.
+
+This is the bar. Ship below it and the security promise is
+a lie.
+└─────────────────────────────────────────────────────────────┘

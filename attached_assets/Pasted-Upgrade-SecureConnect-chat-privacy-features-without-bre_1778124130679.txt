@@ -1,0 +1,230 @@
+Upgrade SecureConnect chat + privacy features without breaking the current app.
+
+Goal: Add a modern Signal/iMessage-style chat long-press menu, real message actions, privacy controls, read receipts, typing indicators, disappearing messages, and notification privacy.
+
+IMPORTANT:
+- Do not remove or rewrite existing working auth, chat, encryption, database, navigation, UI theme, or push notification code.
+- Keep the app stable on iOS.
+- Use the existing SecureConnect design language: modern rounded cards, soft blur/glass style, clean typography, smooth animations.
+- All new features must work with the current chat structure and encryption system.
+- Add proper error handling, loading states, permission checks, and fallback behavior.
+- No fake UI. Every button must perform the real action.
+
+CHAT LONG-PRESS MESSAGE MENU:
+When a user holds/long-presses any message bubble, show a modern floating action menu above/beside the message with these options:
+
+1. Reply
+2. Forward
+3. Copy
+4. Select
+5. Pin
+6. Info
+7. Delete
+
+The menu must:
+- Match the screenshot style: rounded white/blur card, modern icons, smooth scale/fade animation.
+- Work for both sent and received messages.
+- Dismiss when tapping outside.
+- Support dark mode if the app has it.
+- Use haptic feedback on long press.
+
+REPLY FEATURE:
+- When Reply is tapped, show a modern reply preview bar above the message input.
+- Display the original sender name and a short preview of the replied message.
+- Include an X button to cancel reply.
+- When the reply is sent, attach reply metadata to the encrypted message.
+- In the chat bubble, show a compact quoted reply preview.
+- Tapping the quoted preview should scroll/highlight the original message if still available.
+
+FORWARD FEATURE:
+- When Forward is tapped, open a contact/chat picker.
+- Allow selecting one or multiple chats/users.
+- Forward the selected encrypted message safely.
+- Do not expose plaintext to the server.
+- Forwarded messages should show a small “Forwarded” label.
+- Preserve media/message type where supported.
+- Show success/failure feedback.
+
+COPY FEATURE:
+- Copy decrypted message text to clipboard only on the user’s device.
+- If the message is media-only, show “Nothing to copy” or copy caption if available.
+- Show a small toast: “Message copied”.
+
+SELECT FEATURE:
+- Enter multi-select mode.
+- Show check circles beside messages.
+- Allow selecting multiple messages.
+- Add a bottom action bar with delete, forward, and cancel.
+- Keep the UI smooth and modern.
+- Do not break normal chat scrolling.
+
+PIN FEATURE:
+- Pin selected message in the current chat.
+- Display pinned message preview at the top of the chat.
+- Allow tapping pinned preview to jump to message.
+- Allow unpinning.
+- Store pin state securely in chat metadata.
+- Sync pin state between participants where appropriate.
+
+MESSAGE INFO FEATURE:
+- Open a message info screen/bottom sheet.
+- Show real encrypted message details:
+  - Sent time
+  - Delivered time if available
+  - Read time if read receipts are enabled
+  - Message ID
+  - Sender
+  - Recipient/chat
+  - Encryption status: “End-to-end encrypted”
+  - Encryption/session info available in the app, without exposing private keys
+- Never show secret keys, private keys, raw decrypted payloads, or sensitive crypto material.
+- If info is unavailable, show a clear fallback like “Not available yet”.
+
+DELETE FEATURE:
+When Delete is tapped, show a modern confirmation sheet with two options:
+
+1. Delete for me
+2. Delete for me and the other user
+
+Rules:
+- “Delete for me” removes/hides the message only locally for the current user.
+- “Delete for me and the other user” sends a secure deletion event to the other participant and replaces the message with “This message was deleted”.
+- Only allow delete-for-everyone within a sensible allowed time window if the backend/app requires it.
+- Handle offline state by queueing deletion events.
+- Add confirmation text so users understand the action.
+- Make delete icon/text red.
+
+READ RECEIPTS:
+Add a real Read Receipts toggle in Settings > Privacy.
+
+When ON:
+- Send and display read receipts.
+- Show read status/timestamps for messages.
+- Message Info should include read time.
+
+When OFF:
+- Do not send read receipts.
+- Do not show other users’ read receipts to this user.
+- Respect privacy both ways.
+- Persist this setting per user in the database.
+- Sync setting across devices if the app supports multi-device.
+
+TYPING INDICATORS:
+Add a real Typing Indicators toggle in Settings > Privacy.
+
+When ON:
+- When a user is typing, send real-time typing status to the other user.
+- Inside the chat, show a modern “typing…” indicator where messages appear.
+- Outside the chat, in the chat list, show “typing…” under the user’s name in real time.
+- Stop typing indicator after a short timeout or when message is sent.
+- Debounce typing events so it doesn’t spam the server.
+
+When OFF:
+- Do not send typing events.
+- Do not display typing events from others.
+- Persist the setting per user.
+
+DISAPPEARING MESSAGES:
+Add real disappearing messages settings.
+
+In each chat:
+- Add a disappearing messages option in chat settings/info.
+- Options:
+  - Never
+  - 5 minutes
+  - 8 hours
+  - 12 hours
+  - 18 hours
+  - 24 hours
+
+Behavior:
+- When enabled, new messages in that chat expire after the selected time.
+- Show a small system message when disappearing messages are changed.
+- Show a timer/expiry indicator on messages where appropriate.
+- Expire messages locally and sync deletion/expiry securely.
+- Do not apply retroactively unless the user explicitly chooses that behavior.
+- Default should be Never.
+
+Settings > Privacy:
+- Add a Disappearing Messages row showing current default, like “Off” or selected duration.
+- Tapping it opens the same timer options.
+- This default applies to new chats started by the user.
+
+NOTIFICATION PRIVACY:
+Add a setting in Settings > Privacy:
+
+“Show Message Preview in Notifications” with ON/OFF toggle.
+
+When ON:
+- Notifications behave normally, but still follow the app’s encrypted notification design.
+
+When OFF:
+- Notification must not show the message text.
+- Notification should only show the sender/chat name and a generic line such as:
+  “New encrypted message”
+- Do not expose message content in notification previews, logs, or notification payload where possible.
+- Persist setting per user.
+- Make sure iOS push notification behavior follows this privacy setting.
+
+DATABASE / BACKEND REQUIREMENTS:
+Add or update schema safely for:
+- user privacy settings:
+  - readReceiptsEnabled
+  - typingIndicatorsEnabled
+  - showNotificationPreview
+  - defaultDisappearingMessageTimer
+- per-chat settings:
+  - disappearingMessageTimer
+  - pinnedMessageId or pinnedMessages
+- message metadata:
+  - replyToMessageId
+  - forwarded
+  - deliveredAt
+  - readAt
+  - deletedForUserIds
+  - deletedForEveryone
+  - expiresAt
+  - encryptionStatus/session reference where safe
+- typing presence events
+
+SECURITY REQUIREMENTS:
+- Do not store plaintext messages on the server.
+- Do not log decrypted messages.
+- Do not expose encryption keys.
+- All message actions must preserve end-to-end encryption.
+- Message info must only show safe metadata.
+- Notification previews must respect privacy settings.
+- Make sure delete, forward, reply, and disappearing message events are authenticated and cannot be spoofed.
+
+UI REQUIREMENTS:
+- Match the screenshots’ clean privacy settings style:
+  - Rounded white cards
+  - Large bold labels
+  - Smooth toggles
+  - Clear helper text
+  - Modern spacing
+- Add icons for all long-press menu actions.
+- Add smooth animations.
+- Add toasts for completed actions.
+- Make everything responsive on iPhone sizes.
+- Keep accessibility labels for all buttons.
+
+TESTING:
+After implementation, test:
+- Long press menu appears on every message type.
+- Reply sends and displays correctly.
+- Forward sends to another chat.
+- Copy copies only local decrypted text.
+- Select mode works with multiple messages.
+- Pin/unpin works.
+- Info shows safe real metadata.
+- Delete for me works.
+- Delete for everyone works and syncs.
+- Read receipts ON/OFF works.
+- Typing indicators ON/OFF works inside chat and chat list.
+- Disappearing messages expire correctly for each timer.
+- Notification preview ON/OFF works.
+- App does not crash on reload, logout/login, or offline mode.
+- Existing chats and old messages still load correctly.
+
+Return a clear summary of files changed and any database migration steps needed.

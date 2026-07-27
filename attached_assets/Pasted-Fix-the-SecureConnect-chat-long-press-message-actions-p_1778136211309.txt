@@ -1,0 +1,91 @@
+Fix the SecureConnect chat long-press message actions properly.
+
+Current issue:
+The long-press/hold message UI is buggy. It shows reaction emojis, browser-style copy/select behavior, and does not match the requested modern encrypted messenger action menu.
+
+DO NOT rebuild the whole app. Keep the current design and only fix the chat message hold interaction.
+
+Required behavior:
+When a user presses and holds any chat message bubble, disable native browser text selection/copy popup and show a custom SecureConnect action sheet.
+
+The action sheet must include:
+- Reply
+- Forward
+- Copy
+- Select
+- Pin
+- Message Info
+- Delete
+
+Design requirements:
+- Modern rounded bottom sheet style
+- Smooth fade/slide animation
+- Blurred dark overlay behind it
+- Match SecureConnect blue/white theme
+- Each option has a clean icon and label
+- Must work on mobile Safari/iPhone and desktop
+- No emoji reaction bar unless I specifically enable reactions later
+
+Function requirements:
+1. Reply
+   - Opens a reply preview above the message input
+   - Shows the selected message text
+   - Sending a message attaches the reply reference
+
+2. Forward
+   - Opens real forward screen/contact picker
+   - Allows choosing one or more chats
+   - Sends the selected message as forwarded
+
+3. Copy
+   - Copies only the message text to clipboard
+   - Shows small toast: “Message copied”
+
+4. Select
+   - Enables multi-select mode
+   - Adds check circles beside messages
+   - Shows top/bottom toolbar for selected messages
+
+5. Pin
+   - Pins the selected message in the chat
+   - Shows pinned message banner at top
+   - Clicking banner scrolls to the pinned message
+
+6. Message Info
+   - Opens real encrypted message info screen
+   - Show:
+     - Message ID
+     - Sender
+     - Receiver
+     - Sent time
+     - Delivered/read status
+     - Encryption status: End-to-end encrypted
+     - Cipher/session reference if available
+   - Do not fake info. Use real stored metadata.
+
+7. Delete
+   - Open delete confirmation sheet with 2 options:
+     - Delete for me
+     - Delete for everyone
+   - Delete for me removes only locally/current user view
+   - Delete for everyone removes for both users if allowed
+   - Show correct system message/placeholder after deletion
+
+Important fixes:
+- Completely prevent native text selection on message bubbles during long press.
+- Use CSS: user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+- Use pointer/touch handlers with long-press timer.
+- Cancel long press if user scrolls or moves finger.
+- Do not trigger copy/select automatically.
+- Do not show browser menu.
+- Do not show reaction emojis by default.
+- Make the action sheet close when tapping outside or swiping down.
+- Test on iPhone Safari/Replit mobile preview.
+
+Deliverables:
+- Fix the chat message component
+- Fix the long-press handler
+- Add the custom action sheet
+- Wire every option to real working functions
+- Remove/disable the current buggy emoji reaction popup
+- Keep everything else in the app unchanged

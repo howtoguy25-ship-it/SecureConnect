@@ -1,0 +1,111 @@
+Fix the Delete Account button, Sign Out button, and VIP Locker back/return button so all three are fully real, clickable, connected to the correct logic/API/navigation, and working end-to-end on web + mobile.
+
+CURRENT PROBLEMS
+- Delete Account button does not click or does nothing
+- Sign Out button does not click or does nothing
+- VIP Locker back/return button is missing or not working
+- I need all of them to actually perform their real job
+
+TASKS
+
+1. FIND THE ROOT CAUSE OF BUTTON FAILURE
+Inspect and fix all possible causes:
+- missing onPress / onClick handlers
+- Pressable/Touchable not wired correctly
+- overlay, modal, absolute view, z-index, pointerEvents, or layout blocking taps
+- disabled state stuck true
+- navigation function missing or broken
+- runtime error stopping handler execution
+- silent API failure with no visible error
+- wrong route names or navigation stack issues
+
+2. FIX SIGN OUT BUTTON FULLY
+Make Sign Out do the complete real flow:
+- button tap must register correctly
+- call the real logout/signOut auth function
+- notify backend/API if a logout/session endpoint exists
+- clear auth tokens
+- clear secure storage / async storage / local storage / cached session data
+- reset user state, auth state, profile state, and app session state
+- clear query cache if used
+- disconnect sockets, listeners, subscriptions, or realtime services if active
+- navigate user back to login / onboarding / welcome / auth screen
+- block access to protected screens after logout
+- add loading state while processing
+- disable repeated taps while request is running
+- show success or error message
+
+3. FIX DELETE ACCOUNT BUTTON FULLY
+Make Delete Account do the complete real destructive flow:
+- button tap must register correctly
+- open a confirmation modal first
+- require a final confirmation before deletion
+- clearly warn that deletion is permanent
+- on confirm, call the real delete account API/backend/auth flow
+- delete the account record and required user data according to current app architecture
+- handle auth provider deletion if needed
+- after success:
+  - sign user out
+  - clear all local session/auth data
+  - clear secure storage / async storage / local storage / cached data
+  - reset app state completely
+  - navigate to login / onboarding / welcome / auth screen
+- if deletion fails, show a real error and leave app in stable state
+- add loading state and prevent double taps
+
+4. ADD/FIX VIP LOCKER BACK / RETURN BUTTON
+Make the VIP Locker have a real back/return button and ensure it works every time:
+- add a visible back button in the VIP Locker header/screen if missing
+- wire it to the real navigation stack
+- if there is a previous screen, goBack()
+- if goBack is unavailable, safely navigate to the correct fallback screen (for example Settings, Profile, or the Locker entry screen depending on current app flow)
+- ensure it works on web + mobile
+- ensure no overlay blocks it
+- ensure correct hit area and touch feedback
+- preserve unsaved state rules if needed
+- do not let user get trapped inside VIP Locker
+
+5. API / BACKEND / AUTH WIRING
+- Verify Sign Out is connected to correct auth/session service
+- Verify Delete Account is connected to correct delete endpoint/service
+- Create missing routes/endpoints if they do not exist
+- Ensure frontend requests match backend route, method, headers, and expected response
+- Add proper error logging for debugging
+- remove fake placeholder logic
+
+6. NAVIGATION + STATE
+- After Sign Out: user must land on auth screen and protected screens must be inaccessible
+- After Delete Account: user must land on auth screen and previous account session must be fully gone
+- VIP Locker back button must return correctly without crashing or dead-ending
+- Reset all relevant context/store/redux/zustand/global state
+- prevent stale storage from auto-logging user back in
+
+7. UX / RELIABILITY
+- add visible loading state for destructive/auth actions
+- add success/error alerts or toast messages
+- keep current design style
+- ensure all 3 buttons work on iOS, Android, and web
+- fix touchable area issues so taps always register
+
+8. VERIFY END-TO-END
+Test and confirm all of these:
+- Sign Out button responds to tap
+- Sign Out actually logs user out
+- Delete Account button responds to tap
+- Delete Account opens confirmation modal
+- Delete Account actually deletes the account and clears session
+- VIP Locker back/return button is visible
+- VIP Locker back/return button actually navigates correctly
+- No blocked tap areas
+- No silent failures
+- No runtime errors
+- No fake placeholder actions left
+
+IMPORTANT
+- Do not only make the UI appear clickable
+- Make all three actions truly functional end-to-end
+- If touch events are blocked, fix layout/pointerEvents/z-index
+- If navigation is broken, repair routes and handlers
+- If auth state reset is broken, fix it fully
+- If API wiring is missing, create it
+- Keep fixing until Delete Account, Sign Out, and VIP Locker back/return all work in real usage

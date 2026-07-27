@@ -1,0 +1,131 @@
+PERMANENT PROJECT REQUIREMENTS — DO NOT REGRESS
+
+You are working on an iOS React Native / Expo app. The following 
+requirements are non-negotiable and must be preserved across every 
+change, refactor, or feature addition. Before completing any task, 
+verify each item below still holds. If a change would break any of 
+these, STOP and flag it explicitly before proceeding.
+
+────────────────────────────────────────────────────────────────────
+1. ATT + UMP + Ad Init Ordering — CRITICAL
+────────────────────────────────────────────────────────────────────
+
+The correct startup order for ads on iOS is:
+
+  ATT  →  UMP (gatherConsent)  →  mobileAds().initialize()  →  ads
+
+ATT MUST run FIRST so that UMP reads the resolved IDFA state when
+making consent decisions. Running UMP before ATT causes UMP to gather
+consent against an unresolved IDFA, then ATT changes the state 
+underneath it, producing mismatched signals and degraded ad 
+personalization. This also matches Google's current AdMob sample 
+code.
+
+Required ordering in client/MainApp.tsx (enforce strictly, 
+top-to-bottom, each step awaited to completion before the next):
+
+  1. ATT prompt              — requestTrackingPermissionsAsync()
+                               awaited to completion
+  2. gatherConsent()         — UMP / GDPR consent gathered after ATT
+                               has resolved the IDFA state
+  3. mobileAds().initialize()— only after both ATT and UMP resolve
+  4. <AdBanner /> mounts     — only after initialize resolves
+
+Safety invariant (must always hold):
+  Nothing ad-related fires before ATT has resolved. No ad component, 
+  no mobileAds() call, no tracking/analytics SDK init may execute 
+  upstream of the ATT await.
+
+Rules:
+- Do NOT reorder to UMP → ATT → init. UMP must see the post-ATT
+  IDFA state.
+- Do NOT fire ATT, UMP, and init in parallel — each must be awaited
+  in sequence.
+- Do NOT move ATT, UMP, or init into a child component, useEffect
+  without ordering guarantees, or any code path that can race with
+  ad mounting.
+- If you add a new ad surface, analytics SDK, or tracking library,
+  it must be gated behind the same post-ATT, post-UMP, post-init
+  barrier.
+- If the doc (replit.md or similar) and code ever disagree on this
+  ordering, the CODE order above (ATT → UMP → init) is the source 
+  of truth — update the doc to match, not the other way around.
+
+Verification checklist before shipping:
+[ ] client/MainApp.tsx shows the four steps in the exact order above
+[ ] Each step is awaited; none run in parallel
+[ ] No mobileAds(), no ad component, and no tracking SDK appears
+    anywhere upstream of the ATT await
+[ ] Cold-start on a fresh iOS install shows the ATT dialog FIRST,
+    then the UMP consent form (if applicable), then ads load
+[ ] replit.md (or whichever doc describes this flow) reflects
+    ATT → UMP → init, not the reverse
+
+────────────────────────────────────────────────────────────────────
+2. Authentication — Phone + OTP ONLY
+────────────────────────────────────────────────────────────────────
+
+This app uses phone + OTP as the SOLE authentication method. There
+is no Sign in with Apple, no Google Sign-In, no Facebook, no email/
+password, and none of these should be added.
+
+Because no third-party social login exists, Apple's "Sign in with
+Apple required" rule (App Store Review Guideline 4.8) does NOT apply
+to this app. Do not add Sign in with Apple "just in case" — adding
+any social provider would then trigger that requirement.
+
+Rules:
+- Do NOT add Sign in with Apple, Google Sign-In, Facebook Login, or
+  any other third-party social authentication.
+- Do NOT add email/password auth as an alternative.
+- Phone + OTP via WelcomeScreen.tsx is the only sign-in path.
+
+────────────────────────────────────────────────────────────────────
+3. Reviewer Bypass — PROTECTED, DO NOT REMOVE OR "CLEAN UP"
+────────────────────────────────────────────────────────────────────
+
+The phone-OTP flow contains a deliberate bypass for the Apple App
+Review team. This is NOT dev cruft. It is the mechanism by which
+Apple reviewers gain access to the app's VIP/paid features during
+review without needing a real phone number. Removing it will cause
+review rejection because reviewers cannot complete sign-in.
+
+Protected bypasses in routes.ts:
+- Phone number 555-1234567 (routes.ts:344–357) — bypasses OTP and
+  grants free VIP access. This is the Apple reviewer account. It
+  must always log in successfully, must always be granted VIP/
+  premium entitlements, and must never be rate-limited, geo-
+  restricted, or gated behind payment.
+- Dev phone shortcut (routes.ts:340–342) — internal development
+  convenience, also preserve.
+
+Rules:
+- Do NOT remove, "tighten," or refactor away the 555-1234567 bypass
+  under any circumstance — including security audits, lint sweeps,
+  or "removing test code before production."
+- Do NOT log, alert, or telemetry-flag this number's logins in a way
+  that could disable the account or trip fraud heuristics.
+- Do NOT change the VIP entitlement that this account receives —
+  Apple reviewers need to see the full paid experience.
+- If you touch routes.ts around lines 340–357, leave both bypasses
+  intact and re-verify they still work after your change.
+- If a reviewer-bypass refactor is genuinely needed (e.g., moving to
+  a different test number on Apple's request), surface it explicitly
+  and confirm with the user before changing anything.
+
+Required inline comment in routes.ts next to the bypass:
+
+  // DO NOT REMOVE — Apple App Review reviewer account.
+  // 555-1234567 bypasses OTP and grants VIP access so reviewers
+  // can evaluate paid features. Removing this will cause App
+  // Store rejection.
+
+────────────────────────────────────────────────────────────────────
+ENFORCEMENT
+────────────────────────────────────────────────────────────────────
+
+At the start of every task on this codebase, re-read this prompt.
+If the user's request would violate any item above, surface the
+conflict immediately rather than silently working around it. If any
+item above is currently broken in the codebase, state that clearly
+in your first response so it stays visible.

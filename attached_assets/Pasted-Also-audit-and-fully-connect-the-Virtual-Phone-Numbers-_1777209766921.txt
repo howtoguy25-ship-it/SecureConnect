@@ -1,0 +1,55 @@
+Also audit and fully connect the Virtual Phone Numbers feature.
+
+Goal:
+Users can use virtual phone numbers to chat, but all messages must still be protected with x2 encryption.
+
+Do this in order:
+
+1. Find all virtual phone number files, screens, backend routes, database tables, and message flows.
+
+2. Confirm how virtual numbers are assigned:
+- Each user must own only their assigned virtual number.
+- Users cannot access another user’s virtual number.
+- Virtual numbers must be verified in backend, not only frontend.
+
+3. Confirm virtual-number chat uses encryption before sending:
+- Message plaintext must never be stored in the database.
+- Encrypt message once with normal chat encryption.
+- Then apply a second encryption layer for virtual-number transport.
+- Only decrypt after receiving on the correct user’s device.
+
+4. Add a security test/log check:
+- Send a test message through a virtual number.
+- Confirm database/server only sees ciphertext, not readable message text.
+- Confirm receiver can decrypt and read it correctly.
+
+5. Protect metadata:
+- Do not expose real user phone number.
+- Do not expose real user ID to the other user.
+- Only show virtual number/display name.
+
+6. Add backend permission checks:
+- Sender must own the virtual number used.
+- Receiver must be valid.
+- Block spoofing another virtual number.
+- Block users from querying virtual numbers they do not own.
+
+7. Add UI checks:
+- Show which virtual number is being used before sending.
+- Add warning: “Messages sent through virtual numbers are protected with double encryption.”
+- Add clear error if virtual number is not active.
+
+8. Run full tests:
+- Virtual number assigned correctly.
+- Message sends successfully.
+- Message receives successfully.
+- Database contains encrypted ciphertext only.
+- Wrong user cannot access another virtual number.
+- Normal chat still works.
+- No compile/runtime errors.
+
+At the end, report:
+- Which files were changed
+- Whether virtual-number chat is fully encrypted
+- Whether plaintext is ever stored
+- Any remaining warnings

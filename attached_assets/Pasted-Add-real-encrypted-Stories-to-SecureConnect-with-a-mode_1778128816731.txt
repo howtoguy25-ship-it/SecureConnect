@@ -1,0 +1,112 @@
+Add real encrypted Stories to SecureConnect with a modern privacy settings screen.
+
+Do not break existing chats, auth, encryption, contacts, notifications, or settings.
+
+STORIES FEATURE:
+- Add a Stories section/page.
+- Users can post text, image, or video stories.
+- Stories automatically disappear after 24 hours.
+- Stories must be end-to-end encrypted where possible.
+- Never store plaintext story content on the server.
+- Add smooth modern UI matching SecureConnect: rounded cards, soft grey background, bold typography, clean spacing, glass/blur style.
+
+STORY PRIVACY:
+Add “My Story” settings where users can choose who can view their stories.
+
+Viewer options:
+1. Everyone
+2. My Contacts
+3. Contacts Except…
+4. Only Share With…
+
+Requirements:
+- “Contacts Except…” opens contact picker and blocks selected people from seeing stories.
+- “Only Share With…” opens contact picker and allows only selected people.
+- Save privacy settings per user.
+- Apply privacy rules before showing stories in the stories feed.
+- If someone is not allowed, the story must not appear for them.
+
+VIEW RECEIPTS:
+Add “View Receipts” toggle in Stories settings.
+
+When ON:
+- User can see who viewed their story.
+- Other users can see when this user views their story.
+- Story owner can open viewer list showing:
+  - viewer name
+  - avatar
+  - viewed time
+
+When OFF:
+- User cannot see who viewed their own stories.
+- User does not send story view receipts to others.
+- Hide viewer list and show: “View receipts are off.”
+- Persist this setting per user.
+
+Add helper text under the button:
+“See and share when stories are viewed. If disabled, you won’t see when others view your stories.”
+
+STORIES SETTINGS SCREEN:
+Create a screen matching the screenshot style:
+
+Title: Stories
+
+Card 1:
+- “My Story”
+- Subtitle: “Choose who can view your story”
+- Opens story privacy options
+
+Helper text:
+“Story updates automatically disappear after 24 hours. Choose who can view your story or create new stories with specific viewers or groups.”
+
+Card 2:
+- “View Receipts”
+- Toggle ON/OFF
+- Helper text under it:
+“See and share when stories are viewed. If disabled, you won’t see when others view your stories.”
+
+Card 3:
+- Red button: “Turn Off Stories”
+- Helper text:
+“If you opt out of stories you will no longer be able to share or view stories.”
+
+TURN OFF STORIES:
+- Add real Turn Off Stories button.
+- Confirm before disabling.
+- When disabled:
+  - User cannot post stories.
+  - User cannot view stories.
+  - User disappears from stories feed.
+- Allow user to turn stories back on later from settings.
+
+STORY VIEWER LIST:
+- Add viewer list for each story.
+- Only available if View Receipts is ON.
+- Show real viewers, not fake data.
+- Update in real time or near real time.
+- Respect privacy settings.
+
+SECURITY:
+- Do not leak story media URLs publicly.
+- Use authenticated access checks.
+- Do not show stories to blocked users.
+- Do not show stories from blocked users.
+- Do not log plaintext story text/media captions.
+- Expired stories must be removed from feed, previews, and viewer lists.
+
+TESTING:
+Test:
+- Posting story works.
+- Story disappears after 24 hours.
+- Everyone privacy works.
+- My Contacts privacy works.
+- Contacts Except works.
+- Only Share With works.
+- View Receipts ON shows real viewers.
+- View Receipts OFF hides/suppresses views both ways.
+- Turn Off Stories disables posting and viewing.
+- Blocked users cannot view stories.
+- App reload keeps settings saved.
+- No old chat features break.
+
+Return summary of changed files, database changes, and any migration steps.

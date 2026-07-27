@@ -1,0 +1,88 @@
+What I need you to verify — go through each section and report findings:**
+
+---
+
+**1. VIP In-App Purchase — does it actually deliver what it promises?**
+
+- Find every place in the codebase where VIP status is checked (search for terms like `isVIP`, `vip`, `premium`, `subscription`, `entitlement`)
+- List every feature that is supposed to be gated behind VIP
+- For each gated feature, trace the code path and confirm:
+  - The VIP check actually runs before the feature is unlocked
+  - The check reads from a reliable source (server-validated receipt, not just a local flag that can be spoofed)
+  - There's no path where a non-VIP user can access the feature
+- Confirm the purchase flow:
+  - Product ID matches what's configured in App Store Connect
+  - Purchase completes successfully on success
+  - Receipt is validated (ideally server-side)
+  - VIP status persists across app restarts and reinstalls (via `restorePurchases`)
+  - Subscription expiration / renewal is handled correctly
+- Flag any feature that's advertised as VIP but isn't actually gated, or any gate that can be bypassed
+
+---
+
+**2. Ad Removal In-App Purchase — does buying it actually remove ads?**
+
+- Find the Ad Removal purchase flow and the flag it sets (e.g., `adsRemoved`, `noAds`)
+- Find every AdMob ad call in the app (banner, interstitial, rewarded, app open)
+- For each ad call, confirm there's a check that suppresses the ad if Ad Removal is purchased OR if the user is VIP (assuming VIP includes ad-free — confirm this is the intended behavior)
+- Confirm the flag persists across restarts and reinstalls
+- Confirm `restorePurchases` correctly restores Ad Removal
+- Flag any ad placement that fires regardless of purchase state
+
+---
+
+**3. All In-App Purchases — are they wired up correctly?**
+
+- List every IAP product ID referenced in the code
+- Confirm each one matches an actual product in App Store Connect (flag mismatches)
+- Confirm the IAP library being used (e.g., `react-native-iap`, `expo-in-app-purchases`) is initialized correctly on app launch
+- Confirm error handling: what happens on failed purchase, cancelled purchase, network failure, deferred purchase (Ask to Buy)?
+- Confirm sandbox testing works: any hardcoded conditions that would break in sandbox vs. production?
+- Confirm receipts are validated — ideally server-side, not just trusting the client
+- Confirm purchase restoration works (required by Apple for non-consumables and subscriptions)
+
+---
+
+**4. AdMob Ads — are they actually loading and displaying?**
+
+- Confirm the iOS App ID in `app.config.js` matches the AdMob console for the current bundle ID
+- Confirm every ad unit ID in the code is a real, active ad unit (not a leftover test ID in production, and not a real ID in dev)
+- Confirm AdMob SDK is initialized before any ad request
+- Confirm `SKAdNetwork` identifiers are present in Info.plist
+- Confirm ATT (App Tracking Transparency) prompt is implemented if required and is shown before personalized ad requests
+- Confirm ads aren't blocked by missing consent (GDPR / UMP) on EU users
+- Flag any ad call that could fail silently with no fallback
+
+---
+
+**5. Sign in with Apple — does it actually sign users in?**
+
+- Confirm Sign in with Apple capability is enabled in the entitlements file
+- Confirm the bundle ID and Services ID are correctly configured in the Apple Developer Portal for the new bundle ID
+- Trace the sign-in flow:
+  - User taps "Sign in with Apple"
+  - Apple returns an identity token + authorization code + user identifier
+  - The token is sent to my backend (if applicable) for verification
+  - A session is created and persisted
+  - The user lands in the authenticated state
+- Confirm the identity token signature is verified (not just trusted blindly)
+- Confirm the user identifier (`sub` claim) is stored as the stable account key — NOT the email, since Apple can return a private relay email or no email on subsequent sign-ins
+- Confirm the flow handles:
+  - First-time sign-in (Apple sends name + email once, only on first auth)
+  - Returning user sign-in (Apple sends only the user identifier — name/email are NOT re-sent)
+  - Sign-in revocation (user removing the app from Apple ID settings)
+- Flag any place where the code relies on email being present every time — that's a known bug
+
+---
+
+**Output format:**
+
+For each of the 5 sections, give me:
+- ✅ What's working correctly (with file paths + line references)
+- ⚠️ What's risky or fragile (with file paths + explanation)
+- ❌ What's broken or missing (with file paths + what to fix)
+- A short prioritized fix list at the very end, ranked by severity (revenue-impacting first, then auth, then ads, then polish)
+
+Don't be vague. If you can't verify something from the code alone (e.g., backend receipt validation, App Store Connect product configuration, AdMob console state), say so explicitly and tell me exactly what I need to check manually outside the codebase.
+
+Start by listing the files you're going to inspect, then go through them.

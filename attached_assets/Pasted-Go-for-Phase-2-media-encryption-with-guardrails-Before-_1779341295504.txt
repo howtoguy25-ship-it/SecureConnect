@@ -1,0 +1,59 @@
+Go for Phase 2 (media encryption), with guardrails.
+
+Before writing code, produce a short Phase 2 design note (markdown, in-repo, e.g. docs/e2ee/phase-2-media.md). Cover:
+
+1. Threat model
+  - What media types are in scope (images, video, voice notes, file attachments, thumbnails, previews).
+  - What an attacker with server access can and cannot see (filenames, sizes, MIME, durations, dimensions).
+  - Metadata strategy: what gets stripped client-side before upload, what stays plaintext for delivery routing.
+
+2. Key derivation & lifecycle
+  - Per-message media key vs. per-attachment key. Justify the choice.
+  - KDF (HKDF-SHA256 expected) with explicit info/context strings.
+  - How media keys are bound to the Signal session (or whatever ratchet state you're using post-Phase-1).
+  - Rotation: media keys MUST be ephemeral per-attachment. No reuse, ever. Document why.
+
+3. Cipher & framing
+  - AEAD choice (AES-256-GCM or XChaCha20-Poly1305). Pick one, justify.
+  - Nonce strategy. If random, document the size and collision math. If counter, document the counter source.
+  - Chunked vs. whole-blob encryption. For anything >5MB, chunked with per-chunk auth tags. Specify chunk size.
+  - Wire format: header (version byte, algo id, nonce, chunk size), ciphertext chunks, final auth tag. Version it.
+
+4. Storage & transport
+  - Ciphertext lives where (S3? our blob store?). What the server sees (opaque blob + size + minimal routing metadata).
+  - Upload flow: client encrypts → uploads ciphertext → sends key + blob URL inside the existing E2EE message envelope.
+  - Download flow: receive envelope → fetch blob → verify auth tag → decrypt → render.
+  - What happens on auth-tag failure (hard fail, surface to user, no partial render).
+
+5. Thumbnails & previews
+  - Encrypted separately with their own keys, or derived from the parent media key via HKDF with a "thumbnail" info string. Pick one.
+  - No plaintext thumbnails on the server. Ever. Confirm.
+
+6. Forward secrecy & deletion
+  - When a message is deleted locally / "delete for everyone," what happens to the blob and the key.
+  - Key destruction on the receiving device after decrypt-to-disk vs. decrypt-on-view.
+
+7. Failure modes & limits
+  - Max attachment size.
+  - Behavior on partial upload, partial download, network drop mid-encrypt.
+  - Server-side rate limit for media key/blob endpoints (carry forward the TODO from Phase 1 — file the ticket now, not later).
+
+8. Test plan
+  - Unit: KDF vectors, encrypt/decrypt roundtrip, tampered-ciphertext rejection, tampered-header rejection, wrong-key rejection.
+  - Integration: send → receive across two clients, including a client on the old build that should fail gracefully.
+  - Negative: server returns wrong blob, truncated blob, swapped blob for a different message.
+
+Once the design note is in the repo, stop and wait for review before implementing.
+
+Also, before starting:
+- Carry the /api/e2ee/prekeys/signed rate-limit TODO into the Phase 2 server work as a tracked item (not a comment). Same endpoint family, same review, same build.
+- Skip the SESSION_INDEX backfill. Self-heal is sufficient.
+- Build number stays at 60 in git; bump to 61 when the build is cut. Changelog should separate the Apple compliance fixes from the E2EE work.
+- Phase 1 currently has type-check coverage only. Before Phase 2 lands, add at minimum one integration test for the signed prekey rotation path (stale → rotate → upload → server accepts → peer fetches new SPK). Doesn't need to be exhaustive; just needs to exist.
+
+Deliverables for this turn:
+1. docs/e2ee/phase-2-media.md (design note, no code).
+2. A failing/placeholder test file for the Phase 1 SPK rotation integration test, so it's visible in the next checkpoint.
+3. A tracked TODO (in whatever issue tracker the repo uses, or TODO.md if none) for the server-side rate limit on signed prekey + upcoming media endpoints.
+
+Do not start Phase 2 implementation until I sign off on the design note.

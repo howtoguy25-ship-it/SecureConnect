@@ -1,0 +1,56 @@
+I need permanent fixes for the following issues in my Pryvo messenger app. These fixes must work consistently on both native (iOS/Android) and web. Do not use quick patches — apply proper responsive, accessible solutions.
+
+Bug 1 — GIF picker overlapping category buttons (Trending, Funny, Reactions, Love)
+When the GIF grid loads, the thumbnails render on top of the category filter row instead of below it. Fix by:
+- Wrapping the GIF picker in a flex column container with `flex-direction: column` and explicit z-index stacking.
+- The category chips row must have `position: sticky; top: [search bar height]; z-index: 10; background: #000;` so it stays above the scrolling grid.
+- The GIF grid below must have its own scroll container with `overflow-y: auto` and proper `margin-top` / `padding-top` equal to the combined height of the search bar + chips row.
+- Do NOT use absolute positioning for the grid. Use normal document flow inside a flex parent.
+
+Bug 2 — Settings list items (Privacy & Messaging, Stories) descriptions get cut off / overlap chevron
+Long description text ("Read receipts, typing, notification preview, disapp…") is truncated by the right-side chevron. Fix by:
+- Each row should be `display: flex; align-items: center; gap: 12px;` with the icon, a flex-1 text column, and the chevron.
+- The text column needs `min-width: 0; flex: 1;` so it can shrink properly.
+- Apply `white-space: normal; overflow-wrap: break-word;` to descriptions and allow up to 2 lines with `display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;`.
+- Row height should be `min-height` (not fixed height) so it grows when description wraps.
+- Right-pad the text column so it never sits under the chevron.
+
+Bug 3 — Phone number entry screen: input box overflows viewport on the right
+The "Phone number" input extends past the right edge of the screen. Fix by:
+- The form container should use `width: 100%; max-width: 100%; padding: 0 16px; box-sizing: border-box;`.
+- The row containing the country selector (`US +1`) and the phone input should use `display: flex; gap: 8px; width: 100%;` with the input as `flex: 1; min-width: 0;`.
+- Remove any fixed pixel widths on the input. Use `width: 100%`.
+- Ensure parent containers also have `overflow-x: hidden` as a safety net.
+- Test at 320px, 375px, 414px, and 768px+ widths.
+
+Feature — Custom Pryvo ringtone for outgoing + incoming audio and video calls
+Currently the call screen shows "Ringing…" silently. Add a fully custom, branded ringtone system:
+
+Sound design requirements (the ringtone itself):
+- Create an original, custom-composed ringtone exclusive to Pryvo — not a stock tone, not a clone of WhatsApp/Snapchat/iMessage.
+- Tone should feel nostalgic and warm — think early-2000s mobile era charm meets modern soft synth. Reference moods: gentle marimba, soft mallet bells, mellow vibraphone, or a clean plucked synth — never harsh, never a loud telephone bell.
+- 3–5 second loop, seamless (no audible click on loop point), tempo around 90–110 BPM, in a major key (C, D, or F major recommended for friendliness).
+- Two variants from the same melodic motif so the app feels cohesive:
+  • Outgoing ringback — softer, slightly slower, lower volume, single instrument.
+  • Incoming ringtone — fuller arrangement, slightly louder, more presence, but still warm and not jarring.
+- Export both as high-quality .m4a (AAC, 256kbps) for native and .mp3 (192kbps) fallback for web. Also export an .ogg version for Android compatibility.
+- Place all audio assets in `/assets/sounds/calls/` with names: `pryvo_ringback.m4a`, `pryvo_ringtone.m4a` (plus mp3/ogg counterparts).
+
+Playback implementation:
+- Outgoing call: play `pryvo_ringback` on loop from call initiation until the recipient answers, declines, or the caller ends.
+- Incoming call: play `pryvo_ringtone` on loop until answered, declined, missed, or timed out.
+- On native iOS: use AVAudioPlayer with audio session category `.playback`, mode `.voiceChat`, and respect the Speaker toggle state for routing.
+- On native Android: use MediaPlayer with `STREAM_VOICE_CALL` for ringback and `STREAM_RING` for incoming, respecting Do Not Disturb and silent mode.
+- On web: use the HTML5 `Audio` API with `loop = true`, preloaded via `<link rel="preload" as="audio">`, and tied to call state. Stop and release the audio on call connect, decline, end, or component unmount to prevent memory leaks.
+- Centralize all playback in a single `CallSoundService` (or equivalent) so native and web share one interface and behavior stays identical.
+
+Haptics + extras:
+- Add light haptic feedback on native (light impact every ring cycle) for parity with iMessage/WhatsApp.
+- Respect system silent/vibrate settings on both platforms.
+- Allow the user to preview the ringtone in Settings later (future-proof the service for this).
+
+General requirements
+- All fixes must use the app's existing dark theme variables — no hardcoded colors.
+- Test on the smallest supported viewport (iPhone SE / 320px web) and the largest.
+- Add safe-area-inset padding for notched devices on every screen touched.
+- No regressions to existing chat, call, or settings flows.

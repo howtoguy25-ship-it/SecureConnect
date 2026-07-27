@@ -1,0 +1,50 @@
+Option 1.
+
+Do all four phases in one continuous push and ship it together as Build 59. I want the features fully integrated and matching the same SecureConnect experience instead of partial placeholder-style releases.
+
+For disappearing messages:
+Use secure hybrid expiry.
+
+Requirements:
+- Messages expire locally on both devices.
+- Also store encrypted expiry metadata server-side for sync consistency across devices.
+- Server must NEVER store plaintext.
+- Server only knows:
+  - encrypted payload
+  - expiresAt timestamp
+  - deletion/expiry event metadata
+- When expiry time is reached:
+  - message auto-removes locally
+  - sync secure delete/expiry event to participants
+  - replace with “This message disappeared” only if chat history logic requires it
+- Expired messages must not appear in:
+  - notifications
+  - search
+  - previews
+  - pinned messages
+  - forwarded content
+- Handle offline users:
+  - expire immediately once device reconnects and syncs
+- Add cleanup jobs for expired encrypted payloads server-side where supported.
+- Preserve end-to-end encryption and never expose plaintext during expiry processing.
+
+Additional important requirements:
+- No fake typing indicators.
+- Use real realtime presence events with debounce/throttle.
+- Read receipts must respect privacy toggles both ways.
+- Notification preview privacy must work on iOS lock screen and notification center.
+- Long-press menu animation should feel premium like Signal/iMessage/Telegram.
+- Use haptics and smooth blur/glass UI.
+- Do not break current chat performance or scrolling.
+- Keep all actions encrypted and authenticated.
+- Avoid unnecessary rerenders in chat lists/messages.
+- Make the whole system production-grade, not prototype-grade.
+
+Before finalizing:
+- Run full regression testing on chat send/receive.
+- Test offline/online sync.
+- Test message deletion edge cases.
+- Test disappearing timers.
+- Test typing indicators across multiple devices.
+- Test push notification privacy.
+- Verify no plaintext leaks into logs or analytics.

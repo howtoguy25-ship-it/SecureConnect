@@ -1,0 +1,60 @@
+I am experiencing a critical iOS build failure in my Expo EAS project.
+
+The build completes all steps successfully except “Install pods”, which fails with:
+
+iOS build failed: Unknown error. See logs of the Install pods build phase for more information.
+
+This occurs during EAS Build after:
+	•	Dependencies install successfully
+	•	Prebuild completes
+	•	Credentials prepare successfully
+	•	Failure occurs specifically at CocoaPods installation
+
+⸻
+
+🔎 Required Actions
+
+Please perform a full professional remediation of this issue by doing the following:
+	1.	Audit and repair CocoaPods configuration
+	•	Validate iOS deployment target (ensure minimum iOS 13+ or compatible with current SDK)
+	•	Ensure Podfile is correctly generated
+	•	Remove any corrupted Pods, Podfile.lock, and DerivedData equivalents
+	•	Regenerate pods cleanly
+	2.	Validate Expo SDK compatibility
+	•	Confirm project SDK matches the latest supported Expo SDK
+	•	Upgrade all incompatible native modules
+	•	Run expo doctor equivalent fixes automatically
+	•	Ensure no deprecated or unsupported iOS libraries exist
+	3.	Dependency alignment
+	•	Fix mismatched React Native versions
+	•	Ensure all native modules support the current Expo SDK
+	•	Remove duplicate or conflicting dependencies
+	•	Clear node_modules and reinstall cleanly
+	4.	EAS Build environment corrections
+	•	Ensure correct eas.json build profile
+	•	Confirm correct Xcode image compatibility
+	•	Set proper Node version
+	•	Enforce clean build flag
+	5.	Hard Reset & Rebuild
+Execute a complete clean rebuild sequence:
+	•	Delete ios folder (if prebuilt)
+	•	Regenerate via expo prebuild
+	•	Reinstall pods
+	•	Rebuild with eas build --platform ios --clear-cache
+	6.	Provide a final summary of:
+	•	Root cause found
+	•	Exact fixes applied
+	•	Any manual steps required from me
+
+⸻
+
+⚠️ Important
+
+This is a production secure messaging application.
+The solution must:
+	•	Maintain encryption libraries
+	•	Not downgrade security packages
+	•	Not remove required native modules
+	•	Preserve iOS 15+ compatibility
+
+Fix this completely and provide a stable, production-ready configuration.
