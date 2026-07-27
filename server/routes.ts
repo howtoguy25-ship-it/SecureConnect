@@ -10,6 +10,7 @@ import path from "path";
 import { storage } from "./storage";
 import { sendVerificationSMS, generateVerificationCode, getEnabledSmsCountries, isTwilioConfigured, searchAvailableNumbers, provisionPhoneNumber, releasePhoneNumber, validateTwilioWebhookSignature } from "./twilioClient";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
+import { getAppBaseUrl, getAllowedOrigins } from "./publicUrl";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { getMockConversations, getMockMessages, isMockConversation, isMockUser, getMockUser, createMockBotReply, MOCK_USERS } from "./mock-data";
@@ -3439,7 +3440,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateUser(user.id, { stripeCustomerId: customerId });
       }
 
-      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000'}`;
+      const baseUrl = getAppBaseUrl();
       
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
@@ -3491,7 +3492,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateUser(user.id, { stripeCustomerId: customerId });
       }
 
-      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000'}`;
+      const baseUrl = getAppBaseUrl();
       
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
@@ -4795,7 +4796,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: process.env.REPLIT_DOMAINS?.split(',').map((d: string) => `https://${d.trim()}`) || [],
+      origin: getAllowedOrigins(),
       credentials: true,
     },
   });

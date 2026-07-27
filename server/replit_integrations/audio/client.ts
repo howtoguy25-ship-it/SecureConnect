@@ -6,9 +6,23 @@ import { randomUUID } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+// Lazy, not module-scope: this file is dynamically imported from the
+// voice-message-transcription request path, and the OpenAI SDK throws
+// synchronously from its constructor when no API key is present. Building
+// it eagerly meant recording a voice message crashed the request on any
+// deployment without AI_INTEGRATIONS_OPENAI_API_KEY set (same failure
+// mode fixed in server/aiModerator.ts).
+let _client: OpenAI | null = null;
+export const openai = new Proxy({} as OpenAI, {
+  get(_target, prop, receiver) {
+    if (!_client) {
+      _client = new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      });
+    }
+    return Reflect.get(_client, prop, receiver);
+  },
 });
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";

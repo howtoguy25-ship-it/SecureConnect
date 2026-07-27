@@ -9,25 +9,24 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 
-const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+// Previously authenticated via Replit's local sidecar (http://127.0.0.1:1106),
+// which only exists inside a Replit container. Off Replit, authenticate with
+// a real GCS service-account key instead: GCS_SERVICE_ACCOUNT_KEY holds the
+// key JSON directly (or base64-encoded, for envs that dislike embedded
+// newlines). If unset, fall back to the client library's normal defaults —
+// GOOGLE_APPLICATION_CREDENTIALS (a mounted key file) or the ambient service
+// account on GCP compute (Cloud Run/GKE/GCE).
+function buildStorageClient(): Storage {
+  const rawKey = process.env.GCS_SERVICE_ACCOUNT_KEY;
+  if (!rawKey) return new Storage();
+  const json = rawKey.trim().startsWith("{")
+    ? rawKey
+    : Buffer.from(rawKey, "base64").toString("utf8");
+  const credentials = JSON.parse(json);
+  return new Storage({ credentials, projectId: credentials.project_id });
+}
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
-      },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+export const objectStorageClient = buildStorageClient();
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -306,6 +305,12 @@ function parseObjectPath(path: string): {
   return { bucketName, objectName };
 }
 
+// Previously delegated to Replit's sidecar (/object-storage/signed-object-url),
+// which signs on the caller's behalf so no private key ever needs to leave
+// Replit's infra. Off Replit there's no sidecar, so sign directly with the
+// GCS client: a real key (GCS_SERVICE_ACCOUNT_KEY) signs locally; falling
+// back to ambient credentials on GCP compute signs via the IAM SignBlob API
+// (requires roles/iam.serviceAccountTokenCreator on that service account).
 async function signObjectURL({
   bucketName,
   objectName,
@@ -317,27 +322,14 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
-    );
-  }
-
-  const { signed_url: signedURL } = await response.json();
+  const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+  const [signedURL] = await objectStorageClient
+    .bucket(bucketName)
+    .file(objectName)
+    .getSignedUrl({
+      version: "v4",
+      action,
+      expires: Date.now() + ttlSec * 1000,
+    });
   return signedURL;
 }
