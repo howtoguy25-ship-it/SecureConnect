@@ -8,6 +8,7 @@ import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 import { locatePlateRegion } from "@/utils/plateLocator";
 import { readPlateText } from "@/services/plateOcr";
 import { colors, radius, spacing, pressedOpacity } from "@/theme/tokens";
+import { Sentry } from "@/services/sentry";
 
 const CAPTURE_INTERVAL_MS = 1200;
 // Attempts (each tied to one capture pass, ~1.2s apart) before giving up on a persistently
@@ -57,8 +58,10 @@ export function VehicleDetectionScreen({ onClose }: Props) {
     if (capturingRef.current || !cameraRef.current) return;
     capturingRef.current = true;
     try {
+      Sentry.logger.info("vehicle-detection: calling takePictureAsync");
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.4, skipProcessing: true });
       if (!photo) return;
+      Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
       const detected = await detectVehiclesInPhoto(photo.uri);
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
@@ -97,7 +100,10 @@ export function VehicleDetectionScreen({ onClose }: Props) {
             plateTextsRef.current.set(trackId, text);
             setPlateTexts(new Map(plateTextsRef.current));
           })
-          .catch((err) => console.warn("[vehicle-detection] plate OCR failed", err))
+          .catch((err) => {
+            Sentry.logger.error("vehicle-detection: plate OCR failed", { error: String(err) });
+            console.warn("[vehicle-detection] plate OCR failed", err);
+          })
           .finally(() => platesReadingRef.current.delete(trackId));
       }
     } catch (err) {

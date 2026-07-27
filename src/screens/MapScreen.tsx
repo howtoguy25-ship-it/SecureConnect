@@ -37,6 +37,7 @@ import { sirenDetection } from "@/services/sirenDetection";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import type { AlertDoc, AlertType } from "@/types/alert";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
+import { Sentry } from "@/services/sentry";
 
 export function MapScreen() {
   const { location } = useLocation();
@@ -346,7 +347,10 @@ export function MapScreen() {
           { bottom: insets.bottom + 24 + 70 },
           pressed && { opacity: pressedOpacity },
         ]}
-        onPress={() => setDetectionOpen(true)}
+        onPress={() => {
+          Sentry.logger.info("map: opening vehicle detection screen");
+          setDetectionOpen(true);
+        }}
         accessibilityLabel="Live vehicle detection"
       >
         <Ionicons name="videocam" size={24} color="#FFFFFF" />
@@ -360,7 +364,12 @@ export function MapScreen() {
             show3D && styles.fabActive,
             pressed && { opacity: pressedOpacity },
           ]}
-          onPress={() => setShow3D((v) => !v)}
+          onPress={() =>
+            setShow3D((v) => {
+              Sentry.logger.info("map: toggling 3D view", { next: !v });
+              return !v;
+            })
+          }
           accessibilityLabel={show3D ? "Switch to standard map" : "Switch to 3D satellite view"}
         >
           <Ionicons name="globe-outline" size={22} color="#FFFFFF" />

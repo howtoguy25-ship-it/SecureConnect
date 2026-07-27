@@ -1,18 +1,31 @@
 import { Platform } from "react-native";
 import mobileAds from "react-native-google-mobile-ads";
 import { requestTrackingPermissionsAsync } from "expo-tracking-transparency";
+import { Sentry } from "@/services/sentry";
 
 // Kicks off the Google Mobile Ads SDK's own initialization exactly once, no matter how many
 // call sites (App Open manager, banner, any future ad placement) ask for it -- every caller
 // awaits the same in-flight/settled promise instead of re-initializing.
 let initPromise: Promise<void> | null = null;
 
+// Logged immediately before/after each native ad SDK call -- this crash class (native
+// exception inside a TurboModule void method, on com.meta.react.turbomodulemanager.queue)
+// happens beneath JS entirely, so a try/catch here can't catch it, but a log line right
+// before the call means the NEXT crash log's last breadcrumb tells us definitively whether
+// ads were the trigger.
 export function ensureAdsInitialized(): Promise<void> {
   if (!initPromise) {
     initPromise = maybeRequestTrackingPermission()
-      .then(() => mobileAds().initialize())
-      .then(() => undefined)
+      .then(() => {
+        Sentry.logger.info("ads: calling mobileAds().initialize()");
+        return mobileAds().initialize();
+      })
+      .then(() => {
+        Sentry.logger.info("ads: mobileAds().initialize() resolved");
+        return undefined;
+      })
       .catch((err) => {
+        Sentry.logger.error("ads: Google Mobile Ads SDK failed to initialize", { error: String(err) });
         console.warn("[ads] Google Mobile Ads SDK failed to initialize", err);
       });
   }
@@ -29,8 +42,11 @@ export function ensureAdsInitialized(): Promise<void> {
 async function maybeRequestTrackingPermission(): Promise<void> {
   if (Platform.OS !== "ios") return;
   try {
+    Sentry.logger.info("ads: calling requestTrackingPermissionsAsync()");
     await requestTrackingPermissionsAsync();
+    Sentry.logger.info("ads: requestTrackingPermissionsAsync() resolved");
   } catch (err) {
+    Sentry.logger.error("ads: tracking permission request failed", { error: String(err) });
     console.warn("[ads] tracking permission request failed", err);
   }
 }

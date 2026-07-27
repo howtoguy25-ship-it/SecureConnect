@@ -1,6 +1,7 @@
 import { ImageManipulator } from "expo-image-manipulator";
 import { recognizeText } from "rn-mlkit-ocr";
 import type { PlateRegion } from "@/utils/plateLocator";
+import { Sentry } from "@/services/sentry";
 
 // Plausible plate text: letters/digits only, length in a real plate's range -- filters out
 // OCR noise (stray punctuation, a single misread character) without trying to validate
@@ -20,17 +21,20 @@ function bestPlateCandidate(text: string): string | null {
  * was actually read from the crop.
  */
 export async function readPlateText(photoUri: string, region: PlateRegion): Promise<string | null> {
-  const cropped = await ImageManipulator.manipulate(photoUri)
-    .crop({
-      originX: Math.max(0, Math.round(region.x)),
-      originY: Math.max(0, Math.round(region.y)),
-      width: Math.max(1, Math.round(region.w)),
-      height: Math.max(1, Math.round(region.h)),
-    })
-    .renderAsync();
+  const crop = {
+    originX: Math.max(0, Math.round(region.x)),
+    originY: Math.max(0, Math.round(region.y)),
+    width: Math.max(1, Math.round(region.w)),
+    height: Math.max(1, Math.round(region.h)),
+  };
+  Sentry.logger.info("plateOcr: calling ImageManipulator crop", crop);
+  const cropped = await ImageManipulator.manipulate(photoUri).crop(crop).renderAsync();
+  Sentry.logger.info("plateOcr: crop rendered, calling saveAsync");
   const saved = await cropped.saveAsync();
 
+  Sentry.logger.info("plateOcr: calling rn-mlkit-ocr recognizeText");
   const result = await recognizeText(saved.uri);
+  Sentry.logger.info("plateOcr: recognizeText resolved", { blockCount: result.blocks.length });
   for (const block of result.blocks) {
     const candidate = bestPlateCandidate(block.text);
     if (candidate) return candidate;

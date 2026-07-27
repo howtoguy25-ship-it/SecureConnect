@@ -1,6 +1,7 @@
 import { View, StyleSheet } from "react-native";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { env } from "@/config/env";
+import { Sentry } from "@/services/sentry";
 
 // A persistent strip reserved at the very bottom of the screen, outside the map's own
 // layout -- see MapScreen.tsx, which only renders this when NOT navigating, and gives it its
@@ -13,7 +14,11 @@ export function BannerAdBar() {
       <BannerAd
         unitId={env.ads.bannerUnitId}
         size={BannerAdSize.LARGE_ANCHORED_ADAPTIVE_BANNER}
-        onAdFailedToLoad={(error) => console.warn("[ads] banner failed to load", error)}
+        onAdLoaded={() => Sentry.logger.info("ads: banner loaded")}
+        onAdFailedToLoad={(error) => {
+          Sentry.logger.error("ads: banner failed to load", { error: String(error) });
+          console.warn("[ads] banner failed to load", error);
+        }}
       />
     </View>
   );

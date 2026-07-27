@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAppOpenAd } from "react-native-google-mobile-ads";
 import { env } from "@/config/env";
 import { ensureAdsInitialized } from "@/services/ads";
+import { Sentry } from "@/services/sentry";
 
 // Renders nothing -- just loads and shows one full-screen App Open ad on true cold start.
 //
@@ -18,14 +19,21 @@ export function AppOpenAdManager() {
 
   useEffect(() => {
     ensureAdsInitialized()
-      .then(load)
-      .catch((err) => console.warn("[ads] app open ad load failed", err));
+      .then(() => {
+        Sentry.logger.info("ads: calling app open ad load()");
+        load();
+      })
+      .catch((err) => {
+        Sentry.logger.error("ads: app open ad load failed", { error: String(err) });
+        console.warn("[ads] app open ad load failed", err);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (isLoaded && !isShowing && !hasShownRef.current) {
       hasShownRef.current = true;
+      Sentry.logger.info("ads: calling app open ad show()");
       show();
     }
   }, [isLoaded, isShowing, show]);
