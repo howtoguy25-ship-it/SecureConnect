@@ -18,29 +18,37 @@ import { env } from "@/config/env";
 // real frame data shows up in the dashboard instead of another blind guess.
 export const navigationIntegration = Sentry.reactNavigationIntegration();
 
+// DIAGNOSTIC BUILD -- enableNative is temporarily false. The replay-postInit fix (see
+// replaysSessionSampleRate/replaysOnErrorSampleRate below) was a real, verified bug, but
+// build 22 (which included that fix) crashed again with the exact same signature, and
+// Sentry has now received precisely zero events/sessions/logs across builds 20, 21, AND 22
+// -- meaning whatever's happening blocks Sentry's own upload pipeline every single launch,
+// not just the one replay code path. This isolates whether Sentry's NATIVE layer (crash
+// handling, session tracking, hang detection, breadcrumb converters -- all the machinery
+// that runs void TurboModule calls) is involved in this crash AT ALL. JS-side error/log
+// capture (installCrashReporter's ErrorUtils hook, Sentry.logger calls) still works with
+// native off, since neither touches this native init path. If the crash disappears with
+// native off, Sentry's native layer is confirmed as the cause (even if not specifically
+// replay) and it can be re-enabled carefully once identified. If it persists, Sentry is
+// fully ruled out and the investigation moves to ads/OCR/other native modules with real
+// confidence instead of another guess.
+const DIAGNOSTIC_DISABLE_NATIVE = true;
+
 export function initSentry(): void {
   if (!env.sentryDsn) return;
   Sentry.init({
     dsn: env.sentryDsn,
-    enableNative: true,
+    enableNative: !DIAGNOSTIC_DISABLE_NATIVE,
     enableLogs: true,
-    tracesSampleRate: 0.2,
-    integrations: [navigationIntegration],
-    // Root cause of the "crashes ~1-2s after every launch" bug, confirmed by reading
-    // @sentry/react-native's own iOS source (node_modules/@sentry/react-native/ios/
-    // RNSentry.mm + RNSentryReplay.mm, version 7.11.0): when *neither* replay sample rate
-    // is set, RNSentryReplay.updateOptions returns early without constructing a real replay
-    // session -- but RNSentry.mm's initNativeSdk calls [RNSentryReplay postInit] completely
-    // unconditionally right after (no guard on the isSessionReplayEnabled flag it just
-    // computed), which wires a breadcrumb converter into the pipeline every breadcrumb flows
-    // through, pointed at a replay session that was never actually created. The very next
-    // breadcrumb (Sentry's own automatic navigation/HTTP breadcrumbs, or any Sentry.logger
-    // call) throws inside that converter -- and since it's a void TurboModule callback with
-    // no try/catch, it's an instant, unrecoverable SIGABRT (matches
-    // github.com/getsentry/sentry-react-native/issues/5679 exactly: iOS 16+, release build,
-    // New Architecture, replay unconfigured). Setting explicit sample rates (even 0, which
-    // keeps replay itself fully disabled) makes updateOptions take the properly-initialized
-    // path instead, so postInit has a real (inactive) replay session to attach to.
+    tracesSampleRate: DIAGNOSTIC_DISABLE_NATIVE ? 0 : 0.2,
+    integrations: DIAGNOSTIC_DISABLE_NATIVE ? [] : [navigationIntegration],
+    // Real, verified bug (read directly from @sentry/react-native's own iOS source) --
+    // see node_modules/@sentry/react-native/ios/RNSentry.mm + RNSentryReplay.mm (7.11.0):
+    // initNativeSdk calls [RNSentryReplay postInit] unconditionally regardless of whether a
+    // real replay session was constructed, wiring a breadcrumb converter into the pipeline
+    // that throws on the next breadcrumb when replay was left unconfigured. Setting explicit
+    // sample rates avoids that specific path. Kept here (harmless/inert while native is off
+    // for this diagnostic build) for whenever native gets re-enabled.
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
   });
