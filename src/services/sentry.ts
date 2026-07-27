@@ -23,6 +23,7 @@ export function initSentry(): void {
   Sentry.init({
     dsn: env.sentryDsn,
     enableNative: true,
+    enableLogs: true,
     tracesSampleRate: 0.2,
     integrations: [navigationIntegration],
   });
