@@ -5,10 +5,23 @@ import { messages as messagesTable, users, userReports } from "@shared/schema";
 import { eq, and, lte, desc, sql } from "drizzle-orm";
 
 // Reuse the existing Replit AI integration.
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+//
+// Built lazily, not at module scope: this module is dynamically imported
+// from the hot message-send path (checkAndConsumeChatLimit), and the
+// OpenAI SDK throws synchronously from its constructor when no API key is
+// present. Eagerly constructing it here meant every message send 500'd
+// on any deployment without AI_INTEGRATIONS_OPENAI_API_KEY set, even
+// though only callOpenAI (guarded by the caller) actually needs a client.
+let _openai: OpenAI | null = null;
+function getOpenAIClient(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+  return _openai;
+}
 
 const MODEL = "gpt-5.1";
 
@@ -249,7 +262,7 @@ async function callOpenAI(
     })),
   };
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAIClient().chat.completions.create({
     model: MODEL,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
