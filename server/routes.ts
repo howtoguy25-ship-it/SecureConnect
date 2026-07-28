@@ -3279,6 +3279,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const allowedDomains = [
           'pryvoapp.com',
           'www.pryvoapp.com',
+          'pryvomessenger.com',
+          'www.pryvomessenger.com',
           'secureconnectchat.com',
           'www.secureconnectchat.com',
           /\.replit\.dev$/,  // Replit development domains

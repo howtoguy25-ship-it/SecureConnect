@@ -10,14 +10,27 @@ export interface MockUser {
   isVip: boolean;
 }
 
+// Shape matches DatabaseStorage.getConversations()'s return value exactly
+// (see server/storage.ts) — the client's ChatsScreen renders both through
+// the same ConversationItem component and requires the nested `otherUser`
+// object; a mismatched flat shape here means every mock row silently
+// renders as nothing (ConversationItem returns null when otherUser is
+// missing), so Apple's reviewer test account would see an empty chat list.
 export interface MockConversation {
   id: string;
-  otherUserId: string;
-  otherUserName: string;
-  otherUserAvatar: number;
-  otherUserPhone: string;
-  lastMessage: string;
+  numberType: string;
   lastMessageAt: string;
+  lastMessagePreview: string;
+  createdAt: string;
+  otherUser: {
+    id: string;
+    phoneNumber: string;
+    displayName: string;
+    avatarIndex: number;
+    avatarUrl: string | null;
+    isVip: boolean;
+    lastSeen: string;
+  };
   unreadCount: number;
 }
 
@@ -62,16 +75,26 @@ export const MOCK_USERS: MockUser[] = [
 // Generate mock conversations for a reviewer
 export function getMockConversations(reviewerUserId: string): MockConversation[] {
   const now = new Date();
-  return MOCK_USERS.map((user, index) => ({
-    id: `mock-conv-${user.id}`,
-    otherUserId: user.id,
-    otherUserName: user.displayName,
-    otherUserAvatar: user.avatarIndex,
-    otherUserPhone: user.phoneNumber,
-    lastMessage: getInitialMessage(user.displayName),
-    lastMessageAt: new Date(now.getTime() - (index + 1) * 3600000).toISOString(),
-    unreadCount: index === 0 ? 1 : 0,
-  }));
+  return MOCK_USERS.map((user, index) => {
+    const lastMessageAt = new Date(now.getTime() - (index + 1) * 3600000).toISOString();
+    return {
+      id: `mock-conv-${user.id}`,
+      numberType: 'personal',
+      lastMessageAt,
+      lastMessagePreview: getInitialMessage(user.displayName),
+      createdAt: lastMessageAt,
+      otherUser: {
+        id: user.id,
+        phoneNumber: user.phoneNumber,
+        displayName: user.displayName,
+        avatarIndex: user.avatarIndex,
+        avatarUrl: null,
+        isVip: user.isVip,
+        lastSeen: now.toISOString(),
+      },
+      unreadCount: index === 0 ? 1 : 0,
+    };
+  });
 }
 
 function getInitialMessage(name: string): string {
