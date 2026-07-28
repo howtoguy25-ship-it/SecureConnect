@@ -75,11 +75,12 @@ export default function VirtualNumberScreen() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-number"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       refreshUser();
-      Alert.alert("Released", "Your Pryvo number has been released.");
+      Alert.alert("Disposed", "Your Pryvo number has been disposed and its message history cleared.");
     },
     onError: (error: any) => {
-      Alert.alert("Error", error.message || "Failed to release your number.");
+      Alert.alert("Error", error.message || "Failed to dispose your number.");
     },
   });
 
@@ -126,19 +127,20 @@ export default function VirtualNumberScreen() {
   };
 
   const handleRelease = () => {
+    const message = "This clears the message history for conversations you had through this number — your contacts stay, so you can keep chatting once you get a new number. This can't be undone.";
     if (Platform.OS === "web") {
-      const confirmed = window.confirm("Are you sure you want to release your Pryvo number? You can get a new one later.");
+      const confirmed = window.confirm(`Dispose your Pryvo number? ${message}`);
       if (confirmed) {
         releaseMutation.mutate();
       }
     } else {
       Alert.alert(
-        "Release Number",
-        "Are you sure you want to release your Pryvo number? You can get a new one later.",
+        "Dispose This Number?",
+        message,
         [
           { text: "Cancel", style: "cancel" },
           {
-            text: "Release",
+            text: "Dispose",
             style: "destructive",
             onPress: () => releaseMutation.mutate(),
           },
@@ -301,11 +303,14 @@ export default function VirtualNumberScreen() {
               <>
                 <Feather name="x-circle" size={18} color={theme.error} />
                 <ThemedText type="body" style={{ color: theme.error }}>
-                  Release Number
+                  Dispose This Number
                 </ThemedText>
               </>
             )}
           </Pressable>
+          <ThemedText type="small" style={[styles.prefDesc, { color: theme.textSecondary, textAlign: "center", marginTop: -Spacing.sm }]}>
+            Every Pryvo number is disposable. Disposing it clears the message history from conversations you had through it — your contacts stay, so you can keep chatting once you get a new number.
+          </ThemedText>
         </>
       ) : (
         <View style={[styles.card, { backgroundColor: theme.backgroundDefault }]}>

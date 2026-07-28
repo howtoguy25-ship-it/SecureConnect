@@ -1847,12 +1847,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const recipientView = sanitizeForRecipient(message as any, receiverId, lookup);
       const senderView = message; // sender sees their own message in full
 
+      // Masked identity for the recipient's UI — the outer virtual-number
+      // display, never the real sender. Computed here (not just at push
+      // time below) so the in-app banner gets the same non-leaking name.
+      const sealedVn = lookup.get(sender.virtualNumberId);
+      const sealedSenderName = sealedVn?.displayName || sealedVn?.phoneNumber || 'Someone';
+
       // Emit to recipient's personal room with SANITIZED payload.
       io.to(receiverId).emit('new-message', recipientView);
       io.to(receiverId).emit('message-notification', {
         conversationId,
-        // No senderId leaks here — the field is null on a sealed row.
-        message: recipientView,
+        // No real senderId leaks here — deliberately omitted (the field is
+        // also null on the sealed message row itself). senderName is the
+        // masked virtual-number identity, not the real sender. No message
+        // body/ciphertext travels on this event at all — the client's
+        // notification handler never needs it (see NotificationContext.tsx).
+        senderName: sealedSenderName,
       });
 
       // Emit to sender's personal room with FULL payload (their outbox).
@@ -1870,8 +1880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // sendMessageNotification still falls back to "New encrypted
       // message" because that check lives inside that function.
       if (recipient.pushToken && recipient.notificationsEnabled !== false) {
-        const vn = lookup.get(sender.virtualNumberId);
-        const senderName = vn?.displayName || vn?.phoneNumber || 'Someone';
+        const senderName = sealedSenderName;
         try {
           // Build 63: we bypass `sendMessageNotification` here because its
           // signature hard-codes `otherUserId: senderId` into the payload,
@@ -1881,7 +1890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // otherUserId entirely. The body honors the recipient's
           // showNotificationPreview preference for parity with /messages.
           const previewOff = recipient.showNotificationPreview === false;
-          const body = previewOff ? 'New encrypted message' : 'Encrypted message';
+          const body = previewOff ? 'New encrypted message' : 'Sent a message';
           await sendPushNotification(
             recipient.pushToken,
             senderName,
@@ -1890,7 +1899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               conversationId,
               messageId: message.id,
               sealedSender: true,
-              viaVirtualNumber: vn?.phoneNumber ?? null,
+              viaVirtualNumber: sealedVn?.phoneNumber ?? null,
               senderName,
             },
             'message',
@@ -1973,9 +1982,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           setTimeout(() => {
             const botReply = createMockBotReply(conversationId, receiverId, req.userId!);
             io.to(`conversation:${conversationId}`).emit('new-message', botReply);
+            const botUser = getMockUser(receiverId);
             io.to(req.userId!).emit('message-notification', {
               conversationId,
-              message: botReply,
+              senderId: receiverId,
+              senderName: botUser?.displayName || 'Someone',
             });
           }, replyDelay);
           
@@ -2049,30 +2060,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (receiverId) {
-        // Also emit to receiver's personal room for notifications
-        io.to(receiverId).emit('message-notification', {
-          conversationId,
-          message,
-        });
-
         const receiver = await storage.getUser(receiverId);
         const sender = await storage.getUser(req.userId!);
+
+        // Also emit to receiver's personal room for notifications. Include
+        // the sender's name/avatar flat so the in-app banner can render
+        // "<Name> sent a message" without needing a separate lookup — and,
+        // like the push path, deliberately does NOT include message
+        // content or a content-type hint: the banner shows a fixed generic
+        // body, never the real text.
+        const senderNameForNotif = sender?.displayName || sender?.phoneNumber || 'Someone';
+        io.to(receiverId).emit('message-notification', {
+          conversationId,
+          senderId: req.userId!,
+          senderName: senderNameForNotif,
+          senderAvatar: sender?.avatarUrl ?? null,
+        });
         const receiverOnline = connectedUsers.has(receiverId);
 
         if (!receiverOnline && receiver?.pushToken && receiver?.notificationsEnabled !== false) {
           const senderName = sender?.displayName || sender?.phoneNumber || 'Someone';
-          let messagePreview = 'New message';
-          if (mediaType === 'audio') messagePreview = 'Sent a voice message';
-          else if (mediaType === 'image') messagePreview = 'Sent a photo';
-          else if (mediaType === 'video') messagePreview = 'Sent a video';
-          else if (mediaType === 'gif') messagePreview = 'Sent a GIF';
 
-          // Notification preview privacy: when the recipient turned previews
-          // off, replace title with a generic label and body with a fixed
-          // string so the lock screen never reveals who or what.
+          // Notification preview privacy: never put message content — or
+          // even a content-type hint like "Sent a photo" — in a push
+          // notification. The lock screen / notification-center preview is
+          // outside the app's control once it leaves the device, so the
+          // body is always the fixed "Sent a message" regardless of what
+          // was actually sent. Full content only ever renders once the
+          // conversation is opened in-app. When the recipient also turned
+          // previews off, the title drops the sender's name too.
           const previewOff = receiver.showNotificationPreview === false;
           const pushTitle = previewOff ? 'Pryvo' : senderName;
-          const pushBody = previewOff ? 'New encrypted message' : messagePreview;
+          const pushBody = previewOff ? 'New encrypted message' : 'Sent a message';
 
           sendMessageNotification(
             receiver.pushToken,
@@ -2146,6 +2165,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { checkAndConsumeChatLimit, refundChatLimitSlot } = await import('./aiModerator');
       const results: Array<{ conversationId: string; ok: boolean; messageId?: string; reason?: string }> = [];
       let chatLimited: { perDay?: number; resetAt?: string } | null = null;
+      const forwarder = await storage.getUser(req.userId!);
+      const forwarderName = forwarder?.displayName || forwarder?.phoneNumber || 'Someone';
 
       for (const targetConvId of conversationIds) {
         // The forwarder must be a participant in the target chat.
@@ -2203,7 +2224,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (ioRef) {
           ioRef.to(`conversation:${targetConvId}`).emit('new-message', fwd);
-          if (receiverId) ioRef.to(receiverId).emit('message-notification', { conversationId: targetConvId, message: fwd });
+          if (receiverId) {
+            ioRef.to(receiverId).emit('message-notification', {
+              conversationId: targetConvId,
+              senderId: req.userId!,
+              senderName: forwarderName,
+              senderAvatar: forwarder?.avatarUrl ?? null,
+            });
+          }
         }
         results.push({ conversationId: targetConvId, ok: true, messageId: fwd.id });
       }
@@ -3343,10 +3371,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // = now + 30d. A future /provision call (same country) will recycle
       // the row via `reassignVirtualNumber` after the 30d window passes.
       await storage.releaseVirtualNumber(virtualNumber.id, user.id);
-      await storage.updateUser(user.id, { 
+      await storage.updateUser(user.id, {
         virtualNumberId: null,
         preferredNumberType: 'personal',
       });
+
+      // Disposable numbers: burning this number wipes the message content
+      // exchanged under it, but the conversation/contact relationship
+      // survives so the same person is reachable again once this user has
+      // a new number. Notify both sides' open clients to drop their local
+      // cache for these threads rather than showing stale bubbles until
+      // their next fetch.
+      const wipedConversationIds = await storage.wipeVirtualNumberConversationHistory(user.id);
+      if (wipedConversationIds.length > 0) {
+        const ioRef = getIO();
+        if (ioRef) {
+          for (const conversationId of wipedConversationIds) {
+            ioRef.to(`conversation:${conversationId}`).emit('virtual-number-conversation-cleared', {
+              conversationId,
+            });
+          }
+        }
+      }
 
       res.json({ success: true });
     } catch (error) {
@@ -4731,11 +4777,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (receiver.pushToken && receiver.notificationsEnabled !== false) {
+        // Carrier SMS is plaintext by nature (never E2EE — see externalSms's
+        // schema comment), but that's a reason to be MORE careful with the
+        // notification preview, not less: real SMS content (2FA codes,
+        // etc.) shouldn't sit on a lock screen any more than a chat message
+        // should. Same fixed-body rule as the E2EE paths.
         const previewOff = receiver.showNotificationPreview === false;
         const pushTitle = previewOff ? 'Pryvo' : `SMS from ${From}`;
-        const pushBody = previewOff
-          ? 'New SMS (not end-to-end encrypted)'
-          : (Body.length > 50 ? Body.substring(0, 50) + '...' : Body);
+        const pushBody = previewOff ? 'New SMS (not end-to-end encrypted)' : 'New SMS';
 
         sendPushNotification(
           receiver.pushToken,
@@ -4936,11 +4985,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           setTimeout(() => {
             const botReply = createMockBotReply(data.conversationId, data.receiverId, userId);
             io.to(`conversation:${data.conversationId}`).emit('new-message', botReply);
-            
+
             // Also send notification to the user
+            const botUser = getMockUser(data.receiverId);
             io.to(userId).emit('message-notification', {
               conversationId: data.conversationId,
-              message: botReply,
+              senderId: data.receiverId,
+              senderName: botUser?.displayName || 'Someone',
             });
           }, replyDelay);
           
@@ -4996,28 +5047,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       io.to(`conversation:${data.conversationId}`).emit('new-message', message);
-      
-      if (data.receiverId) {
-        io.to(data.receiverId).emit('message-notification', {
-          conversationId: data.conversationId,
-          message,
-        });
 
+      if (data.receiverId) {
         const receiver = await storage.getUser(data.receiverId);
         const sender = await storage.getUser(userId);
+        io.to(data.receiverId).emit('message-notification', {
+          conversationId: data.conversationId,
+          senderId: userId,
+          senderName: sender?.displayName || sender?.phoneNumber || 'Someone',
+          senderAvatar: sender?.avatarUrl ?? null,
+        });
         const receiverOnline = connectedUsers.has(data.receiverId);
 
         if (!receiverOnline && receiver?.pushToken && receiver?.notificationsEnabled !== false) {
           const senderName = sender?.displayName || sender?.phoneNumber || 'Someone';
-          let messagePreview = 'New message';
-          if (data.mediaType === 'audio') messagePreview = 'Sent a voice message';
-          else if (data.mediaType === 'image') messagePreview = 'Sent a photo';
-          else if (data.mediaType === 'video') messagePreview = 'Sent a video';
-          else if (data.mediaType === 'gif') messagePreview = 'Sent a GIF';
 
+          // Same notification-preview privacy rule as the REST send path —
+          // never a content-type hint, always the fixed "Sent a message".
           const previewOff = receiver.showNotificationPreview === false;
           const pushTitle = previewOff ? 'Pryvo' : senderName;
-          const pushBody = previewOff ? 'New encrypted message' : messagePreview;
+          const pushBody = previewOff ? 'New encrypted message' : 'Sent a message';
 
           sendMessageNotification(
             receiver.pushToken,

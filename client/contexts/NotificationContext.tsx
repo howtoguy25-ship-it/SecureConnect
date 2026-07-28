@@ -241,32 +241,31 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      // Server payload is { conversationId, senderId?, senderName?,
+      // senderAvatar?, message: {...full message row} } — note there is
+      // deliberately no top-level `content`/`mediaType` read here. The
+      // banner never renders message content or a content-type hint (no
+      // "Sent a photo"), only "<Name> sent a message" — same rule as the
+      // OS push notifications. Full content is only ever shown once the
+      // conversation is actually opened.
       messageNotificationHandler = (data: {
         conversationId?: string;
         senderId?: string;
         senderName?: string;
         senderAvatar?: string | null;
-        content?: string;
-        mediaType?: string;
       }) => {
         if (data.conversationId === activeConversationRef.current) {
           return;
         }
 
-        if (data.senderId === user?.id) {
+        if (data.senderId && data.senderId === user?.id) {
           return;
         }
 
-        let body = data.content || '';
-        if (data.mediaType === 'image') body = 'Sent a photo';
-        if (data.mediaType === 'video') body = 'Sent a video';
-        if (data.mediaType === 'audio') body = 'Sent a voice message';
-        if (data.mediaType === 'file') body = 'Sent a file';
-
         const notification: InAppNotification = {
-          id: `${Date.now()}-${data.senderId}`,
+          id: `${Date.now()}-${data.senderId ?? 'unknown'}`,
           title: data.senderName || 'New Message',
-          body,
+          body: 'Sent a message',
           conversationId: data.conversationId,
           senderId: data.senderId,
           senderName: data.senderName,
