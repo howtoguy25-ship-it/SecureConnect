@@ -22,6 +22,16 @@ services:
     # of promoting every missing dev tool into "dependencies" one at a
     # time.
     buildCommand: npm install --include=dev && npx expo export -p web --output-dir web-build && npm run server:build
+    # Runs after build, before the new instance takes traffic, with the
+    # same env vars as the service — including the internal DATABASE_URL,
+    # which this sandbox can't reach directly (only HTTPS is proxied out,
+    # not raw Postgres TCP). The production DB never actually had its
+    # schema applied (only a local throwaway test DB got `drizzle-kit
+    # push` during earlier work), which is why every DB-backed request
+    # was failing with "relation ... does not exist". --force skips the
+    # interactive confirmation prompt drizzle-kit push would otherwise
+    # block on in a non-interactive deploy.
+    preDeployCommand: npx drizzle-kit push --force
     startCommand: npm run server:prod
     healthCheckPath: /
     envVars:
