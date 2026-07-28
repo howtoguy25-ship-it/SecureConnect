@@ -21,6 +21,18 @@ import { initSentry, Sentry } from "@/services/sentry";
 installCrashReporter();
 initSentry();
 
+// DIAGNOSTIC: AppOpenAdManager fully removed for this build. Sentry's native layer was
+// already ruled out (build 23, fully disabled, still crashed with the identical signature).
+// This is the next candidate with actual structural evidence: appOpenLoad is a `void`-
+// returning native TurboModule method (confirmed in
+// node_modules/react-native-google-mobile-ads/src/specs/modules/NativeAppOpenModule.ts),
+// an exact type match for the crash's technical signature (performVoidMethodInvocation), and
+// it fires unconditionally on every single cold launch with zero user interaction -- matching
+// every timing observation so far. Removing it entirely isolates whether it's the cause the
+// same clean way the Sentry test did: if this build doesn't crash, it's confirmed; if it still
+// crashes, this is ruled out too and the search moves on with real evidence either way.
+const DIAGNOSTIC_DISABLE_APP_OPEN_AD = true;
+
 function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -29,9 +41,11 @@ function App() {
           <SettingsProvider>
             <LocationProvider>
               <StatusBar style="dark" />
-              <AdsErrorBoundary>
-                <AppOpenAdManager />
-              </AdsErrorBoundary>
+              {!DIAGNOSTIC_DISABLE_APP_OPEN_AD && (
+                <AdsErrorBoundary>
+                  <AppOpenAdManager />
+                </AdsErrorBoundary>
+              )}
               <RootNavigator />
             </LocationProvider>
           </SettingsProvider>
