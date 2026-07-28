@@ -13,12 +13,22 @@ const LocationContext = createContext<LocationContextValue>({
   permissionGranted: false,
 });
 
+// DIAGNOSTIC BUILD -- Sentry native, the entire ad SDK, and AsyncStorage (Firebase persistence
+// + Settings load) are now ALL conclusively ruled out (build 26: everything from all three off
+// simultaneously, identical crash persisted). This isolates the next unconditional-on-launch
+// native surface: expo-location's requestForegroundPermissionsAsync/watchPositionAsync, run
+// together with MapScreen's DIAGNOSTIC_DISABLE_MAPVIEW (see MapScreen.tsx) so this build tests
+// both remaining candidates -- location and the native MapView itself -- at once, the same
+// combined-isolation approach build 25 used for Sentry+ads.
+const DIAGNOSTIC_DISABLE_LOCATION_WATCH = true;
+
 export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [permissionGranted, setPermissionGranted] = useState(false);
 
   useEffect(() => {
+    if (DIAGNOSTIC_DISABLE_LOCATION_WATCH) return;
     let subscription: Location.LocationSubscription | null = null;
 
     (async () => {

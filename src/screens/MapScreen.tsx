@@ -39,6 +39,8 @@ import type { AlertDoc, AlertType } from "@/types/alert";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { Sentry } from "@/services/sentry";
 
+const DIAGNOSTIC_DISABLE_MAPVIEW = true;
+
 export function MapScreen() {
   const { location } = useLocation();
   const { user } = useAuth();
@@ -256,7 +258,19 @@ export function MapScreen() {
           real reserved row of its own instead of floating over the map -- it can never
           overlap the route, turn instructions, or FAB buttons this way. */}
       <View style={styles.mapArea}>
-      {/* Google provider needs a custom dev client on iOS (unavailable in Expo Go); Android gets it for free. */}
+      {/* DIAGNOSTIC BUILD -- native MapView swapped for a plain placeholder View. Sentry
+          native, the entire ad SDK, AsyncStorage, and now expo-location's watch (see
+          LocationContext.tsx's DIAGNOSTIC_DISABLE_LOCATION_WATCH) are all off in this same
+          build. MapView is the one remaining unconditional-on-launch native surface that's
+          never been isolated -- it mounts on every cold launch with zero gating, same as the
+          subsystems already ruled out. If the crash disappears with this out too, MapView (or
+          its provider config/customMapStyle) is confirmed; if it persists, every native
+          surface examined so far is ruled out and the search moves to something not yet
+          identified, with real evidence either way. */}
+      {DIAGNOSTIC_DISABLE_MAPVIEW ? (
+        <View style={[StyleSheet.absoluteFill, styles.mapPlaceholder]} />
+      ) : (
+      /* Google provider needs a custom dev client on iOS (unavailable in Expo Go); Android gets it for free. */
       <MapView
         ref={mapRef}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
@@ -278,6 +292,7 @@ export function MapScreen() {
           <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
         ))}
       </MapView>
+      )}
 
       {show3D && isMap3DSupported && currentLatLng && (
         <Map3DView
@@ -420,6 +435,7 @@ export function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceMuted },
   mapArea: { flex: 1 },
+  mapPlaceholder: { backgroundColor: colors.surfaceMuted },
   topRightControls: {
     position: "absolute",
     right: spacing.md,
