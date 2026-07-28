@@ -1,0 +1,63 @@
+databases:
+  - name: pryvo-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: pryvo-server
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run server:build
+    startCommand: npm run server:prod
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pryvo-db
+          property: connectionString
+      # Required in production (server fails closed without these — see
+      # server/routes.ts JWT_SECRET and server/smsEncryption.ts
+      # ENCRYPTION_KEY). Generate real random 32+ char values and set
+      # them in the Render dashboard rather than committing them here.
+      - key: SESSION_SECRET
+        sync: false
+      - key: SMS_ENCRYPTION_KEY
+        sync: false
+      # Your production domain — used for CORS, webhook base URLs, and
+      # baked into the app's API_URL at EAS build time (see eas.json).
+      - key: EXPO_PUBLIC_DOMAIN
+        value: pryvoapp.com
+      # Optional integrations — the server degrades gracefully without
+      # these (Stripe/Twilio/LiveKit/GCS features just stay disabled),
+      # but set the ones you use in the Render dashboard.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: LIVEKIT_IDENTITY_SECRET
+        sync: false
+      - key: GCS_SERVICE_ACCOUNT_KEY
+        sync: false
+      - key: PRIVATE_OBJECT_DIR
+        sync: false
+      - key: PUBLIC_OBJECT_SEARCH_PATHS
+        sync: false
+      - key: OWNER_PHONE_NUMBER
+        sync: false
