@@ -31,7 +31,7 @@ initSentry();
 // every timing observation so far. Removing it entirely isolates whether it's the cause the
 // same clean way the Sentry test did: if this build doesn't crash, it's confirmed; if it still
 // crashes, this is ruled out too and the search moves on with real evidence either way.
-const DIAGNOSTIC_DISABLE_APP_OPEN_AD = true;
+const DIAGNOSTIC_DISABLE_APP_OPEN_AD = false;
 
 function App() {
   return (

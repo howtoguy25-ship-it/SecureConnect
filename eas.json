@@ -16,10 +16,19 @@
     "production": {
       "autoIncrement": true,
       "ios": { "image": "latest" }
+    },
+    "productionDebug": {
+      "autoIncrement": true,
+      "ios": { "image": "latest", "buildConfiguration": "Debug" }
     }
   },
   "submit": {
     "production": {
+      "ios": {
+        "ascAppId": "6790121934"
+      }
+    },
+    "productionDebug": {
       "ios": {
         "ascAppId": "6790121934"
       }

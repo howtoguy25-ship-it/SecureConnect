@@ -20,7 +20,7 @@ const LocationContext = createContext<LocationContextValue>({
 // together with MapScreen's DIAGNOSTIC_DISABLE_MAPVIEW (see MapScreen.tsx) so this build tests
 // both remaining candidates -- location and the native MapView itself -- at once, the same
 // combined-isolation approach build 25 used for Sentry+ads.
-const DIAGNOSTIC_DISABLE_LOCATION_WATCH = true;
+const DIAGNOSTIC_DISABLE_LOCATION_WATCH = false;
 
 export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);

@@ -39,7 +39,7 @@ import type { AlertDoc, AlertType } from "@/types/alert";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { Sentry } from "@/services/sentry";
 
-const DIAGNOSTIC_DISABLE_MAPVIEW = true;
+const DIAGNOSTIC_DISABLE_MAPVIEW = false;
 
 export function MapScreen() {
   const { location } = useLocation();
@@ -401,7 +401,7 @@ export function MapScreen() {
           !route is true until navigation starts) -- this was never actually excluded by the
           build 24 AppOpenAdManager-only test, so that test wasn't a clean isolation of ads as
           a whole. Disabling this too for a real one. */}
-      {false && !route && (
+      {!route && (
         <AdsErrorBoundary>
           <BannerAdBar />
         </AdsErrorBoundary>

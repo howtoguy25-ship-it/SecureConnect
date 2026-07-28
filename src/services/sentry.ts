@@ -32,7 +32,7 @@ export const navigationIntegration = Sentry.reactNavigationIntegration();
 // replay) and it can be re-enabled carefully once identified. If it persists, Sentry is
 // fully ruled out and the investigation moves to ads/OCR/other native modules with real
 // confidence instead of another guess.
-const DIAGNOSTIC_DISABLE_NATIVE = true;
+const DIAGNOSTIC_DISABLE_NATIVE = false;
 
 export function initSentry(): void {
   if (!env.sentryDsn) return;

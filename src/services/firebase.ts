@@ -41,7 +41,7 @@ export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseC
 // and via SettingsContext's loadSettings()/getVoiceEnabled() (see App.tsx/SettingsContext.tsx
 // for that half of this same test). Falling back to in-memory-only auth persistence here
 // isolates whether Firebase's AsyncStorage reads specifically are involved.
-const DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE = true;
+const DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE = false;
 
 export const auth = DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE
   ? initializeAuth(firebaseApp)
