@@ -13,7 +13,15 @@ services:
     # scripts/build.js (npm run expo:static:build) is Replit-specific
     # (spawns a dev-server-style Metro process), so this uses a plain
     # `expo export` instead, which is what actually gets tested locally.
-    buildCommand: npm install && npx expo export -p web --output-dir web-build && npm run server:build
+    #
+    # --include=dev: NODE_ENV=production (set below) makes a plain
+    # `npm install` prune ALL devDependencies, including build-only tools
+    # (esbuild, babel-plugin-module-resolver, etc.) that the build steps
+    # on this line actually need even though they're not runtime deps.
+    # Hit this as two separate failures before adding this flag instead
+    # of promoting every missing dev tool into "dependencies" one at a
+    # time.
+    buildCommand: npm install --include=dev && npx expo export -p web --output-dir web-build && npm run server:build
     startCommand: npm run server:prod
     healthCheckPath: /
     envVars:
