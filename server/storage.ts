@@ -1641,10 +1641,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Carrier SMS landing. NOT E2EE — see schema header comment on externalSms.
+  // Callers pass an already-encrypted `body` + `isEncrypted: true` (see
+  // server/smsEncryption.ts and the Twilio SMS webhook in routes.ts) so
+  // storage.ts stays a thin persistence layer with no crypto of its own.
   async insertExternalSms(data: {
     virtualNumberId: string;
     fromPhoneE164: string;
     body: string;
+    isEncrypted?: boolean;
     deliveredToUserId: string;
   }): Promise<ExternalSms> {
     const [row] = await db.insert(externalSms).values(data).returning();

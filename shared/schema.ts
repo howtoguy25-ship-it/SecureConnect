@@ -567,13 +567,22 @@ export const virtualNumbersRelations = relations(virtualNumbers, ({ one }) => ({
 // same inbox view but with a clear "SMS — not end-to-end encrypted" label
 // and the composer is read-only for them in this PR.
 // See docs/e2ee/sealed-sender.md §2.1 item 4 and §7.
+//
+// At-rest hardening: `body` is encrypted server-side (AES-256-GCM, see
+// server/smsEncryption.ts) before insert whenever `isEncrypted` is true.
+// This is NOT E2EE — we hold the key — but it does mean a raw DB
+// dump/leak can't recover SMS content, which can carry 2FA codes and other
+// sensitive material despite arriving over a non-E2EE channel. Older rows
+// written before this column existed have isEncrypted=false and hold
+// genuine plaintext; readers must branch on the flag.
 export const externalSms = pgTable("external_sms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   virtualNumberId: varchar("virtual_number_id")
     .notNull()
     .references(() => virtualNumbers.id, { onDelete: "cascade" }),
   fromPhoneE164: text("from_phone_e164").notNull(),
-  body: text("body").notNull(), // plaintext — see header comment
+  body: text("body").notNull(), // encrypted at rest when isEncrypted=true — see header comment
+  isEncrypted: boolean("is_encrypted").default(false).notNull(),
   deliveredToUserId: varchar("delivered_to_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),

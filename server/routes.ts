@@ -238,6 +238,7 @@ function getClientIp(req: Request): string | null {
 }
 
 import crypto from "crypto";
+import { encryptSmsBody } from "./smsEncryption";
 
 function generateSafeCode(): string {
   // 24 hex chars (96 bits), formatted as XXXX-XXXX-XXXX-XXXX-XXXX-XXXX
@@ -588,6 +589,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAgent: typeof userAgent === 'string' ? userAgent : null,
         isNewDevice: isNewDevice && !isNewUser,
       }).catch(err => console.error('Failed to record login event:', err));
+
+      // Concurrent-session / account-hijack alert: if this account already has
+      // a LIVE socket connection from a device other than the one logging in
+      // right now, warn that original session in real time instead of letting
+      // a second session join silently. We deliberately compare deviceId (not
+      // just "any existing connection") so a normal reconnect from the same
+      // device/app instance never falsely trips this.
+      try {
+        const existingSocketIds = socketIO ? connectedUsers.get(user.id) : null;
+        if (existingSocketIds && existingSocketIds.size > 0 && socketIO) {
+          for (const sid of existingSocketIds) {
+            const existingSocket = socketIO.sockets.sockets.get(sid);
+            if (!existingSocket) continue;
+            const existingDeviceId = (existingSocket as any).deviceId ?? null;
+            if (deviceId && existingDeviceId && existingDeviceId === deviceId) continue;
+            existingSocket.emit('concurrent-session-alert', {
+              newDeviceName: deviceName ?? null,
+              newPlatform: platform ?? null,
+              ipAddress,
+              at: new Date().toISOString(),
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Failed to emit concurrent-session-alert:', e);
+      }
 
       // If new device for existing user, push-notify previously registered devices
       if (isNewDevice && !isNewUser && user.pushToken && user.notificationsEnabled !== false) {
@@ -4756,10 +4783,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
+      // Encrypt at rest before it ever touches the database — see
+      // shared/schema.ts's externalSms header comment and
+      // server/smsEncryption.ts. The live socket emission and push
+      // notification below still use the plaintext `Body` we already have
+      // in memory; only the persisted copy is encrypted.
       const externalRow = await storage.insertExternalSms({
         virtualNumberId: virtualNumber.id,
         fromPhoneE164: From,
-        body: Body,
+        body: encryptSmsBody(Body),
+        isEncrypted: true,
         deliveredToUserId: receiver.id,
       });
 
@@ -4920,7 +4953,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tv?: number };
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tv?: number; did?: string };
       // Enforce token version against current DB value so stale tokens
       // (e.g. after logout-all-others) cannot maintain realtime sessions.
       try {
@@ -4935,6 +4968,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       (socket as any).userId = decoded.userId;
       (socket as any).tokenVersion = decoded.tv ?? 0;
+      // Carried through from the JWT so the concurrent-session-alert logic
+      // (see /api/auth/verify-code) can tell "same device reconnecting" apart
+      // from "a genuinely different device just logged in".
+      (socket as any).deviceId = decoded.did ?? null;
       next();
     } catch (error) {
       next(new Error('Invalid token'));

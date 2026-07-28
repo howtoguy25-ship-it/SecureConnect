@@ -56,7 +56,7 @@ module.exports = () => {
       },
       android: {
         adaptiveIcon: {
-          backgroundColor: "#000000",
+          backgroundColor: "#0D0A1A",
           foregroundImage: "./assets/images/icon.png",
         },
         package: "com.securechat.app",
@@ -96,9 +96,9 @@ module.exports = () => {
             image: "./assets/images/splash-icon.png",
             imageWidth: 280,
             resizeMode: "contain",
-            backgroundColor: "#000000",
+            backgroundColor: "#0D0A1A",
             dark: {
-              backgroundColor: "#000000",
+              backgroundColor: "#0D0A1A",
             },
           },
         ],
@@ -112,7 +112,7 @@ module.exports = () => {
         [
           "expo-camera",
           {
-            cameraPermission: "Pryvo needs camera access for video calls",
+            cameraPermission: "Pryvo needs camera access for video calls and optional Peek Detection (spotting when someone else may be looking at your screen)",
             microphonePermission: "Pryvo needs microphone access for calls",
             recordAudioAndroid: true,
           },

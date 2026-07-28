@@ -16,6 +16,8 @@ import { CallProvider } from "@/contexts/CallContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import IncomingCallModal from "@/components/IncomingCallModal";
 import { InAppNotificationBanner } from "@/components/InAppNotificationBanner";
+import { ConcurrentSessionAlert } from "@/components/ConcurrentSessionAlert";
+import { ShoulderSurfingGuard } from "@/components/ShoulderSurfingGuard";
 import { logCheckpoint, deferToNextFrame } from "@/lib/launchInstrumentation";
 
 // LiveKit WebRTC globals must be registered ONCE before any LiveKit Room is
@@ -222,6 +224,8 @@ export default function MainApp() {
                       <RootStackNavigator />
                       <IncomingCallModal />
                       <InAppNotificationBanner />
+                      <ConcurrentSessionAlert />
+                      <ShoulderSurfingGuard />
                     </CallProvider>
                   </NotificationProvider>
                 </NavigationContainer>

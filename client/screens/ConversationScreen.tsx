@@ -3786,7 +3786,7 @@ export default function ConversationScreen() {
               style={[styles.messageOption, { backgroundColor: theme.backgroundDefault }]}
               onPress={handleReplyToMessage}
             >
-              <View style={[styles.messageOptionIcon, { backgroundColor: '#0A84FF' }]}>
+              <View style={[styles.messageOptionIcon, { backgroundColor: theme.primary }]}>
                 <Feather name="corner-up-left" size={20} color="#fff" />
               </View>
               <View style={styles.messageOptionText}>
@@ -3819,7 +3819,7 @@ export default function ConversationScreen() {
                 style={[styles.messageOption, { backgroundColor: theme.backgroundDefault }]}
                 onPress={handleCopyMessage}
               >
-                <View style={[styles.messageOptionIcon, { backgroundColor: '#007AFF' }]}>
+                <View style={[styles.messageOptionIcon, { backgroundColor: theme.primary }]}>
                   <Feather name="copy" size={20} color="#fff" />
                 </View>
                 <View style={styles.messageOptionText}>

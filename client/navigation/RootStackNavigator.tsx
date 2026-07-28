@@ -27,6 +27,7 @@ import RecoveryCodeScreen from "@/screens/RecoveryCodeScreen";
 import TrustedDevicesScreen from "@/screens/TrustedDevicesScreen";
 import SafeCodeScreen from "@/screens/SafeCodeScreen";
 import LoginHistoryScreen from "@/screens/LoginHistoryScreen";
+import PeekDetectionSettingsScreen from "@/screens/PeekDetectionSettingsScreen";
 import RingtoneScreen from "@/screens/RingtoneScreen";
 import BlockedContactsScreen from "@/screens/BlockedContactsScreen";
 import AdminReportsScreen from "@/screens/AdminReportsScreen";
@@ -67,6 +68,7 @@ export type RootStackParamList = {
   TrustedDevices: undefined;
   SafeCode: undefined;
   LoginHistory: undefined;
+  PeekDetectionSettings: undefined;
   Ringtone: undefined;
   BlockedContacts: undefined;
   AdminReports: undefined;
@@ -311,8 +313,15 @@ export default function RootStackNavigator() {
           <Stack.Screen
             name="LoginHistory"
             component={LoginHistoryScreen}
-            options={{ 
+            options={{
               headerTitle: "Login History",
+            }}
+          />
+          <Stack.Screen
+            name="PeekDetectionSettings"
+            component={PeekDetectionSettingsScreen}
+            options={{
+              headerTitle: "Peek Detection",
             }}
           />
           <Stack.Screen

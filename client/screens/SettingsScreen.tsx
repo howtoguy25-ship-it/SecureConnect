@@ -438,7 +438,25 @@ export default function SettingsScreen() {
             trackColor={{ false: theme.border, true: theme.primary }}
           />
         </View>
-        
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={() => navigation.navigate("PeekDetectionSettings" as never)}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#5856D6" }]}>
+              <Feather name="eye-off" size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">Peek Detection</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Hide chats when someone looks over your shoulder
+              </ThemedText>
+            </View>
+          </View>
+          <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+        </Pressable>
+
         <Pressable
           style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
           onPress={() => navigation.navigate("BlockedContacts")}

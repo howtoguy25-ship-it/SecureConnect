@@ -1,14 +1,17 @@
 import { Platform } from "react-native";
 
-const primaryBlue = "#007AFF";
-const primaryBlueDark = "#0A84FF";
+// Professional dark/purple palette. Primary shifted from iOS-system blue to
+// a violet brand color; dark-mode backgrounds shifted from neutral
+// near-black to a purple-tinted "midnight violet" instead of pure black/grey.
+const primaryPurple = "#7C5CFC";
+const primaryPurpleLight = "#9D85FF"; // dark-mode primary — lighter for contrast on dark backgrounds
 const gold = "#FFD700";
 const success = "#34C759";
 const error = "#FF3B30";
 const warning = "#FF9500";
 
 export const TabColors = {
-  chats: "#007AFF",
+  chats: primaryPurple,
   status: "#FF9500",
   location: "#34C759",
   calls: "#AF52DE",
@@ -24,42 +27,44 @@ export const Colors = {
     // Darker than the old #8E8E93 mid-grey specifically so tab labels stay
     // legible over a transparent/blurred tab bar instead of a solid dark fill.
     tabIconDefault: "#3A3A3C",
-    tabIconSelected: primaryBlue,
-    link: primaryBlue,
+    tabIconSelected: primaryPurple,
+    link: primaryPurple,
     backgroundRoot: "#FFFFFF",
     backgroundDefault: "#FFFFFF",
-    backgroundSecondary: "#F5F5F5",
-    backgroundTertiary: "#EBEBEB",
-    primary: primaryBlue,
+    backgroundSecondary: "#F5F3FA",
+    backgroundTertiary: "#EBE6F7",
+    primary: primaryPurple,
     accent: gold,
     success: success,
     error: error,
     warning: warning,
-    sentBubble: primaryBlue,
-    receivedBubble: "#E8E8E8",
-    border: "#E0E0E0",
+    sentBubble: primaryPurple,
+    receivedBubble: "#EDEAF7",
+    border: "#E3DEF0",
   },
   dark: {
     text: "#FFFFFF",
-    textSecondary: "#A0A0A5",
+    textSecondary: "#ABA3C4",
     buttonText: "#FFFFFF",
     // Brighter than the old #8E8E93 so labels stay clearly readable over a
     // transparent/blurred dark tab bar instead of a solid near-black fill.
     tabIconDefault: "#AEAEB2",
-    tabIconSelected: primaryBlueDark,
-    link: primaryBlueDark,
-    backgroundRoot: "#000000",
-    backgroundDefault: "#0A0A0A",
-    backgroundSecondary: "#1A1A1A",
-    backgroundTertiary: "#2A2A2A",
-    primary: primaryBlueDark,
+    tabIconSelected: primaryPurpleLight,
+    link: primaryPurpleLight,
+    // Purple-tinted "midnight violet" instead of neutral near-black, per the
+    // professional dark/purple re-theme.
+    backgroundRoot: "#0D0A1A",
+    backgroundDefault: "#120E22",
+    backgroundSecondary: "#1B1530",
+    backgroundTertiary: "#241D3F",
+    primary: primaryPurpleLight,
     accent: gold,
     success: success,
     error: error,
     warning: warning,
-    sentBubble: primaryBlueDark,
-    receivedBubble: "#1A1A1A",
-    border: "#333333",
+    sentBubble: primaryPurpleLight,
+    receivedBubble: "#1F1938",
+    border: "#332B54",
   },
 };
 

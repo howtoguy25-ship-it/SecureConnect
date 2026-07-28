@@ -376,7 +376,7 @@ export default function ProfileScreen() {
           theme={theme}
           onPress={() => navigation.navigate("Support")}
           iconColor="#fff"
-          iconBgColor="#007AFF"
+          iconBgColor={theme.primary}
         />
       </View>
 

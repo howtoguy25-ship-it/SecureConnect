@@ -240,8 +240,8 @@ export default function WelcomeScreen() {
     }
   }, [navigation]);
 
-  const gradientColors = isDark 
-    ? ['#1a1a2e', '#16213e', '#0f3460'] as const
+  const gradientColors = isDark
+    ? ['#140F26', '#1F1638', '#3A2160'] as const
     : ['#667eea', '#764ba2', '#f093fb'] as const;
 
   const renderCountryItem = ({ item }: { item: Country }) => (
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   selectedBadge: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#7C5CFC",
     paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
     borderRadius: BorderRadius.xs,
@@ -726,7 +726,7 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   countryBadge: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#7C5CFC",
     paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
     borderRadius: BorderRadius.xs,

@@ -47,7 +47,7 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
       name: 'Calls',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 500, 250, 500],
-      lightColor: '#007AFF',
+      lightColor: '#7C5CFC',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       bypassDnd: true,
     });
@@ -56,14 +56,14 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
       name: 'Messages',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#007AFF',
+      lightColor: '#7C5CFC',
     });
     
     await Notifications.setNotificationChannelAsync('activity', {
       name: 'Activity',
       importance: Notifications.AndroidImportance.LOW,
       vibrationPattern: [0, 100],
-      lightColor: '#007AFF',
+      lightColor: '#7C5CFC',
     });
   }
 
