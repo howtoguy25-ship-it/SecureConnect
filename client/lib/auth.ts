@@ -45,33 +45,39 @@ export async function sendVerificationCode(phoneNumber: string): Promise<SendCod
   } catch (error: any) {
     console.error('Failed to send code:', error);
 
-    // Try to surface the server's specific error message first (e.g. Twilio
-    // "unverified caller", invalid number, rate limit).
+    // Surface the server's specific error message first (e.g. Twilio
+    // "unverified caller", invalid number, rate limit). apiRequest's
+    // throwIfResNotOk already throws `new Error(json.error)` directly —
+    // no "<status>: " prefix and no re-wrapped JSON to parse — so
+    // error.message IS the server's message as-is. (A previous version of
+    // this function tried to strip a numeric status-code prefix that the
+    // API layer never actually produces, which meant the real reason was
+    // silently discarded on every failure.)
     if (error?.message) {
-      const match = error.message.match(/^\d+:\s*(.+)$/);
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[1]);
-          if (parsed?.error && typeof parsed.error === 'string') {
-            return { success: false, error: parsed.error };
-          }
-        } catch {
-          // fall through to network-level diagnostics
-        }
+      const msg = String(error.message);
+      const isNetworkOrGenericError =
+        msg.toLowerCase().includes('network request failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('typeerror') ||
+        msg.toLowerCase().includes('timeout') ||
+        msg.toLowerCase().includes('aborted') ||
+        /^request failed with status \d+$/i.test(msg);
+      if (!isNetworkOrGenericError) {
+        return { success: false, error: msg };
       }
 
       // Network-level diagnostics: differentiate offline / timeout / server
       // unreachable instead of showing a single generic line. This is what
       // App Store reviewers and real users see when something genuinely
       // breaks at the transport layer.
-      const msg = String(error.message).toLowerCase();
-      if (msg.includes('network request failed') || msg.includes('failed to fetch') || msg.includes('typeerror')) {
+      const lowerMsg = msg.toLowerCase();
+      if (lowerMsg.includes('network request failed') || lowerMsg.includes('failed to fetch') || lowerMsg.includes('typeerror')) {
         return {
           success: false,
           error: "Can't reach Pryvo right now. Check your internet connection and try again.",
         };
       }
-      if (msg.includes('timeout') || msg.includes('aborted')) {
+      if (lowerMsg.includes('timeout') || lowerMsg.includes('aborted')) {
         return {
           success: false,
           error: 'The request took too long. Please try again on a stronger connection.',
