@@ -26,9 +26,28 @@ const firebaseConfig = {
 
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-export const auth = initializeAuth(firebaseApp, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+// DIAGNOSTIC BUILD -- AsyncStorage-backed persistence temporarily removed. Sentry's native
+// layer and the entire ad SDK (App Open + Banner, including mobileAds().initialize() and the
+// ATT prompt) are now BOTH conclusively ruled out (build 25: everything from both subsystems
+// off, identical crash persisted). Next candidate with real structural evidence, read directly
+// from the installed package: node_modules/@react-native-async-storage/async-storage's
+// NativeAsyncStorageModuleSpecJSI (ios/RNCAsyncStorage.mm line ~901, under
+// RCT_NEW_ARCH_ENABLED) bridges through ObjCTurboModule exactly like the ad SDK did, and every
+// exported method (multiGet/multiSet/multiMerge/getAllKeys/clear -- see
+// src/NativeAsyncStorageModule.ts's Spec) is typed `=> void` with a plain callback param, the
+// identical performVoidMethodInvocation pattern as appOpenLoad/BannerAd's Commands.load. Unlike
+// ads/Sentry, AsyncStorage was NEVER disabled in any build tested so far (20-25) -- it fires
+// unconditionally on every single cold launch via this persistence call (before first render)
+// and via SettingsContext's loadSettings()/getVoiceEnabled() (see App.tsx/SettingsContext.tsx
+// for that half of this same test). Falling back to in-memory-only auth persistence here
+// isolates whether Firebase's AsyncStorage reads specifically are involved.
+const DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE = true;
+
+export const auth = DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE
+  ? initializeAuth(firebaseApp)
+  : initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
 
 export const db = getFirestore(firebaseApp);
 
