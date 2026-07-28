@@ -172,7 +172,19 @@ class LiveKitService {
       let keyProvider: any = null;
       if (e2eeKey && ExternalE2EEKeyProvider) {
         try {
-          const worker = new Worker(new URL('livekit-client/e2ee-worker', import.meta.url), { type: 'module' });
+          // Base for the inner new URL(...) must NOT be import.meta.url: this
+          // project's Expo web export loads the main bundle as a classic
+          // (non-module) <script>, where `import.meta` is a hard parse-time
+          // SyntaxError anywhere in the file — even unreached inside this
+          // try block, since script-vs-module parsing is decided for the
+          // whole file, not per-statement. Confirmed by exporting the web
+          // build and parsing the bundle standalone. Metro's worker-splitting
+          // transform (collect-dependencies.js) only pattern-matches
+          // `new Worker(new URL("literal", <anything>))` — it doesn't care
+          // what the second argument is beyond needing a valid absolute-URL
+          // base, and it rewrites the first argument to an already-absolute
+          // resolved path — so any valid same-origin base works here.
+          const worker = new Worker(new URL('livekit-client/e2ee-worker', self.location.href), { type: 'module' });
           keyProvider = new ExternalE2EEKeyProvider();
           this.room = new Room({
             adaptiveStream: true,
