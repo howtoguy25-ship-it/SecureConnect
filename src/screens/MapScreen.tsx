@@ -379,7 +379,14 @@ export function MapScreen() {
 
       {/* Never shown while navigating -- a driving app shouldn't have anything competing for
           attention with the road/turn instructions, safety concern first and foremost. */}
-      {!route && (
+      {/* DIAGNOSTIC: disabled -- see App.tsx's DIAGNOSTIC_DISABLE_APP_OPEN_AD. BannerAd's own
+          native `load` command (Commands.load in GoogleMobileAdsBannerViewNativeComponent.ts)
+          is *also* a void-returning TurboModule call, the same crash-signature match as
+          appOpenLoad, and it fires unconditionally the moment this mounts (every launch, since
+          !route is true until navigation starts) -- this was never actually excluded by the
+          build 24 AppOpenAdManager-only test, so that test wasn't a clean isolation of ads as
+          a whole. Disabling this too for a real one. */}
+      {false && !route && (
         <AdsErrorBoundary>
           <BannerAdBar />
         </AdsErrorBoundary>
