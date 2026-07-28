@@ -88,13 +88,19 @@ export default function MainTabNavigator() {
             paddingBottom: bottomInset,
             paddingTop: 6,
             paddingHorizontal: 8,
+            // Transparent tab bar: on iOS the BlurView below supplies the
+            // frosted-glass fill, so this stays fully transparent. Android
+            // and web have no native blur here, so they get a translucent
+            // wash of the current theme's own background instead of a
+            // flat opaque color, tinted rather than a solid black bar in
+            // every theme.
             backgroundColor: Platform.select({
-              ios: "rgba(10, 10, 10, 0.95)",
-              android: "#0A0A0A",
-              default: "#0A0A0A",
+              ios: "transparent",
+              android: isDark ? "rgba(10, 10, 10, 0.85)" : "rgba(255, 255, 255, 0.85)",
+              default: isDark ? "rgba(10, 10, 10, 0.85)" : "rgba(255, 255, 255, 0.85)",
             }),
             borderTopWidth: 0.5,
-            borderTopColor: "rgba(255, 255, 255, 0.1)",
+            borderTopColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
             elevation: 0,
           };
         })(),
@@ -118,7 +124,7 @@ export default function MainTabNavigator() {
           Platform.OS === "ios" ? (
             <BlurView
               intensity={80}
-              tint="dark"
+              tint={isDark ? "dark" : "light"}
               style={StyleSheet.absoluteFill}
             />
           ) : null,

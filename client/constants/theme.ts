@@ -21,7 +21,9 @@ export const Colors = {
     text: "#000000",
     textSecondary: "#6B6B6B",
     buttonText: "#FFFFFF",
-    tabIconDefault: "#8E8E93",
+    // Darker than the old #8E8E93 mid-grey specifically so tab labels stay
+    // legible over a transparent/blurred tab bar instead of a solid dark fill.
+    tabIconDefault: "#3A3A3C",
     tabIconSelected: primaryBlue,
     link: primaryBlue,
     backgroundRoot: "#FFFFFF",
@@ -41,7 +43,9 @@ export const Colors = {
     text: "#FFFFFF",
     textSecondary: "#A0A0A5",
     buttonText: "#FFFFFF",
-    tabIconDefault: "#8E8E93",
+    // Brighter than the old #8E8E93 so labels stay clearly readable over a
+    // transparent/blurred dark tab bar instead of a solid near-black fill.
+    tabIconDefault: "#AEAEB2",
     tabIconSelected: primaryBlueDark,
     link: primaryBlueDark,
     backgroundRoot: "#000000",
