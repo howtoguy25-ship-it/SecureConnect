@@ -6,6 +6,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { Feather } from "@expo/vector-icons";
+import { useAuth } from "@/contexts/AuthContext";
 
 const SUPPORT_EMAIL = "adisssal7@hotmail.com";
 
@@ -36,9 +37,16 @@ export default function SupportScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const isVip = !!user?.isVip;
 
   const openEmail = () => {
-    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Pryvo%20Support`);
+    // VIP subject line is intentionally distinct so priority requests are
+    // visually flagged in the inbox and handled first — the actual
+    // mechanism behind the "Priority Support" VIP perk.
+    const subject = isVip ? "%5BVIP%5D%20Pryvo%20Priority%20Support" : "Pryvo%20Support";
+    const body = isVip ? `?subject=${subject}&body=VIP%20Member%20-%20Phone%3A%20${encodeURIComponent(user?.phoneNumber ?? "")}` : `?subject=${subject}`;
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}${body}`);
   };
 
   return (
@@ -56,15 +64,27 @@ export default function SupportScreen() {
           <Feather name="headphones" size={36} color={theme.primary} />
         </View>
         <ThemedText type="h2" style={styles.heroTitle}>Help & Support</ThemedText>
+        {isVip ? (
+          <View style={[styles.vipPill, { backgroundColor: theme.primary + "20" }]}>
+            <Feather name="award" size={14} color={theme.primary} />
+            <ThemedText type="small" style={[styles.vipPillText, { color: theme.primary }]}>
+              VIP Priority Support
+            </ThemedText>
+          </View>
+        ) : null}
         <ThemedText type="body" style={[styles.heroSub, { color: theme.textSecondary }]}>
-          We are here to help. Reach out any time and we will respond within 24 hours.
+          {isVip
+            ? "As a VIP member, your requests are flagged and handled first — we'll respond within 4 hours."
+            : "We are here to help. Reach out any time and we will respond within 24 hours."}
         </ThemedText>
         <Pressable
           style={[styles.emailBtn, { backgroundColor: theme.primary }]}
           onPress={openEmail}
         >
           <Feather name="mail" size={18} color="#fff" />
-          <ThemedText type="body" style={styles.emailBtnText}>Email Support</ThemedText>
+          <ThemedText type="body" style={styles.emailBtnText}>
+            {isVip ? "Email Priority Support" : "Email Support"}
+          </ThemedText>
         </Pressable>
         <ThemedText type="small" style={[styles.emailAddr, { color: theme.textSecondary }]}>
           {SUPPORT_EMAIL}
@@ -116,6 +136,18 @@ const styles = StyleSheet.create({
   heroTitle: {
     textAlign: "center",
     marginBottom: Spacing.sm,
+  },
+  vipPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    marginBottom: Spacing.sm,
+  },
+  vipPillText: {
+    fontWeight: "700",
   },
   heroSub: {
     textAlign: "center",

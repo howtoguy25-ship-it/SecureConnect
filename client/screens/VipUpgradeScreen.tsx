@@ -15,11 +15,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { iapService } from "@/services/InAppPurchaseService";
 
 const VIP_FEATURES = [
-  { icon: "lock" as const, title: "Hidden Message Locker", description: "Store private messages and photos in a PIN-protected vault" },
-  { icon: "map-pin" as const, title: "Real-Time Location Sharing", description: "Share your live location with friends and see where they are on a map" },
   { icon: "image" as const, title: "Custom Chat Backgrounds", description: "Personalize your conversations with custom background images" },
-  { icon: "eye-off" as const, title: "Ad-Free Experience", description: "Enjoy Pryvo without any advertisements" },
-  { icon: "phone" as const, title: "Virtual Phone Number", description: "Get a dedicated app-only number for private communication" },
+  { icon: "map-pin" as const, title: "Real-Time Location Sharing", description: "Share your live location with friends and see where they are on a map" },
+  { icon: "lock" as const, title: "Hidden Message Locker", description: "Store private messages and photos in a PIN-protected vault" },
+  { icon: "eye-off" as const, title: "3-Month Ad-Free Experience", description: "Enjoy Pryvo with no ads for your first 3 months as a VIP" },
+  { icon: "headphones" as const, title: "Priority Support", description: "Your support requests are flagged and answered first" },
 ];
 
 export default function VipUpgradeScreen() {
