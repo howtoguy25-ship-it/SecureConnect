@@ -21,7 +21,13 @@ services:
     # Hit this as two separate failures before adding this flag instead
     # of promoting every missing dev tool into "dependencies" one at a
     # time.
-    buildCommand: npm install --include=dev && npx expo export -p web --output-dir web-build && npm run server:build
+    # EXPO_BASE_URL=/app tells the web export to emit asset paths prefixed
+    # with /app (app.config.js experiments.baseUrl) — the web bundle is
+    # mounted at /app (see server/index.ts), but a plain `expo export`
+    # always writes domain-root-absolute paths like `/_expo/static/...`
+    # into index.html. Without this, index.html loads fine but its <script>
+    # tag 404s against the domain root, leaving #root empty (blank screen).
+    buildCommand: npm install --include=dev && EXPO_BASE_URL=/app npx expo export -p web --output-dir web-build && npm run server:build
     # Runs after build, before the new instance takes traffic, with the
     # same env vars as the service — including the internal DATABASE_URL,
     # which this sandbox can't reach directly (only HTTPS is proxied out,
