@@ -8,7 +8,12 @@ services:
     name: pryvo-server
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run server:build
+    # Builds both halves of the app: the web bundle (served at /app/* —
+    # see server/index.ts's static serving block) and the server bundle.
+    # scripts/build.js (npm run expo:static:build) is Replit-specific
+    # (spawns a dev-server-style Metro process), so this uses a plain
+    # `expo export` instead, which is what actually gets tested locally.
+    buildCommand: npm install && npx expo export -p web --output-dir web-build && npm run server:build
     startCommand: npm run server:prod
     healthCheckPath: /
     envVars:
