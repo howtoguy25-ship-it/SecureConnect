@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, StyleSheet, Pressable, Modal, AppState, AppStateStatus } from 'react-native';
+import { View, StyleSheet, Pressable, Modal, AppState, AppStateStatus, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ThemedText } from '@/components/ThemedText';
 import { useTheme } from '@/hooks/useTheme';
@@ -17,14 +17,31 @@ import {
 
 const SAMPLE_INTERVAL_MS = 2500;
 
-// See client/utils/shoulderSurfing/detector.ts for exactly what "detection"
-// means in this build (a JPEG-size-delta heuristic, not a real face-count
-// model) and why. This component owns the full lifecycle around that
-// signal: only running the camera while it's actually useful (feature on,
+// Lazily imported: @react-native-ml-kit/face-detection is a native module
+// with no web implementation. Importing it unconditionally would crash the
+// web build at bundle-load time, so it's only required on native platforms
+// where it's actually used (see runDetection below).
+let FaceDetectionModule: typeof import('@react-native-ml-kit/face-detection').default | null = null;
+function getFaceDetection() {
+  if (Platform.OS === 'web') return null;
+  if (FaceDetectionModule) return FaceDetectionModule;
+  try {
+    FaceDetectionModule = require('@react-native-ml-kit/face-detection').default;
+    return FaceDetectionModule;
+  } catch {
+    return null;
+  }
+}
+
+// See client/utils/shoulderSurfing/detector.ts — this now runs real
+// on-device face detection (Google ML Kit) on each captured frame, not a
+// heuristic proxy. Web has no ML Kit binding, so it falls back to the
+// byte-size heuristic there only; iOS/Android get genuine face-count
+// detection. This component owns the full lifecycle around that signal:
+// only running the camera while it's actually useful (feature on,
 // permission granted, app foregrounded, a conversation open), asking the
 // user, dimming on "yes", and enforcing the cooldown either way so the
-// alert can't spam the user. Runs identically on iOS, Android, and web —
-// expo-camera's CameraView supports all three.
+// alert can't spam the user.
 export function ShoulderSurfingGuard() {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -109,20 +126,34 @@ export function ShoulderSurfingGuard() {
 
       capturingRef.current = true;
       try {
-        const photo = await cam.takePictureAsync({ quality: 0, base64: true, skipProcessing: true });
-        // Web returns a data: URL ("data:image/jpeg;base64,...."); native
-        // returns the raw base64 payload with no prefix. Strip it so the
-        // byte-length heuristic measures the same thing on every platform.
-        const rawB64 = photo?.base64;
-        const b64 = rawB64?.startsWith('data:') ? rawB64.slice(rawB64.indexOf(',') + 1) : rawB64;
-        if (b64) {
-          const triggered = detectorRef.current.addSample(b64.length);
-          if (triggered) {
-            setAlertVisible(true);
+        const FaceDetection = getFaceDetection();
+        if (FaceDetection) {
+          // Native path: real face-count detection. Capture to a temp file
+          // (uri) rather than base64 — ML Kit's detect() takes a file URI.
+          const photo = await cam.takePictureAsync({ quality: 0.3, skipProcessing: true });
+          if (photo?.uri) {
+            const faces = await FaceDetection.detect(photo.uri, { performanceMode: 'fast' });
+            const triggered = detectorRef.current.addSample(Array.isArray(faces) ? faces.length : 0);
+            if (triggered) setAlertVisible(true);
+          }
+        } else {
+          // Web fallback: no ML Kit binding, use the byte-size heuristic.
+          const photo = await cam.takePictureAsync({ quality: 0, base64: true, skipProcessing: true });
+          const rawB64 = photo?.base64;
+          const b64 = rawB64?.startsWith('data:') ? rawB64.slice(rawB64.indexOf(',') + 1) : rawB64;
+          if (b64) {
+            // A single elevated byte-length reading isn't face-aware, so
+            // require the same sample to look "elevated" relative to a
+            // fixed floor rather than feeding raw length into a face-count
+            // detector — reuse the count-based detector by mapping a big
+            // jump to "2 faces", anything normal to "1".
+            const elevated = b64.length > 15000; // ~ typical single-face front-cam JPEG at quality 0
+            const triggered = detectorRef.current.addSample(elevated ? 2 : 1);
+            if (triggered) setAlertVisible(true);
           }
         }
       } catch {
-        // Camera not ready / transient capture failure — just skip this tick.
+        // Camera not ready / detection failure — just skip this tick.
       } finally {
         capturingRef.current = false;
       }

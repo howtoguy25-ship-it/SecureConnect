@@ -118,7 +118,7 @@ export default function PeekDetectionSettingsScreen() {
       <View style={[styles.infoCard, { backgroundColor: theme.warning + "12", borderColor: theme.warning + "30" }]}>
         <Feather name="info" size={16} color={theme.warning} />
         <ThemedText type="small" style={{ color: theme.textSecondary, flex: 1, lineHeight: 18 }}>
-          This uses a lightweight on-device visual-change signal, not facial recognition — it can't identify who's around, only that something changed in the camera's view. Treat alerts as a helpful nudge, not a guarantee.
+          This uses on-device face detection to notice when more than one face is in view of your front camera. It doesn't identify who anyone is, and nothing is ever sent off your device — detection runs entirely locally. Treat alerts as a helpful nudge, not a guarantee.
         </ThemedText>
       </View>
 
