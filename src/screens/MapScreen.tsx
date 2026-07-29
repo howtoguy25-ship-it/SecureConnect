@@ -31,6 +31,7 @@ import { AdsErrorBoundary } from "@/components/AdsErrorBoundary";
 import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
 import { PlaceInfoSheet } from "@/screens/PlaceInfoSheet";
+import { OsmMarkerSheet, type OsmMarkerKind } from "@/screens/OsmMarkerSheet";
 import { getRouteOptions, DirectionsApiError, type Route, type RouteProfileKey } from "@/services/directions";
 import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
 import type { LatLng } from "@/utils/polyline";
@@ -64,6 +65,7 @@ export function MapScreen() {
   const reportSheetRef = useRef<BottomSheet>(null);
   const detailSheetRef = useRef<BottomSheet>(null);
   const placeInfoSheetRef = useRef<BottomSheet>(null);
+  const osmMarkerSheetRef = useRef<BottomSheet>(null);
 
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -107,7 +109,8 @@ export function MapScreen() {
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [placeInfoSheetOpen, setPlaceInfoSheetOpen] = useState(false);
-  const anySheetOpen = reportSheetOpen || detailSheetOpen || placeInfoSheetOpen;
+  const [osmMarkerSheetOpen, setOsmMarkerSheetOpen] = useState(false);
+  const anySheetOpen = reportSheetOpen || detailSheetOpen || placeInfoSheetOpen || osmMarkerSheetOpen;
   const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
 
   // Real "tap a shop, see its info" -- iOS's native MapKit provider here has no onPoiClick
@@ -115,6 +118,14 @@ export function MapScreen() {
   // looks up whatever business is closest to that point via Places Nearby Search + Details.
   const [placeInfo, setPlaceInfo] = useState<PlaceInfo | null>(null);
   const [placeInfoLoading, setPlaceInfoLoading] = useState(false);
+
+  const [osmMarkerKind, setOsmMarkerKind] = useState<OsmMarkerKind | null>(null);
+  const [osmMarkerLocation, setOsmMarkerLocation] = useState<LatLng | null>(null);
+  const onOsmMarkerPress = useCallback((kind: OsmMarkerKind, location: LatLng) => {
+    setOsmMarkerKind(kind);
+    setOsmMarkerLocation(location);
+    osmMarkerSheetRef.current?.expand();
+  }, []);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
   // Real photorealistic 3D satellite (Android only for now, see modules/map3d) -- Stage 1:
@@ -308,45 +319,58 @@ export function MapScreen() {
     [currentLatLng]
   );
 
-  // Min zoom before the OSM layer queries at all -- a zoomed-out view spans too wide an area
-  // for a reasonable Overpass request/response size. ~0.03 latitudeDelta is roughly a
-  // few-km-wide view, comparable to web's OSM_LAYER_MIN_ZOOM.
+  // Min zoom before the OSM layer *re-fetches* -- a zoomed-out view spans too wide an area for
+  // a reasonable Overpass request/response size. ~0.03 latitudeDelta is roughly a few-km-wide
+  // view, comparable to web's OSM_LAYER_MIN_ZOOM. Zooming out past this only skips asking for
+  // *new* data -- it must NOT clear osmData, or a toggled-on layer visibly disappears the
+  // moment you zoom out, which is exactly the bug reported ("zooming out the traffic lights or
+  // speed cameras... disappears"). Whatever was already fetched for the last in-range view
+  // stays on screen; it only gets replaced once the user zooms back in and pans to a new area.
   const OSM_LAYER_MAX_DELTA = 0.03;
 
-  const onRegionChangeComplete = useCallback((region: Region) => {
-    if (osmDebounceRef.current) clearTimeout(osmDebounceRef.current);
-    if (!settings.showTrafficLights && !settings.showSpeedCameras) {
-      setOsmData(null);
-      setOsmLoading(false);
-      return;
-    }
-    if (region.latitudeDelta > OSM_LAYER_MAX_DELTA) {
-      setOsmData(null);
-      setOsmLoading(false);
-      return;
-    }
-    osmDebounceRef.current = setTimeout(() => {
-      const bounds = {
-        sw: {
-          latitude: region.latitude - region.latitudeDelta / 2,
-          longitude: region.longitude - region.longitudeDelta / 2,
-        },
-        ne: {
-          latitude: region.latitude + region.latitudeDelta / 2,
-          longitude: region.longitude + region.longitudeDelta / 2,
-        },
-      };
-      setOsmLoading(true);
-      fetchOsmTrafficData(bounds, {
-        wantTrafficLights: settings.showTrafficLights,
-        wantSpeedCameras: settings.showSpeedCameras,
-      })
-        .then(setOsmData)
-        .catch((err) => console.warn("[map] OSM traffic layer fetch failed", err))
-        .finally(() => setOsmLoading(false));
-    }, 1200);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.showTrafficLights, settings.showSpeedCameras]);
+  const onRegionChangeComplete = useCallback(
+    (region: Region) => {
+      // Manual alert placement uses a fixed pin at the center of the screen and moves the map
+      // underneath it instead of a draggable Marker (see onAlertTypeSelected above) -- so the
+      // "drag" is really just keeping alertPlacementLatLng in sync with wherever the map
+      // settles after every pan/pinch-zoom gesture.
+      if (placingAlert) {
+        setAlertPlacementLatLng({ latitude: region.latitude, longitude: region.longitude });
+      }
+
+      if (osmDebounceRef.current) clearTimeout(osmDebounceRef.current);
+      if (!settings.showTrafficLights && !settings.showSpeedCameras) {
+        setOsmData(null);
+        setOsmLoading(false);
+        return;
+      }
+      if (region.latitudeDelta > OSM_LAYER_MAX_DELTA) {
+        setOsmLoading(false);
+        return;
+      }
+      osmDebounceRef.current = setTimeout(() => {
+        const bounds = {
+          sw: {
+            latitude: region.latitude - region.latitudeDelta / 2,
+            longitude: region.longitude - region.longitudeDelta / 2,
+          },
+          ne: {
+            latitude: region.latitude + region.latitudeDelta / 2,
+            longitude: region.longitude + region.longitudeDelta / 2,
+          },
+        };
+        setOsmLoading(true);
+        fetchOsmTrafficData(bounds, {
+          wantTrafficLights: settings.showTrafficLights,
+          wantSpeedCameras: settings.showSpeedCameras,
+        })
+          .then(setOsmData)
+          .catch((err) => console.warn("[map] OSM traffic layer fetch failed", err))
+          .finally(() => setOsmLoading(false));
+      }, 1200);
+    },
+    [placingAlert, settings.showTrafficLights, settings.showSpeedCameras]
+  );
 
   const onMapPress = useCallback(
     (e: MapPressEvent) => {
@@ -444,10 +468,20 @@ export function MapScreen() {
 
   // Flow (per spec: select the type first, then drag to place, then Set/Save):
   // 1. FAB -> openAlertTypePicker: opens AlertReportSheet, nothing else happens yet.
-  // 2. onAlertTypeSelected: sheet closes, placement mode starts (draggable pin at the live
-  //    position, type remembered in a ref for the eventual save).
+  // 2. onAlertTypeSelected: sheet closes, placement mode starts (type remembered in a ref for
+  //    the eventual save).
   // 3. confirmAlertPlacement ("Set"): actually writes the alert at wherever the pin ended up.
   // 4. cancelAlertPlacement ("Cancel"): aborts, no write.
+  //
+  // The pin itself is NOT a draggable Marker -- react-native-maps' per-marker drag gesture
+  // recognizer on iOS reliably loses to (or gets left in a broken state by) the map's own
+  // pinch-zoom recognizer: real user report was "doesn't allow to drag the pin for any alert
+  // ... with zoom out with fingers and re-drag". Instead this uses the same fixed
+  // center-of-screen pin + drag-the-map-underneath-it pattern Uber/Google Maps' own "choose a
+  // location" flows use -- panning/zooming the map is the map's native, always-reliable
+  // gesture, so there's no competing recognizer to lose to. alertPlacementLatLng is just kept
+  // in sync with the map's own region center (see onRegionChangeComplete below) while
+  // placingAlert is true; the pin view itself never moves, the map moves under it.
   const pendingAlertTypeRef = useRef<AlertType | null>(null);
 
   const openAlertTypePicker = useCallback(() => {
@@ -461,6 +495,12 @@ export function MapScreen() {
       reportSheetRef.current?.close();
       setAlertPlacementLatLng(currentLatLng);
       setPlacingAlert(true);
+      // Snap the map to center on the current location so the fixed center pin starts exactly
+      // where alertPlacementLatLng says it is, even if the user had panned away beforehand.
+      mapRef.current?.animateToRegion(
+        { ...currentLatLng, latitudeDelta: 0.006, longitudeDelta: 0.006 },
+        300
+      );
     },
     [currentLatLng]
   );
@@ -607,20 +647,6 @@ export function MapScreen() {
             </Marker>
           </>
         )}
-        {/* Manual alert placement -- a real draggable pin (react-native-maps' own built-in
-            drag support), not just wherever GPS says the phone is right now. */}
-        {placingAlert && alertPlacementLatLng && (
-          <Marker
-            coordinate={alertPlacementLatLng}
-            draggable
-            onDragEnd={(e) => setAlertPlacementLatLng(e.nativeEvent.coordinate)}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.placementPinWrap}>
-              <Ionicons name="location" size={44} color={colors.danger} />
-            </View>
-          </Marker>
-        )}
         {visibleAlerts.map((alert) => (
           <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
         ))}
@@ -631,6 +657,10 @@ export function MapScreen() {
               coordinate={{ latitude: p.lat, longitude: p.lng }}
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
+              onPress={(e) => {
+                e.stopPropagation();
+                onOsmMarkerPress("traffic_light", { latitude: p.lat, longitude: p.lng });
+              }}
             >
               <View style={styles.osmIconBadgeTrafficLight}>
                 <MaterialCommunityIcons name="traffic-light" size={11} color="#FFFFFF" />
@@ -644,6 +674,10 @@ export function MapScreen() {
               coordinate={{ latitude: p.lat, longitude: p.lng }}
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
+              onPress={(e) => {
+                e.stopPropagation();
+                onOsmMarkerPress("speed_camera", { latitude: p.lat, longitude: p.lng });
+              }}
             >
               <View style={styles.osmIconBadgeSpeedCamera}>
                 <MaterialCommunityIcons name="cctv" size={11} color="#FFFFFF" />
@@ -651,6 +685,15 @@ export function MapScreen() {
             </Marker>
           ))}
       </MapView>
+      )}
+
+      {/* Fixed center-of-screen pin for manual alert placement -- see the comment on
+          onAlertTypeSelected/onRegionChangeComplete above for why this replaced a draggable
+          Marker. Never moves itself; the map pans/zooms underneath it instead. */}
+      {placingAlert && (
+        <View style={styles.placementPinOverlay} pointerEvents="none">
+          <Ionicons name="location" size={44} color={colors.danger} />
+        </View>
       )}
 
       {show3D && isMap3DSupported && currentLatLng && (
@@ -844,7 +887,7 @@ export function MapScreen() {
 
       {placingAlert && (
         <View style={[styles.placementBar, { bottom: insets.bottom + spacing.xl }]}>
-          <Text style={styles.placementBarText}>Drag the pin to the exact spot</Text>
+          <Text style={styles.placementBarText}>Move the map to place the pin</Text>
           <View style={styles.placementBarButtons}>
             <Pressable
               style={({ pressed }) => [
@@ -899,6 +942,13 @@ export function MapScreen() {
         onClose={() => placeInfoSheetRef.current?.close()}
         onSheetChange={(index) => setPlaceInfoSheetOpen(index >= 0)}
       />
+      <OsmMarkerSheet
+        ref={osmMarkerSheetRef}
+        kind={osmMarkerKind}
+        location={osmMarkerLocation}
+        onClose={() => osmMarkerSheetRef.current?.close()}
+        onSheetChange={(index) => setOsmMarkerSheetOpen(index >= 0)}
+      />
 
       {placeInfoLoading && (
         <View style={styles.placeInfoLoadingBadge} pointerEvents="none">
@@ -926,7 +976,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...shadow.medium,
   },
-  placementPinWrap: {
+  placementPinOverlay: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    // Icon is 44x44; offset so the pin's point (bottom-center of the glyph) lands exactly on
+    // the map's screen-center coordinate, not the icon's own center.
+    marginLeft: -22,
+    marginTop: -44,
     alignItems: "center",
     justifyContent: "center",
     ...shadow.high,
