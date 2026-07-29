@@ -250,7 +250,7 @@ export default function ChatsScreen() {
 
   React.useLayoutEffect(() => {
     navigation.setOptions({
-      headerTitle: () => <HeaderTitle title="SecureChat" />,
+      headerTitle: () => <HeaderTitle title="Pryvo Messenger" />,
       headerLeft: () => (
         <Pressable
           onPress={() => navigation.navigate("VipUpgrade")}

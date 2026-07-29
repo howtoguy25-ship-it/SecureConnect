@@ -13,6 +13,7 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Clipboard from "expo-clipboard";
+import * as ScreenCapture from "expo-screen-capture";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -35,6 +36,18 @@ export default function SafeCodeScreen() {
   const [loading, setLoading] = useState(true);
   const [acknowledging, setAcknowledging] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // The Account ID shown on this screen is the one and only time it's ever
+  // displayed in plaintext — screenshotting it and letting the image sync to
+  // cloud photo storage defeats the entire point of "write it down somewhere
+  // secret". Block screenshots/recording for as long as this screen is
+  // mounted.
+  useEffect(() => {
+    ScreenCapture.preventScreenCaptureAsync("safe-code").catch(() => {});
+    return () => {
+      ScreenCapture.allowScreenCaptureAsync("safe-code").catch(() => {});
+    };
+  }, []);
 
   const fetchCode = useCallback(async () => {
     setLoading(true);

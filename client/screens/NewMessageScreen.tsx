@@ -169,7 +169,7 @@ export default function NewMessageScreen() {
       if (response.ok) {
         Alert.alert(
           "Invite Sent",
-          `We've sent an SMS invite to ${searchedNumber}. They'll be able to message you once they join SecureChat.`,
+          `We've sent an SMS invite to ${searchedNumber}. They'll be able to message you once they join Pryvo Messenger.`,
           [{ text: "OK", onPress: () => navigation.goBack() }]
         );
       } else {
@@ -186,7 +186,7 @@ export default function NewMessageScreen() {
 
   const handleShareWhatsApp = async () => {
     const senderName = user?.displayName || "Someone";
-    const appStoreLink = "https://apps.apple.com/app/secureconnect-chat/id6744919552";
+    const appStoreLink = "https://apps.apple.com/app/secureconnect-encrypted/id6756967188";
     const message = `Hey! ${senderName} wants to chat with you on Pryvo - a secure messaging app. Download it here: ${appStoreLink}`;
     const whatsappNumber = searchedNumber.replace(/\+/g, "");
     
@@ -215,7 +215,7 @@ export default function NewMessageScreen() {
 
   const handleShareApp = async () => {
     const senderName = user?.displayName || "A friend";
-    const appStoreLink = "https://apps.apple.com/app/secureconnect-chat/id6744919552";
+    const appStoreLink = "https://apps.apple.com/app/secureconnect-encrypted/id6756967188";
     const message = `${senderName} wants to chat with you on Pryvo - a secure encrypted messaging app. Download here: ${appStoreLink}`;
     
     try {
@@ -385,7 +385,7 @@ export default function NewMessageScreen() {
               <View style={styles.emptyContainer}>
                 <Feather name="user-plus" size={48} color={theme.primary} />
                 <ThemedText type="body" style={{ color: theme.text, fontWeight: "600" }}>
-                  Not on SecureChat yet
+                  Not on Pryvo Messenger yet
                 </ThemedText>
                 <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: "center", marginBottom: Spacing.lg }}>
                   {searchedNumber} isn't registered. Send them an invite to start messaging!
@@ -457,7 +457,7 @@ export default function NewMessageScreen() {
                   Search for a contact
                 </ThemedText>
                 <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: "center" }}>
-                  Enter a phone number to find SecureChat users or invite someone new
+                  Enter a phone number to find Pryvo Messenger users or invite someone new
                 </ThemedText>
               </View>
             ) : null

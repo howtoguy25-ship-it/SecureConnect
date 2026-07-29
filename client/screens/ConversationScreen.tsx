@@ -416,6 +416,35 @@ export default function ConversationScreen() {
     },
   });
 
+  // Solid-color backgrounds reuse the same chatBackgroundUrl column with a
+  // "color:#hex" value instead of an image path — no schema change needed.
+  // Rendering below (chatBackgroundUrl.startsWith("color:")) branches to a
+  // plain colored View instead of an <Image>.
+  const setSolidColorBackgroundMutation = useMutation({
+    mutationFn: async (hex: string) => {
+      await apiRequest('PUT', '/api/user/chat-background', { chatBackgroundUrl: `color:${hex}` });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/user/chat-background"] });
+      setShowChatSettings(false);
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to set background');
+    },
+  });
+
+  // Five dark, purple-toned presets pulled from the app's own palette family
+  // so a solid background never fights the bubble colors or clashes with
+  // white text — every option here is dark enough that theme.text (#FFF)
+  // and the sent/received bubble colors stay fully legible on top of it.
+  const CHAT_BACKGROUND_COLORS = [
+    { name: "Midnight Violet", hex: "#120E22" },
+    { name: "Deep Plum", hex: "#1D1030" },
+    { name: "Royal Indigo", hex: "#181433" },
+    { name: "Wine Berry", hex: "#2A1024" },
+    { name: "Slate Teal", hex: "#0F1E24" },
+  ];
+
   const handleSetChatBackground = async () => {
     if (!user?.isVip) {
       Alert.alert('VIP Feature', 'Custom chat backgrounds are available for VIP members only.');
@@ -3179,7 +3208,11 @@ export default function ConversationScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {chatBackgroundUrl ? (
+      {chatBackgroundUrl?.startsWith('color:') ? (
+        <View style={[styles.backgroundImage, { backgroundColor: chatBackgroundUrl.slice('color:'.length) }]}>
+          {chatContent}
+        </View>
+      ) : chatBackgroundUrl ? (
         <ImageBackground
           source={{ uri: chatBackgroundUrl }}
           style={styles.backgroundImage}
@@ -4068,6 +4101,34 @@ export default function ConversationScreen() {
                     </View>
                     <Feather name="chevron-right" size={18} color={theme.textSecondary} />
                   </AnimatedPressable>
+
+                  <View style={{ paddingHorizontal: Spacing.md, paddingTop: Spacing.sm }}>
+                    <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.sm }}>
+                      Or pick a solid color
+                    </ThemedText>
+                    <View style={{ flexDirection: "row", gap: Spacing.md }}>
+                      {CHAT_BACKGROUND_COLORS.map((c) => {
+                        const isSelected = chatBackgroundUrl === `color:${c.hex}`;
+                        return (
+                          <AnimatedPressable
+                            key={c.hex}
+                            onPress={() => setSolidColorBackgroundMutation.mutate(c.hex)}
+                            disabled={setSolidColorBackgroundMutation.isPending}
+                            style={[
+                              styles.colorSwatch,
+                              {
+                                backgroundColor: c.hex,
+                                borderColor: isSelected ? theme.primary : theme.border,
+                                borderWidth: isSelected ? 3 : 1,
+                              },
+                            ]}
+                          >
+                            {isSelected ? <Feather name="check" size={16} color="#fff" /> : null}
+                          </AnimatedPressable>
+                        );
+                      })}
+                    </View>
+                  </View>
 
                   {chatBackgroundUrl ? (
                     <AnimatedPressable
@@ -5131,6 +5192,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     flexShrink: 0,
+  },
+  colorSwatch: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
   },
   settingsOptionText: {
     flex: 1,
