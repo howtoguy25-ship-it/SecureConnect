@@ -737,13 +737,20 @@ export default function StatusScreen() {
         // Web: Use fetch to get blob
         const imageResponse = await fetch(selectedImage);
         const blob = await imageResponse.blob();
-        await fetch(uploadURL, {
+        const putRes = await fetch(uploadURL, {
           method: "PUT",
           body: blob,
           headers: {
             "Content-Type": mimeType,
           },
         });
+        // Previously the response here was never checked — a rejected PUT
+        // (expired signed URL, bad content-type, etc) would silently fall
+        // through to the ACL step and create a status pointing at media that
+        // was never actually written.
+        if (!putRes.ok) {
+          throw new Error(`Upload failed with status ${putRes.status}`);
+        }
       } else {
         // Native: Verify file exists before uploading
         const fileInfo = await FileSystem.getInfoAsync(selectedImage);
@@ -751,18 +758,28 @@ export default function StatusScreen() {
           throw new Error("Media file not found");
         }
 
-        // Native: Use expo-file-system uploadAsync for reliable file:// URI handling
-        // uploadType: 1 = BINARY_CONTENT (raw binary upload)
-        const uploadResult = await FileSystem.uploadAsync(uploadURL, selectedImage, {
-          httpMethod: "PUT",
-          uploadType: 1,
+        // Native: read the file into memory and PUT it via fetch — the same
+        // approach the encrypted-media path (uploadEncryptedMedia) already
+        // uses successfully for images/videos up to 50MB. expo-file-system's
+        // native uploadAsync() was returning 400 from GCS's signed-URL PUT
+        // (it drives its own native HTTP stack rather than fetch, and
+        // doesn't set the request the same way GCS's V4 signing expects),
+        // while fetch's RN implementation reliably sets Content-Length and
+        // matches the working path exactly.
+        const b64 = await FileSystem.readAsStringAsync(selectedImage, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const bytes = naclUtil.decodeBase64(b64);
+        const putRes = await fetch(uploadURL, {
+          method: "PUT",
           headers: {
             "Content-Type": mimeType,
           },
+          body: bytes as BodyInit,
         });
-        
-        if (uploadResult.status < 200 || uploadResult.status >= 300) {
-          throw new Error(`Upload failed with status ${uploadResult.status}`);
+
+        if (!putRes.ok) {
+          throw new Error(`Upload failed with status ${putRes.status}`);
         }
       }
 
@@ -1502,7 +1519,10 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: "100%",
-    height: 300,
+    // Match the 9:16 crop the picker already applies (aspect: [9, 16] in
+    // pickImage) — the previous fixed height:300 squashed/cropped an
+    // already-correctly-cropped 9:16 image into an unrelated box shape.
+    aspectRatio: 9 / 16,
     borderRadius: BorderRadius.lg,
     marginBottom: Spacing.lg,
   },

@@ -29,7 +29,7 @@ export default function SafeCodeScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const navigation = useNavigation<Nav>();
-  const { user, refreshUser } = useAuth();
+  const { user, setUser, refreshUser } = useAuth();
 
   const [code, setCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,8 +97,16 @@ export default function SafeCodeScreen() {
       // Wipe the locally-cached plaintext — once acknowledged it must never
       // be displayed again (the server only retains a bcrypt hash).
       try { await AsyncStorage.removeItem("pending_safe_code"); } catch {}
-      // Refresh the auth user so RootStackNavigator's gating condition flips.
-      await refreshUser();
+      // Update local state directly rather than relying solely on a
+      // follow-up /me fetch — if that fetch hits any hiccup, fetchCurrentUser
+      // silently falls back to the STALE cached user (still
+      // safeCodeAcknowledged: false), which made this screen look like it
+      // "didn't save" even though the server had already recorded it, and
+      // meant it kept reappearing on every subsequent app launch. The POST
+      // above already succeeded, so it's safe to reflect that immediately.
+      if (user) setUser({ ...user, safeCodeAcknowledged: true });
+      // Best-effort background sync; local state above is already correct.
+      refreshUser().catch(() => {});
 
       // If we landed here via push navigation (e.g. Settings → Safe Code),
       // pop back to the previous screen. Otherwise the root navigator will

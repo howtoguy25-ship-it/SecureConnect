@@ -62,7 +62,15 @@ export default function VirtualNumberScreen() {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-number"] });
       setShowNumberPicker(false);
       refreshUser();
-      Alert.alert("Success", "Your Pryvo number is now active!");
+      // Presenting Alert.alert in the same tick as dismissing the pageSheet
+      // Modal races iOS's dismiss animation — the alert can render while the
+      // modal's view hierarchy is still tearing down, which is what was
+      // showing up as a black screen right after "phone active successfully".
+      // Waiting for the sheet's dismiss animation to finish first avoids the
+      // collision.
+      setTimeout(() => {
+        Alert.alert("Success", "Your Pryvo number is now active!");
+      }, 400);
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to get your number. Please try again.");

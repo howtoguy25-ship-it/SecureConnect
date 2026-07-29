@@ -92,21 +92,22 @@ export default function HiddenLockerScreen() {
     navigation.goBack();
   }, [navigation, wipeMasterKey]);
 
-  // Block screenshots + screen recording while this screen is mounted.  On
-  // iOS this prevents the system screenshot bitmap; on Android it sets
-  // FLAG_SECURE, which also hides the window from the app-switcher preview.
+  // Block screenshots + screen recording only once the locker is actually
+  // unlocked and showing real content.  On iOS this prevents the system
+  // screenshot bitmap; on Android it sets FLAG_SECURE, which also hides the
+  // window from the app-switcher preview. The PIN-entry front page has
+  // nothing sensitive on it, so it stays screenshot-able like the rest of
+  // the app.
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        await ScreenCapture.preventScreenCaptureAsync("hidden-locker");
-      } catch {}
-    })();
+    if (!isUnlocked) {
+      ScreenCapture.allowScreenCaptureAsync("hidden-locker").catch(() => {});
+      return;
+    }
+    ScreenCapture.preventScreenCaptureAsync("hidden-locker").catch(() => {});
     return () => {
-      active = false;
       ScreenCapture.allowScreenCaptureAsync("hidden-locker").catch(() => {});
     };
-  }, []);
+  }, [isUnlocked]);
 
   // Auto-lock on background.  If the user backgrounds the app, we drop the
   // key — they'll need to re-enter the PIN.

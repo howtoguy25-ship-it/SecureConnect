@@ -39,6 +39,22 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  // Phone number is masked by default on this screen — it sits right next
+  // to the profile photo, which is exactly the kind of thing that ends up
+  // in a screenshot shared elsewhere. Tap to reveal; re-masks after a few
+  // seconds or when leaving the screen.
+  const [phoneRevealed, setPhoneRevealed] = useState(false);
+  useEffect(() => {
+    if (!phoneRevealed) return;
+    const t = setTimeout(() => setPhoneRevealed(false), 6000);
+    return () => clearTimeout(t);
+  }, [phoneRevealed]);
+
+  function maskPhoneNumber(phone: string | undefined): string {
+    if (!phone) return "";
+    const last2 = phone.slice(-2);
+    return `${"•".repeat(Math.max(phone.length - 2, 3))}${last2}`;
+  }
 
   // Reset the avatar-failed flag any time the avatar URL changes so a fresh
   // upload gets a chance to render even if the previous URL had failed.
@@ -312,9 +328,14 @@ export default function ProfileScreen() {
           </ThemedText>
         ) : null}
         
-        <ThemedText type="body" style={{ color: theme.textSecondary, fontSize: 16 }} numberOfLines={1} adjustsFontSizeToFit>
-          {user?.phoneNumber}
-        </ThemedText>
+        <Pressable onPress={() => setPhoneRevealed((v) => !v)} hitSlop={8}>
+          <View style={styles.phoneRow}>
+            <ThemedText type="body" style={{ color: theme.textSecondary, fontSize: 16 }} numberOfLines={1} adjustsFontSizeToFit>
+              {phoneRevealed ? user?.phoneNumber : maskPhoneNumber(user?.phoneNumber)}
+            </ThemedText>
+            <Feather name={phoneRevealed ? "eye-off" : "eye"} size={14} color={theme.textSecondary} />
+          </View>
+        </Pressable>
         
         {user?.isVip ? (
           <View style={[styles.vipStatus, { backgroundColor: theme.accent + "20" }]}>
@@ -517,11 +538,20 @@ const styles = StyleSheet.create({
   },
   profileHeader: {
     alignItems: "center",
+    // A little extra breathing room below the header bar — the avatar sat
+    // too close to the nav bar on several phone sizes even with
+    // headerHeight already factored into the scroll view's paddingTop.
+    marginTop: Spacing.lg,
     marginBottom: Spacing["3xl"],
   },
   avatarContainer: {
     position: "relative",
     marginBottom: Spacing.lg,
+  },
+  phoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   avatar: {
     width: 100,

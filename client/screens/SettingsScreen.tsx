@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, StyleSheet, Pressable, Switch, Alert, ActivityIndicator, Platform, Linking, FlatList } from "react-native";
+import { View, StyleSheet, Pressable, Switch, Alert, ActivityIndicator, Platform, Linking, FlatList, Modal, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
@@ -201,35 +201,33 @@ export default function SettingsScreen() {
   };
 
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isSendingDeleteOtp, setIsSendingDeleteOtp] = useState(false);
+  const [showDeleteOtpModal, setShowDeleteOtpModal] = useState(false);
+  const [deleteOtp, setDeleteOtp] = useState("");
 
+  // Account deletion is a two-step, OTP-confirmed flow server-side
+  // (POST .../request-otp then POST .../confirm) — the old one-shot
+  // DELETE /api/auth/account endpoint was retired and now always answers
+  // 410 Gone, which is why tapping this used to silently fail.
   const handleDeleteAccount = async () => {
-    if (isDeletingAccount) return;
-    const doDelete = async () => {
-      setIsDeletingAccount(true);
+    if (isSendingDeleteOtp || isDeletingAccount) return;
+    const requestOtp = async () => {
+      setIsSendingDeleteOtp(true);
       try {
-        const token = await getStoredToken();
-        const baseUrl = getApiUrl();
-        const response = await fetch(new URL('/api/auth/account', baseUrl).toString(), {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to delete account');
-        }
-        await logout();
+        await apiRequest('POST', '/api/auth/account/delete/request-otp');
+        setDeleteOtp("");
+        setShowDeleteOtpModal(true);
       } catch (error: any) {
-        setIsDeletingAccount(false);
-        if (Platform.OS === "web") {
-          window.alert(error.message || 'Failed to delete account. Please try again.');
-        } else {
-          Alert.alert('Error', error.message || 'Failed to delete account. Please try again.');
-        }
+        const msg = error?.message || 'Failed to send verification code. Please try again.';
+        if (Platform.OS === "web") window.alert(msg);
+        else Alert.alert('Error', msg);
+      } finally {
+        setIsSendingDeleteOtp(false);
       }
     };
     if (Platform.OS === "web") {
       if (window.confirm("This will permanently erase your account, all messages, profile data, and phone number from Pryvo. This action cannot be undone.\n\nAre you absolutely sure?")) {
-        await doDelete();
+        await requestOtp();
       }
     } else {
       Alert.alert(
@@ -237,9 +235,26 @@ export default function SettingsScreen() {
         "This will permanently erase your account, all messages, profile data, and phone number from Pryvo. This action cannot be undone.\n\nAre you absolutely sure?",
         [
           { text: "Cancel", style: "cancel" },
-          { text: "Yes, Delete Everything", style: "destructive", onPress: doDelete },
+          { text: "Yes, Delete Everything", style: "destructive", onPress: requestOtp },
         ]
       );
+    }
+  };
+
+  const confirmDeleteAccount = async () => {
+    if (isDeletingAccount || deleteOtp.length < 4) return;
+    setIsDeletingAccount(true);
+    try {
+      await apiRequest('POST', '/api/auth/account/delete/confirm', { otp: deleteOtp });
+      setShowDeleteOtpModal(false);
+      setDeleteOtp("");
+      await logout();
+    } catch (error: any) {
+      const msg = error?.message || 'Invalid or expired code. Please try again.';
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setIsDeletingAccount(false);
     }
   };
 
@@ -850,19 +865,63 @@ export default function SettingsScreen() {
       </View>
 
       <Pressable
-        style={[styles.dangerButton, { borderColor: theme.error, opacity: isDeletingAccount ? 0.5 : 1 }]}
+        style={[styles.dangerButton, { borderColor: theme.error, opacity: (isSendingDeleteOtp || isDeletingAccount) ? 0.5 : 1 }]}
         onPress={handleDeleteAccount}
-        disabled={isDeletingAccount}
+        disabled={isSendingDeleteOtp || isDeletingAccount}
       >
-        {isDeletingAccount ? (
+        {isSendingDeleteOtp ? (
           <ActivityIndicator size="small" color={theme.error} />
         ) : (
           <Feather name="trash-2" size={20} color={theme.error} />
         )}
         <ThemedText type="body" style={{ color: theme.error }}>
-          {isDeletingAccount ? "Deleting Account..." : "Delete Account"}
+          {isSendingDeleteOtp ? "Sending code..." : "Delete Account"}
         </ThemedText>
       </Pressable>
+
+      <Modal visible={showDeleteOtpModal} transparent animationType="fade" onRequestClose={() => setShowDeleteOtpModal(false)}>
+        <View style={styles.otpOverlay}>
+          <View style={[styles.otpCard, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
+            <ThemedText type="h3" style={{ textAlign: "center", marginBottom: Spacing.sm }}>
+              Confirm Deletion
+            </ThemedText>
+            <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: "center", marginBottom: Spacing.lg }}>
+              Enter the code we texted to {user?.phoneNumber} to permanently delete your account.
+            </ThemedText>
+            <TextInput
+              value={deleteOtp}
+              onChangeText={(t) => setDeleteOtp(t.replace(/\D/g, "").slice(0, 6))}
+              placeholder="123456"
+              placeholderTextColor={theme.textSecondary}
+              keyboardType="number-pad"
+              maxLength={6}
+              style={[styles.otpInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.backgroundSecondary }]}
+              autoFocus
+            />
+            <Pressable
+              style={[styles.dangerButton, { borderColor: theme.error, marginTop: Spacing.lg, opacity: (isDeletingAccount || deleteOtp.length < 4) ? 0.5 : 1 }]}
+              onPress={confirmDeleteAccount}
+              disabled={isDeletingAccount || deleteOtp.length < 4}
+            >
+              {isDeletingAccount ? (
+                <ActivityIndicator size="small" color={theme.error} />
+              ) : (
+                <Feather name="trash-2" size={20} color={theme.error} />
+              )}
+              <ThemedText type="body" style={{ color: theme.error }}>
+                {isDeletingAccount ? "Deleting Account..." : "Confirm Delete"}
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              style={{ marginTop: Spacing.md, alignItems: "center", paddingVertical: Spacing.sm }}
+              onPress={() => { setShowDeleteOtpModal(false); setDeleteOtp(""); }}
+              disabled={isDeletingAccount}
+            >
+              <ThemedText type="body" style={{ color: theme.textSecondary }}>Cancel</ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAwareScrollViewCompat>
   );
 }
@@ -918,6 +977,29 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
     marginTop: Spacing.xl,
+  },
+  otpOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: Spacing.xl,
+  },
+  otpCard: {
+    width: "100%",
+    maxWidth: 380,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.xl,
+  },
+  otpInput: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+    fontSize: 20,
+    textAlign: "center",
+    letterSpacing: 4,
   },
   iconBg: {
     width: 32,

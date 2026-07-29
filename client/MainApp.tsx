@@ -4,7 +4,6 @@ import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import * as ScreenCapture from "expo-screen-capture";
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
@@ -104,25 +103,6 @@ function PreKeyMaintenanceGuard() {
   return null;
 }
 
-function ScreenCaptureGuard() {
-  const { user } = useAuth();
-
-  useEffect(() => {
-    const tag = "secureconnect-global";
-    if (user && user.isVip) {
-      ScreenCapture.allowScreenCaptureAsync(tag).catch(() => {});
-    } else {
-      ScreenCapture.preventScreenCaptureAsync(tag).catch(() => {});
-    }
-
-    return () => {
-      ScreenCapture.allowScreenCaptureAsync(tag).catch(() => {});
-    };
-  }, [user?.isVip, user?.id]);
-
-  return null;
-}
-
 async function initApp() {
   try {
     logCheckpoint('init_app_start');
@@ -211,7 +191,6 @@ export default function MainApp() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <ScreenCaptureGuard />
           <PreKeyMaintenanceGuard />
           <SafeAreaProvider>
             <GestureHandlerRootView style={rootStyle}>

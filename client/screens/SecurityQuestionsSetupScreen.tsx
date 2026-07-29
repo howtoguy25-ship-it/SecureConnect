@@ -30,7 +30,7 @@ export default function SecurityQuestionsSetupScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
-  const { refreshUser } = useAuth();
+  const { user, setUser, refreshUser } = useAuth();
 
   const [dishAnswer, setDishAnswer] = useState("");
   const [twoWordsAnswer, setTwoWordsAnswer] = useState("");
@@ -71,9 +71,13 @@ export default function SecurityQuestionsSetupScreen() {
     if (continuing) return;
     setContinuing(true);
     try {
-      // Flips user.hasSecurityQuestions → RootStackNavigator's gate swaps
-      // this screen out for the main app automatically.
-      await refreshUser();
+      // The /set POST in handleSet() already succeeded (that's the only way
+      // `saved` became true) — flip the gate locally right away rather than
+      // depending solely on a follow-up /me fetch, which would silently
+      // fall back to the stale cached user (still hasSecurityQuestions:
+      // false) on any transient network hiccup and strand this screen.
+      if (user) setUser({ ...user, hasSecurityQuestions: true });
+      refreshUser().catch(() => {});
     } finally {
       setContinuing(false);
     }

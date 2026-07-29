@@ -54,18 +54,37 @@ export default function PeekDetectionSettingsScreen() {
         }
       }
       setEnabled(next);
-      await setPeekDetectionEnabled(next);
-      haptics.light();
+      try {
+        await setPeekDetectionEnabled(next);
+        haptics.light();
+      } catch {
+        // Persist failed — the switch would otherwise show "on" while
+        // AsyncStorage still has the old value, so the next time this
+        // screen loads it silently reverts. Roll the UI back so what's
+        // shown always matches what's actually saved.
+        setEnabled(!next);
+        const msg = "Couldn't save this setting. Please try again.";
+        if (Platform.OS === "web") window.alert(msg);
+        else Alert.alert("Error", msg);
+      }
     },
     [permission, requestPermission],
   );
 
   const applyCooldown = useCallback(async (seconds: number) => {
     const clamped = clampCooldownSeconds(seconds);
+    const previous = cooldownSeconds;
     setCooldownSecondsState(clamped);
-    await setPeekCooldownSeconds(clamped);
-    haptics.light();
-  }, []);
+    try {
+      await setPeekCooldownSeconds(clamped);
+      haptics.light();
+    } catch {
+      setCooldownSecondsState(previous);
+      const msg = "Couldn't save this setting. Please try again.";
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Error", msg);
+    }
+  }, [cooldownSeconds]);
 
   const applyCustom = useCallback(() => {
     const n = parseFloat(customValue);

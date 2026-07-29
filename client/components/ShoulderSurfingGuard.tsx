@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, StyleSheet, Pressable, Modal, AppState, AppStateStatus, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ThemedText } from '@/components/ThemedText';
 import { useTheme } from '@/hooks/useTheme';
@@ -44,6 +45,7 @@ function getFaceDetection() {
 // alert can't spam the user.
 export function ShoulderSurfingGuard() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { activeConversationId } = useNotifications();
   const [permission] = useCameraPermissions();
@@ -52,6 +54,12 @@ export function ShoulderSurfingGuard() {
   const [alertVisible, setAlertVisible] = useState(false);
   const [dimmed, setDimmed] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  // Small persistent status pill, separate from the blocking modal below —
+  // stays up for as long as the peek condition is actively being detected
+  // (armed the instant a sample crosses the threshold, cleared once the
+  // user responds), so there's always a lightweight, glanceable signal even
+  // if they dismiss or ignore the modal.
+  const [peekBannerVisible, setPeekBannerVisible] = useState(false);
 
   const cameraRef = useRef<CameraView | null>(null);
   const detectorRef = useRef(new PeekSignalDetector());
@@ -92,6 +100,7 @@ export function ShoulderSurfingGuard() {
   const dismissAlert = useCallback(
     (hide: boolean) => {
       setAlertVisible(false);
+      setPeekBannerVisible(false);
       detectorRef.current.reset();
       armCooldown();
       if (hide) {
@@ -134,7 +143,7 @@ export function ShoulderSurfingGuard() {
           if (photo?.uri) {
             const faces = await FaceDetection.detect(photo.uri, { performanceMode: 'fast' });
             const triggered = detectorRef.current.addSample(Array.isArray(faces) ? faces.length : 0);
-            if (triggered) setAlertVisible(true);
+            if (triggered) { setAlertVisible(true); setPeekBannerVisible(true); }
           }
         } else {
           // Web fallback: no ML Kit binding, use the byte-size heuristic.
@@ -149,7 +158,7 @@ export function ShoulderSurfingGuard() {
             // jump to "2 faces", anything normal to "1".
             const elevated = b64.length > 15000; // ~ typical single-face front-cam JPEG at quality 0
             const triggered = detectorRef.current.addSample(elevated ? 2 : 1);
-            if (triggered) setAlertVisible(true);
+            if (triggered) { setAlertVisible(true); setPeekBannerVisible(true); }
           }
         }
       } catch {
@@ -180,6 +189,17 @@ export function ShoulderSurfingGuard() {
       {active ? (
         <View style={styles.hiddenCameraWrap} pointerEvents="none">
           <CameraView ref={cameraRef} style={styles.hiddenCamera} facing="front" />
+        </View>
+      ) : null}
+
+      {peekBannerVisible ? (
+        <View style={[styles.peekBanner, { top: insets.top + Spacing.sm }]} pointerEvents="box-none">
+          <View style={[styles.peekBannerPill, { backgroundColor: theme.warning }]}>
+            <Feather name="eye" size={14} color="#1a1200" />
+            <ThemedText type="small" style={styles.peekBannerText}>
+              Someone may be looking at your screen
+            </ThemedText>
+          </View>
         </View>
       ) : null}
 
@@ -238,6 +258,30 @@ const styles = StyleSheet.create({
   hiddenCamera: {
     width: 2,
     height: 2,
+  },
+  peekBanner: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 9998,
+    elevation: 9998,
+  },
+  peekBannerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.full,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  peekBannerText: {
+    color: '#1a1200',
+    fontWeight: '700',
   },
   dimOverlay: {
     ...StyleSheet.absoluteFillObject,
