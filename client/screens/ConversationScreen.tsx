@@ -18,7 +18,6 @@ import { haptics } from "@/lib/haptics";
 import { Image } from "expo-image";
 import * as Location from "expo-location";
 import * as Contacts from "expo-contacts";
-import * as DocumentPicker from "expo-document-picker";
 import { useAudioRecorder, RecordingPresets, AudioModule, setAudioModeAsync, createAudioPlayer } from 'expo-audio';
 import * as Clipboard from "expo-clipboard";
 import * as Sharing from "expo-sharing";
@@ -144,6 +143,7 @@ export default function ConversationScreen() {
   const [pendingRecordingDuration, setPendingRecordingDuration] = useState(0);
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
   const previewSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const previewSoundSubRef = useRef<{ remove: () => void } | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [showMessageOptions, setShowMessageOptions] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -181,6 +181,7 @@ export default function ConversationScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const messageSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const messageSoundSubRef = useRef<{ remove: () => void } | null>(null);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1665,10 +1666,17 @@ export default function ConversationScreen() {
       }
 
       if (previewSoundRef.current) {
+        previewSoundSubRef.current?.remove();
+        previewSoundSubRef.current = null;
         previewSoundRef.current.release();
       }
 
       const player = createAudioPlayer({ uri: pendingRecordingUri });
+      previewSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
+        if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
+          setIsPlayingPreview(false);
+        }
+      });
       previewSoundRef.current = player;
       player.play();
       setIsPlayingPreview(true);
@@ -1680,6 +1688,8 @@ export default function ConversationScreen() {
   const deletePreviewRecording = async () => {
     try {
       if (previewSoundRef.current) {
+        previewSoundSubRef.current?.remove();
+        previewSoundSubRef.current = null;
         previewSoundRef.current.release();
         previewSoundRef.current = null;
       }
@@ -1713,6 +1723,8 @@ export default function ConversationScreen() {
       haptics.medium();
 
       if (previewSoundRef.current) {
+        previewSoundSubRef.current?.remove();
+        previewSoundSubRef.current = null;
         previewSoundRef.current.pause();
         previewSoundRef.current.release();
         previewSoundRef.current = null;
@@ -2009,6 +2021,8 @@ export default function ConversationScreen() {
       }
 
       if (messageSoundRef.current) {
+        messageSoundSubRef.current?.remove();
+        messageSoundSubRef.current = null;
         messageSoundRef.current.release();
         messageSoundRef.current = null;
       }
@@ -2025,15 +2039,26 @@ export default function ConversationScreen() {
         const baseUrl = getApiUrl();
         audioUrl = new URL(audioUrl, baseUrl).toString();
       }
-      
+
       // Ensure URL uses HTTPS
       if (audioUrl.startsWith('http://')) {
         audioUrl = audioUrl.replace('http://', 'https://');
       }
-      
+
       console.log('Playing voice message from URL:', audioUrl);
 
       const player = createAudioPlayer({ uri: audioUrl });
+      // Nothing reset playingMessageId when a voice note reached the end,
+      // so the button stayed stuck showing "pause" and the NEXT tap just
+      // paused an already-finished player (no audible effect) instead of
+      // replaying -- the reported "it just skips" bug. Reset on the real
+      // end-of-track event so the icon flips back and the following tap
+      // replays immediately.
+      messageSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
+        if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
+          setPlayingMessageId((prev) => (prev === messageId ? null : prev));
+        }
+      });
       player.play();
       messageSoundRef.current = player;
       setPlayingMessageId(messageId);
@@ -2042,53 +2067,6 @@ export default function ConversationScreen() {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
       Alert.alert('Playback Error', 'Could not play the voice message.');
-    }
-  };
-
-  const handlePickFile = async () => {
-    setShowAttachmentMenu(false);
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
-      });
-      
-      if (!result.canceled && result.assets && result.assets[0]) {
-        const file = result.assets[0];
-        setIsSending(true);
-        haptics.medium();
-        
-        const token = await getStoredToken();
-        const baseUrl = getApiUrl();
-        
-        const formData = new FormData();
-        formData.append('file', {
-          uri: file.uri,
-          name: file.name || 'document',
-          type: file.mimeType || 'application/octet-stream',
-        } as any);
-        formData.append('conversationId', conversationId);
-        formData.append('receiverId', otherUserId);
-        formData.append('mediaType', 'file');
-        
-        const response = await fetch(new URL('/api/messages/media', baseUrl), {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-          body: formData,
-        });
-        
-        if (response.ok) {
-          const message = await response.json();
-          setMessages((prev) => [...prev, message]);
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }
-        setIsSending(false);
-      }
-    } catch (error) {
-      console.error('Error picking file:', error);
-      setIsSending(false);
     }
   };
 
@@ -3662,15 +3640,6 @@ export default function ConversationScreen() {
                 </View>
                 <ThemedText style={[styles.attachmentLabel, { color: theme.text }]}>
                   Emoji
-                </ThemedText>
-              </Pressable>
-              
-              <Pressable style={styles.attachmentOption} onPress={handlePickFile}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#9B59B6' }]}>
-                  <Feather name="file" size={24} color="#fff" />
-                </View>
-                <ThemedText style={[styles.attachmentLabel, { color: theme.text }]}>
-                  File
                 </ThemedText>
               </Pressable>
               

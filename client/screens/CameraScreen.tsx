@@ -20,7 +20,6 @@ import {
 } from "expo-camera";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Sharing from "expo-sharing";
-import * as FileSystem from "expo-file-system/legacy";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -30,12 +29,11 @@ import * as Linking from "expo-linking";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
-import { getApiUrl, apiRequest } from "@/lib/query-client";
+import { getApiUrl } from "@/lib/query-client";
 import { getStoredToken } from "@/lib/auth";
 import { haptics } from "@/lib/haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  E2EE_MEDIA_ENABLED,
   uploadEncryptedMedia,
   buildMediaEnvelope,
 } from "@/utils/crypto/encryptedMediaClient";
@@ -263,125 +261,57 @@ export default function CameraScreen() {
       }
       const baseUrl = getApiUrl();
 
-      // Item 4c — encrypted+sealed media path for sealed-mode users.
-      // Mirrors SendPhotoScreen: same SCM1 envelope + sealed-helper
-      // routing so a captured photo or video from a sealed-mode sender
-      // no longer attaches the sender's userId to the row, and no
-      // plaintext media URL ever hits the wire. Personal-mode senders
-      // fall through to the original plaintext upload path below.
-      const userIsSealedCapable =
-        user?.preferredNumberType === "app" &&
-        !!user?.virtualNumber &&
-        user.virtualNumber.status === "active";
-
-      if (
-        E2EE_MEDIA_ENABLED &&
-        userIsSealedCapable &&
-        (capturedKind === "image" || capturedKind === "video")
-      ) {
-        let okCount = 0;
-        for (const recipientId of selectedRecipients) {
-          const conversation = conversations.find((c) => c.otherUserId === recipientId);
-          if (!conversation) continue;
-          try {
-            const { envelope } = await uploadEncryptedMedia({
-              uri: capturedUri,
-              mediaType: capturedKind,
-              token,
-              apiBaseUrl: baseUrl,
-            });
-            const envelopeText = buildMediaEnvelope(envelope);
-            const payload = caption ? `${envelopeText}\n${caption}` : envelopeText;
-            const outgoing = await signalEncrypt(user?.id ?? "", recipientId, payload);
-            const result = await sendEncryptedToRecipient({
-              currentUser: user,
-              conversationId: conversation.id,
-              receiverId: recipientId,
-              ciphertext: outgoing.ciphertext,
-              encryptionVersion: outgoing.encryptionVersion,
-              e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
-            });
-            if (result.ok) okCount++;
-          } catch (perRecipientErr) {
-            console.error("encrypted camera media send failed:", perRecipientErr);
-          }
-        }
-        queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-        const recipientNames = selectedRecipients
-          .map((id) => conversations.find((c) => c.otherUserId === id)?.otherUserName || "User")
-          .join(", ");
-        if (okCount === 0) {
-          Alert.alert("Error", `Failed to send ${capturedKind}. Please try again.`);
-        } else {
-          Alert.alert(
-            "Sent",
-            `${capturedKind === "video" ? "Video" : "Photo"} sent to ${recipientNames}!`,
-            [{ text: "OK", onPress: () => navigation.goBack() }],
-          );
-        }
-        setIsSending(false);
-        return;
-      }
-
-      const uploadUrlResponse = await fetch(new URL("/api/objects/upload", baseUrl), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      if (!uploadUrlResponse.ok) throw new Error("Failed to get upload URL");
-      const { uploadURL } = await uploadUrlResponse.json();
-
-      const fileInfo = await FileSystem.getInfoAsync(capturedUri);
-      if (!fileInfo.exists) throw new Error("Media file not found");
-
-      const contentType = capturedKind === "video" ? "video/mp4" : "image/jpeg";
-      const uploadResult = await FileSystem.uploadAsync(uploadURL, capturedUri, {
-        httpMethod: "PUT",
-        uploadType: 1,
-        headers: { "Content-Type": contentType },
-      });
-      if (uploadResult.status < 200 || uploadResult.status >= 300) {
-        throw new Error("Failed to upload media");
-      }
-      const mediaUrl = uploadURL.split("?")[0];
-
-      const aclResponse = await fetch(new URL("/api/objects/media", baseUrl), {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ mediaURL: mediaUrl }),
-      });
-      if (!aclResponse.ok) throw new Error("Failed to set media permissions");
-      const { objectPath } = await aclResponse.json();
-
+      // Every captured photo/video is encrypted client-side and sent
+      // through the same SCM1-envelope + Signal-ciphertext path
+      // ConversationScreen uses, regardless of number preference --
+      // sendEncryptedToRecipient itself decides sealed vs legacy /api/messages
+      // transport internally. There used to be a separate "personal mode"
+      // fallback here that uploaded via FileSystem.uploadAsync() (unreliable
+      // against GCS's V4-signed PUT URLs -- the same bug already fixed in
+      // StatusScreen/encryptedMediaClient) AND sent the message as
+      // plaintext with no encryption at all. Since personal-mode is the
+      // default for most accounts, that fallback was actually the common
+      // path, not an edge case.
+      let okCount = 0;
       for (const recipientId of selectedRecipients) {
         const conversation = conversations.find((c) => c.otherUserId === recipientId);
         if (!conversation) continue;
-        await apiRequest("POST", "/api/messages", {
-          conversationId: conversation.id,
-          receiverId: recipientId,
-          content: caption || "",
-          mediaUrl: objectPath,
-          mediaType: capturedKind,
-        });
+        try {
+          const { envelope } = await uploadEncryptedMedia({
+            uri: capturedUri,
+            mediaType: capturedKind,
+            token,
+            apiBaseUrl: baseUrl,
+          });
+          const envelopeText = buildMediaEnvelope(envelope);
+          const payload = caption ? `${envelopeText}\n${caption}` : envelopeText;
+          const outgoing = await signalEncrypt(user?.id ?? "", recipientId, payload);
+          const result = await sendEncryptedToRecipient({
+            currentUser: user,
+            conversationId: conversation.id,
+            receiverId: recipientId,
+            ciphertext: outgoing.ciphertext,
+            encryptionVersion: outgoing.encryptionVersion,
+            e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
+          });
+          if (result.ok) okCount++;
+        } catch (perRecipientErr) {
+          console.error("encrypted camera media send failed:", perRecipientErr);
+        }
       }
-      /* end legacy plaintext path */
-
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-
       const recipientNames = selectedRecipients
         .map((id) => conversations.find((c) => c.otherUserId === id)?.otherUserName || "User")
         .join(", ");
-
-      Alert.alert(
-        "Sent",
-        `${capturedKind === "video" ? "Video" : "Photo"} sent to ${recipientNames}!`,
-        [{ text: "OK", onPress: () => navigation.goBack() }],
-      );
+      if (okCount === 0) {
+        Alert.alert("Error", `Failed to send ${capturedKind}. Please try again.`);
+      } else {
+        Alert.alert(
+          "Sent",
+          `${capturedKind === "video" ? "Video" : "Photo"} sent to ${recipientNames}!`,
+          [{ text: "OK", onPress: () => navigation.goBack() }],
+        );
+      }
     } catch (error) {
       console.error("Failed to send media:", error);
       Alert.alert("Error", `Failed to send ${capturedKind}. Please try again.`);

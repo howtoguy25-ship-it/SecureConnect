@@ -673,18 +673,24 @@ export default function HiddenLockerScreen() {
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View style={styles.actionBar}>
-            <Pressable style={[styles.actionBarBtn, { backgroundColor: theme.backgroundDefault }]} onPress={() => { setIsChangingPin(true); setError(""); }}>
-              <Feather name="edit-2" size={14} color={theme.primary} />
-              <ThemedText type="small" style={{ color: theme.primary }}>Change PIN</ThemedText>
+            <Pressable
+              style={[styles.actionBarBtn, { backgroundColor: `${theme.primary}26`, borderColor: theme.primary }]}
+              onPress={() => { setIsChangingPin(true); setError(""); }}
+            >
+              <Feather name="edit-2" size={20} color={theme.primary} />
+              <ThemedText type="body" style={{ color: theme.primary, fontWeight: '700' }}>Change PIN</ThemedText>
             </Pressable>
-            <Pressable style={[styles.actionBarBtn, { backgroundColor: theme.backgroundDefault }]} onPress={handleResetLocker}>
-              <Feather name="rotate-ccw" size={14} color={theme.error} />
-              <ThemedText type="small" style={{ color: theme.error }}>Reset Locker</ThemedText>
+            <Pressable
+              style={[styles.actionBarBtn, { backgroundColor: `${theme.error}26`, borderColor: theme.error }]}
+              onPress={handleResetLocker}
+            >
+              <Feather name="rotate-ccw" size={20} color={theme.error} />
+              <ThemedText type="body" style={{ color: theme.error, fontWeight: '700' }}>Reset Locker</ThemedText>
             </Pressable>
           </View>
         }
         contentContainerStyle={{
-          paddingTop: headerHeight + Spacing.lg,
+          paddingTop: headerHeight + Spacing.xl,
           paddingBottom: insets.bottom + Spacing.xl,
           paddingHorizontal: Spacing.lg,
         }}
@@ -713,8 +719,8 @@ const styles = StyleSheet.create({
   pinInput: { width: "100%", height: Spacing.inputHeight, paddingHorizontal: Spacing.lg, borderRadius: BorderRadius.sm, fontSize: 24, fontWeight: "600", textAlign: "center", letterSpacing: 8, borderWidth: 2, marginBottom: Spacing.lg },
   error: { textAlign: "center", marginBottom: Spacing.md },
   button: { width: "100%" },
-  actionBar: { flexDirection: "row", gap: Spacing.sm, marginBottom: Spacing.lg },
-  actionBarBtn: { flexDirection: "row", alignItems: "center", gap: Spacing.xs, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full },
+  actionBar: { flexDirection: "row", gap: Spacing.md, marginBottom: Spacing.lg },
+  actionBarBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1.5 },
   emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingTop: Spacing["5xl"], paddingHorizontal: Spacing["2xl"], gap: Spacing.md },
   itemCard: { flexDirection: "row", alignItems: "center", borderRadius: BorderRadius.sm, marginBottom: Spacing.sm },
   itemPressable: { flex: 1 },
