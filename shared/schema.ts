@@ -772,6 +772,18 @@ export const encryptedBackups = pgTable("encrypted_backups", {
 
 export type EncryptedBackup = typeof encryptedBackups.$inferSelect;
 
+// Small durable key/value store for process-wide toggles (currently just
+// App Store Review Mode) that previously lived in a plain in-memory
+// module variable in server/routes.ts and silently reset to the env-var
+// default on every server restart/redeploy.
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type AppSetting = typeof appSettings.$inferSelect;
+
 export const insertUserSchema = createInsertSchema(users).pick({
   phoneNumber: true,
   displayName: true,

@@ -384,7 +384,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Module-scoped so /api/auth/verify-code can gate the demo bypass on it.
   // Fail-closed default: only opens when explicitly enabled (Apple review window).
+  // Was a bare in-memory variable with no persistence — every server
+  // restart/redeploy silently reset it back to the env-var default,
+  // discarding whatever the owner had toggled in Settings. Seed it from the
+  // durable app_settings row (falls back to the env default if never set)
+  // and have the POST handler below write through to that row too.
   let reviewModeEnabled = (process.env.REVIEW_MODE || 'false').toLowerCase() === 'true';
+  try {
+    const persisted = await storage.getAppSetting('reviewModeEnabled');
+    if (persisted !== undefined) reviewModeEnabled = persisted === 'true';
+  } catch (e) {
+    console.error('Failed to load persisted review-mode setting, using env default:', e);
+  }
   
   // DO NOT REMOVE — Apple App Review reviewer account.
   // 555-1234567 bypasses OTP and grants VIP access so reviewers
@@ -1595,6 +1606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       reviewModeEnabled = enabled;
+      await storage.setAppSetting('reviewModeEnabled', String(enabled));
       console.log(`[ADMIN] Review mode ${enabled ? 'ENABLED' : 'DISABLED'} by owner`);
       res.json({ success: true, reviewMode: reviewModeEnabled });
     } catch (error) {

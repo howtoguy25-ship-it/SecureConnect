@@ -1,4 +1,4 @@
-import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents } from "@shared/schema";
+import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings } from "@shared/schema";
 import type { User, InsertUser, Message, InsertMessage, Conversation, Call, HiddenLockerItem, VerificationCode, PendingContact, JoinNotification, MessageRequest, Status, StatusView, Friend, LocationShare, LocationRequest, VirtualNumber, ExternalSms, UserBlock, UserReport, InsertUserReport, ScheduledMessage, UserDevice, SignedPrekey, OneTimePrekey, LoginEvent } from "@shared/schema";
 import { gt, lt, lte, ilike } from "drizzle-orm";
 import { db } from "./db";
@@ -98,9 +98,21 @@ export interface IStorage {
   updateReport(id: string, patch: Partial<UserReport>): Promise<UserReport | undefined>;
   suspendUser(userId: string, reason: string): Promise<void>;
   unsuspendUser(userId: string): Promise<void>;
+  getAppSetting(key: string): Promise<string | undefined>;
+  setAppSetting(key: string, value: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
+  async getAppSetting(key: string): Promise<string | undefined> {
+    const [row] = await db.select().from(appSettings).where(eq(appSettings.key, key));
+    return row?.value;
+  }
+
+  async setAppSetting(key: string, value: string): Promise<void> {
+    await db.insert(appSettings).values({ key, value, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: new Date() } });
+  }
+
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user || undefined;

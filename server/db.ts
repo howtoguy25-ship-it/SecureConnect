@@ -36,6 +36,13 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS users_safe_code_lookup_hash_unique
         ON users (safe_code_lookup_hash);
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key text PRIMARY KEY,
+        value text NOT NULL,
+        updated_at timestamp DEFAULT now()
+      );
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

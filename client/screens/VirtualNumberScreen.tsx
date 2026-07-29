@@ -316,7 +316,7 @@ export default function VirtualNumberScreen() {
               </>
             )}
           </Pressable>
-          <ThemedText type="small" style={[styles.prefDesc, { color: theme.textSecondary, textAlign: "center", marginTop: -Spacing.sm }]}>
+          <ThemedText type="small" style={[styles.prefDesc, { color: theme.textSecondary, textAlign: "center" }]}>
             Every Pryvo number is disposable. Disposing it clears the message history from conversations you had through it — your contacts stay, so you can keep chatting once you get a new number.
           </ThemedText>
         </>
