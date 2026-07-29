@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, StyleSheet, Pressable, Platform, Modal, Share } from "react-native";
+import { View, Text, StyleSheet, Pressable, Platform, Modal, Share } from "react-native";
 import MapView, { PROVIDER_GOOGLE, Polyline, Marker, Circle, type Region } from "react-native-maps";
-import { Map3DView, isMap3DSupported } from "map3d";
+import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
 import { Ionicons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
@@ -94,6 +94,25 @@ export function MapScreen() {
   // staged rollout. Renders as an overlay on top of the existing MapView, matching how the
   // web version layers its own Map3DElement over the classic 2D map.
   const [show3D, setShow3D] = useState(false);
+  // Tilted, near-horizontal "front view" of the 3D tiles/buildings on top of the default
+  // top-down 3D angle -- the module's own `tilt(deltaDeg)` is relative, not absolute, but
+  // since Map3DView is only ever mounted while show3D is true (unmounts fully when it's
+  // toggled off), each mount starts from the same default camera, so a fixed +60/-60 delta
+  // pair is a safe, always-correct toggle rather than needing to track absolute angle.
+  const [frontView, setFrontView] = useState(false);
+  const map3DRef = useRef<Map3DViewHandle>(null);
+
+  useEffect(() => {
+    if (!show3D) setFrontView(false);
+  }, [show3D]);
+
+  const toggleFrontView = useCallback(() => {
+    setFrontView((was) => {
+      const next = !was;
+      map3DRef.current?.tilt(next ? 60 : -60);
+      return next;
+    });
+  }, []);
 
   // Apple-Maps-style close-follow camera: tilted, zoomed in, rotates to match the direction
   // of travel. Uses react-native-maps' own `camera`/`animateCamera` API (pitch/heading/zoom),
@@ -518,12 +537,28 @@ export function MapScreen() {
       )}
 
       {show3D && isMap3DSupported && currentLatLng && (
-        <Map3DView
-          style={StyleSheet.absoluteFill}
-          center={currentLatLng}
-          markerPosition={currentLatLng}
-          routeCoordinates={route?.polyline}
-        />
+        <>
+          <Map3DView
+            ref={map3DRef}
+            style={StyleSheet.absoluteFill}
+            center={currentLatLng}
+            markerPosition={currentLatLng}
+            routeCoordinates={route?.polyline}
+          />
+          <Pressable
+            style={({ pressed }) => [
+              styles.frontViewButton,
+              { top: insets.top + spacing.md },
+              frontView && styles.fabActive,
+              pressed && { opacity: pressedOpacity },
+            ]}
+            onPress={toggleFrontView}
+            accessibilityLabel={frontView ? "Switch to top-down 3D view" : "Switch to front view"}
+          >
+            <Ionicons name={frontView ? "layers" : "eye"} size={18} color="#FFFFFF" />
+            <Text style={styles.frontViewButtonText}>{frontView ? "Top-down" : "Front view"}</Text>
+          </Pressable>
+        </>
       )}
 
       {!route && !pendingDestination && (
@@ -700,6 +735,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.medium,
+  },
+  frontViewButton: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.dark,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    ...shadow.medium,
+  },
+  frontViewButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 12,
   },
   osmDotTrafficLight: {
     width: 10,
