@@ -14,7 +14,7 @@
     },
     "production": {
       "cache": {
-        "key": "v60-build-80"
+        "key": "v60-build-81"
       },
       "channel": "production",
       "env": {
