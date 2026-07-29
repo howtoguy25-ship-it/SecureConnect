@@ -2,7 +2,13 @@ import React, { useState, useCallback, useRef } from "react";
 import { View, TextInput, FlatList, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { searchPlaces, getPlaceDetails, type PlacePrediction, type PlaceDetails } from "@/services/places";
+import {
+  searchPlaces,
+  getPlaceDetails,
+  PlacesApiError,
+  type PlacePrediction,
+  type PlaceDetails,
+} from "@/services/places";
 import type { LatLng } from "@/utils/polyline";
 import { colors, radius, shadow, spacing } from "@/theme/tokens";
 
@@ -24,6 +30,7 @@ export function DestinationSearchBar({
   const [query, setQuery] = useState("");
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
 
@@ -33,13 +40,22 @@ export function DestinationSearchBar({
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (!text.trim()) {
         setPredictions([]);
+        setErrorText(null);
         return;
       }
       debounceRef.current = setTimeout(async () => {
         setLoading(true);
+        setErrorText(null);
         try {
           const results = await searchPlaces(text, biasLocation);
           setPredictions(results);
+        } catch (err) {
+          setPredictions([]);
+          setErrorText(
+            err instanceof PlacesApiError
+              ? `Search unavailable (${err.status}) -- check the Places API key/billing`
+              : "Search failed -- check your connection"
+          );
         } finally {
           setLoading(false);
         }
@@ -50,10 +66,18 @@ export function DestinationSearchBar({
 
   const onSelectPrediction = useCallback(
     async (prediction: PlacePrediction) => {
-      const details = await getPlaceDetails(prediction.placeId);
-      setQuery(details.name);
-      setPredictions([]);
-      onDestinationSelected(details);
+      try {
+        const details = await getPlaceDetails(prediction.placeId);
+        setQuery(details.name);
+        setPredictions([]);
+        onDestinationSelected(details);
+      } catch (err) {
+        setErrorText(
+          err instanceof PlacesApiError
+            ? `Couldn't load that place (${err.status})`
+            : "Couldn't load that place -- check your connection"
+        );
+      }
     },
     [onDestinationSelected]
   );
@@ -76,6 +100,12 @@ export function DestinationSearchBar({
           </Pressable>
         )}
       </View>
+      {errorText && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle" size={16} color={colors.danger} />
+          <Text style={styles.errorText}>{errorText}</Text>
+        </View>
+      )}
       {predictions.length > 0 && (
         <FlatList
           data={predictions}
@@ -120,6 +150,22 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: colors.text,
+  },
+  errorBanner: {
+    marginTop: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: "#FEF2F2",
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    ...shadow.low,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.danger,
   },
   list: {
     marginTop: spacing.sm,

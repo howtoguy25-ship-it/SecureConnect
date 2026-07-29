@@ -1,5 +1,13 @@
 import { env } from "@/config/env";
 import { decodePolyline, type LatLng } from "@/utils/polyline";
+import { Sentry } from "@/services/sentry";
+
+export class DirectionsApiError extends Error {
+  constructor(public status: string, message?: string) {
+    super(message ? `${status}: ${message}` : status);
+    this.name = "DirectionsApiError";
+  }
+}
 
 export type ManeuverType =
   | "turn-left"
@@ -84,7 +92,11 @@ export async function getDirections(
   const json = await res.json();
 
   if (json.status !== "OK" || !json.routes?.length) {
-    throw new Error(`Directions request failed: ${json.status ?? "unknown error"}`);
+    Sentry.logger.error("directions: request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
   }
 
   const route = json.routes[0];

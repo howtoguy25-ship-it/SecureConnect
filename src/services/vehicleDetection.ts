@@ -3,6 +3,21 @@ import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import * as jpeg from "jpeg-js";
 import { File } from "expo-file-system";
 import { ensureTfReady } from "@/services/tfPlatform";
+import { cachedModelIO } from "@/services/cachedModelIO";
+
+// COCO-SSD fetches its own base model (several MB, model.json + weight shards) from
+// Google's CDN on every single load by default -- there's no persistent cache without this,
+// since tfPlatform.ts's minimal shim doesn't register one the way a browser's IndexedDB-
+// backed handler would. Registered once at module load: intercepts any tfjs-models CDN
+// request and routes it through an on-device disk cache (cachedModelIO) instead, so only the
+// very first vehicle-detection session ever touches the network for this.
+tf.io.registerLoadRouter((url) => {
+  if (typeof url !== "string" || !url.includes("storage.googleapis.com/tfjs-models/")) {
+    return null as unknown as tf.io.IOHandler;
+  }
+  const cacheKey = url.replace(/[^a-zA-Z0-9]/g, "_");
+  return cachedModelIO(url, cacheKey);
+});
 
 // COCO-SSD (the pretrained model this runs) only knows generic COCO classes — "car" /
 // "truck" / "bus" / "motorcycle" -- not "police car" or "ambulance". This app used to run a
@@ -32,17 +47,38 @@ export interface DecodedPhoto {
   data: Uint8Array;
 }
 
+const MODEL_LOAD_TIMEOUT_MS = 25000;
+
 let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
 
 function loadModel(): Promise<cocoSsd.ObjectDetection> {
   if (!modelPromise) {
-    modelPromise = ensureTfReady().then(() => cocoSsd.load({ base: "lite_mobilenet_v2" }));
+    modelPromise = ensureTfReady()
+      .then(() => cocoSsd.load({ base: "lite_mobilenet_v2" }))
+      .catch((err) => {
+        // Don't leave a permanently-rejected promise cached -- without this, one failed
+        // load (a network blip, a cold CDN fetch that timed out) would keep failing
+        // instantly forever, even after connectivity recovers, until the app fully restarts.
+        modelPromise = null;
+        throw err;
+      });
   }
   return modelPromise;
 }
 
 export async function warmUpModel(): Promise<void> {
-  await loadModel();
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error("Detection model took too long to load -- check your connection.")),
+      MODEL_LOAD_TIMEOUT_MS
+    );
+  });
+  try {
+    await Promise.race([loadModel(), timeout]);
+  } finally {
+    clearTimeout(timeoutHandle!);
+  }
 }
 
 /** Decodes a captured JPEG photo into raw RGB pixels, without the unmaintained

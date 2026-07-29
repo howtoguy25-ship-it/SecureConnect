@@ -23,6 +23,7 @@ const PROFILE_ORDER: RouteProfileKey[] = ["normal", "fastest", "safest"];
 interface Props {
   options: Record<RouteProfileKey, Route> | null;
   loading: boolean;
+  errorText?: string | null;
   selected: RouteProfileKey;
   onSelect: (key: RouteProfileKey) => void;
   onStart: () => void;
@@ -34,6 +35,7 @@ interface Props {
 export function RouteOptionsCard({
   options,
   loading,
+  errorText,
   selected,
   onSelect,
   onStart,
@@ -52,7 +54,12 @@ export function RouteOptionsCard({
         </Pressable>
       </View>
 
-      {loading || !options ? (
+      {errorText ? (
+        <View style={styles.loadingRow}>
+          <Ionicons name="alert-circle" size={20} color={colors.danger} />
+          <Text style={styles.errorText}>{errorText}</Text>
+        </View>
+      ) : loading || !options ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={colors.accent} />
           <Text style={styles.loadingText}>Finding the best routes…</Text>
@@ -149,6 +156,11 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: colors.textMuted,
+    fontSize: 14,
+  },
+  errorText: {
+    flex: 1,
+    color: colors.danger,
     fontSize: 14,
   },
   option: {

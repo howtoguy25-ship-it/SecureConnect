@@ -56,14 +56,28 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   // interval effect below doesn't tear down and rebuild every time a plate read resolves.
   const plateTextsRef = useRef(new Map<number, string>());
 
+  const [retryCount, setRetryCount] = useState(0);
+  const retryLoad = useCallback(() => {
+    setStatus("loading-model");
+    setErrorMessage(null);
+    setRetryCount((n) => n + 1);
+  }, []);
+
   useEffect(() => {
+    let cancelled = false;
     warmUpModel()
-      .then(() => setStatus("running"))
+      .then(() => {
+        if (!cancelled) setStatus("running");
+      })
       .catch((err) => {
+        if (cancelled) return;
         setErrorMessage(err instanceof Error ? err.message : "Failed to load detection model.");
         setStatus("error");
       });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [retryCount]);
 
   const captureAndDetect = useCallback(async () => {
     if (capturingRef.current || !cameraRef.current) return;
@@ -270,7 +284,16 @@ export function VehicleDetectionScreen({ onClose }: Props) {
           </Text>
         )}
         {status === "error" && (
-          <Text style={styles.bannerText}>{errorMessage ?? "Something went wrong."}</Text>
+          <>
+            <Text style={styles.bannerText}>{errorMessage ?? "Something went wrong."}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.retryButton, pressed && { opacity: pressedOpacity }]}
+              onPress={retryLoad}
+              accessibilityLabel="Retry loading detection model"
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </Pressable>
+          </>
         )}
       </View>
 
@@ -404,6 +427,17 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 12,
     flex: 1,
+  },
+  retryButton: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.md,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
   },
   switchButton: {
     position: "absolute",

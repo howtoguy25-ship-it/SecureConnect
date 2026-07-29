@@ -1,6 +1,7 @@
 import React, { forwardRef, useCallback, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertType } from "@/types/alert";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
@@ -23,7 +24,11 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
   ref
 ) {
   const [selected, setSelected] = useState<AlertType | null>(null);
-  const snapPoints = useMemo(() => ["42%"], []);
+  const insets = useSafeAreaInsets();
+  // A bit taller than the content strictly needs at rest, plus real bottom safe-area padding
+  // below -- previously neither was accounted for, so the confirm button sat flush against
+  // (and on notch-less-home-indicator iPhones, partly under) the bottom edge.
+  const snapPoints = useMemo(() => ["48%"], []);
 
   const handleConfirm = useCallback(() => {
     if (!selected) return;
@@ -40,7 +45,7 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
-      <BottomSheetView style={styles.container}>
+      <BottomSheetView style={[styles.container, { paddingBottom: insets.bottom + spacing.lg }]}>
         <Text style={styles.title}>Report what you see</Text>
         <View style={styles.grid}>
           {ALERT_TYPES.map((type) => {

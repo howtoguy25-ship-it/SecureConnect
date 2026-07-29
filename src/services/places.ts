@@ -1,5 +1,6 @@
 import { env } from "@/config/env";
 import type { LatLng } from "@/utils/polyline";
+import { Sentry } from "@/services/sentry";
 
 export interface PlacePrediction {
   placeId: string;
@@ -12,6 +13,13 @@ export interface PlaceDetails {
   name: string;
   address: string;
   location: LatLng;
+}
+
+export class PlacesApiError extends Error {
+  constructor(public status: string, message?: string) {
+    super(message ? `${status}: ${message}` : status);
+    this.name = "PlacesApiError";
+  }
 }
 
 export async function searchPlaces(query: string, biasLocation?: LatLng): Promise<PlacePrediction[]> {
@@ -36,7 +44,22 @@ export async function searchPlaces(query: string, biasLocation?: LatLng): Promis
   );
   const json = await res.json();
 
-  if (json.status !== "OK") return [];
+  // ZERO_RESULTS is a normal, silent empty-list outcome (nothing matches yet, still typing).
+  // Everything else (REQUEST_DENIED, INVALID_REQUEST, OVER_QUERY_LIMIT, UNKNOWN_ERROR) is a
+  // real failure -- most commonly an API-key restriction issue, since a plain fetch() from
+  // JS doesn't send the iOS/Android bundle-identifier headers that an "app-restricted" key
+  // requires, unlike calls made through the native Maps SDK itself. This used to be silently
+  // swallowed into an empty array indistinguishable from "no matches", which is exactly what
+  // made this impossible to diagnose without a report like "the dropdown just never appears."
+  if (json.status !== "OK" && json.status !== "ZERO_RESULTS") {
+    Sentry.logger.error("places: autocomplete request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+      query,
+    });
+    throw new PlacesApiError(json.status, json.error_message);
+  }
+  if (json.status === "ZERO_RESULTS") return [];
 
   return json.predictions.map((p: any) => ({
     placeId: p.place_id,
@@ -58,7 +81,12 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetails> {
   const json = await res.json();
 
   if (json.status !== "OK") {
-    throw new Error(`Place details request failed: ${json.status}`);
+    Sentry.logger.error("places: place details request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+      placeId,
+    });
+    throw new PlacesApiError(json.status, json.error_message);
   }
 
   const result = json.result;

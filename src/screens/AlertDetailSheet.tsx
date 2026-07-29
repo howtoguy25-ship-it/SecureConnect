@@ -1,6 +1,7 @@
 import React, { forwardRef, useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertDoc } from "@/types/alert";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
@@ -25,7 +26,8 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
   { alert, currentUid, onDelete, onHide, onConfirmStillHere },
   ref
 ) {
-  const snapPoints = useMemo(() => ["32%"], []);
+  const insets = useSafeAreaInsets();
+  const snapPoints = useMemo(() => ["38%"], []);
   const isOwner = !!alert && !!currentUid && alert.createdBy === currentUid;
 
   return (
@@ -37,7 +39,7 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
-      <BottomSheetView style={styles.container}>
+      <BottomSheetView style={[styles.container, { paddingBottom: insets.bottom + spacing.lg }]}>
         {alert && (
           <>
             <View style={styles.header}>

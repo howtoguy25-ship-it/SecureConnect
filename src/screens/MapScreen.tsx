@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { View, Text, StyleSheet, Pressable, Platform, Modal, Share } from "react-native";
 import MapView, { PROVIDER_GOOGLE, Polyline, Marker, Circle, type Region } from "react-native-maps";
 import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -23,7 +23,7 @@ import { BannerAdBar } from "@/components/BannerAdBar";
 import { AdsErrorBoundary } from "@/components/AdsErrorBoundary";
 import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
-import { getRouteOptions, type Route, type RouteProfileKey } from "@/services/directions";
+import { getRouteOptions, DirectionsApiError, type Route, type RouteProfileKey } from "@/services/directions";
 import type { PlaceDetails } from "@/services/places";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
@@ -75,6 +75,7 @@ export function MapScreen() {
   const [pickingStop, setPickingStop] = useState(false);
   const [routeOptions, setRouteOptions] = useState<Record<RouteProfileKey, Route> | null>(null);
   const [loadingRouteOptions, setLoadingRouteOptions] = useState(false);
+  const [routeOptionsError, setRouteOptionsError] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<RouteProfileKey>("normal");
 
   const [nearbyAlerts, setNearbyAlerts] = useState<AlertDoc[]>([]);
@@ -87,6 +88,8 @@ export function MapScreen() {
   const osmDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [bannerVisible, setBannerVisible] = useState(false);
+  const [placingAlert, setPlacingAlert] = useState(false);
+  const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
   // Real photorealistic 3D satellite (Android only for now, see modules/map3d) -- Stage 1:
@@ -256,6 +259,7 @@ export function MapScreen() {
     async (destination: LatLng, waypoint?: LatLng) => {
       if (!currentLatLng) return;
       setLoadingRouteOptions(true);
+      setRouteOptionsError(null);
       try {
         const options = await getRouteOptions(currentLatLng, destination, waypoint);
         setRouteOptions(options);
@@ -267,6 +271,11 @@ export function MapScreen() {
       } catch (err) {
         Sentry.logger.error("map: failed to fetch route options", { error: String(err) });
         console.warn("[map] failed to fetch route options", err);
+        setRouteOptionsError(
+          err instanceof DirectionsApiError
+            ? `Couldn't find a route (${err.status})`
+            : "Couldn't find a route -- check your connection"
+        );
       } finally {
         setLoadingRouteOptions(false);
       }
@@ -363,6 +372,7 @@ export function MapScreen() {
     setPendingDestination(null);
     setStopLocation(null);
     setPickingStop(false);
+    setRouteOptionsError(null);
   }, []);
 
   const exitNavigation = useCallback(() => {
@@ -376,12 +386,35 @@ export function MapScreen() {
 
   const onShareAlert = useCallback(
     async (type: AlertType) => {
-      if (!currentLatLng || !user) return;
-      await reportAlert(type, currentLatLng, user.uid);
+      const location = alertPlacementLatLng ?? currentLatLng;
+      if (!location || !user) return;
+      await reportAlert(type, location, user.uid);
       reportSheetRef.current?.close();
+      setPlacingAlert(false);
+      setAlertPlacementLatLng(null);
     },
-    [currentLatLng, user]
+    [alertPlacementLatLng, currentLatLng, user]
   );
+
+  // Manual placement: tapping the report FAB drops a draggable pin (starting at the live
+  // position) the user can drag to the exact spot before picking an alert type -- rather than
+  // always silently reporting at wherever the phone's GPS currently says it is, which is
+  // often not quite where the actual hazard/police car/etc is.
+  const startAlertPlacement = useCallback(() => {
+    if (!currentLatLng) return;
+    setAlertPlacementLatLng(currentLatLng);
+    setPlacingAlert(true);
+  }, [currentLatLng]);
+
+  const confirmAlertPlacement = useCallback(() => {
+    setPlacingAlert(false);
+    reportSheetRef.current?.expand();
+  }, []);
+
+  const cancelAlertPlacement = useCallback(() => {
+    setPlacingAlert(false);
+    setAlertPlacementLatLng(null);
+  }, []);
 
   const onMarkerPress = useCallback((alert: AlertDoc) => {
     setSelectedAlert(alert);
@@ -508,6 +541,20 @@ export function MapScreen() {
             </Marker>
           </>
         )}
+        {/* Manual alert placement -- a real draggable pin (react-native-maps' own built-in
+            drag support), not just wherever GPS says the phone is right now. */}
+        {placingAlert && alertPlacementLatLng && (
+          <Marker
+            coordinate={alertPlacementLatLng}
+            draggable
+            onDragEnd={(e) => setAlertPlacementLatLng(e.nativeEvent.coordinate)}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <View style={styles.placementPinWrap}>
+              <Ionicons name="location" size={44} color={colors.danger} />
+            </View>
+          </Marker>
+        )}
         {visibleAlerts.map((alert) => (
           <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
         ))}
@@ -519,7 +566,9 @@ export function MapScreen() {
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
             >
-              <View style={styles.osmDotTrafficLight} />
+              <View style={styles.osmIconBadgeTrafficLight}>
+                <MaterialCommunityIcons name="traffic-light" size={11} color="#FFFFFF" />
+              </View>
             </Marker>
           ))}
         {settings.showSpeedCameras &&
@@ -530,7 +579,9 @@ export function MapScreen() {
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
             >
-              <View style={styles.osmDotSpeedCamera} />
+              <View style={styles.osmIconBadgeSpeedCamera}>
+                <MaterialCommunityIcons name="cctv" size={11} color="#FFFFFF" />
+              </View>
             </Marker>
           ))}
       </MapView>
@@ -561,7 +612,7 @@ export function MapScreen() {
         </>
       )}
 
-      {!route && !pendingDestination && (
+      {!route && !pendingDestination && !placingAlert && (
         <DestinationSearchBar biasLocation={currentLatLng ?? undefined} onDestinationSelected={onDestinationSelected} />
       )}
 
@@ -578,6 +629,7 @@ export function MapScreen() {
         <RouteOptionsCard
           options={routeOptions}
           loading={loadingRouteOptions}
+          errorText={routeOptionsError}
           selected={selectedProfile}
           onSelect={onSelectProfile}
           onStart={confirmRoute}
@@ -632,7 +684,7 @@ export function MapScreen() {
           { bottom: insets.bottom + 24 },
           pressed && { opacity: pressedOpacity },
         ]}
-        onPress={() => reportSheetRef.current?.expand()}
+        onPress={startAlertPlacement}
         accessibilityLabel="Report an alert"
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
@@ -702,6 +754,37 @@ export function MapScreen() {
         </AdsErrorBoundary>
       )}
 
+      {placingAlert && (
+        <View style={[styles.placementBar, { bottom: insets.bottom + spacing.xl }]}>
+          <Text style={styles.placementBarText}>Drag the pin to the exact spot</Text>
+          <View style={styles.placementBarButtons}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.placementButton,
+                styles.placementButtonRemove,
+                pressed && { opacity: pressedOpacity },
+              ]}
+              onPress={cancelAlertPlacement}
+              accessibilityLabel="Cancel placing alert"
+            >
+              <Ionicons name="close" size={20} color={colors.text} />
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.placementButton,
+                styles.placementButtonSet,
+                pressed && { opacity: pressedOpacity },
+              ]}
+              onPress={confirmAlertPlacement}
+              accessibilityLabel="Set alert location"
+            >
+              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+              <Text style={styles.placementButtonSetText}>Set</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
         <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
       </Modal>
@@ -736,6 +819,56 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...shadow.medium,
   },
+  placementPinWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.high,
+  },
+  placementBar: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    ...shadow.high,
+  },
+  placementBarText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.text,
+  },
+  placementBarButtons: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  placementButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.pill,
+    height: 40,
+    paddingHorizontal: spacing.md,
+    gap: spacing.xs,
+  },
+  placementButtonRemove: {
+    width: 40,
+    paddingHorizontal: 0,
+    backgroundColor: colors.surfaceMuted,
+  },
+  placementButtonSet: {
+    backgroundColor: colors.accent,
+  },
+  placementButtonSetText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
   frontViewButton: {
     position: "absolute",
     alignSelf: "center",
@@ -753,21 +886,25 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 12,
   },
-  osmDotTrafficLight: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  osmIconBadgeTrafficLight: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "#0D9488",
     borderWidth: 1.5,
     borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  osmDotSpeedCamera: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  osmIconBadgeSpeedCamera: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "#7C3AED",
     borderWidth: 1.5,
     borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
   topRightControls: {
     position: "absolute",
