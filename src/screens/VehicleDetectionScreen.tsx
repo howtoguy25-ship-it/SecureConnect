@@ -265,7 +265,16 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         {status === "loading-model" && (
           <>
             <ActivityIndicator color="#fff" />
-            <Text style={styles.bannerText}>Loading detection model…</Text>
+            {/* Real expectation-setting, not a generic spinner label -- loading this model
+                includes a full warmup pass through it on-device with no GPU acceleration, which
+                can genuinely take up to a minute on some phones. The Close/Switch camera
+                buttons below stay tappable throughout this -- if they seem unresponsive, that's
+                this same on-device computation keeping the app busy, not those buttons being
+                broken. */}
+            <Text style={styles.bannerText}>
+              Loading detection model… this can take up to a minute the first time, longer on
+              older phones (runs fully on-device, no GPU acceleration).
+            </Text>
           </>
         )}
         {status === "running" && (

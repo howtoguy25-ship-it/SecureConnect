@@ -53,7 +53,15 @@ export interface DecodedPhoto {
   data: Uint8Array;
 }
 
-const MODEL_LOAD_TIMEOUT_MS = 25000;
+// coco-ssd's load() isn't just a download -- it also runs a real warmup inference (a
+// tf.zeros([1,300,300,3]) tensor through the *entire* SSD-MobileNet graph) before resolving,
+// and this app's tfPlatform.ts deliberately runs tfjs on the CPU backend only (no WebGL/GPU
+// acceleration -- that needs expo-gl + real device verification, the same category of risk as
+// the Maps 3D SDK crash history elsewhere in this app, not something to wire in blind).
+// SSD-MobileNet's warmup pass on CPU-only Hermes can genuinely take much longer than a simple
+// network fetch would -- 25s was tuned for "slow download", not "slow inference", and was
+// cutting real loads off before they finished on real hardware.
+const MODEL_LOAD_TIMEOUT_MS = 75000;
 
 let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
 
@@ -85,7 +93,12 @@ export async function warmUpModel(): Promise<void> {
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(
-      () => reject(new Error("Detection model took too long to load -- check your connection.")),
+      () =>
+        reject(
+          new Error(
+            "Detection model is taking unusually long to load -- check your connection, or try again."
+          )
+        ),
       MODEL_LOAD_TIMEOUT_MS
     );
   });

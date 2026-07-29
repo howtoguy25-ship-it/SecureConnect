@@ -181,24 +181,55 @@ export function MapScreen() {
   useEffect(() => {
     if (!route || !followTilt || !currentLatLng) return;
     if (Date.now() - navStartedAtRef.current < 1200) return;
-    mapRef.current?.animateCamera(
-      { center: currentLatLng, heading, pitch: 60, zoom: 18 },
-      { duration: 600 }
-    );
+    // Deliberately omits pitch/zoom here (animateCamera only touches the fields it's given,
+    // leaving the rest alone) -- GPS updates land every ~2s or every 5m travelled, which while
+    // actually driving can be several times a second. Including a fixed pitch/zoom on every one
+    // of those ticks was re-snapping the camera back and fighting a user's manual two-finger
+    // tilt/pinch almost as soon as they started it, making that real, native gesture feel
+    // broken even though it works fine on its own. Pitch/zoom are only ever set once, when
+    // follow-tilt is first entered (toggleFollowTilt/enterFollowTilt below) -- after that, only
+    // center/heading keep tracking live position/direction of travel.
+    mapRef.current?.animateCamera({ center: currentLatLng, heading }, { duration: 600 });
   }, [route, followTilt, currentLatLng, heading]);
 
   const toggleFollowTilt = useCallback(() => {
     setFollowTilt((was) => {
       const next = !was;
       if (!next && currentLatLng) {
+        // A bit closer than the old zoom 15 -- "keep it lower, not too high" -- 15 read as too
+        // zoomed-out/distant for a normal driving view once the tilted close-follow (zoom 18)
+        // was the point of comparison.
         mapRef.current?.animateCamera(
-          { center: currentLatLng, heading: 0, pitch: 0, zoom: 15 },
+          { center: currentLatLng, heading: 0, pitch: 0, zoom: 17 },
           { duration: 500 }
         );
       }
       return next;
     });
   }, [currentLatLng]);
+
+  // Tapping the route line itself is a second, more discoverable way into the same real,
+  // native-camera 3D close-follow view as the small toggle button -- always *enters* it rather
+  // than toggling, so tapping the line is a predictable "show me the 3D view" action regardless
+  // of whatever state the toggle button was already in.
+  const enterFollowTilt = useCallback(() => {
+    setFollowTilt(true);
+    if (currentLatLng) {
+      mapRef.current?.animateCamera(
+        { center: currentLatLng, heading, pitch: 60, zoom: 18 },
+        { duration: 500 }
+      );
+    }
+  }, [currentLatLng, heading]);
+
+  // Apple/Google Maps' own convention: a manual pan/tilt/rotate gesture drops the camera out of
+  // auto-follow instead of being fought by it. Without this, the close-follow effect above
+  // re-animates the camera back to its fixed pitch/zoom on every single GPS update (often under
+  // a second apart) -- which stomps a two-finger tilt gesture almost as soon as the user starts
+  // it, making manual 3D tilting feel broken even though the gesture itself works fine.
+  const onMapPanDrag = useCallback(() => {
+    if (followTilt) setFollowTilt(false);
+  }, [followTilt]);
 
   // Subscribe to nearby alerts (Phase 3 + Phase 5) whenever position or radius changes
   // meaningfully. Fully off (and cleared) when the user has disabled alerts altogether --
@@ -615,9 +646,16 @@ export function MapScreen() {
         }}
         onRegionChangeComplete={onRegionChangeComplete}
         onPress={onMapPress}
+        onPanDrag={onMapPanDrag}
       >
         {route && (
-          <Polyline coordinates={route.polyline} strokeWidth={5} strokeColor="#2563EB" />
+          <Polyline
+            coordinates={route.polyline}
+            strokeWidth={8}
+            strokeColor="#2563EB"
+            tappable
+            onPress={enterFollowTilt}
+          />
         )}
         {/* Preview of whichever route profile is highlighted in the picker below, before
             the user commits to it with Start -- "click a route, see its line" like Apple/
