@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
+  Modal,
 } from "react-native";
 import {
   CameraView,
@@ -20,6 +21,7 @@ import {
 } from "expo-camera";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Sharing from "expo-sharing";
+import * as ImageManipulator from "expo-image-manipulator";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -56,6 +58,14 @@ const AVATAR_COLORS = [
 
 const MAX_VIDEO_SECONDS = 60;
 
+// null aspect = "Original" (no crop, restores the uncropped source).
+const CROP_PRESETS: { label: string; aspect: number | null }[] = [
+  { label: "Original", aspect: null },
+  { label: "Square", aspect: 1 },
+  { label: "Portrait", aspect: 4 / 5 },
+  { label: "Wide", aspect: 16 / 9 },
+];
+
 export default function CameraScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -75,6 +85,11 @@ export default function CameraScreen() {
   const [isSending, setIsSending] = useState(false);
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [cropSourceUri, setCropSourceUri] = useState<string | null>(null);
+  const [cropPreviewUri, setCropPreviewUri] = useState<string | null>(null);
+  const [selectedCropAspect, setSelectedCropAspect] = useState<number | null>(null);
+  const [isCropping, setIsCropping] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -208,6 +223,78 @@ export default function CameraScreen() {
     setCapturedVideo(null);
     setSelectedRecipients([]);
     setCaption("");
+  };
+
+  // Real pixel crop via expo-image-manipulator, not a fake visual overlay.
+  // Presets are deterministic (largest centered rect at the chosen aspect)
+  // rather than a free-drag crop frame — that avoids the real risk of a
+  // hand-rolled pan/pinch-to-crop transform silently mismapping screen
+  // gesture coordinates to source-image pixels and cropping the wrong area,
+  // which would be worse than no crop feature at all. Each preset tap
+  // applies the actual crop immediately so what's previewed is exactly
+  // what gets saved and sent.
+  const getImageSize = (uri: string): Promise<{ width: number; height: number }> =>
+    new Promise((resolve, reject) => {
+      Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
+    });
+
+  const applyCropPreset = async (aspect: number | null) => {
+    if (!cropSourceUri) return;
+    setIsCropping(true);
+    try {
+      if (aspect === null) {
+        setCropPreviewUri(cropSourceUri);
+        setSelectedCropAspect(null);
+        return;
+      }
+      const { width: imgW, height: imgH } = await getImageSize(cropSourceUri);
+      const currentAspect = imgW / imgH;
+      let cropW: number;
+      let cropH: number;
+      if (currentAspect > aspect) {
+        cropH = imgH;
+        cropW = imgH * aspect;
+      } else {
+        cropW = imgW;
+        cropH = imgW / aspect;
+      }
+      const originX = Math.round((imgW - cropW) / 2);
+      const originY = Math.round((imgH - cropH) / 2);
+      const result = await ImageManipulator.manipulateAsync(
+        cropSourceUri,
+        [{ crop: { originX, originY, width: Math.round(cropW), height: Math.round(cropH) } }],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      setCropPreviewUri(result.uri);
+      setSelectedCropAspect(aspect);
+    } catch (error) {
+      console.error('Failed to apply crop:', error);
+      Alert.alert('Crop Failed', 'Could not crop this photo. Please try again.');
+    } finally {
+      setIsCropping(false);
+    }
+  };
+
+  const openCropModal = () => {
+    if (!capturedPhoto) return;
+    setCropSourceUri(capturedPhoto);
+    setCropPreviewUri(capturedPhoto);
+    setSelectedCropAspect(null);
+    setShowCropModal(true);
+  };
+
+  const handleSaveCrop = () => {
+    if (cropPreviewUri) {
+      setCapturedPhoto(cropPreviewUri);
+      haptics.success();
+    }
+    setShowCropModal(false);
+  };
+
+  const handleCancelCrop = () => {
+    setShowCropModal(false);
+    setCropPreviewUri(null);
+    setCropSourceUri(null);
   };
 
   const capturedUri = capturedPhoto || capturedVideo;
@@ -468,6 +555,16 @@ export default function CameraScreen() {
               <Text style={styles.actionButtonText}>Retake</Text>
             </Pressable>
 
+            {capturedKind === "image" ? (
+              <Pressable
+                style={[styles.actionButton, { backgroundColor: "rgba(255,255,255,0.2)" }]}
+                onPress={openCropModal}
+              >
+                <Feather name="crop" size={20} color="#FFFFFF" />
+                <Text style={styles.actionButtonText}>Crop</Text>
+              </Pressable>
+            ) : null}
+
             {selectedRecipients.length > 0 ? (
               <Pressable
                 style={[styles.actionButton, styles.sendButton, { backgroundColor: theme.primary }]}
@@ -506,6 +603,54 @@ export default function CameraScreen() {
         >
           <Feather name="x" size={24} color="#FFFFFF" />
         </Pressable>
+
+        <Modal visible={showCropModal} animationType="slide" transparent={false}>
+          <View style={[styles.container, { backgroundColor: "#000" }]}>
+            <View style={styles.cropPreviewWrap}>
+              {isCropping ? (
+                <ActivityIndicator size="large" color="#FFFFFF" />
+              ) : cropPreviewUri ? (
+                <Image source={{ uri: cropPreviewUri }} style={styles.preview} resizeMode="contain" />
+              ) : null}
+            </View>
+
+            <View style={[styles.cropControls, { paddingBottom: insets.bottom + Spacing.lg }]}>
+              <View style={styles.cropAspectRow}>
+                {CROP_PRESETS.map((preset) => (
+                  <Pressable
+                    key={preset.label}
+                    style={[
+                      styles.cropAspectButton,
+                      selectedCropAspect === preset.aspect && { backgroundColor: theme.primary },
+                    ]}
+                    onPress={() => applyCropPreset(preset.aspect)}
+                    disabled={isCropping}
+                  >
+                    <Text style={styles.cropAspectButtonText}>{preset.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={[styles.actionButton, { backgroundColor: "rgba(255,255,255,0.2)" }]}
+                  onPress={handleCancelCrop}
+                >
+                  <Feather name="x" size={20} color="#FFFFFF" />
+                  <Text style={styles.actionButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.actionButton, styles.sendButton, { backgroundColor: theme.primary }]}
+                  onPress={handleSaveCrop}
+                  disabled={isCropping || !cropPreviewUri}
+                >
+                  <Feather name="check" size={20} color="#FFFFFF" />
+                  <Text style={styles.actionButtonText}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -785,6 +930,16 @@ const styles = StyleSheet.create({
   },
   sendButton: { flex: 1, justifyContent: "center" },
   actionButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "600" },
+  cropPreviewWrap: { flex: 1, justifyContent: "center", alignItems: "center" },
+  cropControls: { paddingHorizontal: Spacing.lg, gap: Spacing.md },
+  cropAspectRow: { flexDirection: "row", justifyContent: "center", gap: Spacing.sm },
+  cropAspectButton: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.full,
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  cropAspectButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "600" },
   permissionTitle: {
     fontSize: 22,
     fontWeight: "700",
