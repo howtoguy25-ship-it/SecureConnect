@@ -10,21 +10,7 @@ module.exports = {
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
     assetBundlePatterns: ["**/*"],
-    // TEST: JSC instead of Hermes (default). Every third-party native module with the
-    // void-TurboModule pattern implicated in the crash (facebook/react-native#54859 --
-    // ObjCTurboModule::performVoidMethodInvocation mishandling an NSException on iOS 26.x
-    // release builds) has been individually ruled out by disabling it (Sentry native, ads,
-    // AsyncStorage, location watch, native MapView -- see git history on this branch). The
-    // upstream report calls out "compiler optimization interactions" with iOS 26's exception
-    // handling specifically -- Hermes does ahead-of-time bytecode compilation in Release
-    // builds that JSC doesn't, so this isolates that one remaining variable directly, on a
-    // real shippable Release build rather than another broken Debug-config attempt (that one
-    // just hit the expo-dev-launcher screen instead of running the app -- see EXAppDefines.
-    // APP_DEBUG in expo-modules-core, gated on Xcode's own DEBUG macro). Scoped to iOS only --
-    // Android isn't the one crashing and isn't being built/tested right now, so it stays on
-    // the default Hermes engine rather than pulling in the separate jsc-android dependency.
     ios: {
-      jsEngine: "jsc",
       // Phone-only -- TrackLine is a live driving/navigation app, not something meant to run
       // on an iPad mounted somewhere, and this avoids App Store Connect requiring a whole
       // separate set of iPad screenshots for a form factor the app isn't really designed for.

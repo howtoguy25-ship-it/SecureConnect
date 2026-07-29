@@ -1,0 +1,37 @@
+diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+index a1111f9..3f138d2 100644
+--- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
++++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+@@ -10,6 +10,7 @@
+ #import <React/RCTBridgeModule.h>
+ #import <React/RCTConvert.h>
+ #import <React/RCTCxxConvert.h>
++#import <React/RCTLog.h>
+ #import <React/RCTManagedPointer.h>
+ #import <React/RCTModuleMethod.h>
+ #import <React/RCTUtils.h>
+@@ -460,9 +461,21 @@ void ObjCTurboModule::performVoidMethodInvocation(
+     @try {
+       [inv invokeWithTarget:strongModule];
+     } @catch (NSException *exception) {
+-      // Void methods are always async, re-throw instead of converting to
+-      // JSError, same as the async branch in performMethodInvocation.
+-      @throw exception;
++      // Upstream (facebook/react-native#54859): re-throwing here still reaches
++      // std::terminate/SIGABRT on iOS 26 release builds, because this block runs on a
++      // background GCD queue with nothing else in the call stack able to catch either a
++      // raw NSException or a converted JSError -- re-throwing "fixes" what the exception
++      // looks like on its way out, not whether it takes the whole app down with it. A void
++      // TurboModule method has no promise/callback contract the caller is blocked on, so
++      // logging and swallowing here converts an unrecoverable full-app crash into one
++      // silently-failed native call, which is the safer trade for a live navigation app in
++      // active use than terminating mid-drive over a single native call.
++      RCTLogError(
++          @"[TrackLine] Suppressed NSException from void TurboModule method %s.%s (would "
++           "otherwise crash the app -- see facebook/react-native#54859): %@",
++          moduleName,
++          methodName,
++          exception);
+     } @finally {
+       [retainedObjectsForInvocation removeAllObjects];
+     }
