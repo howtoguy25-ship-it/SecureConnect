@@ -99,6 +99,7 @@ export interface User {
   lastSeenPrivacy?: string | null;
   safeCodeAcknowledged?: boolean;
   hasSafeCode?: boolean;
+  hasSecurityQuestions?: boolean;
   // Story privacy — account-level audience gate (server also returns these;
   // see server/routes.ts GET /api/auth/me). Used client-side to decide
   // whether a new story's audience is bounded enough to E2EE.

@@ -257,6 +257,42 @@ function verifySafeCode(code: string, hash: string): boolean {
   return bcrypt.compareSync(normalized, hash);
 }
 
+// Deterministic HMAC used ONLY to look up which user a submitted Account ID
+// (Safe Code) belongs to during unauthenticated recovery — bcrypt hashes
+// can't be searched by value since they're salted per-call. The bcrypt hash
+// in `safeCodeHash` remains the actual credential check; this is purely an
+// index.
+function lookupHashSafeCode(code: string): string {
+  const normalized = code.replace(/[-\s]/g, '').toUpperCase();
+  return crypto.createHmac('sha256', JWT_SECRET).update(normalized).digest('hex');
+}
+
+// ─── Security questions (account recovery 2nd factor) ─────────────────────
+// Answers are low-entropy secrets (a favourite dish, two memorable words),
+// so they're normalized aggressively before hashing to avoid users getting
+// locked out by incidental casing/whitespace differences, and bcrypt-hashed
+// like the locker PIN — never stored, logged, or transmitted back in
+// plaintext once hashed.
+function normalizeSecurityAnswer(answer: string): string {
+  return answer.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function hashSecurityAnswer(answer: string): string {
+  return bcrypt.hashSync(normalizeSecurityAnswer(answer), 10);
+}
+
+function verifySecurityAnswer(answer: string, hash: string): boolean {
+  return bcrypt.compareSync(normalizeSecurityAnswer(answer), hash);
+}
+
+function isValidTwoWordAnswer(answer: string): boolean {
+  const words = normalizeSecurityAnswer(answer).split(' ').filter(Boolean);
+  return words.length === 2 && words.every((w) => w.length >= 1);
+}
+
+const SECURITY_Q_MAX_ATTEMPTS = 5;
+const SECURITY_Q_LOCKOUT_MS = 30 * 60_000; // 30 minutes
+
 export async function registerRoutes(app: Express): Promise<Server> {
   const connectedUsers = new Map<string, Set<string>>();
 
@@ -558,8 +594,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const generated = generateSafeCode();
           const hash = hashSafeCode(generated);
-          await storage.updateUser(user.id, { safeCodeHash: hash, safeCodeAcknowledged: false });
-          user = { ...user, safeCodeHash: hash, safeCodeAcknowledged: false };
+          const lookupHash = lookupHashSafeCode(generated);
+          await storage.updateUser(user.id, { safeCodeHash: hash, safeCodeAcknowledged: false, safeCodeLookupHash: lookupHash });
+          user = { ...user, safeCodeHash: hash, safeCodeAcknowledged: false, safeCodeLookupHash: lookupHash };
           pendingSafeCode = generated;
         } catch (e) {
           console.error('Failed to auto-generate Safe Code at signup:', e);
@@ -644,6 +681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           notificationsEnabled: user.notificationsEnabled ?? false,
           safeCodeAcknowledged: user.safeCodeAcknowledged ?? false,
           hasSafeCode: !!user.safeCodeHash,
+          hasSecurityQuestions: !!user.securityQ1Hash,
         },
         isNewUser,
         isNewDevice,
@@ -667,7 +705,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const code = generateSafeCode();
       const hash = hashSafeCode(code);
-      await storage.updateUser(user.id, { safeCodeHash: hash, safeCodeAcknowledged: false });
+      const lookupHash = lookupHashSafeCode(code);
+      await storage.updateUser(user.id, { safeCodeHash: hash, safeCodeAcknowledged: false, safeCodeLookupHash: lookupHash });
       res.json({ success: true, code });
     } catch (error) {
       console.error('Error generating safe code:', error);
@@ -686,6 +725,294 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Could not save acknowledgement' });
+    }
+  });
+
+  // ─── Security questions (set once, required on every fresh login, and ────
+  // combined with the Account ID for self-service account recovery) ────────
+  app.post('/api/auth/security-questions/set', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.securityQ1Hash) {
+        return res.status(400).json({ error: 'Security questions are already set.' });
+      }
+      const { dishAnswer, twoWordsAnswer } = req.body;
+      if (!dishAnswer || typeof dishAnswer !== 'string' || !normalizeSecurityAnswer(dishAnswer)) {
+        return res.status(400).json({ error: 'Please answer the first question.' });
+      }
+      if (!twoWordsAnswer || typeof twoWordsAnswer !== 'string' || !isValidTwoWordAnswer(twoWordsAnswer)) {
+        return res.status(400).json({ error: 'Please enter exactly two words separated by a space.' });
+      }
+      await storage.updateUser(user.id, {
+        securityQ1Hash: hashSecurityAnswer(dishAnswer),
+        securityQ2Hash: hashSecurityAnswer(twoWordsAnswer),
+        securityQuestionsSetAt: new Date(),
+      });
+      // Answers exist only in this request's memory — never echoed back,
+      // never logged, discarded the instant the hashes are computed above.
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error setting security questions:', error);
+      res.status(500).json({ error: 'Could not save security questions' });
+    }
+  });
+
+  app.post('/api/auth/security-questions/verify', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user || !user.securityQ1Hash || !user.securityQ2Hash) {
+        return res.status(400).json({ error: 'No security questions on file' });
+      }
+      if (user.securityQLockedUntil && new Date() < new Date(user.securityQLockedUntil)) {
+        const retryAfterSec = Math.ceil((new Date(user.securityQLockedUntil).getTime() - Date.now()) / 1000);
+        res.setHeader('Retry-After', retryAfterSec.toString());
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please try again later.' });
+      }
+      const { dishAnswer, twoWordsAnswer } = req.body;
+      const valid =
+        typeof dishAnswer === 'string' &&
+        typeof twoWordsAnswer === 'string' &&
+        verifySecurityAnswer(dishAnswer, user.securityQ1Hash) &&
+        verifySecurityAnswer(twoWordsAnswer, user.securityQ2Hash);
+
+      if (!valid) {
+        const attempts = (user.securityQFailedAttempts ?? 0) + 1;
+        const lockedUntil = attempts >= SECURITY_Q_MAX_ATTEMPTS ? new Date(Date.now() + SECURITY_Q_LOCKOUT_MS) : null;
+        await storage.updateUser(user.id, {
+          securityQFailedAttempts: attempts >= SECURITY_Q_MAX_ATTEMPTS ? 0 : attempts,
+          securityQLockedUntil: lockedUntil,
+        });
+        return res.json({ valid: false });
+      }
+
+      await storage.updateUser(user.id, { securityQFailedAttempts: 0, securityQLockedUntil: null });
+      res.json({ valid: true });
+    } catch (error) {
+      console.error('Error verifying security questions:', error);
+      res.status(500).json({ error: 'Verification failed' });
+    }
+  });
+
+  // ─── Account recovery (lost phone number) ──────────────────────────────
+  // Fully automatic, no manual review: Account ID + both security answers
+  // is treated as sufficient proof of ownership, matching a password-reset
+  // flow. To still guard against pure account takeover from a leaked/guessed
+  // Account ID, the flow does NOT relink the phone number until the caller
+  // also proves live possession of the NEW number via a real OTP — the
+  // recovery answers alone only unlock a short-lived recovery token, they
+  // never directly change the login-bound phone number.
+  const recoverVerifyIpRateLimit = makePreAuthRateLimiter("account-recovery", 8, 15 * 60_000);
+  const RECOVERY_TOKEN_TTL_MIN = 10;
+
+  app.post('/api/auth/recover/verify', async (req, res) => {
+    try {
+      const { accountId, dishAnswer, twoWordsAnswer } = req.body;
+      if (!accountId || typeof accountId !== 'string' || !dishAnswer || !twoWordsAnswer) {
+        return res.status(400).json({ error: 'Account ID and both answers are required.' });
+      }
+
+      // IP-wide throttle first so a single attacker can't hammer the lookup
+      // itself (which is O(1) and cheap) before we even find a user to
+      // apply the slower bcrypt + per-account lockout to.
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const ipAllowed = recoverVerifyIpRateLimit(() => ipKey, req, res);
+      if (!ipAllowed) return; // 429 already written
+
+      const lookupHash = lookupHashSafeCode(accountId);
+      const user = await storage.getUserBySafeCodeLookupHash(lookupHash);
+
+      // Same generic failure for "no such account ID" and "wrong answers" —
+      // never reveal which part was incorrect.
+      const genericFail = () => res.json({ valid: false });
+
+      if (!user || !user.safeCodeHash || !user.securityQ1Hash || !user.securityQ2Hash) {
+        return genericFail();
+      }
+
+      if (user.securityQLockedUntil && new Date() < new Date(user.securityQLockedUntil)) {
+        const retryAfterSec = Math.ceil((new Date(user.securityQLockedUntil).getTime() - Date.now()) / 1000);
+        res.setHeader('Retry-After', retryAfterSec.toString());
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please try again later.' });
+      }
+
+      const valid =
+        verifySafeCode(accountId, user.safeCodeHash) &&
+        verifySecurityAnswer(dishAnswer, user.securityQ1Hash) &&
+        verifySecurityAnswer(twoWordsAnswer, user.securityQ2Hash);
+
+      if (!valid) {
+        const attempts = (user.securityQFailedAttempts ?? 0) + 1;
+        const lockedUntil = attempts >= SECURITY_Q_MAX_ATTEMPTS ? new Date(Date.now() + SECURITY_Q_LOCKOUT_MS) : null;
+        await storage.updateUser(user.id, {
+          securityQFailedAttempts: attempts >= SECURITY_Q_MAX_ATTEMPTS ? 0 : attempts,
+          securityQLockedUntil: lockedUntil,
+        });
+        return genericFail();
+      }
+
+      await storage.updateUser(user.id, { securityQFailedAttempts: 0, securityQLockedUntil: null });
+
+      const recoveryToken = jwt.sign(
+        { userId: user.id, purpose: 'account-recovery' },
+        JWT_SECRET,
+        { expiresIn: `${RECOVERY_TOKEN_TTL_MIN}m` },
+      );
+      res.json({ valid: true, recoveryToken });
+    } catch (error) {
+      console.error('Error verifying account recovery:', error);
+      res.status(500).json({ error: 'Recovery verification failed' });
+    }
+  });
+
+  function verifyRecoveryToken(token: unknown): string | null {
+    if (!token || typeof token !== 'string') return null;
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; purpose?: string };
+      if (decoded.purpose !== 'account-recovery') return null;
+      return decoded.userId;
+    } catch {
+      return null;
+    }
+  }
+
+  app.post('/api/auth/recover/send-code', async (req, res) => {
+    try {
+      const { recoveryToken, phoneNumber: rawPhone } = req.body;
+      const userId = verifyRecoveryToken(recoveryToken);
+      if (!userId) {
+        return res.status(401).json({ error: 'Recovery session expired. Please verify your Account ID and answers again.' });
+      }
+      if (!rawPhone || typeof rawPhone !== 'string') {
+        return res.status(400).json({ error: 'Please enter your new phone number.' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const phoneNumber = `+${digitsOnly}`;
+
+      const existingOwner = await storage.getUserByPhone(phoneNumber);
+      if (existingOwner && existingOwner.id !== userId) {
+        return res.status(400).json({ error: 'That phone number is already linked to another account.' });
+      }
+
+      const sendIpKey = getClientIp(req) ?? "unknown-ip";
+      const sendAllowed = sendCodeRateLimit(() => `recover|${sendIpKey}|${phoneNumber}`, req, res);
+      if (!sendAllowed) return;
+
+      const code = generateVerificationCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      await storage.createVerificationCode(phoneNumber, code, expiresAt);
+
+      const twilioConfigured = (process.env.TWILIO_ACCOUNT_SID || process.env.Twilio_Account_SID) &&
+        (process.env.TWILIO_AUTH_TOKEN || process.env.Twilio_Auth_Token) &&
+        (process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number);
+
+      if (twilioConfigured) {
+        const result = await sendVerificationSMS(phoneNumber, code);
+        if (!result.success) {
+          return res.status(400).json({ error: result.userMessage || 'Failed to send verification code' });
+        }
+      } else {
+        console.log(`[DEV MODE] Recovery verification code for ${phoneNumber}: ${code}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error sending recovery code:', error);
+      res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+  });
+
+  app.post('/api/auth/recover/complete', async (req, res) => {
+    try {
+      const { recoveryToken, phoneNumber: rawPhone, code, deviceId, deviceName, platform } = req.body;
+      const userId = verifyRecoveryToken(recoveryToken);
+      if (!userId) {
+        return res.status(401).json({ error: 'Recovery session expired. Please verify your Account ID and answers again.' });
+      }
+      if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
+        return res.status(400).json({ error: 'Phone number and code are required' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const phoneNumber = `+${digitsOnly}`;
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = verifyCodeRateLimit(() => `recover|${ipKey}|${phoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const verificationCode = await storage.getVerificationCode(phoneNumber, code);
+      if (!verificationCode) {
+        return res.status(400).json({ error: 'Invalid verification code' });
+      }
+      if (new Date() > verificationCode.expiresAt) {
+        return res.status(400).json({ error: 'Verification code expired' });
+      }
+      await storage.markCodeVerified(verificationCode.id);
+
+      const existingOwner = await storage.getUserByPhone(phoneNumber);
+      if (existingOwner && existingOwner.id !== userId) {
+        return res.status(400).json({ error: 'That phone number is already linked to another account.' });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'Account not found' });
+      }
+
+      // Relink the account to the new number and bump tokenVersion so any
+      // session on the old (possibly lost/compromised) device is invalidated
+      // immediately — a recovery event is exactly when old sessions should
+      // stop being trusted.
+      const newTokenVersion = (user.tokenVersion ?? 0) + 1;
+      const updated = await storage.updateUser(userId, {
+        phoneNumber,
+        tokenVersion: newTokenVersion,
+      });
+      if (!updated) {
+        return res.status(500).json({ error: 'Could not complete recovery' });
+      }
+
+      const token = jwt.sign({ userId: updated.id, tv: newTokenVersion, did: deviceId ?? undefined }, JWT_SECRET, { expiresIn: '30d' });
+
+      const ipAddress = getClientIp(req);
+      const userAgent = req.headers['user-agent'] || null;
+      storage.recordLoginEvent({
+        userId: updated.id,
+        deviceId: deviceId ?? null,
+        deviceName: deviceName ?? null,
+        platform: platform ?? null,
+        ipAddress,
+        userAgent: typeof userAgent === 'string' ? userAgent : null,
+        isNewDevice: true,
+      }).catch(err => console.error('Failed to record recovery login event:', err));
+
+      res.json({
+        success: true,
+        token,
+        user: {
+          id: updated.id,
+          phoneNumber: updated.phoneNumber,
+          displayName: updated.displayName,
+          avatarIndex: updated.avatarIndex,
+          avatarUrl: updated.avatarUrl,
+          isVip: updated.isVip,
+          isAdFree: updated.isAdFree,
+          vipStartedAt: updated.vipStartedAt,
+          lastNameChangeAt: updated.lastNameChangeAt,
+          notificationsEnabled: updated.notificationsEnabled ?? false,
+          safeCodeAcknowledged: updated.safeCodeAcknowledged ?? false,
+          hasSafeCode: !!updated.safeCodeHash,
+          hasSecurityQuestions: !!updated.securityQ1Hash,
+        },
+      });
+    } catch (error) {
+      console.error('Error completing account recovery:', error);
+      res.status(500).json({ error: 'Could not complete recovery' });
     }
   });
 
@@ -809,6 +1136,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         notificationsEnabled: user.notificationsEnabled ?? false,
         safeCodeAcknowledged: user.safeCodeAcknowledged ?? false,
         hasSafeCode: !!user.safeCodeHash,
+        hasSecurityQuestions: !!user.securityQ1Hash,
         // Privacy & messaging preferences (build 59)
         readReceiptsEnabled: user.readReceiptsEnabled ?? true,
         typingIndicatorsEnabled: user.typingIndicatorsEnabled ?? true,

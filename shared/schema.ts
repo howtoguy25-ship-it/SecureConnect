@@ -39,6 +39,23 @@ export const users = pgTable("users", {
   storyViewReceiptsEnabled: boolean("story_view_receipts_enabled").default(true),
   safeCodeHash: text("safe_code_hash"),
   safeCodeAcknowledged: boolean("safe_code_acknowledged").default(false),
+  // Deterministic HMAC of the normalized Safe Code (Account ID), separate
+  // from the bcrypt hash above. bcrypt is salted per-call so it can never be
+  // looked up by value — this column exists solely so the unauthenticated
+  // account-recovery flow can find the right user in O(1) before doing the
+  // real (bcrypt) verification. Never used as a credential on its own.
+  safeCodeLookupHash: text("safe_code_lookup_hash").unique(),
+  // ── Security questions (account recovery second factor) ────────────────
+  // Two fixed questions, both answers bcrypt-hashed — never stored or
+  // logged in plaintext. Used (a) as a required step right after first-time
+  // Account ID setup, (b) as a re-entry check on every fresh login, and
+  // (c) combined with the Account ID for self-service recovery when the
+  // user has lost access to their phone number.
+  securityQ1Hash: text("security_q1_hash"),
+  securityQ2Hash: text("security_q2_hash"),
+  securityQuestionsSetAt: timestamp("security_questions_set_at"),
+  securityQFailedAttempts: integer("security_q_failed_attempts").default(0),
+  securityQLockedUntil: timestamp("security_q_locked_until"),
   tokenVersion: integer("token_version").default(0),
   isSuspended: boolean("is_suspended").default(false),
   suspendedAt: timestamp("suspended_at"),

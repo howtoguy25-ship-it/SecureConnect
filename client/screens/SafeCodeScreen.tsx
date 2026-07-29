@@ -143,13 +143,13 @@ export default function SafeCodeScreen() {
       </View>
 
       <ThemedText type="h2" style={{ textAlign: "center", marginBottom: 8 }}>
-        Your Safe Code
+        Your Account ID
       </ThemedText>
       <ThemedText
         type="body"
         style={{ color: theme.textSecondary, textAlign: "center", marginBottom: Spacing.xl, lineHeight: 22 }}
       >
-        Write this code down and keep it somewhere safe. You can use it later to verify your identity if you ever lose access to your account.
+        Copy this and save it somewhere very secret. Combined with your security question answers, it's the only way to recover your account if you ever lose access to your phone number.
       </ThemedText>
 
       {code ? (
@@ -185,10 +185,10 @@ export default function SafeCodeScreen() {
         <View style={[styles.warningCard, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
           <Feather name="check-circle" size={20} color={theme.primary} style={{ marginBottom: 8 }} />
           <ThemedText type="body" style={{ fontWeight: "700", marginBottom: 4 }}>
-            Safe Code already created
+            Account ID already created
           </ThemedText>
           <ThemedText type="small" style={{ color: theme.textSecondary, lineHeight: 18 }}>
-            For your security, your Safe Code can only be shown once. If you lost it, contact support to reset your account protection.
+            For your security, your Account ID can only be shown once. If you lost it, contact support to reset your account protection.
           </ThemedText>
         </View>
       )}
@@ -196,9 +196,9 @@ export default function SafeCodeScreen() {
       <View style={[styles.warningCard, { backgroundColor: theme.warning + "10", borderColor: theme.warning + "40", marginTop: Spacing.lg }]}>
         <Feather name="alert-triangle" size={18} color={theme.warning} style={{ marginBottom: 6 }} />
         <ThemedText type="small" style={{ color: theme.text, lineHeight: 18 }}>
-          • Never share your Safe Code with anyone — not even Pryvo support.{"\n"}
+          • Never share your Account ID with anyone — not even Pryvo support.{"\n"}
           • This code is shown only once and cannot be recovered if lost.{"\n"}
-          • Anyone with this code may be able to recover access to your account.
+          • Anyone with this ID and your security question answers can recover access to your account.
         </ThemedText>
       </View>
 
@@ -214,7 +214,7 @@ export default function SafeCodeScreen() {
           <ActivityIndicator color="#fff" />
         ) : (
           <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>
-            I've Saved My Safe Code
+            I've Saved My Account ID — Continue
           </ThemedText>
         )}
       </Pressable>

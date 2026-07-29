@@ -67,6 +67,21 @@ async function initStripe() {
   }
 }
 
+// Cloudflare + Render already terminate TLS and redirect HTTP→HTTPS, but
+// without HSTS a browser that's never visited before will still make its
+// FIRST request in plaintext (stripped by an on-path attacker before the
+// redirect lands). max-age=1yr + includeSubDomains + preload closes that gap
+// and gets pryvoapp.com onto the browser HSTS preload list.
+function setupSecurityHeaders(app: express.Application) {
+  app.use((_req, res, next) => {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+}
+
 function setupCors(app: express.Application) {
   app.use((req, res, next) => {
     const origins = new Set(getAllowedOrigins());
@@ -344,6 +359,7 @@ function setupErrorHandler(app: express.Application) {
     console.warn('Stripe initialization skipped:', err.message ?? err);
   });
   
+  setupSecurityHeaders(app);
   setupCors(app);
 
   app.post(

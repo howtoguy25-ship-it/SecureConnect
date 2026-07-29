@@ -281,6 +281,17 @@ export default function PhoneInputScreen() {
             </ThemedText>
           </Pressable>
         ) : null}
+
+        <Pressable
+          onPress={() => navigation.navigate("RecoverAccount")}
+          disabled={isLoading}
+          style={styles.reviewerLink}
+        >
+          <Feather name="key" size={14} color={theme.textSecondary} />
+          <ThemedText type="small" style={[styles.reviewerLinkText, { color: theme.textSecondary }]}>
+            Forgot access? Recover your account
+          </ThemedText>
+        </Pressable>
       </KeyboardAwareScrollViewCompat>
 
       <Modal

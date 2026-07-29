@@ -41,6 +41,14 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   numberMode: 'personal' | 'virtual';
   setNumberMode: (mode: 'personal' | 'virtual') => void;
+  // True right after a FRESH sign-in (phone + SMS code, or account
+  // recovery) for a user who already has security questions set — gates
+  // RootStackNavigator to SecurityQuestionsVerifyScreen until answered.
+  // Deliberately NOT set when resuming a persisted session from storage on
+  // cold app start, so "log in like normal" (staying logged in) never
+  // re-prompts — only an explicit logout + fresh login does.
+  securityQuestionsPending: boolean;
+  setSecurityQuestionsPending: (pending: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [numberMode, setNumberMode] = useState<'personal' | 'virtual'>('personal');
+  const [securityQuestionsPending, setSecurityQuestionsPending] = useState(false);
   const loadingComplete = useRef(false);
   const loggedOut = useRef(false);
 
@@ -172,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // State change LAST so the navigator only swaps once the cleanup is done.
     setUser(null);
     setToken(null);
+    setSecurityQuestionsPending(false);
   }
 
   // Apple Guideline 1.2 — react to server-side account suspension by force
@@ -218,6 +228,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshUser,
         numberMode,
         setNumberMode,
+        securityQuestionsPending,
+        setSecurityQuestionsPending,
       }}
     >
       {children}

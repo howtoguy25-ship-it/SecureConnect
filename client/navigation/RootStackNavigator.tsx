@@ -26,6 +26,9 @@ import SecurityScreen from "@/screens/SecurityScreen";
 import RecoveryCodeScreen from "@/screens/RecoveryCodeScreen";
 import TrustedDevicesScreen from "@/screens/TrustedDevicesScreen";
 import SafeCodeScreen from "@/screens/SafeCodeScreen";
+import SecurityQuestionsSetupScreen from "@/screens/SecurityQuestionsSetupScreen";
+import SecurityQuestionsVerifyScreen from "@/screens/SecurityQuestionsVerifyScreen";
+import RecoverAccountScreen from "@/screens/RecoverAccountScreen";
 import LoginHistoryScreen from "@/screens/LoginHistoryScreen";
 import PeekDetectionSettingsScreen from "@/screens/PeekDetectionSettingsScreen";
 import RingtoneScreen from "@/screens/RingtoneScreen";
@@ -46,7 +49,10 @@ export type RootStackParamList = {
   Welcome: undefined;
   PhoneInput: undefined;
   VerifyCode: { phoneNumber: string; demoCode?: string };
+  RecoverAccount: undefined;
   ProfileSetup: undefined;
+  SecurityQuestionsSetup: undefined;
+  SecurityQuestionsVerify: undefined;
   Main: undefined;
   Conversation: { conversationId: string; otherUserId: string; otherUserName: string };
   VipUpgrade: undefined;
@@ -92,7 +98,7 @@ logCheckpoint('root_navigator_module_loaded');
 
 export default function RootStackNavigator() {
   const screenOptions = useScreenOptions();
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, user, securityQuestionsPending } = useAuth();
   const { theme } = useTheme();
   const splashHidden = useRef(false);
   const renderCount = useRef(0);
@@ -135,6 +141,21 @@ export default function RootStackNavigator() {
     !!user?.displayName &&
     user?.hasSafeCode === true &&
     user?.safeCodeAcknowledged === false;
+  // First-time setup: shown once, right after the Account ID is acknowledged.
+  const needsSecurityQuestionsSetup =
+    isAuthenticated &&
+    !!user?.displayName &&
+    !needsSafeCode &&
+    user?.hasSecurityQuestions === false;
+  // Every fresh login thereafter (2nd factor) — see AuthContext's
+  // securityQuestionsPending doc comment for why persisted-session resume
+  // never trips this.
+  const needsSecurityQuestionsVerify =
+    isAuthenticated &&
+    !!user?.displayName &&
+    !needsSafeCode &&
+    user?.hasSecurityQuestions === true &&
+    securityQuestionsPending === true;
 
   return (
     <Stack.Navigator screenOptions={screenOptions}>
@@ -155,6 +176,11 @@ export default function RootStackNavigator() {
             component={VerifyCodeScreen}
             options={{ headerTitle: "Verify" }}
           />
+          <Stack.Screen
+            name="RecoverAccount"
+            component={RecoverAccountScreen}
+            options={{ headerTitle: "Recover Account" }}
+          />
         </>
       ) : needsProfileSetup ? (
         <Stack.Screen
@@ -166,7 +192,19 @@ export default function RootStackNavigator() {
         <Stack.Screen
           name="SafeCode"
           component={SafeCodeScreen}
-          options={{ headerTitle: "Safe Code", headerBackVisible: false }}
+          options={{ headerTitle: "Account ID", headerBackVisible: false }}
+        />
+      ) : needsSecurityQuestionsSetup ? (
+        <Stack.Screen
+          name="SecurityQuestionsSetup"
+          component={SecurityQuestionsSetupScreen}
+          options={{ headerTitle: "Security Questions", headerBackVisible: false }}
+        />
+      ) : needsSecurityQuestionsVerify ? (
+        <Stack.Screen
+          name="SecurityQuestionsVerify"
+          component={SecurityQuestionsVerifyScreen}
+          options={{ headerTitle: "Verify Identity", headerBackVisible: false }}
         />
       ) : (
         <>

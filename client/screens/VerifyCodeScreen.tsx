@@ -19,7 +19,7 @@ export default function VerifyCodeScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
-  const { setUser, setToken } = useAuth();
+  const { setUser, setToken, setSecurityQuestionsPending } = useAuth();
   
   // Defensive: if navigation state is ever restored/corrupted without params
   // (a rare but real production crash vector), fall back to empty values and
@@ -122,6 +122,13 @@ export default function VerifyCodeScreen() {
           await ensureE2EEKeys(result.token);
         } catch (e) {
           console.log("E2EE setup failed:", e);
+        }
+        // Fresh sign-in: if this account already has security questions set
+        // up, require them again before reaching the app (2nd factor on
+        // every login). Brand-new accounts / accounts that haven't set
+        // questions up yet fall through to the setup gate instead.
+        if (result.user.hasSecurityQuestions) {
+          setSecurityQuestionsPending(true);
         }
         setUser(result.user);
         // Don't clear submittingRef on success — we're navigating away.
