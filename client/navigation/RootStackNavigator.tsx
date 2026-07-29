@@ -54,7 +54,12 @@ export type RootStackParamList = {
   SecurityQuestionsSetup: undefined;
   SecurityQuestionsVerify: undefined;
   Main: undefined;
-  Conversation: { conversationId: string; otherUserId: string; otherUserName: string };
+  Conversation: {
+    conversationId: string;
+    otherUserId: string;
+    otherUserName: string;
+    statusReplyQuote?: import("@/utils/statusReplyEnvelope").StatusReplyQuote;
+  };
   VipUpgrade: undefined;
   HiddenLocker: undefined;
   Settings: undefined;

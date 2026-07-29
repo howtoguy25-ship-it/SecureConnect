@@ -62,6 +62,11 @@ import {
   fetchAndDecryptEncryptedMedia,
   type MediaEnvelope,
 } from "@/utils/crypto/encryptedMediaClient";
+import {
+  buildStatusReplyEnvelope,
+  parseStatusReplyEnvelope,
+  type StatusReplyQuote,
+} from "@/utils/statusReplyEnvelope";
 
 type RouteProps = RouteProp<RootStackParamList, "Conversation">;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -151,6 +156,7 @@ export default function ConversationScreen() {
   } | null>(null);
   const [submittingReport, setSubmittingReport] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [statusQuote, setStatusQuote] = useState<StatusReplyQuote | null>(route.params?.statusReplyQuote ?? null);
   const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null);
   const [conversationTimer, setConversationTimer] = useState<number>(0);
   // Build 74 — 'personal' | 'virtual' | null (null = not yet known, e.g.
@@ -955,9 +961,17 @@ export default function ConversationScreen() {
   const handleSend = async () => {
     if (!newMessage.trim() || isSending) return;
 
-    const messageContent = newMessage.trim();
+    const typedText = newMessage.trim();
+    const quoteSnapshot = statusQuote;
+    // If replying to a status, the quote travels INSIDE the E2EE ciphertext
+    // (same trick as encrypted-media envelopes) so it round-trips through
+    // encryption/decryption for both sides without the server ever seeing
+    // the quoted status content.
+    const messageContent = quoteSnapshot
+      ? buildStatusReplyEnvelope(quoteSnapshot, typedText)
+      : typedText;
     const tempId = `temp-${Date.now()}`;
-    
+
     const optimisticMessage: Message = {
       id: tempId,
       senderId: user?.id || '',
@@ -969,9 +983,10 @@ export default function ConversationScreen() {
       isHidden: false,
       transcription: null,
     };
-    
+
     setMessages((prev) => [...prev, optimisticMessage]);
     setNewMessage("");
+    setStatusQuote(null);
     setIsSending(true);
     haptics.light();
 
@@ -2735,9 +2750,13 @@ export default function ConversationScreen() {
     const effectiveMediaUrl = mediaEnvelope ? envelopeLocalUri : item.mediaUrl;
     const effectiveMediaType = mediaEnvelope ? mediaEnvelope.mt : item.mediaType;
     const hasMedia = !!(effectiveMediaUrl && effectiveMediaType);
+    // A status reply carries its quote inside the ciphertext (see
+    // statusReplyEnvelope.ts) — mutually exclusive with a media envelope,
+    // so only check for one if the other didn't match.
+    const statusReply = mediaEnvelope ? null : parseStatusReplyEnvelope(rawDisplayContent);
     // Hide the envelope JSON itself from the text-bubble path; if no caption
     // was attached, displayContent ends up null and the text block is skipped.
-    const displayContent = mediaEnvelope ? null : rawDisplayContent;
+    const displayContent = mediaEnvelope ? null : (statusReply ? statusReply.text : rawDisplayContent);
 
     const handlePress = () => {
       if (isSelectMode) {
@@ -2886,6 +2905,39 @@ export default function ConversationScreen() {
               <ThemedText style={{ marginLeft: 4, fontSize: 11, fontStyle: 'italic', color: isOwn ? "rgba(255,255,255,0.85)" : theme.textSecondary }}>
                 Forwarded
               </ThemedText>
+            </View>
+          ) : null}
+
+          {statusReply ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                borderLeftWidth: 3,
+                borderLeftColor: isOwn ? 'rgba(255,255,255,0.7)' : theme.primary,
+                paddingLeft: 8,
+                paddingVertical: 4,
+                marginBottom: 6,
+                backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : theme.backgroundDefault,
+                borderRadius: 6,
+                gap: 8,
+              }}
+            >
+              {statusReply.quote.mediaUrl ? (
+                <Image source={{ uri: statusReply.quote.mediaUrl }} style={{ width: 32, height: 32, borderRadius: 5 }} contentFit="cover" />
+              ) : (
+                <Feather name={statusReply.quote.mediaType === 'video' ? 'video' : 'image'} size={16} color={isOwn ? '#fff' : theme.textSecondary} />
+              )}
+              <View style={{ flex: 1 }}>
+                <ThemedText style={{ fontSize: 11, fontWeight: '700', color: isOwn ? '#fff' : theme.primary }}>
+                  Replied to {statusReply.quote.posterName}'s status
+                </ThemedText>
+                {statusReply.quote.caption ? (
+                  <ThemedText numberOfLines={1} style={{ fontSize: 12, color: isOwn ? 'rgba(255,255,255,0.85)' : theme.textSecondary, marginTop: 1 }}>
+                    {statusReply.quote.caption}
+                  </ThemedText>
+                ) : null}
+              </View>
             </View>
           ) : null}
 
@@ -3397,6 +3449,43 @@ export default function ConversationScreen() {
                 </ThemedText>
               </View>
             )
+          ) : null}
+          {statusQuote ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                marginHorizontal: Spacing.md,
+                marginBottom: Spacing.xs,
+                padding: Spacing.sm,
+                borderRadius: BorderRadius.md,
+                backgroundColor: theme.backgroundSecondary,
+                borderLeftWidth: 3,
+                borderLeftColor: theme.primary,
+                gap: Spacing.sm,
+              }}
+            >
+              {statusQuote.mediaUrl ? (
+                <Image source={{ uri: statusQuote.mediaUrl }} style={{ width: 36, height: 36, borderRadius: 6 }} contentFit="cover" />
+              ) : (
+                <View style={{ width: 36, height: 36, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.backgroundDefault }}>
+                  <Feather name={statusQuote.mediaType === 'video' ? 'video' : 'image'} size={16} color={theme.textSecondary} />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <ThemedText style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>
+                  Replying to {statusQuote.posterName}'s status
+                </ThemedText>
+                {statusQuote.caption ? (
+                  <ThemedText numberOfLines={1} style={{ fontSize: 12, color: theme.textSecondary }}>
+                    {statusQuote.caption}
+                  </ThemedText>
+                ) : null}
+              </View>
+              <Pressable onPress={() => setStatusQuote(null)} hitSlop={8}>
+                <Feather name="x" size={18} color={theme.textSecondary} />
+              </Pressable>
+            </View>
           ) : null}
           <ReplyPreviewBar
             replyTo={replyTo}

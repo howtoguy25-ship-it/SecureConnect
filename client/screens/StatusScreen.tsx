@@ -883,7 +883,22 @@ export default function StatusScreen() {
         conversationId: string;
         otherUserId: string;
         otherUserName: string;
-        status: { id: string; caption: string | null; mediaUrl: string | null; mediaType: string | null };
+      };
+      // Build the quote from what THIS client already has decrypted/resolved
+      // locally rather than the server's raw row — for an encrypted (closed
+      // -audience) status the server can only hand back ciphertext it can
+      // never read, but this viewer just had it open on screen a moment ago.
+      // mediaUrl is only carried through for a non-encrypted ("everyone")
+      // status, where it's a real network URL the recipient can also load;
+      // an encrypted status's local media URI is a cache file path that's
+      // meaningless off this device, so the quote degrades to caption/name
+      // only in that case rather than embedding something unusable.
+      const statusReplyQuote = {
+        statusId: status.id,
+        posterName: status.user?.displayName || "their",
+        caption: getDisplayCaption(status),
+        mediaType: status.mediaType,
+        mediaUrl: status.isEncrypted ? null : resolveMediaUrl(status.mediaUrl),
       };
       // Flush analytics for the in-progress view before navigating away.
       void flushStatusView();
@@ -893,6 +908,7 @@ export default function StatusScreen() {
         conversationId: ctx.conversationId,
         otherUserId: ctx.otherUserId,
         otherUserName: ctx.otherUserName,
+        statusReplyQuote,
       });
     } catch {
       const msg = "Reply unavailable for this status.";
@@ -1263,7 +1279,9 @@ export default function StatusScreen() {
             </View>
           ) : viewingStatus && getDisplayMediaUri(viewingStatus) ? (
             viewingStatus.mediaType === "video" ? (
-              <StatusVideoPlayer uri={getDisplayMediaUri(viewingStatus) ?? ''} style={styles.statusViewerImage} />
+              <View style={styles.statusImageContainer}>
+                <StatusVideoPlayer uri={getDisplayMediaUri(viewingStatus) ?? ''} style={styles.statusViewerImage} />
+              </View>
             ) : (
               <View style={styles.statusImageContainer}>
                 <Image
