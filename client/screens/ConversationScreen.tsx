@@ -18,6 +18,7 @@ import { haptics } from "@/lib/haptics";
 import { Image } from "expo-image";
 import * as Location from "expo-location";
 import * as Contacts from "expo-contacts";
+import * as DocumentPicker from "expo-document-picker";
 import { useAudioRecorder, RecordingPresets, AudioModule, setAudioModeAsync, createAudioPlayer } from 'expo-audio';
 import * as Clipboard from "expo-clipboard";
 import * as Sharing from "expo-sharing";
@@ -59,6 +60,7 @@ import {
   parseMediaEnvelope,
   uploadEncryptedMedia,
   fetchAndDecryptEncryptedMedia,
+  MAX_FILE_SIZE,
   type MediaEnvelope,
 } from "@/utils/crypto/encryptedMediaClient";
 import {
@@ -1350,6 +1352,64 @@ export default function ConversationScreen() {
     }
   };
 
+  const handleOpenFile = async (localUri: string, fileName: string) => {
+    try {
+      if (Platform.OS === 'web') {
+        // localUri is a blob: URL on web — trigger a normal browser download.
+        const a = document.createElement('a');
+        a.href = localUri;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Cannot Open File', 'Sharing is not available on this device.');
+        return;
+      }
+      // The decrypted cache file is named "<messageId>.<ext>" — copy it to a
+      // properly-named temp file first so the share sheet shows the real
+      // filename rather than a UUID.
+      const dir = `${FileSystem.cacheDirectory}shared-files/`;
+      try {
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      } catch {
+        // Already exists — ignore.
+      }
+      const destUri = `${dir}${fileName}`;
+      await FileSystem.copyAsync({ from: localUri, to: destUri });
+      await Sharing.shareAsync(destUri);
+    } catch (error) {
+      console.error('Failed to open file:', error);
+      Alert.alert('Error', 'Could not open this file.');
+    }
+  };
+
+  const handlePickFile = async () => {
+    setShowAttachmentMenu(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const file = result.assets[0];
+      if (typeof file.size === 'number' && file.size > MAX_FILE_SIZE) {
+        Alert.alert('File Too Large', `That file is too large to send. Max size is ${Math.floor(MAX_FILE_SIZE / (1024 * 1024))}MB.`);
+        return;
+      }
+      try {
+        await uploadAndSendMedia(file.uri, 'file', file.name || 'file');
+      } catch (err) {
+        console.error('File upload failed:', err);
+      }
+    } catch (err) {
+      console.error('handlePickFile error:', err);
+    }
+  };
+
   const handlePickVideo = async () => {
     setShowAttachmentMenu(false);
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1420,7 +1480,7 @@ export default function ConversationScreen() {
     }
   };
 
-  const uploadAndSendMedia = async (uri: string, type: 'image' | 'video' | 'audio') => {
+  const uploadAndSendMedia = async (uri: string, type: 'image' | 'video' | 'audio' | 'file', fileName?: string) => {
     setIsSending(true);
     haptics.medium();
 
@@ -1440,6 +1500,7 @@ export default function ConversationScreen() {
             mediaType: type,
             token,
             apiBaseUrl: baseUrl,
+            name: fileName,
           });
           const envelopeText = buildMediaEnvelope(envelope);
 
@@ -1523,7 +1584,7 @@ export default function ConversationScreen() {
         }
       }
 
-      const mimeType = type === 'image' ? 'image/jpeg' : type === 'video' ? 'video/mp4' : 'audio/mp4';
+      const mimeType = type === 'image' ? 'image/jpeg' : type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mp4' : 'application/octet-stream';
       
       // Step 1: Get upload URL from server
       const uploadUrlResponse = await fetch(new URL('/api/objects/upload', baseUrl).toString(), {
@@ -2970,7 +3031,26 @@ export default function ConversationScreen() {
               ) : null}
             </View>
           ) : null}
-          
+
+          {hasMedia && effectiveMediaType === 'file' && effectiveMediaUrl ? (
+            <Pressable
+              style={[styles.fileBubble, { backgroundColor: isOwn ? 'rgba(255,255,255,0.15)' : theme.backgroundDefault }]}
+              onPress={() => handleOpenFile(effectiveMediaUrl, mediaEnvelope?.name || 'file')}
+            >
+              <View style={[styles.fileIconWrap, { backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }]}>
+                <Feather name="file-text" size={20} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ThemedText numberOfLines={1} style={{ color: isOwn ? '#fff' : theme.text, fontWeight: '600' }}>
+                  {mediaEnvelope?.name || 'File'}
+                </ThemedText>
+                <ThemedText style={{ color: isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary, fontSize: 12 }}>
+                  {mediaEnvelope?.size ? `${(mediaEnvelope.size / 1024).toFixed(0)} KB · ` : ''}Tap to open
+                </ThemedText>
+              </View>
+            </Pressable>
+          ) : null}
+
           {item.forwarded ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, opacity: 0.7 }}>
               <Feather name="corner-up-right" size={12} color={isOwn ? "rgba(255,255,255,0.85)" : theme.textSecondary} />
@@ -3144,6 +3224,41 @@ export default function ConversationScreen() {
                   </Pressable>
                 </View>
               </View>
+            );
+          })() : displayContent && /^Location: -?\d+(\.\d+)?, -?\d+(\.\d+)?$/.test(displayContent) ? (() => {
+            // One-time location pin, sent as plain "Location: lat, lng" text
+            // (see sendOneTimeLocation) — render as a tappable pin card that
+            // opens the coordinates in Maps instead of raw text.
+            const [latStr, lngStr] = displayContent.slice('Location: '.length).split(', ');
+            const lat = latStr;
+            const lng = lngStr;
+            const onOpenMaps = async () => {
+              const url = Platform.OS === 'ios'
+                ? `https://maps.apple.com/?ll=${lat},${lng}`
+                : `https://www.google.com/maps?q=${lat},${lng}`;
+              try {
+                await Linking.openURL(url);
+              } catch {
+                Alert.alert('Could not open Maps', 'Please try again.');
+              }
+            };
+            return (
+              <Pressable
+                onPress={onOpenMaps}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, backgroundColor: isOwn ? 'rgba(255,255,255,0.14)' : theme.backgroundDefault, padding: 10, minWidth: 200 }}
+              >
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary, alignItems: 'center', justifyContent: 'center' }}>
+                  <Feather name="map-pin" size={20} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={{ color: isOwn ? '#fff' : theme.text, fontWeight: '600' }}>
+                    Location shared
+                  </ThemedText>
+                  <ThemedText style={{ color: isOwn ? 'rgba(255,255,255,0.75)' : theme.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                    {lat}, {lng} · Tap to open in Maps
+                  </ThemedText>
+                </View>
+              </Pressable>
             );
           })() : displayContent ? (
             <ThemedText style={[styles.messageText, { color: isOwn ? "#fff" : theme.text }]}>
@@ -3761,6 +3876,15 @@ export default function ConversationScreen() {
                 </View>
                 <ThemedText style={[styles.attachmentLabel, { color: theme.text }]}>
                   GIF
+                </ThemedText>
+              </Pressable>
+
+              <Pressable style={styles.attachmentOption} onPress={handlePickFile}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#9B59B6' }]}>
+                  <Feather name="file-text" size={24} color="#fff" />
+                </View>
+                <ThemedText style={[styles.attachmentLabel, { color: theme.text }]}>
+                  File
                 </ThemedText>
               </Pressable>
             </View>
@@ -4878,6 +5002,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.sm,
     minWidth: 180,
+  },
+  fileBubble: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    minWidth: 200,
+    maxWidth: 260,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+  },
+  fileIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
   },
   playButton: {
     width: 36,

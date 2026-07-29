@@ -40,6 +40,8 @@ import {
   MAX_FILE_SIZE,
 } from "./mediaEncryption";
 
+export { MAX_FILE_SIZE };
+
 // Feature flag — flip to false to disable the new encrypted path at runtime
 // without removing it from the bundle (so QA can A/B the two flows).
 export const E2EE_MEDIA_ENABLED = true;
@@ -57,12 +59,15 @@ export interface MediaEnvelope {
   mk: string;
   /** Server-relative object path, e.g. "/objects/uploads/<uuid>" */
   path: string;
-  /** "image" | "video" | "audio" — matches existing mediaType column values */
-  mt: "image" | "video" | "audio";
+  /** "image" | "video" | "audio" | "file" — matches existing mediaType column values */
+  mt: "image" | "video" | "audio" | "file";
   /** Plaintext size in bytes (for UI / sanity check before download). */
   size: number;
   /** Optional file extension hint for the local cache file. */
   ext?: string;
+  /** Original filename — "file" kind only, used to render the bubble and to
+   * name the saved copy when the recipient opens/exports it. */
+  name?: string;
 }
 
 export function buildMediaEnvelope(env: MediaEnvelope): string {
@@ -84,10 +89,11 @@ export function parseMediaEnvelope(body: string | null | undefined): MediaEnvelo
     const parsed = JSON.parse(json) as MediaEnvelope;
     if (parsed?.v !== 1) return null;
     if (typeof parsed.mk !== "string" || typeof parsed.path !== "string") return null;
-    if (parsed.mt !== "image" && parsed.mt !== "video" && parsed.mt !== "audio") return null;
+    if (parsed.mt !== "image" && parsed.mt !== "video" && parsed.mt !== "audio" && parsed.mt !== "file") return null;
     if (typeof parsed.size !== "number" || parsed.size < 0 || parsed.size > MAX_FILE_SIZE) {
       return null;
     }
+    if (parsed.name !== undefined && typeof parsed.name !== "string") return null;
     return parsed;
   } catch {
     return null;
@@ -111,10 +117,12 @@ export interface UploadResult {
  */
 export async function uploadEncryptedMedia(args: {
   uri: string;
-  mediaType: "image" | "video" | "audio";
+  mediaType: "image" | "video" | "audio" | "file";
   token: string;
   apiBaseUrl: string;
   ext?: string;
+  /** Original filename — "file" kind only, carried through to the envelope. */
+  name?: string;
   /**
    * Caller-supplied 32-byte key instead of a freshly generated one. Used by
    * Stories, where one key is shared across the media blob AND wrapped
@@ -123,7 +131,7 @@ export async function uploadEncryptedMedia(args: {
    */
   mediaKey?: Uint8Array;
 }): Promise<UploadResult> {
-  const { uri, mediaType, token, apiBaseUrl, ext } = args;
+  const { uri, mediaType, token, apiBaseUrl, ext, name } = args;
 
   // 1. Read plaintext bytes.
   const plaintext = await readFileBytes(uri);
@@ -183,6 +191,7 @@ export async function uploadEncryptedMedia(args: {
     mt: mediaType,
     size: plaintext.length,
     ext,
+    name,
   };
 
   return { envelope, size: plaintext.length };
@@ -256,7 +265,9 @@ async function writeCacheFile(
         ? "image/jpeg"
         : envelope.mt === "video"
         ? "video/mp4"
-        : "audio/mp4";
+        : envelope.mt === "audio"
+        ? "audio/mp4"
+        : "application/octet-stream";
     const blob = new Blob([plaintext as BlobPart], { type: mime });
     return URL.createObjectURL(blob);
   }
@@ -267,7 +278,8 @@ async function writeCacheFile(
   } catch {
     // Directory already exists — ignore.
   }
-  const ext = envelope.ext || (envelope.mt === "image" ? "jpg" : envelope.mt === "video" ? "mp4" : "m4a");
+  const nameExt = envelope.name?.includes(".") ? envelope.name.split(".").pop() : undefined;
+  const ext = envelope.ext || nameExt || (envelope.mt === "image" ? "jpg" : envelope.mt === "video" ? "mp4" : envelope.mt === "audio" ? "m4a" : "bin");
   const path = `${dir}${cacheKey}.${ext}`;
   // Don't re-write if a fresh copy already exists.
   try {
