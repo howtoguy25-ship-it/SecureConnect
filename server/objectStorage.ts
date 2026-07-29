@@ -59,7 +59,12 @@ export class ObjectStorageService {
   }
 
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
+    // Trim: a stray leading/trailing space in the env var value (easy to
+    // introduce when pasting into Render's dashboard) shifts parseObjectPath's
+    // split-on-"/" indexing by one, silently turning the space itself into
+    // the bucket name (signed URLs come back pointing at .../%20/<real-bucket>/...
+    // and every upload/download 404s against GCS).
+    const dir = (process.env.PRIVATE_OBJECT_DIR || "").trim();
     if (!dir) {
       throw new Error(
         "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
