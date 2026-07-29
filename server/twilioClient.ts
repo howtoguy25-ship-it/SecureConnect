@@ -94,14 +94,19 @@ export function getEnabledSmsCountries(): GeoPermissionsResult {
   }
   
   if (currentConfigValue) {
-    const codes = currentConfigValue.split(',').map(c => c.trim().toUpperCase());
+    // Dedupe defensively — the ALLOWED_COUNTRIES value is hand-edited in the
+    // Render dashboard and has shown up with each code listed twice, which
+    // otherwise renders every country twice in the sign-up country picker.
+    const codes = Array.from(
+      new Set(currentConfigValue.split(',').map(c => c.trim().toUpperCase()).filter(Boolean)),
+    );
     const enabledCountries: GeoCountry[] = [];
     const invalidCodes: string[] = [];
-    
+
     for (const code of codes) {
       const dialCode = COUNTRY_DIAL_CODES[code];
       const name = COUNTRY_NAMES[code];
-      
+
       if (dialCode && name) {
         enabledCountries.push({ isoCode: code, name, dialCode });
       } else if (code.length > 0) {
