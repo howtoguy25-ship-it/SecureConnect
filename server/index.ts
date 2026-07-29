@@ -355,6 +355,9 @@ function setupErrorHandler(app: express.Application) {
 }
 
 (async () => {
+  const { ensureUserRecoverySchema } = await import('./db.js');
+  await ensureUserRecoverySchema();
+
   await initStripe().catch((err: Error) => {
     console.warn('Stripe initialization skipped:', err.message ?? err);
   });
