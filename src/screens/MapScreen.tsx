@@ -307,9 +307,14 @@ export function MapScreen() {
       } catch (err) {
         Sentry.logger.error("map: failed to fetch route options", { error: String(err) });
         console.warn("[map] failed to fetch route options", err);
+        // Same underlying cause as the destination search billing check below -- the
+        // Directions API call hits the exact same Google Cloud project/key, so it fails the
+        // same way whenever billing isn't enabled there.
         setRouteOptionsError(
           err instanceof DirectionsApiError
-            ? `Couldn't find a route (${err.status})`
+            ? /billing/i.test(err.message)
+              ? "Routing unavailable -- billing isn't enabled on this app's Google Cloud project"
+              : `Couldn't find a route (${err.status})`
             : "Couldn't find a route -- check your connection"
         );
       } finally {

@@ -1,5 +1,5 @@
-import React, { forwardRef, useMemo } from "react";
-import { View, Text, Pressable, StyleSheet, Image } from "react-native";
+import React, { forwardRef, useEffect, useMemo, useState } from "react";
+import { View, Text, Pressable, StyleSheet, Image, ActivityIndicator } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -41,6 +41,17 @@ export const OsmMarkerSheet = forwardRef<BottomSheet, Props>(function OsmMarkerS
     ? `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${location.latitude},${location.longitude}&fov=80&key=${env.googlePlacesApiKey}`
     : null;
 
+  // Google's Street View Static API returns a real HTTP error body (not a placeholder image)
+  // when the request is rejected -- e.g. a 403 with a plain-text "enable billing" message --
+  // which React Native's <Image> can't decode, so it just fails silently with no visual
+  // feedback unless onLoad/onError are handled explicitly. Reset per URL so switching between
+  // markers doesn't show the previous marker's loaded/error state for a beat before the new
+  // request resolves.
+  const [imageStatus, setImageStatus] = useState<"loading" | "loaded" | "error">("loading");
+  useEffect(() => {
+    setImageStatus("loading");
+  }, [streetViewUrl]);
+
   return (
     <BottomSheet
       ref={ref}
@@ -72,7 +83,26 @@ export const OsmMarkerSheet = forwardRef<BottomSheet, Props>(function OsmMarkerS
               {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
             </Text>
             {streetViewUrl && (
-              <Image source={{ uri: streetViewUrl }} style={styles.image} resizeMode="cover" />
+              <View style={styles.imageWrap}>
+                <Image
+                  source={{ uri: streetViewUrl }}
+                  style={styles.image}
+                  resizeMode="cover"
+                  onLoad={() => setImageStatus("loaded")}
+                  onError={() => setImageStatus("error")}
+                />
+                {imageStatus === "loading" && (
+                  <View style={styles.imageOverlay}>
+                    <ActivityIndicator size="small" color={colors.textMuted} />
+                  </View>
+                )}
+                {imageStatus === "error" && (
+                  <View style={styles.imageOverlay}>
+                    <Ionicons name="image-outline" size={22} color={colors.textMuted} />
+                    <Text style={styles.imageErrorText}>Street View image unavailable right now</Text>
+                  </View>
+                )}
+              </View>
             )}
             <Text style={styles.caption}>
               Real Google Street View imagery of this spot -- location from OpenStreetMap community data.
@@ -128,12 +158,34 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
-  image: {
+  imageWrap: {
     width: "100%",
     aspectRatio: 640 / 360,
     borderRadius: radius.lg,
     marginTop: spacing.md,
     backgroundColor: colors.surfaceMuted,
+    overflow: "hidden",
+  },
+  image: {
+    width: "100%",
+    height: "100%",
+  },
+  imageOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs + 2,
+  },
+  imageErrorText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: "center",
+    paddingHorizontal: spacing.lg,
   },
   caption: {
     fontSize: 12,

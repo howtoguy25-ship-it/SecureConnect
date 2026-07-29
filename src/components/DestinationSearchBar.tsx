@@ -51,9 +51,17 @@ export function DestinationSearchBar({
           setPredictions(results);
         } catch (err) {
           setPredictions([]);
+          // Confirmed via direct testing that this app's Google API key returns the exact same
+          // "You must enable Billing on the Google Cloud Project" error on every Maps Platform
+          // call (Places, Directions, Street View alike) -- not a per-API restriction issue.
+          // Surface that specific, actionable cause when it's what actually came back, instead
+          // of a generic "check your key" guess that doesn't tell whoever owns the Google Cloud
+          // project what to actually go do.
           setErrorText(
             err instanceof PlacesApiError
-              ? `Search unavailable (${err.status}) -- check the Places API key/billing`
+              ? /billing/i.test(err.message)
+                ? "Search unavailable -- billing isn't enabled on this app's Google Cloud project"
+                : `Search unavailable (${err.status}) -- check the Places API key`
               : "Search failed -- check your connection"
           );
         } finally {
