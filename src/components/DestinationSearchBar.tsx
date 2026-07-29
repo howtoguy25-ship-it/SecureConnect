@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from "react";
-import { View, TextInput, FlatList, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
+import { View, TextInput, FlatList, Text, Pressable, StyleSheet, ActivityIndicator, Keyboard } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -31,8 +31,14 @@ export function DestinationSearchBar({
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
+
+  const dismissSearch = useCallback(() => {
+    Keyboard.dismiss();
+    setPredictions([]);
+  }, []);
 
   const onChangeText = useCallback(
     (text: string) => {
@@ -91,50 +97,60 @@ export function DestinationSearchBar({
   );
 
   return (
-    <View style={[styles.container, { top: insets.top + spacing.md }]}>
-      <View style={styles.inputRow}>
-        <Ionicons name="search" size={18} color={colors.textMuted} />
-        <TextInput
-          value={query}
-          onChangeText={onChangeText}
-          placeholder={placeholder}
-          placeholderTextColor={colors.textFaint}
-          style={styles.input}
-        />
-        {loading && <ActivityIndicator size="small" color={colors.accent} />}
-        {onCancel && (
-          <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel">
-            <Ionicons name="close-circle" size={20} color={colors.textFaint} />
-          </Pressable>
-        )}
-      </View>
-      {errorText && (
-        <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle" size={16} color={colors.danger} />
-          <Text style={styles.errorText}>{errorText}</Text>
-        </View>
-      )}
-      {predictions.length > 0 && (
-        <FlatList
-          data={predictions}
-          keyExtractor={(item) => item.placeId}
-          style={styles.list}
-          keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              onPress={() => onSelectPrediction(item)}
-            >
-              <Ionicons name="location-outline" size={16} color={colors.textMuted} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.primaryText}>{item.primaryText}</Text>
-                {!!item.secondaryText && <Text style={styles.secondaryText}>{item.secondaryText}</Text>}
-              </View>
+    <>
+      {/* Tapping the map while the keyboard/prediction dropdown is up used to do nothing --
+          the keyboard just stayed open, blocking most of the screen with no obvious way out
+          short of the keyboard's own dismiss key. Sits behind the search box in paint order
+          (rendered first), so it only catches taps that land outside the box/dropdown, which
+          keep working normally. */}
+      {isFocused && <Pressable style={StyleSheet.absoluteFill} onPress={dismissSearch} />}
+      <View style={[styles.container, { top: insets.top + spacing.md }]}>
+        <View style={styles.inputRow}>
+          <Ionicons name="search" size={18} color={colors.textMuted} />
+          <TextInput
+            value={query}
+            onChangeText={onChangeText}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            placeholder={placeholder}
+            placeholderTextColor={colors.textFaint}
+            style={styles.input}
+          />
+          {loading && <ActivityIndicator size="small" color={colors.accent} />}
+          {onCancel && (
+            <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel">
+              <Ionicons name="close-circle" size={20} color={colors.textFaint} />
             </Pressable>
           )}
-        />
-      )}
-    </View>
+        </View>
+        {errorText && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle" size={16} color={colors.danger} />
+            <Text style={styles.errorText}>{errorText}</Text>
+          </View>
+        )}
+        {predictions.length > 0 && (
+          <FlatList
+            data={predictions}
+            keyExtractor={(item) => item.placeId}
+            style={styles.list}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => (
+              <Pressable
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                onPress={() => onSelectPrediction(item)}
+              >
+                <Ionicons name="location-outline" size={16} color={colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.primaryText}>{item.primaryText}</Text>
+                  {!!item.secondaryText && <Text style={styles.secondaryText}>{item.secondaryText}</Text>}
+                </View>
+              </Pressable>
+            )}
+          />
+        )}
+      </View>
+    </>
   );
 }
 
