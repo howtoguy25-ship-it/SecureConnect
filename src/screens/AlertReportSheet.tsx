@@ -1,8 +1,8 @@
-import React, { forwardRef, useCallback, useMemo, useState } from "react";
+import React, { forwardRef, useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertType } from "@/types/alert";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
@@ -16,25 +16,21 @@ const ALERT_TYPES: AlertType[] = [
 ];
 
 interface Props {
-  onShare: (type: AlertType) => void;
+  // Selecting a type is the whole interaction here now -- picking one immediately hands off
+  // to MapScreen's placement flow (drag the pin to the exact spot, then Set/Save), rather
+  // than this sheet owning a location and a "Share" confirm button itself. Order requested:
+  // select the type first, *then* place the pin, not place-first-pick-type-after.
+  onTypeSelected: (type: AlertType) => void;
+  onClose: () => void;
+  onSheetChange?: (index: number) => void;
 }
 
 export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertReportSheet(
-  { onShare },
+  { onTypeSelected, onClose, onSheetChange },
   ref
 ) {
-  const [selected, setSelected] = useState<AlertType | null>(null);
   const insets = useSafeAreaInsets();
-  // A bit taller than the content strictly needs at rest, plus real bottom safe-area padding
-  // below -- previously neither was accounted for, so the confirm button sat flush against
-  // (and on notch-less-home-indicator iPhones, partly under) the bottom edge.
-  const snapPoints = useMemo(() => ["48%"], []);
-
-  const handleConfirm = useCallback(() => {
-    if (!selected) return;
-    onShare(selected);
-    setSelected(null);
-  }, [selected, onShare]);
+  const snapPoints = useMemo(() => ["44%"], []);
 
   return (
     <BottomSheet
@@ -42,46 +38,36 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
       index={-1}
       snapPoints={snapPoints}
       enablePanDownToClose
+      onChange={onSheetChange}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={[styles.container, { paddingBottom: insets.bottom + spacing.lg }]}>
-        <Text style={styles.title}>Report what you see</Text>
-        <View style={styles.grid}>
-          {ALERT_TYPES.map((type) => {
-            const isSelected = selected === type;
-            return (
-              <Pressable
-                key={type}
-                onPress={() => setSelected(type)}
-                style={({ pressed }) => [
-                  styles.typeButton,
-                  { borderColor: isSelected ? ALERT_COLORS[type] : colors.border },
-                  isSelected && { backgroundColor: `${ALERT_COLORS[type]}1A` },
-                  pressed && { opacity: pressedOpacity },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={ALERT_ICONS[type] as any}
-                  size={30}
-                  color={ALERT_COLORS[type]}
-                />
-                <Text style={styles.typeLabel}>{ALERT_LABELS[type]}</Text>
-              </Pressable>
-            );
-          })}
+        <View style={styles.header}>
+          <Text style={styles.title}>What do you see?</Text>
+          {/* Swipe-down-to-close is easy to miss -- an explicit button next to the title so
+              there's always a visible, tappable way out, not just a gesture on the handle. */}
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            style={({ pressed }) => [styles.closeButton, pressed && { opacity: pressedOpacity }]}
+            accessibilityLabel="Close"
+          >
+            <Ionicons name="close" size={20} color={colors.textMuted} />
+          </Pressable>
         </View>
-        <Pressable
-          disabled={!selected}
-          onPress={handleConfirm}
-          style={({ pressed }) => [
-            styles.confirmButton,
-            !selected && styles.confirmButtonDisabled,
-            selected && pressed && { opacity: pressedOpacity },
-          ]}
-        >
-          <Text style={styles.confirmText}>Share with nearby drivers</Text>
-        </Pressable>
+        <View style={styles.grid}>
+          {ALERT_TYPES.map((type) => (
+            <Pressable
+              key={type}
+              onPress={() => onTypeSelected(type)}
+              style={({ pressed }) => [styles.typeButton, pressed && { opacity: pressedOpacity }]}
+            >
+              <MaterialCommunityIcons name={ALERT_ICONS[type] as any} size={30} color={ALERT_COLORS[type]} />
+              <Text style={styles.typeLabel}>{ALERT_LABELS[type]}</Text>
+            </Pressable>
+          ))}
+        </View>
       </BottomSheetView>
     </BottomSheet>
   );
@@ -103,11 +89,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.lg,
+  },
   title: {
     fontSize: 17,
     fontWeight: "700",
     color: colors.text,
-    marginBottom: spacing.lg,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
   },
   grid: {
     flexDirection: "row",
@@ -119,6 +118,7 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: radius.lg,
     borderWidth: 2,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.xs + 2,
@@ -128,20 +128,5 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#374151",
     textAlign: "center",
-  },
-  confirmButton: {
-    marginTop: spacing.xl,
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    paddingVertical: spacing.lg - 2,
-    alignItems: "center",
-  },
-  confirmButtonDisabled: {
-    backgroundColor: "#93A3B8",
-  },
-  confirmText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 15,
   },
 });

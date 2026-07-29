@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Platform, Modal, Share } from "react-native";
-import MapView, { PROVIDER_GOOGLE, Polyline, Marker, Circle, type Region } from "react-native-maps";
+import { View, Text, StyleSheet, Pressable, Platform, Modal, Share, ActivityIndicator } from "react-native";
+import MapView, {
+  PROVIDER_GOOGLE,
+  Polyline,
+  Marker,
+  Circle,
+  type Region,
+  type MapPressEvent,
+} from "react-native-maps";
 import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
@@ -23,8 +30,9 @@ import { BannerAdBar } from "@/components/BannerAdBar";
 import { AdsErrorBoundary } from "@/components/AdsErrorBoundary";
 import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
+import { PlaceInfoSheet } from "@/screens/PlaceInfoSheet";
 import { getRouteOptions, DirectionsApiError, type Route, type RouteProfileKey } from "@/services/directions";
-import type { PlaceDetails } from "@/services/places";
+import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
@@ -55,6 +63,7 @@ export function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const reportSheetRef = useRef<BottomSheet>(null);
   const detailSheetRef = useRef<BottomSheet>(null);
+  const placeInfoSheetRef = useRef<BottomSheet>(null);
 
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -85,11 +94,27 @@ export function MapScreen() {
   // on region-change-complete, gated behind a min-zoom so a zoomed-out view doesn't fire an
   // Overpass query over a huge area), independent of the live community AlertType markers.
   const [osmData, setOsmData] = useState<OsmTrafficData | null>(null);
+  const [osmLoading, setOsmLoading] = useState(false);
   const osmDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [bannerVisible, setBannerVisible] = useState(false);
   const [placingAlert, setPlacingAlert] = useState(false);
+  // Tracks whether either alert sheet is actually open (not just mounted -- both are always
+  // mounted, controlled via ref) so the FAB column below can hide itself while a sheet
+  // covers most of the screen -- previously the FABs stayed rendered at their normal
+  // position underneath, and whichever one happened to sit just above the sheet's top edge
+  // showed as an oddly clipped sliver peeking out from behind it.
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false);
+  const [placeInfoSheetOpen, setPlaceInfoSheetOpen] = useState(false);
+  const anySheetOpen = reportSheetOpen || detailSheetOpen || placeInfoSheetOpen;
   const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
+
+  // Real "tap a shop, see its info" -- iOS's native MapKit provider here has no onPoiClick
+  // event (react-native-maps only fires that on Google Maps/Android), so instead any map tap
+  // looks up whatever business is closest to that point via Places Nearby Search + Details.
+  const [placeInfo, setPlaceInfo] = useState<PlaceInfo | null>(null);
+  const [placeInfoLoading, setPlaceInfoLoading] = useState(false);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
   // Real photorealistic 3D satellite (Android only for now, see modules/map3d) -- Stage 1:
@@ -292,10 +317,12 @@ export function MapScreen() {
     if (osmDebounceRef.current) clearTimeout(osmDebounceRef.current);
     if (!settings.showTrafficLights && !settings.showSpeedCameras) {
       setOsmData(null);
+      setOsmLoading(false);
       return;
     }
     if (region.latitudeDelta > OSM_LAYER_MAX_DELTA) {
       setOsmData(null);
+      setOsmLoading(false);
       return;
     }
     osmDebounceRef.current = setTimeout(() => {
@@ -309,12 +336,43 @@ export function MapScreen() {
           longitude: region.longitude + region.longitudeDelta / 2,
         },
       };
-      fetchOsmTrafficData(bounds)
+      setOsmLoading(true);
+      fetchOsmTrafficData(bounds, {
+        wantTrafficLights: settings.showTrafficLights,
+        wantSpeedCameras: settings.showSpeedCameras,
+      })
         .then(setOsmData)
-        .catch((err) => console.warn("[map] OSM traffic layer fetch failed", err));
+        .catch((err) => console.warn("[map] OSM traffic layer fetch failed", err))
+        .finally(() => setOsmLoading(false));
     }, 1200);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.showTrafficLights, settings.showSpeedCameras]);
+
+  const onMapPress = useCallback(
+    (e: MapPressEvent) => {
+      // Don't hijack a tap that's meant for something else already in progress -- placing an
+      // alert pin, or a sheet already open and eating input.
+      if (placingAlert || anySheetOpen) return;
+      const coordinate = e.nativeEvent.coordinate;
+      setPlaceInfoLoading(true);
+      findNearestPlace(coordinate)
+        .then((nearest) => {
+          if (!nearest) return null;
+          return getPlaceInfo(nearest.placeId);
+        })
+        .then((info) => {
+          if (!info) return;
+          setPlaceInfo(info);
+          placeInfoSheetRef.current?.expand();
+        })
+        .catch((err) => {
+          console.warn("[map] place info lookup failed", err);
+          Sentry.logger.error("map: place info lookup failed", { error: String(err) });
+        })
+        .finally(() => setPlaceInfoLoading(false));
+    },
+    [placingAlert, anySheetOpen]
+  );
 
   const onDestinationSelected = useCallback(
     (place: PlaceDetails) => {
@@ -384,34 +442,41 @@ export function MapScreen() {
     setDestinationLatLng(null);
   }, []);
 
-  const onShareAlert = useCallback(
-    async (type: AlertType) => {
-      const location = alertPlacementLatLng ?? currentLatLng;
-      if (!location || !user) return;
-      await reportAlert(type, location, user.uid);
-      reportSheetRef.current?.close();
-      setPlacingAlert(false);
-      setAlertPlacementLatLng(null);
-    },
-    [alertPlacementLatLng, currentLatLng, user]
-  );
+  // Flow (per spec: select the type first, then drag to place, then Set/Save):
+  // 1. FAB -> openAlertTypePicker: opens AlertReportSheet, nothing else happens yet.
+  // 2. onAlertTypeSelected: sheet closes, placement mode starts (draggable pin at the live
+  //    position, type remembered in a ref for the eventual save).
+  // 3. confirmAlertPlacement ("Set"): actually writes the alert at wherever the pin ended up.
+  // 4. cancelAlertPlacement ("Cancel"): aborts, no write.
+  const pendingAlertTypeRef = useRef<AlertType | null>(null);
 
-  // Manual placement: tapping the report FAB drops a draggable pin (starting at the live
-  // position) the user can drag to the exact spot before picking an alert type -- rather than
-  // always silently reporting at wherever the phone's GPS currently says it is, which is
-  // often not quite where the actual hazard/police car/etc is.
-  const startAlertPlacement = useCallback(() => {
-    if (!currentLatLng) return;
-    setAlertPlacementLatLng(currentLatLng);
-    setPlacingAlert(true);
-  }, [currentLatLng]);
-
-  const confirmAlertPlacement = useCallback(() => {
-    setPlacingAlert(false);
+  const openAlertTypePicker = useCallback(() => {
     reportSheetRef.current?.expand();
   }, []);
 
+  const onAlertTypeSelected = useCallback(
+    (type: AlertType) => {
+      if (!currentLatLng) return;
+      pendingAlertTypeRef.current = type;
+      reportSheetRef.current?.close();
+      setAlertPlacementLatLng(currentLatLng);
+      setPlacingAlert(true);
+    },
+    [currentLatLng]
+  );
+
+  const confirmAlertPlacement = useCallback(async () => {
+    const type = pendingAlertTypeRef.current;
+    const location = alertPlacementLatLng;
+    if (!type || !location || !user) return;
+    await reportAlert(type, location, user.uid);
+    pendingAlertTypeRef.current = null;
+    setPlacingAlert(false);
+    setAlertPlacementLatLng(null);
+  }, [alertPlacementLatLng, user]);
+
   const cancelAlertPlacement = useCallback(() => {
+    pendingAlertTypeRef.current = null;
     setPlacingAlert(false);
     setAlertPlacementLatLng(null);
   }, []);
@@ -504,6 +569,7 @@ export function MapScreen() {
           longitudeDelta: 0.05,
         }}
         onRegionChangeComplete={onRegionChangeComplete}
+        onPress={onMapPress}
       >
         {route && (
           <Polyline coordinates={route.polyline} strokeWidth={5} strokeColor="#2563EB" />
@@ -668,7 +734,21 @@ export function MapScreen() {
             <Ionicons name={followTilt ? "close" : "navigate"} size={20} color={colors.text} />
           </Pressable>
         )}
-        <MuteButton />
+        {/* Voice guidance only ever speaks during active turn-by-turn navigation, so mute
+            only means anything then -- previously always rendered here, which put it at the
+            exact same top offset as the destination search bar (both start at
+            insets.top + spacing.md) and painted on top of the search bar's right edge
+            whenever not navigating, looking like a broken "voice search" button glued to the
+            search input instead of a separate control. */}
+        {route && <MuteButton />}
+        {/* Overpass (OSM) traffic-light/speed-camera lookups can genuinely take a few
+            seconds -- a visible spinner while one is in flight replaces what used to look
+            like the layer being permanently stuck with no feedback at all. */}
+        {osmLoading && (settings.showTrafficLights || settings.showSpeedCameras) && (
+          <View style={styles.osmLoadingBadge} accessibilityLabel="Loading traffic light and speed camera data">
+            <ActivityIndicator size="small" color={colors.textMuted} />
+          </View>
+        )}
         <Pressable
           style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
           onPress={() => navigation.navigate("Settings")}
@@ -678,13 +758,19 @@ export function MapScreen() {
         </Pressable>
       </View>
 
+      {/* Hidden while a bottom sheet is open or an alert is being placed -- previously these
+          stayed rendered at their normal position underneath a sheet, and whichever FAB sat
+          just above the sheet's top edge showed as a clipped sliver peeking out from behind
+          it instead of being cleanly covered or cleanly visible. */}
+      {!anySheetOpen && !placingAlert && (
+        <>
       <Pressable
         style={({ pressed }) => [
           styles.fab,
           { bottom: insets.bottom + 24 },
           pressed && { opacity: pressedOpacity },
         ]}
-        onPress={startAlertPlacement}
+        onPress={openAlertTypePicker}
         accessibilityLabel="Report an alert"
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
@@ -737,6 +823,8 @@ export function MapScreen() {
       >
         <Ionicons name="map-outline" size={22} color="#FFFFFF" />
       </Pressable>
+        </>
+      )}
       </View>
 
       {/* Never shown while navigating -- a driving app shouldn't have anything competing for
@@ -789,7 +877,12 @@ export function MapScreen() {
         <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
       </Modal>
 
-      <AlertReportSheet ref={reportSheetRef} onShare={onShareAlert} />
+      <AlertReportSheet
+        ref={reportSheetRef}
+        onTypeSelected={onAlertTypeSelected}
+        onClose={() => reportSheetRef.current?.close()}
+        onSheetChange={(index) => setReportSheetOpen(index >= 0)}
+      />
       <AlertDetailSheet
         ref={detailSheetRef}
         alert={selectedAlert}
@@ -797,7 +890,21 @@ export function MapScreen() {
         onDelete={onDeleteAlert}
         onHide={onHideAlert}
         onConfirmStillHere={onConfirmStillHere}
+        onClose={() => detailSheetRef.current?.close()}
+        onSheetChange={(index) => setDetailSheetOpen(index >= 0)}
       />
+      <PlaceInfoSheet
+        ref={placeInfoSheetRef}
+        place={placeInfo}
+        onClose={() => placeInfoSheetRef.current?.close()}
+        onSheetChange={(index) => setPlaceInfoSheetOpen(index >= 0)}
+      />
+
+      {placeInfoLoading && (
+        <View style={styles.placeInfoLoadingBadge} pointerEvents="none">
+          <ActivityIndicator size="small" color={colors.text} />
+        </View>
+      )}
 
       {/* Rendered last so it always paints on top of the search bar/nav card below it,
           instead of being silently covered by them when both occupy the same top area. */}
@@ -912,6 +1019,27 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   settingsButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.low,
+  },
+  osmLoadingBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.low,
+  },
+  placeInfoLoadingBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "48%",
     width: 44,
     height: 44,
     borderRadius: radius.pill,

@@ -68,6 +68,103 @@ export async function searchPlaces(query: string, biasLocation?: LatLng): Promis
   }));
 }
 
+export interface PlaceReview {
+  authorName: string;
+  rating: number;
+  relativeTime: string;
+  text: string;
+}
+
+export interface PlaceInfo extends PlaceDetails {
+  rating?: number;
+  userRatingsTotal?: number;
+  openNow?: boolean;
+  weekdayText?: string[];
+  phoneNumber?: string;
+  website?: string;
+  reviews: PlaceReview[];
+}
+
+// Real POI-tap-to-info requires *some* place near the tapped coordinate to look up. iOS uses
+// Apple's native MapKit here (not PROVIDER_GOOGLE), and react-native-maps' own onPoiClick is
+// Google-Maps-only on iOS -- so there's no native "which business did they tap" event to read
+// on this platform. This is the workaround: treat any map tap as "find whatever's closest to
+// here" via Nearby Search, then pull full details for it. A small fixed radius (rather than
+// rankby=distance, which requires a keyword/name/type we don't have) keeps results limited to
+// places actually near the tap instead of matching something arbitrarily far away.
+const POI_LOOKUP_RADIUS_METERS = 60;
+
+export async function findNearestPlace(location: LatLng): Promise<{ placeId: string } | null> {
+  const params = new URLSearchParams({
+    location: `${location.latitude},${location.longitude}`,
+    radius: String(POI_LOOKUP_RADIUS_METERS),
+    key: env.googlePlacesApiKey,
+  });
+
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params.toString()}`
+  );
+  const json = await res.json();
+
+  if (json.status === "ZERO_RESULTS") return null;
+  if (json.status !== "OK") {
+    Sentry.logger.error("places: nearby search request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new PlacesApiError(json.status, json.error_message);
+  }
+
+  const nearest = json.results?.[0];
+  return nearest ? { placeId: nearest.place_id } : null;
+}
+
+export async function getPlaceInfo(placeId: string): Promise<PlaceInfo> {
+  const params = new URLSearchParams({
+    place_id: placeId,
+    key: env.googlePlacesApiKey,
+    fields:
+      "place_id,name,formatted_address,geometry,rating,user_ratings_total,opening_hours,formatted_phone_number,website,reviews",
+  });
+
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`
+  );
+  const json = await res.json();
+
+  if (json.status !== "OK") {
+    Sentry.logger.error("places: place info request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+      placeId,
+    });
+    throw new PlacesApiError(json.status, json.error_message);
+  }
+
+  const result = json.result;
+  return {
+    placeId: result.place_id,
+    name: result.name,
+    address: result.formatted_address,
+    location: {
+      latitude: result.geometry.location.lat,
+      longitude: result.geometry.location.lng,
+    },
+    rating: result.rating,
+    userRatingsTotal: result.user_ratings_total,
+    openNow: result.opening_hours?.open_now,
+    weekdayText: result.opening_hours?.weekday_text,
+    phoneNumber: result.formatted_phone_number,
+    website: result.website,
+    reviews: (result.reviews ?? []).slice(0, 5).map((r: any) => ({
+      authorName: r.author_name,
+      rating: r.rating,
+      relativeTime: r.relative_time_description,
+      text: r.text,
+    })),
+  };
+}
+
 export async function getPlaceDetails(placeId: string): Promise<PlaceDetails> {
   const params = new URLSearchParams({
     place_id: placeId,

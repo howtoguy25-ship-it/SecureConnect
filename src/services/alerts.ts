@@ -28,7 +28,16 @@ function toAlertDoc(id: string, data: any): AlertDoc {
     lng: data.lng,
     geohash: data.geohash,
     createdBy: data.createdBy,
-    createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : data.createdAt,
+    // createdAt is written with serverTimestamp() (see reportAlert below), which the local
+    // optimistic write Firestore fires through onSnapshot *before* the server round-trip
+    // resolves it -- during that brief window, data.createdAt is genuinely `null`, not a
+    // Timestamp. Falling through null as-is here (the previous behavior) made
+    // `Date.now() - null` coerce to `Date.now() - 0`, i.e. "reported 56 years ago" flashing
+    // for a split second on every alert the instant it's created. Date.now() is a real,
+    // honest "just now" stand-in for those few hundred ms, not a mock value -- the very next
+    // snapshot (server-confirmed) replaces it with the real timestamp.
+    createdAt:
+      data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : (data.createdAt ?? Date.now()),
     expiresAt: data.expiresAt instanceof Timestamp ? data.expiresAt.toMillis() : data.expiresAt,
     confirmCount: data.confirmCount ?? 0,
     hiddenBy: data.hiddenBy ?? [],

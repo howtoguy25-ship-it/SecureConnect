@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertDoc } from "@/types/alert";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
@@ -12,6 +12,8 @@ interface Props {
   onDelete: (alert: AlertDoc) => void;
   onHide: (alert: AlertDoc) => void;
   onConfirmStillHere: (alert: AlertDoc) => void;
+  onClose: () => void;
+  onSheetChange?: (index: number) => void;
 }
 
 function timeAgo(timestampMs: number): string {
@@ -23,7 +25,7 @@ function timeAgo(timestampMs: number): string {
 }
 
 export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDetailSheet(
-  { alert, currentUid, onDelete, onHide, onConfirmStillHere },
+  { alert, currentUid, onDelete, onHide, onConfirmStillHere, onClose, onSheetChange },
   ref
 ) {
   const insets = useSafeAreaInsets();
@@ -36,6 +38,7 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
       index={-1}
       snapPoints={snapPoints}
       enablePanDownToClose
+      onChange={onSheetChange}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
@@ -46,12 +49,20 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
               <View style={[styles.iconWrap, { backgroundColor: ALERT_COLORS[alert.type] }]}>
                 <MaterialCommunityIcons name={ALERT_ICONS[alert.type] as any} size={26} color="#FFFFFF" />
               </View>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.title}>{ALERT_LABELS[alert.type]}</Text>
                 <Text style={styles.subtitle}>
                   Reported {timeAgo(alert.createdAt)} · {alert.confirmCount} confirmed
                 </Text>
               </View>
+              <Pressable
+                onPress={onClose}
+                hitSlop={12}
+                style={({ pressed }) => [styles.closeButton, pressed && { opacity: pressedOpacity }]}
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={20} color={colors.textMuted} />
+              </Pressable>
             </View>
 
             <Pressable
@@ -110,6 +121,14 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
   },
