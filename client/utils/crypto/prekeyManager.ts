@@ -349,35 +349,46 @@ export async function registerDeviceAndUploadPrekeys(
   const signedPreKey = await generateSignedPreKey(signingPair);
   const oneTimePreKeys = await generateOneTimePreKeys(100);
 
-  await fetch(`${apiBase}/api/e2ee/devices/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
+  // Device registration, the signed prekey, and every one-time-prekey batch
+  // are each keyed on req.userId server-side with no FK dependency between
+  // them, so there's no reason to await them one at a time. Sequentially
+  // awaiting ~7 round trips (1 device + 1 signed + 5 batches of 20) meant a
+  // brand-new signup's prekey bundle could take several real seconds to
+  // become fully available -- and because none of these checked
+  // response.ok, a single failed call anywhere in that chain silently
+  // "succeeded" while leaving the bundle incomplete, so anyone messaging
+  // that new user during the gap got a hard "no keys" failure with no
+  // retry. Running everything concurrently and throwing on a non-OK
+  // response closes most of that race window and stops failures from
+  // being swallowed as success.
+  const BATCH_SIZE = 20;
+  const batches: Array<{ id: string; publicKey: string }>[] = [];
+  for (let i = 0; i < oneTimePreKeys.length; i += BATCH_SIZE) {
+    batches.push(oneTimePreKeys.slice(i, i + BATCH_SIZE));
+  }
+
+  const postJson = async (path: string, body: unknown) => {
+    const res = await fetch(`${apiBase}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`${path} failed (${res.status})`);
+  };
+
+  await Promise.all([
+    postJson("/api/e2ee/devices/register", {
       deviceId,
       identityPublicKey: ikPair.publicKey,
       signingPublicKey: naclUtil.encodeBase64(signingPair.publicKey),
     }),
-  });
-
-  await fetch(`${apiBase}/api/e2ee/prekeys/signed`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
+    postJson("/api/e2ee/prekeys/signed", {
       keyId: signedPreKey.id,
       publicKey: signedPreKey.publicKey,
       signature: signedPreKey.signature,
     }),
-  });
-
-  const BATCH_SIZE = 20;
-  for (let i = 0; i < oneTimePreKeys.length; i += BATCH_SIZE) {
-    const batch = oneTimePreKeys.slice(i, i + BATCH_SIZE);
-    await fetch(`${apiBase}/api/e2ee/prekeys/onetime`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ keys: batch }),
-    });
-  }
+    ...batches.map((batch) => postJson("/api/e2ee/prekeys/onetime", { keys: batch })),
+  ]);
 }
 
 /**
