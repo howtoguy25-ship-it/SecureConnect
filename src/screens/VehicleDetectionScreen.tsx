@@ -3,14 +3,22 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent
 import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { detectVehiclesInPhoto, warmUpModel } from "@/services/vehicleDetection";
+import { detectVehiclesInPhoto, decodePhotoForDetection, warmUpModel } from "@/services/vehicleDetection";
+import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 import { locatePlateRegion } from "@/utils/plateLocator";
 import { readPlateText } from "@/services/plateOcr";
 import { colors, radius, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
 
-const CAPTURE_INTERVAL_MS = 1200;
+// Shorter than the original 1.2s -- expo-camera's takePictureAsync is a discrete photo
+// shutter (not a continuous frame stream the way a real video/frame-processor pipeline
+// would be), so this is the fastest cadence that still leaves enough time for the shutter +
+// JPEG decode + COCO-SSD inference to actually finish before the next capture fires. It's a
+// real, honest limitation of expo-camera's still-photo API versus a true frame processor
+// (e.g. react-native-vision-camera, which this app doesn't depend on) -- this makes
+// detection noticeably snappier without claiming to be continuous video.
+const CAPTURE_INTERVAL_MS = 700;
 // Attempts (each tied to one capture pass, ~1.2s apart) before giving up on a persistently
 // unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
 // forever on one that's obscured, too far, or at a bad angle.
@@ -33,6 +41,9 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   // component's own state, cleared the moment a vehicle's track is pruned (see
   // pruneStalePlateState below). Nothing here is persisted or sent off-device.
   const [plateTexts, setPlateTexts] = useState<Map<number, string>>(new Map());
+  // Track ids with a confirmed, actually-strobing lightbar signature (see
+  // lightbarDetector.ts) -- real detected evidence, not a model's guess at vehicle type.
+  const [emergencyTrackIds, setEmergencyTrackIds] = useState<Set<number>>(new Set());
 
   const cameraRef = useRef<CameraView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -63,15 +74,29 @@ export function VehicleDetectionScreen({ onClose }: Props) {
       if (!photo) return;
       Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
-      const detected = await detectVehiclesInPhoto(photo.uri);
+      const decoded = await decodePhotoForDetection(photo.uri);
+      const detected = await detectVehiclesInPhoto(decoded);
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
       setBoxes(tracked);
+
+      const liveIds = speedTrackerRef.current.liveTrackIds();
+
+      // Real, evidence-based emergency-lightbar check (actively strobing red/blue light),
+      // not a guess at vehicle type -- see lightbarDetector.ts.
+      const nowMs = Date.now();
+      const nextEmergencyIds = new Set<number>();
+      for (const box of tracked) {
+        if (sampleLightbarActivity(decoded, box.id, box.bbox, nowMs)) {
+          nextEmergencyIds.add(box.id);
+        }
+      }
+      setEmergencyTrackIds(nextEmergencyIds);
+      pruneLightbarTracks(liveIds);
 
       // Prune cached plate state for any track id the tracker has fully dropped (not just
       // ones missing from this frame's `tracked` -- a track survives a short grace period on
       // a single missed detection, and pruning off `tracked` alone would wipe a legitimately
       // in-progress read on that miss).
-      const liveIds = speedTrackerRef.current.liveTrackIds();
       for (const id of plateAttemptsRef.current.keys()) {
         if (!liveIds.has(id)) plateAttemptsRef.current.delete(id);
       }
@@ -132,6 +157,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
     platesReadingRef.current.clear();
     plateTextsRef.current = new Map();
     setPlateTexts(new Map());
+    setEmergencyTrackIds(new Set());
     setFacing((prev) => (prev === "back" ? "front" : "back"));
   }, []);
 
@@ -170,7 +196,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         containerSize &&
         boxes.map((box) => {
           const [x, y, w, h] = box.bbox;
-          const isEmergency = box.label !== "Vehicle";
+          const isEmergency = emergencyTrackIds.has(box.id);
           const plateText = plateTexts.get(box.id);
           const speedLabel =
             box.state === "parked"
@@ -195,7 +221,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
               ]}
             >
               <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
-                {box.label} {Math.round((box.confidence ?? box.score) * 100)}%
+                {isEmergency ? `${box.label} — lights active` : `${box.label} ${Math.round(box.score * 100)}%`}
               </Text>
               {/* Anchored top-right, just outside the box edge, separate from the type/
                   confidence label at top-left -- so it never overlaps the vehicle or the
@@ -230,16 +256,17 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         )}
         {status === "running" && (
           <Text style={styles.bannerText}>
-            Detecting vehicles ({facing === "back" ? "back" : "front"} camera) — a
-            custom-trained model guesses ambulance/fire truck/police car (red box, shown
-            with its confidence %) when confident enough, generic "Vehicle" (amber box)
-            otherwise. It's trained on a modest ~500-image dataset — a real but imperfect
-            guess, not certified identification. Speed (top-right of box) is a rough estimate
-            (assumes average car width, no calibration) — not radar-accurate, and shows
-            "PARKED" once a vehicle has been still for a couple of seconds. A plate number
-            (bottom of box, cyan) only ever appears once real on-device text recognition
-            actually reads one from a face-on vehicle — it's never stored or sent anywhere,
-            just shown live while that vehicle stays in view.
+            Detecting vehicles ({facing === "back" ? "back" : "front"} camera) — amber box,
+            generic "Vehicle"/"Heavy Vehicle". Turns red with "lights active" only once an
+            actual strobing red/blue light is confirmed in view for a few seconds — real
+            detected evidence, not a guess at vehicle type (a marked/unmarked car with no
+            lights on shows no different to any other car, the same way a driver wouldn't
+            notice one either). Speed (top-right of box) is a rough estimate (assumes average
+            car width, no calibration) — not radar-accurate, and shows "PARKED" once a
+            vehicle has been still for a couple of seconds. A plate number (bottom of box,
+            cyan) only ever appears once real on-device text recognition actually reads one
+            from a face-on vehicle — it's never stored or sent anywhere, just shown live
+            while that vehicle stays in view.
           </Text>
         )}
         {status === "error" && (

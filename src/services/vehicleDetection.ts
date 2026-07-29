@@ -3,32 +3,33 @@ import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import * as jpeg from "jpeg-js";
 import { File } from "expo-file-system";
 import { ensureTfReady } from "@/services/tfPlatform";
-import { classifyVehicleCrop, warmUpClassifier, type VehicleClass } from "@/services/vehicleClassifier";
 
-// COCO-SSD (the pretrained model this runs) only knows generic COCO classes — it has no
-// concept of "police car" or "ambulance", just "car" / "truck" / "bus" / "motorcycle". A
-// second, custom-trained classifier (see training/README.md) runs behind it on each box to
-// take a real guess at ambulance/firetruck/police-car -- trained on a modest ~500-image
-// dataset, so it's a confidence score, not a certified ID, and falls back to the generic
-// "Vehicle" label whenever it isn't confident enough. Same approach as the web app's live
-// detection — see web/src/components/LiveVehicleDetection.tsx.
+// COCO-SSD (the pretrained model this runs) only knows generic COCO classes — "car" /
+// "truck" / "bus" / "motorcycle" -- not "police car" or "ambulance". This app used to run a
+// second, custom-trained classifier (src/services/vehicleClassifier.ts, still present but no
+// longer called from here) behind each box to guess ambulance/firetruck/police-car. Dropped
+// for the same reason the web app already dropped its identical model: repeated real-world
+// testing kept producing confidently-wrong "Police car" results on ordinary cars even after
+// tightening its confidence bar twice -- a ~500-image training set just isn't enough to be
+// honest about on a live phone camera. Generic labels plus the real, evidence-based lightbar
+// flash detector (lightbarDetector.ts) below replace it, matching
+// web/src/components/LiveVehicleDetection.tsx's own fix.
 const VEHICLE_CLASSES = new Set(["car", "truck", "bus", "motorcycle"]);
-
-const CLASS_DISPLAY_NAMES: Record<VehicleClass, string> = {
-  ambulance: "Ambulance",
-  firetruck: "Fire truck",
-  "police-car": "Police car",
-  other: "Vehicle",
-};
+const HEAVY_VEHICLE_CLASSES = new Set(["truck", "bus"]);
 
 export interface VehicleBox {
-  label: string;
+  label: "Vehicle" | "Heavy Vehicle";
   score: number;
-  // Set only when the custom classifier identified this as ambulance/firetruck/police-car;
-  // absent (and label is the generic "Vehicle") when it wasn't confident enough.
-  confidence?: number;
   // [x, y, width, height] in pixels, relative to the source image dimensions.
   bbox: [number, number, number, number];
+}
+
+export interface DecodedPhoto {
+  width: number;
+  height: number;
+  // RGB, 3 bytes per pixel -- shared between COCO-SSD detection and the lightbar flash
+  // sampler below so a single capture only ever gets JPEG-decoded once.
+  data: Uint8Array;
 }
 
 let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
@@ -42,46 +43,35 @@ function loadModel(): Promise<cocoSsd.ObjectDetection> {
 
 export async function warmUpModel(): Promise<void> {
   await loadModel();
-  await warmUpClassifier();
 }
 
-/** Decodes a captured JPEG photo into a pixel tensor, without the unmaintained
+/** Decodes a captured JPEG photo into raw RGB pixels, without the unmaintained
  *  @tensorflow/tfjs-react-native's decodeJpeg -- jpeg-js is a plain, actively-maintained
  *  pure-JS decoder with no native/platform dependency of its own. */
-async function decodePhotoToTensor(uri: string): Promise<tf.Tensor3D> {
+export async function decodePhotoForDetection(uri: string): Promise<DecodedPhoto> {
   const buffer = await new File(uri).arrayBuffer();
   const { width, height, data } = jpeg.decode(new Uint8Array(buffer), {
     useTArray: true,
     formatAsRGBA: false,
   });
-  return tf.tensor3d(data, [height, width, 3], "int32");
+  return { width, height, data };
 }
 
-/** Runs detection on a photo captured via expo-camera and returns vehicle-class boxes. */
-export async function detectVehiclesInPhoto(uri: string): Promise<VehicleBox[]> {
+/** Runs detection on an already-decoded photo (see decodePhotoForDetection) and returns
+ *  generic vehicle-class boxes. */
+export async function detectVehiclesInPhoto(photo: DecodedPhoto): Promise<VehicleBox[]> {
   const model = await loadModel();
-  const imageTensor = await decodePhotoToTensor(uri);
+  const imageTensor = tf.tensor3d(photo.data, [photo.height, photo.width, 3], "int32");
 
   try {
     const predictions = await model.detect(imageTensor);
-    const vehiclePredictions = predictions.filter((p) => VEHICLE_CLASSES.has(p.class));
-
-    const boxes: VehicleBox[] = [];
-    for (const p of vehiclePredictions) {
-      const bbox = p.bbox as [number, number, number, number];
-      const classification = await classifyVehicleCrop(imageTensor, bbox);
-      if (classification && classification.label !== "other") {
-        boxes.push({
-          label: CLASS_DISPLAY_NAMES[classification.label],
-          score: p.score,
-          confidence: classification.confidence,
-          bbox,
-        });
-      } else {
-        boxes.push({ label: "Vehicle", score: p.score, bbox });
-      }
-    }
-    return boxes;
+    return predictions
+      .filter((p) => VEHICLE_CLASSES.has(p.class))
+      .map((p) => ({
+        label: HEAVY_VEHICLE_CLASSES.has(p.class) ? ("Heavy Vehicle" as const) : ("Vehicle" as const),
+        score: p.score,
+        bbox: p.bbox as [number, number, number, number],
+      }));
   } finally {
     imageTensor.dispose();
   }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, StyleSheet, Pressable, Platform, Modal } from "react-native";
-import MapView, { PROVIDER_GOOGLE, Polyline } from "react-native-maps";
+import { View, StyleSheet, Pressable, Platform, Modal, Share } from "react-native";
+import MapView, { PROVIDER_GOOGLE, Polyline, Marker, type Region } from "react-native-maps";
 import { Map3DView, isMap3DSupported } from "map3d";
 import { Ionicons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
@@ -16,16 +16,19 @@ import { useSettings } from "@/context/SettingsContext";
 import { MuteButton } from "@/components/MuteButton";
 import { DestinationSearchBar } from "@/components/DestinationSearchBar";
 import { NavigationInstructionCard } from "@/components/NavigationInstructionCard";
+import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { AlertMarker } from "@/components/AlertMarker";
 import { AlertBanner } from "@/components/AlertBanner";
 import { BannerAdBar } from "@/components/BannerAdBar";
 import { AdsErrorBoundary } from "@/components/AdsErrorBoundary";
 import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
-import { getDirections, type Route } from "@/services/directions";
+import { getRouteOptions, type Route, type RouteProfileKey } from "@/services/directions";
 import type { PlaceDetails } from "@/services/places";
+import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
+import { formatArrivalClock } from "@/utils/navFormat";
 import {
   subscribeNearbyAlerts,
   reportAlert,
@@ -34,6 +37,7 @@ import {
   confirmAlert,
 } from "@/services/alerts";
 import { sirenDetection } from "@/services/sirenDetection";
+import { fetchOsmTrafficData, type OsmTrafficData } from "@/services/osmTrafficData";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import type { AlertDoc, AlertType } from "@/types/alert";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
@@ -56,8 +60,23 @@ export function MapScreen() {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const guidanceRef = useRef(createGuidanceState());
 
+  // Route-choice flow: destination picked -> fetch all 3 profiles -> user picks one (with a
+  // live preview of that profile's line on the map) -> Start commits it into `route` above.
+  const [pendingDestination, setPendingDestination] = useState<PlaceDetails | null>(null);
+  const [stopLocation, setStopLocation] = useState<LatLng | null>(null);
+  const [pickingStop, setPickingStop] = useState(false);
+  const [routeOptions, setRouteOptions] = useState<Record<RouteProfileKey, Route> | null>(null);
+  const [loadingRouteOptions, setLoadingRouteOptions] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<RouteProfileKey>("normal");
+
   const [nearbyAlerts, setNearbyAlerts] = useState<AlertDoc[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<AlertDoc | null>(null);
+
+  // Static OSM traffic-light/speed-camera layer -- fetched per visible map region (debounced
+  // on region-change-complete, gated behind a min-zoom so a zoomed-out view doesn't fire an
+  // Overpass query over a huge area), independent of the live community AlertType markers.
+  const [osmData, setOsmData] = useState<OsmTrafficData | null>(null);
+  const osmDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [bannerVisible, setBannerVisible] = useState(false);
   const [bannerMessage, setBannerMessage] = useState("");
@@ -115,9 +134,14 @@ export function MapScreen() {
     });
   }, [currentLatLng]);
 
-  // Subscribe to nearby alerts (Phase 3 + Phase 5) whenever position or radius changes meaningfully.
+  // Subscribe to nearby alerts (Phase 3 + Phase 5) whenever position or radius changes
+  // meaningfully. Fully off (and cleared) when the user has disabled alerts altogether --
+  // "if toggled off user who is active doesn't receive no alerts".
   useEffect(() => {
-    if (!currentLatLng || !user) return;
+    if (!currentLatLng || !user || !settings.alertsEnabled) {
+      setNearbyAlerts([]);
+      return;
+    }
     const unsubscribe = subscribeNearbyAlerts(
       currentLatLng.latitude,
       currentLatLng.longitude,
@@ -129,10 +153,18 @@ export function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     user?.uid,
+    settings.alertsEnabled,
     settings.alertRadiusKm,
     currentLatLng ? Math.round(currentLatLng.latitude * 200) : null,
     currentLatLng ? Math.round(currentLatLng.longitude * 200) : null,
   ]);
+
+  // Per-type visibility filter, applied on top of the radius subscription above -- lets a
+  // driver e.g. only care about police + hazards without changing what's actually fetched.
+  const visibleAlerts = useMemo(
+    () => nearbyAlerts.filter((alert) => settings.visibleAlertTypes.includes(alert.type)),
+    [nearbyAlerts, settings.visibleAlertTypes]
+  );
 
   // Turn-by-turn voice guidance (Phase 2): advance the active step as GPS crosses trigger radius.
   useEffect(() => {
@@ -193,28 +225,124 @@ export function MapScreen() {
     sirenDetection.setSensitivity(settings.sirenSensitivity);
   }, [settings.sirenSensitivity]);
 
-  const onDestinationSelected = useCallback(
-    async (place: PlaceDetails) => {
+  const fetchRouteOptions = useCallback(
+    async (destination: LatLng, waypoint?: LatLng) => {
       if (!currentLatLng) return;
-      const newRoute = await getDirections(currentLatLng, place.location);
-      guidanceRef.current = createGuidanceState();
-      setActiveStepIndex(0);
-      setRoute(newRoute);
-      navStartedAtRef.current = Date.now();
-      setFollowTilt(true);
-      mapRef.current?.fitToCoordinates(newRoute.polyline, {
-        edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
-        animated: true,
-      });
+      setLoadingRouteOptions(true);
+      try {
+        const options = await getRouteOptions(currentLatLng, destination, waypoint);
+        setRouteOptions(options);
+        setSelectedProfile("normal");
+        mapRef.current?.fitToCoordinates(options.normal.polyline, {
+          edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+          animated: true,
+        });
+      } catch (err) {
+        Sentry.logger.error("map: failed to fetch route options", { error: String(err) });
+        console.warn("[map] failed to fetch route options", err);
+      } finally {
+        setLoadingRouteOptions(false);
+      }
     },
     [currentLatLng]
   );
+
+  // Min zoom before the OSM layer queries at all -- a zoomed-out view spans too wide an area
+  // for a reasonable Overpass request/response size. ~0.03 latitudeDelta is roughly a
+  // few-km-wide view, comparable to web's OSM_LAYER_MIN_ZOOM.
+  const OSM_LAYER_MAX_DELTA = 0.03;
+
+  const onRegionChangeComplete = useCallback((region: Region) => {
+    if (osmDebounceRef.current) clearTimeout(osmDebounceRef.current);
+    if (!settings.showTrafficLights && !settings.showSpeedCameras) {
+      setOsmData(null);
+      return;
+    }
+    if (region.latitudeDelta > OSM_LAYER_MAX_DELTA) {
+      setOsmData(null);
+      return;
+    }
+    osmDebounceRef.current = setTimeout(() => {
+      const bounds = {
+        sw: {
+          latitude: region.latitude - region.latitudeDelta / 2,
+          longitude: region.longitude - region.longitudeDelta / 2,
+        },
+        ne: {
+          latitude: region.latitude + region.latitudeDelta / 2,
+          longitude: region.longitude + region.longitudeDelta / 2,
+        },
+      };
+      fetchOsmTrafficData(bounds)
+        .then(setOsmData)
+        .catch((err) => console.warn("[map] OSM traffic layer fetch failed", err));
+    }, 1200);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.showTrafficLights, settings.showSpeedCameras]);
+
+  const onDestinationSelected = useCallback(
+    (place: PlaceDetails) => {
+      if (!currentLatLng) return;
+      setPendingDestination(place);
+      setStopLocation(null);
+      fetchRouteOptions(place.location);
+    },
+    [currentLatLng, fetchRouteOptions]
+  );
+
+  const onStopSelected = useCallback(
+    (place: PlaceDetails) => {
+      if (!pendingDestination) return;
+      setStopLocation(place.location);
+      setPickingStop(false);
+      fetchRouteOptions(pendingDestination.location, place.location);
+    },
+    [pendingDestination, fetchRouteOptions]
+  );
+
+  const onSelectProfile = useCallback(
+    (key: RouteProfileKey) => {
+      setSelectedProfile(key);
+      const previewRoute = routeOptions?.[key];
+      if (previewRoute) {
+        mapRef.current?.fitToCoordinates(previewRoute.polyline, {
+          edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+          animated: true,
+        });
+      }
+    },
+    [routeOptions]
+  );
+
+  const confirmRoute = useCallback(() => {
+    if (!routeOptions) return;
+    const chosen = routeOptions[selectedProfile];
+    guidanceRef.current = createGuidanceState();
+    setActiveStepIndex(0);
+    setRoute(chosen);
+    navStartedAtRef.current = Date.now();
+    setFollowTilt(true);
+    mapRef.current?.fitToCoordinates(chosen.polyline, {
+      edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
+      animated: true,
+    });
+    setRouteOptions(null);
+    setPendingDestination(null);
+  }, [routeOptions, selectedProfile]);
+
+  const cancelRouteOptions = useCallback(() => {
+    setRouteOptions(null);
+    setPendingDestination(null);
+    setStopLocation(null);
+    setPickingStop(false);
+  }, []);
 
   const exitNavigation = useCallback(() => {
     stopSpeaking();
     setRoute(null);
     setActiveStepIndex(0);
     setFollowTilt(true);
+    setStopLocation(null);
   }, []);
 
   const onShareAlert = useCallback(
@@ -251,6 +379,31 @@ export function MapScreen() {
     () => (route ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.distanceMeters, 0) : 0),
     [route, activeStepIndex]
   );
+  const remainingDurationSeconds = useMemo(
+    () => (route ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.durationSeconds, 0) : 0),
+    [route, activeStepIndex]
+  );
+  const arrivalClockText = useMemo(
+    () => (route ? formatArrivalClock(Date.now() + remainingDurationSeconds * 1000) : ""),
+    [route, remainingDurationSeconds]
+  );
+
+  // One-time snapshot, not a live-updating tracked link -- matches the web app's own
+  // shareEta: a plain-text message with the current ETA/arrival time and a static Google
+  // Maps link to where the sender is right now, handed off to the OS share sheet.
+  const shareEta = useCallback(async () => {
+    if (!route || !currentLatLng) return;
+    const mapsLink = `https://www.google.com/maps?q=${currentLatLng.latitude},${currentLatLng.longitude}`;
+    const message =
+      `I'm on my way -- ETA ${route.etaText}, arriving around ${arrivalClockText}. ` +
+      `My current location: ${mapsLink}`;
+    try {
+      await Share.share({ message });
+    } catch (err) {
+      Sentry.logger.error("map: share ETA failed", { error: String(err) });
+      console.warn("[map] share ETA failed", err);
+    }
+  }, [route, currentLatLng, arrivalClockText]);
 
   return (
     <View style={styles.container}>
@@ -284,13 +437,49 @@ export function MapScreen() {
           latitudeDelta: 0.05,
           longitudeDelta: 0.05,
         }}
+        onRegionChangeComplete={onRegionChangeComplete}
       >
         {route && (
           <Polyline coordinates={route.polyline} strokeWidth={5} strokeColor="#2563EB" />
         )}
-        {nearbyAlerts.map((alert) => (
+        {/* Preview of whichever route profile is highlighted in the picker below, before
+            the user commits to it with Start -- "click a route, see its line" like Apple/
+            Google Maps' own route picker. Dashed so it's visually distinct from the solid
+            committed-route line above (the two are mutually exclusive: `route` is only ever
+            set once routeOptions has been cleared by confirmRoute). */}
+        {routeOptions && (
+          <Polyline
+            coordinates={routeOptions[selectedProfile].polyline}
+            strokeWidth={4}
+            strokeColor="#2563EB"
+            lineDashPattern={[8, 6]}
+          />
+        )}
+        {visibleAlerts.map((alert) => (
           <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
         ))}
+        {settings.showTrafficLights &&
+          osmData?.trafficLights.map((p) => (
+            <Marker
+              key={`tl-${p.id}`}
+              coordinate={{ latitude: p.lat, longitude: p.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.osmDotTrafficLight} />
+            </Marker>
+          ))}
+        {settings.showSpeedCameras &&
+          osmData?.speedCameras.map((p) => (
+            <Marker
+              key={`sc-${p.id}`}
+              coordinate={{ latitude: p.lat, longitude: p.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.osmDotSpeedCamera} />
+            </Marker>
+          ))}
       </MapView>
       )}
 
@@ -303,16 +492,40 @@ export function MapScreen() {
         />
       )}
 
-      {!route && (
+      {!route && !pendingDestination && (
         <DestinationSearchBar biasLocation={currentLatLng ?? undefined} onDestinationSelected={onDestinationSelected} />
+      )}
+
+      {!route && pendingDestination && pickingStop && (
+        <DestinationSearchBar
+          biasLocation={currentLatLng ?? undefined}
+          onDestinationSelected={onStopSelected}
+          placeholder="Add a stop on the way"
+          onCancel={() => setPickingStop(false)}
+        />
+      )}
+
+      {!route && pendingDestination && !pickingStop && (
+        <RouteOptionsCard
+          options={routeOptions}
+          loading={loadingRouteOptions}
+          selected={selectedProfile}
+          onSelect={onSelectProfile}
+          onStart={confirmRoute}
+          onCancel={cancelRouteOptions}
+          onAddStop={() => setPickingStop(true)}
+          hasStop={!!stopLocation}
+        />
       )}
 
       {route && (
         <NavigationInstructionCard
           step={activeStep}
           etaText={route.etaText}
+          arrivalClockText={arrivalClockText}
           distanceRemainingText={`${(remainingDistanceMeters / 1000).toFixed(1)} km`}
           onExit={exitNavigation}
+          onShareEta={shareEta}
         />
       )}
 
@@ -436,6 +649,22 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceMuted },
   mapArea: { flex: 1 },
   mapPlaceholder: { backgroundColor: colors.surfaceMuted },
+  osmDotTrafficLight: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#0D9488",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+  osmDotSpeedCamera: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#7C3AED",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
   topRightControls: {
     position: "absolute",
     right: spacing.md,

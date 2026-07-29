@@ -17,10 +17,14 @@ export interface PlaceDetails {
 export async function searchPlaces(query: string, biasLocation?: LatLng): Promise<PlacePrediction[]> {
   if (!query.trim()) return [];
 
+  // No `types` restriction -- Google's default returns addresses, suburbs/localities,
+  // cities, regions, and countries (the "geocode" set) *plus* businesses/landmarks by name,
+  // which a real navigation destination search needs too ("Starbucks", not just "123 Main
+  // St"). Restricting to types:"geocode" (the old behavior) silently excluded every
+  // establishment result.
   const params = new URLSearchParams({
     input: query,
     key: env.googlePlacesApiKey,
-    types: "geocode",
   });
   if (biasLocation) {
     params.set("location", `${biasLocation.latitude},${biasLocation.longitude}`);

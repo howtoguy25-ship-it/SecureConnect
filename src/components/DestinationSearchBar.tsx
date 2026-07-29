@@ -9,9 +9,18 @@ import { colors, radius, shadow, spacing } from "@/theme/tokens";
 interface Props {
   biasLocation?: LatLng;
   onDestinationSelected: (place: PlaceDetails) => void;
+  placeholder?: string;
+  // Only set when this bar is standing in for a secondary pick (e.g. "add a stop") that the
+  // user should be able to back out of without having picked anything.
+  onCancel?: () => void;
 }
 
-export function DestinationSearchBar({ biasLocation, onDestinationSelected }: Props) {
+export function DestinationSearchBar({
+  biasLocation,
+  onDestinationSelected,
+  placeholder = "Search destination",
+  onCancel,
+}: Props) {
   const [query, setQuery] = useState("");
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [loading, setLoading] = useState(false);
@@ -56,11 +65,16 @@ export function DestinationSearchBar({ biasLocation, onDestinationSelected }: Pr
         <TextInput
           value={query}
           onChangeText={onChangeText}
-          placeholder="Search destination"
+          placeholder={placeholder}
           placeholderTextColor={colors.textFaint}
           style={styles.input}
         />
         {loading && <ActivityIndicator size="small" color={colors.accent} />}
+        {onCancel && (
+          <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel">
+            <Ionicons name="close-circle" size={20} color={colors.textFaint} />
+          </Pressable>
+        )}
       </View>
       {predictions.length > 0 && (
         <FlatList

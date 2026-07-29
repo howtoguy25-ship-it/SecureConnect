@@ -27,11 +27,20 @@ const MANEUVER_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 interface Props {
   step: RouteStep | null;
   etaText: string;
+  arrivalClockText: string;
   distanceRemainingText: string;
   onExit: () => void;
+  onShareEta: () => void;
 }
 
-export function NavigationInstructionCard({ step, etaText, distanceRemainingText, onExit }: Props) {
+export function NavigationInstructionCard({
+  step,
+  etaText,
+  arrivalClockText,
+  distanceRemainingText,
+  onExit,
+  onShareEta,
+}: Props) {
   const insets = useSafeAreaInsets();
   if (!step) return null;
   const icon = (step.maneuver && MANEUVER_ICONS[step.maneuver]) || "arrow-up";
@@ -46,9 +55,18 @@ export function NavigationInstructionCard({ step, etaText, distanceRemainingText
           {step.instruction}
         </Text>
         <Text style={styles.meta}>
-          {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} · {distanceRemainingText} left
+          {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
+          {distanceRemainingText} left
         </Text>
       </View>
+      <Pressable
+        onPress={onShareEta}
+        hitSlop={12}
+        style={({ pressed }) => [styles.shareButton, pressed && { opacity: pressedOpacity }]}
+        accessibilityLabel="Share ETA"
+      >
+        <Ionicons name="share-outline" size={18} color={colors.text} />
+      </Pressable>
       <Pressable
         onPress={onExit}
         hitSlop={12}
@@ -92,6 +110,14 @@ const styles = StyleSheet.create({
     color: colors.textFaint,
     fontSize: 12,
     marginTop: 4,
+  },
+  shareButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
   exitButton: {
     width: 32,

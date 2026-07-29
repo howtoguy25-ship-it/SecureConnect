@@ -8,6 +8,8 @@ import { syncAlertRadiusToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
 import { BUSINESS_INFO } from "@/config/business";
 import { colors, radius, shadow, spacing } from "@/theme/tokens";
+import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
+import { ALERT_LABELS, type AlertType } from "@/types/alert";
 
 function sensitivityLabel(value: number): string {
   if (value <= 0.4) return "Low";
@@ -26,6 +28,41 @@ export function SettingsScreen() {
       if (user) await syncAlertRadiusToProfile(user.uid, rounded);
     },
     [updateSettings, user]
+  );
+
+  // Off = no alerts shown/received at all, regardless of radius. Turning it back on resets
+  // to a fresh 30km radius rather than whatever it was left at -- the user's own spec.
+  const onAlertsEnabledToggle = useCallback(
+    async (value: boolean) => {
+      if (value) {
+        await updateSettings({ alertsEnabled: true, alertRadiusKm: DEFAULT_ALERT_RADIUS_KM });
+        if (user) await syncAlertRadiusToProfile(user.uid, DEFAULT_ALERT_RADIUS_KM);
+      } else {
+        await updateSettings({ alertsEnabled: false });
+      }
+    },
+    [updateSettings, user]
+  );
+
+  const onAlertTypeToggle = useCallback(
+    (type: AlertType, value: boolean) => {
+      updateSettings({
+        visibleAlertTypes: value
+          ? [...settings.visibleAlertTypes, type]
+          : settings.visibleAlertTypes.filter((t) => t !== type),
+      });
+    },
+    [updateSettings, settings.visibleAlertTypes]
+  );
+
+  const onShowTrafficLightsToggle = useCallback(
+    (value: boolean) => updateSettings({ showTrafficLights: value }),
+    [updateSettings]
+  );
+
+  const onShowSpeedCamerasToggle = useCallback(
+    (value: boolean) => updateSettings({ showSpeedCameras: value }),
+    [updateSettings]
   );
 
   const onSensitivityChange = useCallback(
@@ -52,17 +89,65 @@ export function SettingsScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Section title="Alerts">
+      <Section title="Live alerts">
+        <Row label="Receive alerts">
+          <Switch
+            value={settings.alertsEnabled}
+            onValueChange={onAlertsEnabledToggle}
+            trackColor={{ true: colors.accent, false: colors.border }}
+          />
+        </Row>
+        <Text style={styles.helperText}>
+          Off — you won't see or receive any community alerts. Turning it back on sets your
+          radius to 30 km; adjust it below any time.
+        </Text>
+
         <Row label={`Alert visibility radius — ${settings.alertRadiusKm} km`}>
           <Slider
             minimumValue={1}
-            maximumValue={15}
+            maximumValue={200}
             step={1}
             value={settings.alertRadiusKm}
             onSlidingComplete={onRadiusChange}
+            disabled={!settings.alertsEnabled}
             minimumTrackTintColor={colors.accent}
           />
         </Row>
+
+        <View style={styles.alertTypeGrid}>
+          {ALL_ALERT_TYPES.map((type) => (
+            <View key={type} style={styles.alertTypeRow}>
+              <Text style={styles.alertTypeLabel}>{ALERT_LABELS[type]}</Text>
+              <Switch
+                value={settings.visibleAlertTypes.includes(type)}
+                onValueChange={(value) => onAlertTypeToggle(type, value)}
+                disabled={!settings.alertsEnabled}
+                trackColor={{ true: colors.accent, false: colors.border }}
+              />
+            </View>
+          ))}
+        </View>
+      </Section>
+
+      <Section title="Map layers">
+        <Row label="Traffic lights">
+          <Switch
+            value={settings.showTrafficLights}
+            onValueChange={onShowTrafficLightsToggle}
+            trackColor={{ true: colors.accent, false: colors.border }}
+          />
+        </Row>
+        <Row label="Speed cameras">
+          <Switch
+            value={settings.showSpeedCameras}
+            onValueChange={onShowSpeedCamerasToggle}
+            trackColor={{ true: colors.accent, false: colors.border }}
+          />
+        </Row>
+        <Text style={styles.helperText}>
+          Every known traffic light and fixed speed camera location, mapped by OpenStreetMap's
+          community — shown independently on the map, whether or not "Live alerts" is on.
+        </Text>
       </Section>
 
       <Section title="EV Radar (siren detection)">
@@ -161,6 +246,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     lineHeight: 17,
+  },
+  alertTypeGrid: {
+    gap: spacing.sm,
+  },
+  alertTypeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 2,
+  },
+  alertTypeLabel: {
+    fontSize: 14,
+    color: colors.text,
   },
   about: {
     alignItems: "center",
