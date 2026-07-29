@@ -72,7 +72,13 @@ export function GifPicker({ visible, onClose, onSelectGif }: GifPickerProps) {
     setErrorMsg(null);
     try {
       const token = await getStoredToken();
-      const response = await fetch(`${getApiUrl()}${path}`, {
+      // getApiUrl() always returns a trailing-slash base and path always
+      // starts with "/" -- naive string concatenation produced a literal
+      // "//api/gifs/..." double slash, which Express's router treats as a
+      // different (nonexistent) path and 404s. new URL() correctly resolves
+      // a leading-slash path against a base, same as every other fetch call
+      // in this app already does.
+      const response = await fetch(new URL(path, getApiUrl()).toString(), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!response.ok) {

@@ -16,17 +16,35 @@ function getDeviceId(): string {
   return `ios-${Date.now()}`;
 }
 
+// Retry-with-backoff: previously a single failed attempt here (a transient
+// network blip, not just the registration-order race the parallelization
+// fix addressed) was silently swallowed with no retry until the NEXT full
+// app cold-start -- meaning anyone messaging that user stayed blocked with
+// "hasn't set up encryption keys yet" for the rest of that session even
+// though the failure was recoverable. Retrying inside the same call means
+// a transient failure self-heals in seconds instead of requiring a restart.
+const E2EE_RETRY_DELAYS_MS = [2000, 5000, 10000];
+
 export async function ensureE2EEKeys(token: string) {
   logCheckpoint('e2ee_keys_start');
-  try {
-    const deviceId = getDeviceId();
-    await registerDeviceAndUploadPrekeys(token, API_BASE, deviceId);
-    logCheckpoint('e2ee_device_registered');
+  const deviceId = getDeviceId();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await registerDeviceAndUploadPrekeys(token, API_BASE, deviceId);
+      logCheckpoint('e2ee_device_registered');
 
-    await replenishOneTimePreKeysIfNeeded(token, API_BASE, 10);
-    logCheckpoint('e2ee_prekeys_replenished');
-  } catch (error) {
-    logCheckpoint(`e2ee_error: ${error}`);
+      await replenishOneTimePreKeysIfNeeded(token, API_BASE, 10);
+      logCheckpoint('e2ee_prekeys_replenished');
+      return;
+    } catch (error) {
+      logCheckpoint(`e2ee_error (attempt ${attempt + 1}): ${error}`);
+      if (attempt >= E2EE_RETRY_DELAYS_MS.length) {
+        // Out of retries for this call -- the next app cold-start (which
+        // calls ensureE2EEKeys unconditionally) is the final fallback.
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, E2EE_RETRY_DELAYS_MS[attempt]));
+    }
   }
 }
 

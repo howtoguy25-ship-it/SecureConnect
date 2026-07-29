@@ -4735,7 +4735,11 @@ export default function ConversationScreen() {
           try {
             setIsSending(true);
             const token = await getStoredToken();
-            const response = await fetch(`${getApiUrl()}/api/messages`, {
+            // getApiUrl() always ends in "/" -- string-concatenating another
+            // leading "/" produced a literal double slash that 404'd on the
+            // server. new URL() resolves it correctly (see GifPicker.tsx for
+            // the same fix and full explanation).
+            const response = await fetch(new URL('/api/messages', getApiUrl()).toString(), {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
