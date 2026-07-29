@@ -5,7 +5,18 @@
 // app's other crowd-sourced alerts: real, but not authoritative. Mirrors the web app's
 // services/osmTrafficData.ts (fetchOsmTrafficData half only -- the mobile map doesn't yet
 // have a posted-speed-limit readout to pair with fetchSpeedLimitNear).
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+//
+// Multiple independent public mirrors, not just overpass-api.de -- confirmed by directly
+// querying it that the single default instance genuinely times out under load ("The server is
+// probably too busy to handle your request", a real HTTP 504 from Overpass itself, not a app
+// bug), which is exactly why most areas were coming back empty ("none of the traffic lights
+// load, only one area" -- that one area was just the lucky request that beat the timeout).
+// All mirrors are queried in parallel and whichever answers first wins; the rest are aborted.
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
 
 export interface OsmPoint {
   id: number;
@@ -84,32 +95,39 @@ export async function fetchOsmTrafficData(
   if (clauses.length === 0) return { trafficLights: [], speedCameras: [] };
 
   const query = `[out:json][timeout:25];(${clauses.join("")});out body;`;
+  const body = `data=${encodeURIComponent(query)}`;
 
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  let response: Response;
-  try {
-    response = await fetch(OVERPASS_URL, {
+  const requestFrom = async (endpoint: string): Promise<OverpassResponse> => {
+    const response = await fetch(endpoint, {
       method: "POST",
-      body: `data=${encodeURIComponent(query)}`,
+      body,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       signal: controller.signal,
     });
+    if (!response.ok) {
+      throw new Error(`${endpoint} returned ${response.status}`);
+    }
+    return response.json();
+  };
+
+  let data: OverpassResponse;
+  try {
+    data = await Promise.any(OVERPASS_ENDPOINTS.map(requestFrom));
   } catch (err) {
     if (controller.signal.aborted) {
       throw new Error("Traffic light/speed camera lookup timed out -- try panning the map again");
     }
-    throw err;
+    throw new Error("Traffic light/speed camera lookup failed -- all data sources unavailable");
   } finally {
     clearTimeout(timeoutHandle);
+    // Whichever mirror answered first has already resolved `data` above -- abort the rest so
+    // they don't keep doing work for a result nothing will use.
+    controller.abort();
   }
 
-  if (!response.ok) {
-    throw new Error(`Overpass API returned ${response.status}`);
-  }
-
-  const data: OverpassResponse = await response.json();
   const trafficLights: OsmPoint[] = [];
   const speedCameras: OsmPoint[] = [];
 
