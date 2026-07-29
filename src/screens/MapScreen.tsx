@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, StyleSheet, Pressable, Platform, Modal, Share } from "react-native";
-import MapView, { PROVIDER_GOOGLE, Polyline, Marker, type Region } from "react-native-maps";
+import MapView, { PROVIDER_GOOGLE, Polyline, Marker, Circle, type Region } from "react-native-maps";
 import { Map3DView, isMap3DSupported } from "map3d";
 import { Ionicons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
@@ -59,6 +59,14 @@ export function MapScreen() {
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const guidanceRef = useRef(createGuidanceState());
+  // Exact arrival coordinate for the highlighted destination marker below -- kept separate
+  // from route.polyline's last point so it's the real picked place, not whatever pixel the
+  // polyline decoder happened to end on.
+  const [destinationLatLng, setDestinationLatLng] = useState<LatLng | null>(null);
+  // "hybrid" = satellite imagery + road/place labels, not bare "satellite" -- an unlabeled
+  // satellite view is close to unusable while actually navigating, and this is what most map
+  // apps' own "Satellite" button actually switches to.
+  const [mapType, setMapType] = useState<"standard" | "hybrid">("standard");
 
   // Route-choice flow: destination picked -> fetch all 3 profiles -> user picks one (with a
   // live preview of that profile's line on the map) -> Start commits it into `route` above.
@@ -315,11 +323,12 @@ export function MapScreen() {
   );
 
   const confirmRoute = useCallback(() => {
-    if (!routeOptions) return;
+    if (!routeOptions || !pendingDestination) return;
     const chosen = routeOptions[selectedProfile];
     guidanceRef.current = createGuidanceState();
     setActiveStepIndex(0);
     setRoute(chosen);
+    setDestinationLatLng(pendingDestination.location);
     navStartedAtRef.current = Date.now();
     setFollowTilt(true);
     mapRef.current?.fitToCoordinates(chosen.polyline, {
@@ -328,7 +337,7 @@ export function MapScreen() {
     });
     setRouteOptions(null);
     setPendingDestination(null);
-  }, [routeOptions, selectedProfile]);
+  }, [routeOptions, selectedProfile, pendingDestination]);
 
   const cancelRouteOptions = useCallback(() => {
     setRouteOptions(null);
@@ -343,6 +352,7 @@ export function MapScreen() {
     setActiveStepIndex(0);
     setFollowTilt(true);
     setStopLocation(null);
+    setDestinationLatLng(null);
   }, []);
 
   const onShareAlert = useCallback(
@@ -427,6 +437,10 @@ export function MapScreen() {
       <MapView
         ref={mapRef}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
+        mapType={mapType}
+        // The custom black/green style only ever applies to the "standard" map type --
+        // satellite/hybrid imagery has no styleable roads/land polygons to restyle, so
+        // Google/Apple just ignore it there. Safe to always pass.
         customMapStyle={TRACKLINE_MAP_STYLE}
         style={StyleSheet.absoluteFill}
         showsUserLocation
@@ -454,6 +468,26 @@ export function MapScreen() {
             strokeColor="#2563EB"
             lineDashPattern={[8, 6]}
           />
+        )}
+        {/* Highlighted arrival spot -- the exact picked destination (not wherever the
+            polyline decoder's last point happens to land), so it's obvious exactly which
+            building/driveway is the actual arrival point rather than "somewhere on this
+            block". A soft halo ring plus a pin on top, both anchored to the same coordinate. */}
+        {destinationLatLng && (
+          <>
+            <Circle
+              center={destinationLatLng}
+              radius={18}
+              strokeWidth={2}
+              strokeColor="rgba(37, 99, 235, 0.9)"
+              fillColor="rgba(37, 99, 235, 0.18)"
+            />
+            <Marker coordinate={destinationLatLng} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
+              <View style={styles.destinationPinWrap}>
+                <Ionicons name="location" size={40} color={colors.accent} />
+              </View>
+            </Marker>
+          </>
         )}
         {visibleAlerts.map((alert) => (
           <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
@@ -603,6 +637,19 @@ export function MapScreen() {
           <Ionicons name="globe-outline" size={22} color="#FFFFFF" />
         </Pressable>
       )}
+
+      <Pressable
+        style={({ pressed }) => [
+          styles.fabSecondary,
+          { bottom: insets.bottom + 24 + (isMap3DSupported ? 210 : 140) },
+          mapType === "hybrid" && styles.fabActive,
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={() => setMapType((v) => (v === "standard" ? "hybrid" : "standard"))}
+        accessibilityLabel={mapType === "hybrid" ? "Switch to standard map" : "Switch to satellite map"}
+      >
+        <Ionicons name="map-outline" size={22} color="#FFFFFF" />
+      </Pressable>
       </View>
 
       {/* Never shown while navigating -- a driving app shouldn't have anything competing for
@@ -649,6 +696,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceMuted },
   mapArea: { flex: 1 },
   mapPlaceholder: { backgroundColor: colors.surfaceMuted },
+  destinationPinWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.medium,
+  },
   osmDotTrafficLight: {
     width: 10,
     height: 10,
