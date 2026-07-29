@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteStep } from "@/services/directions";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
-const MANEUVER_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+export const MANEUVER_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   "turn-left": "arrow-back",
   "turn-right": "arrow-forward",
   "turn-slight-left": "arrow-back",
@@ -31,6 +31,10 @@ interface Props {
   distanceRemainingText: string;
   onExit: () => void;
   onShareEta: () => void;
+  // Opens the full turn-by-turn directions list -- the whole icon+text area is tappable for
+  // this (a bigger, easier target than a small dedicated button would be), while share/exit
+  // keep their own separate buttons so they're never accidentally triggered by the same tap.
+  onExpandDirections: () => void;
 }
 
 export function NavigationInstructionCard({
@@ -40,6 +44,7 @@ export function NavigationInstructionCard({
   distanceRemainingText,
   onExit,
   onShareEta,
+  onExpandDirections,
 }: Props) {
   const insets = useSafeAreaInsets();
   if (!step) return null;
@@ -47,18 +52,24 @@ export function NavigationInstructionCard({
 
   return (
     <View style={[styles.card, { top: insets.top + spacing.md }]}>
-      <View style={styles.iconWrap}>
-        <Ionicons name={icon} size={30} color="#FFFFFF" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.instruction} numberOfLines={2}>
-          {step.instruction}
-        </Text>
-        <Text style={styles.meta}>
-          {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
-          {distanceRemainingText} left
-        </Text>
-      </View>
+      <Pressable
+        style={({ pressed }) => [styles.tapArea, pressed && { opacity: pressedOpacity }]}
+        onPress={onExpandDirections}
+        accessibilityLabel="Show full route directions"
+      >
+        <View style={styles.iconWrap}>
+          <Ionicons name={icon} size={30} color="#FFFFFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.instruction} numberOfLines={2}>
+            {step.instruction}
+          </Text>
+          <Text style={styles.meta}>
+            {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
+            {distanceRemainingText} left
+          </Text>
+        </View>
+      </Pressable>
       <Pressable
         onPress={onShareEta}
         hitSlop={12}
@@ -91,6 +102,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.md,
     ...shadow.medium,
+  },
+  tapArea: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
   },
   iconWrap: {
     width: 44,

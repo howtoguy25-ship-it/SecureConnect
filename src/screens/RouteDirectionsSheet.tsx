@@ -1,0 +1,162 @@
+import React, { forwardRef, useMemo } from "react";
+import { View, Text, Pressable, StyleSheet } from "react-native";
+import BottomSheet, { BottomSheetFlatList } from "@gorhom/bottom-sheet";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { MANEUVER_ICONS } from "@/components/NavigationInstructionCard";
+import type { Route, RouteStep } from "@/services/directions";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
+
+interface Props {
+  route: Route | null;
+  activeStepIndex: number;
+  onClose: () => void;
+  onSheetChange?: (index: number) => void;
+}
+
+export const RouteDirectionsSheet = forwardRef<BottomSheet, Props>(function RouteDirectionsSheet(
+  { route, activeStepIndex, onClose, onSheetChange },
+  ref
+) {
+  const insets = useSafeAreaInsets();
+  const snapPoints = useMemo(() => ["65%"], []);
+
+  return (
+    <BottomSheet
+      ref={ref}
+      index={-1}
+      snapPoints={snapPoints}
+      enablePanDownToClose
+      onChange={onSheetChange}
+      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBackground}
+    >
+      {route && (
+        <>
+          <View style={styles.header}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>Directions</Text>
+              <Text style={styles.subtitle}>
+                {route.distanceText} · {route.etaInTrafficText ?? route.etaText}
+                {route.hasTrafficDelay ? " (traffic)" : ""}
+              </Text>
+            </View>
+            <Pressable
+              onPress={onClose}
+              hitSlop={12}
+              style={({ pressed }) => [styles.closeButton, pressed && { opacity: pressedOpacity }]}
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={20} color={colors.textMuted} />
+            </Pressable>
+          </View>
+          <BottomSheetFlatList
+            data={route.steps}
+            keyExtractor={(_: RouteStep, i: number) => String(i)}
+            contentContainerStyle={{ paddingBottom: insets.bottom + spacing.lg }}
+            renderItem={({ item, index }: { item: RouteStep; index: number }) => {
+              const icon = (item.maneuver && MANEUVER_ICONS[item.maneuver]) || "arrow-up";
+              const isActive = index === activeStepIndex;
+              const isPast = index < activeStepIndex;
+              return (
+                <View style={[styles.row, isActive && styles.rowActive]}>
+                  <View style={[styles.iconWrap, isActive && styles.iconWrapActive, isPast && styles.iconWrapPast]}>
+                    <Ionicons name={icon} size={18} color="#FFFFFF" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.instruction, isPast && styles.instructionPast]}>
+                      {item.instruction}
+                    </Text>
+                    <Text style={styles.meta}>
+                      {(item.distanceMeters / 1000).toFixed(1)} km ·{" "}
+                      {Math.max(1, Math.round(item.durationSeconds / 60))} min
+                    </Text>
+                  </View>
+                </View>
+              );
+            }}
+          />
+        </>
+      )}
+    </BottomSheet>
+  );
+});
+
+const styles = StyleSheet.create({
+  sheetBackground: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.high,
+  },
+  handleIndicator: {
+    backgroundColor: colors.border,
+    width: 40,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  rowActive: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.textMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconWrapActive: {
+    backgroundColor: colors.accent,
+  },
+  iconWrapPast: {
+    backgroundColor: colors.textFaint,
+  },
+  instruction: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.text,
+  },
+  instructionPast: {
+    color: colors.textMuted,
+  },
+  meta: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+});

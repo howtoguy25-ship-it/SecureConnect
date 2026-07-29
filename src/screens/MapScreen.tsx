@@ -23,6 +23,7 @@ import { useSettings } from "@/context/SettingsContext";
 import { MuteButton } from "@/components/MuteButton";
 import { DestinationSearchBar } from "@/components/DestinationSearchBar";
 import { NavigationInstructionCard } from "@/components/NavigationInstructionCard";
+import { RouteDirectionsSheet } from "@/screens/RouteDirectionsSheet";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { AlertMarker } from "@/components/AlertMarker";
 import { AlertBanner } from "@/components/AlertBanner";
@@ -66,6 +67,7 @@ export function MapScreen() {
   const detailSheetRef = useRef<BottomSheet>(null);
   const placeInfoSheetRef = useRef<BottomSheet>(null);
   const osmMarkerSheetRef = useRef<BottomSheet>(null);
+  const directionsSheetRef = useRef<BottomSheet>(null);
 
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -109,8 +111,10 @@ export function MapScreen() {
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [placeInfoSheetOpen, setPlaceInfoSheetOpen] = useState(false);
+  const [directionsSheetOpen, setDirectionsSheetOpen] = useState(false);
   const [osmMarkerSheetOpen, setOsmMarkerSheetOpen] = useState(false);
-  const anySheetOpen = reportSheetOpen || detailSheetOpen || placeInfoSheetOpen || osmMarkerSheetOpen;
+  const anySheetOpen =
+    reportSheetOpen || detailSheetOpen || placeInfoSheetOpen || osmMarkerSheetOpen || directionsSheetOpen;
   const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
 
   // Real "tap a shop, see its info" -- iOS's native MapKit provider here has no onPoiClick
@@ -187,7 +191,7 @@ export function MapScreen() {
     // of those ticks was re-snapping the camera back and fighting a user's manual two-finger
     // tilt/pinch almost as soon as they started it, making that real, native gesture feel
     // broken even though it works fine on its own. Pitch/zoom are only ever set once, when
-    // follow-tilt is first entered (toggleFollowTilt/enterFollowTilt below) -- after that, only
+    // follow-tilt is first entered (toggleFollowTilt/enterOverviewMode below) -- after that, only
     // center/heading keep tracking live position/direction of travel.
     mapRef.current?.animateCamera({ center: currentLatLng, heading }, { duration: 600 });
   }, [route, followTilt, currentLatLng, heading]);
@@ -208,15 +212,18 @@ export function MapScreen() {
     });
   }, [currentLatLng]);
 
-  // Tapping the route line itself is a second, more discoverable way into the same real,
-  // native-camera 3D close-follow view as the small toggle button -- always *enters* it rather
-  // than toggling, so tapping the line is a predictable "show me the 3D view" action regardless
-  // of whatever state the toggle button was already in.
-  const enterFollowTilt = useCallback(() => {
+  // Tapping the route line pulls the camera back into a wider, still-tilted "overview" --
+  // Apple/Google Maps' own convention when you tap the route during nav: not the tight
+  // chase-cam (that's what the small toggle button gives you), but a pulled-back 3D view that
+  // shows the surrounding blocks/buildings around your position, not just the next turn. Sets
+  // followTilt=true so the same exit ("X") control in topRightControls works to back out of it.
+  const lineTapAtRef = useRef(0);
+  const enterOverviewMode = useCallback(() => {
+    lineTapAtRef.current = Date.now();
     setFollowTilt(true);
     if (currentLatLng) {
       mapRef.current?.animateCamera(
-        { center: currentLatLng, heading, pitch: 60, zoom: 18 },
+        { center: currentLatLng, heading, pitch: 45, zoom: 15 },
         { duration: 500 }
       );
     }
@@ -413,6 +420,12 @@ export function MapScreen() {
       // Don't hijack a tap that's meant for something else already in progress -- placing an
       // alert pin, or a sheet already open and eating input.
       if (placingAlert || anySheetOpen) return;
+      // react-native-maps fires the map's own onPress *in addition to* a tapped polyline's
+      // onPress on the same tap (confirmed in the native iOS handler), not instead of it -- so
+      // tapping the route line would otherwise also kick off a Places lookup for whatever's
+      // directly under that point at the same time as entering overview mode. Short-lived guard
+      // so a just-handled line tap doesn't double-fire this.
+      if (Date.now() - lineTapAtRef.current < 150) return;
       const coordinate = e.nativeEvent.coordinate;
       setPlaceInfoLoading(true);
       findNearestPlace(coordinate)
@@ -636,7 +649,11 @@ export function MapScreen() {
         // Google/Apple just ignore it there. Safe to always pass.
         customMapStyle={TRACKLINE_MAP_STYLE}
         style={StyleSheet.absoluteFill}
-        showsUserLocation
+        // The default blue-dot puck is swapped for a custom heading-rotated arrow (below)
+        // while actively navigating -- a plain dot doesn't communicate which way you're
+        // facing, which matters once the camera itself is also rotating to match heading.
+        // Reverts to the normal dot the instant navigation ends (route becomes null).
+        showsUserLocation={!route}
         showsMyLocationButton={false}
         initialRegion={{
           latitude: currentLatLng?.latitude ?? 37.7749,
@@ -654,8 +671,19 @@ export function MapScreen() {
             strokeWidth={8}
             strokeColor="#2563EB"
             tappable
-            onPress={enterFollowTilt}
+            onPress={enterOverviewMode}
           />
+        )}
+        {/* Custom heading-rotated arrow puck, replacing the default blue dot (showsUserLocation
+            is false above while route is set) -- flat+rotation is react-native-maps' own
+            built-in support for a marker that rotates with heading instead of always facing
+            the camera, exactly the "connected to the route/direction of travel" arrow. */}
+        {route && currentLatLng && (
+          <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} tracksViewChanges={false}>
+            <View style={styles.navArrowWrap}>
+              <Ionicons name="navigate" size={20} color="#FFFFFF" />
+            </View>
+          </Marker>
         )}
         {/* Preview of whichever route profile is highlighted in the picker below, before
             the user commits to it with Start -- "click a route, see its line" like Apple/
@@ -799,6 +827,7 @@ export function MapScreen() {
           distanceRemainingText={`${(remainingDistanceMeters / 1000).toFixed(1)} km`}
           onExit={exitNavigation}
           onShareEta={shareEta}
+          onExpandDirections={() => directionsSheetRef.current?.expand()}
         />
       )}
 
@@ -811,13 +840,27 @@ export function MapScreen() {
           { top: insets.top + spacing.md + (route ? 96 : 0) },
         ]}
       >
-        {route && (
+        {/* A real, clearly-labeled "Recenter" pill once the user has panned away (manual drag
+            or exiting the 3D view both drop followTilt to false) -- previously this was always
+            just a small icon-only circle, easy to miss/not recognize as "get my location back"
+            versus the plain "X" that makes sense once already in the 3D view. */}
+        {route && !followTilt && (
+          <Pressable
+            style={({ pressed }) => [styles.recenterPill, pressed && { opacity: pressedOpacity }]}
+            onPress={toggleFollowTilt}
+            accessibilityLabel="Recenter on my location"
+          >
+            <Ionicons name="navigate" size={16} color="#FFFFFF" />
+            <Text style={styles.recenterPillText}>Recenter</Text>
+          </Pressable>
+        )}
+        {route && followTilt && (
           <Pressable
             style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
             onPress={toggleFollowTilt}
-            accessibilityLabel={followTilt ? "Exit close-follow view" : "Resume close-follow view"}
+            accessibilityLabel="Exit close-follow view"
           >
-            <Ionicons name={followTilt ? "close" : "navigate"} size={20} color={colors.text} />
+            <Ionicons name="close" size={20} color={colors.text} />
           </Pressable>
         )}
         {/* Voice guidance only ever speaks during active turn-by-turn navigation, so mute
@@ -992,6 +1035,13 @@ export function MapScreen() {
         onClose={() => osmMarkerSheetRef.current?.close()}
         onSheetChange={(index) => setOsmMarkerSheetOpen(index >= 0)}
       />
+      <RouteDirectionsSheet
+        ref={directionsSheetRef}
+        route={route}
+        activeStepIndex={activeStepIndex}
+        onClose={() => directionsSheetRef.current?.close()}
+        onSheetChange={(index) => setDirectionsSheetOpen(index >= 0)}
+      />
 
       {placeInfoLoading && (
         <View style={styles.placeInfoLoadingBadge} pointerEvents="none">
@@ -1015,6 +1065,17 @@ const styles = StyleSheet.create({
   mapArea: { flex: 1 },
   mapPlaceholder: { backgroundColor: colors.surfaceMuted },
   destinationPinWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.medium,
+  },
+  navArrowWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.accent,
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     ...shadow.medium,
@@ -1126,6 +1187,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.low,
+  },
+  recenterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    height: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    ...shadow.low,
+  },
+  recenterPillText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
   },
   osmLoadingBadge: {
     width: 44,
