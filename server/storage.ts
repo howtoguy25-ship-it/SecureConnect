@@ -1320,29 +1320,114 @@ export class DatabaseStorage implements IStorage {
     await db.delete(statuses).where(eq(statuses.id, statusId));
   }
 
-  // Friends methods
+  // Friends methods — request-then-accept model. A row is created by the
+  // requester with status='pending'; the recipient accepting flips it to
+  // 'accepted'. Friendship is mutual once accepted, so getFriends/removeFriend
+  // look in both directions regardless of who originally sent the request.
   async getFriends(userId: string): Promise<any[]> {
-    const userFriends = await db.select().from(friends).where(eq(friends.userId, userId));
-    
-    return Promise.all(userFriends.map(async (f) => {
-      const [friend] = await db.select().from(users).where(eq(users.id, f.friendId));
+    const rows = await db.select().from(friends).where(and(
+      or(eq(friends.userId, userId), eq(friends.friendId, userId)),
+      eq(friends.status, 'accepted'),
+    ));
+
+    return Promise.all(rows.map(async (f) => {
+      const otherId = f.userId === userId ? f.friendId : f.userId;
+      const [friend] = await db.select().from(users).where(eq(users.id, otherId));
       return { id: friend?.id, displayName: friend?.displayName, avatarUrl: friend?.avatarUrl };
     }));
   }
 
-  async addFriend(userId: string, friendId: string): Promise<Friend> {
-    const [existing] = await db.select()
-      .from(friends)
+  // Pending requests the given user has RECEIVED and can accept/decline.
+  async getPendingFriendRequests(userId: string): Promise<any[]> {
+    const rows = await db.select().from(friends).where(and(
+      eq(friends.friendId, userId),
+      eq(friends.status, 'pending'),
+    ));
+
+    return Promise.all(rows.map(async (f) => {
+      const [sender] = await db.select().from(users).where(eq(users.id, f.userId));
+      return {
+        id: f.id,
+        senderId: f.userId,
+        displayName: sender?.displayName,
+        avatarUrl: sender?.avatarUrl,
+        createdAt: f.createdAt,
+      };
+    }));
+  }
+
+  // Relationship state between two specific users, for a chat's "Add Friend"
+  // affordance to know what to show (Add / Request Sent / Accept / Friends).
+  async getFriendshipStatus(
+    userId: string,
+    otherUserId: string,
+  ): Promise<{ status: 'none' | 'friends' | 'request_sent' | 'request_received'; requestId?: string }> {
+    const [outgoing] = await db.select().from(friends)
+      .where(and(eq(friends.userId, userId), eq(friends.friendId, otherUserId)));
+    if (outgoing) {
+      return outgoing.status === 'accepted'
+        ? { status: 'friends' }
+        : { status: 'request_sent', requestId: outgoing.id };
+    }
+    const [incoming] = await db.select().from(friends)
+      .where(and(eq(friends.userId, otherUserId), eq(friends.friendId, userId)));
+    if (incoming) {
+      return incoming.status === 'accepted'
+        ? { status: 'friends' }
+        : { status: 'request_received', requestId: incoming.id };
+    }
+    return { status: 'none' };
+  }
+
+  // Sending a request when the OTHER user already sent one to you auto
+  // -accepts it (mutual match) rather than creating a redundant reverse row.
+  async sendFriendRequest(userId: string, friendId: string): Promise<{ request: Friend; autoAccepted: boolean }> {
+    if (userId === friendId) throw new Error('CANNOT_FRIEND_SELF');
+
+    const [reverse] = await db.select().from(friends)
+      .where(and(eq(friends.userId, friendId), eq(friends.friendId, userId)));
+    if (reverse) {
+      if (reverse.status === 'pending') {
+        const [accepted] = await db.update(friends)
+          .set({ status: 'accepted' })
+          .where(eq(friends.id, reverse.id))
+          .returning();
+        return { request: accepted, autoAccepted: true };
+      }
+      return { request: reverse, autoAccepted: false };
+    }
+
+    const [existing] = await db.select().from(friends)
       .where(and(eq(friends.userId, userId), eq(friends.friendId, friendId)));
-    
-    if (existing) return existing;
-    
-    const [friend] = await db.insert(friends).values({ userId, friendId }).returning();
-    return friend;
+    if (existing) return { request: existing, autoAccepted: false };
+
+    const [created] = await db.insert(friends)
+      .values({ userId, friendId, status: 'pending' })
+      .returning();
+    return { request: created, autoAccepted: false };
+  }
+
+  async acceptFriendRequest(requestId: string, userId: string): Promise<Friend | undefined> {
+    const [row] = await db.select().from(friends).where(eq(friends.id, requestId));
+    if (!row || row.friendId !== userId || row.status !== 'pending') return undefined;
+    const [updated] = await db.update(friends)
+      .set({ status: 'accepted' })
+      .where(eq(friends.id, requestId))
+      .returning();
+    return updated;
+  }
+
+  async declineFriendRequest(requestId: string, userId: string): Promise<void> {
+    const [row] = await db.select().from(friends).where(eq(friends.id, requestId));
+    if (!row || row.friendId !== userId) return;
+    await db.delete(friends).where(eq(friends.id, requestId));
   }
 
   async removeFriend(userId: string, friendId: string): Promise<void> {
-    await db.delete(friends).where(and(eq(friends.userId, userId), eq(friends.friendId, friendId)));
+    await db.delete(friends).where(or(
+      and(eq(friends.userId, userId), eq(friends.friendId, friendId)),
+      and(eq(friends.userId, friendId), eq(friends.friendId, userId)),
+    ));
   }
 
   // Location methods (VIP only)

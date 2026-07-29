@@ -331,6 +331,88 @@ export default function ConversationScreen() {
     },
   });
 
+  const { data: friendshipStatus } = useQuery<{
+    status: 'none' | 'friends' | 'request_sent' | 'request_received';
+    requestId?: string;
+  }>({
+    queryKey: [`/api/friends/status/${otherUserId}`],
+    enabled: !!otherUserId,
+  });
+
+  const invalidateFriendship = () => {
+    queryClient.invalidateQueries({ queryKey: [`/api/friends/status/${otherUserId}`] });
+    queryClient.invalidateQueries({ queryKey: ["/api/friends"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/friends/requests"] });
+  };
+
+  const sendFriendRequestMutation = useMutation({
+    mutationFn: async () => apiRequest("POST", "/api/friends", { friendId: otherUserId }),
+    onSuccess: (result: any) => {
+      invalidateFriendship();
+      setShowChatSettings(false);
+      Alert.alert(
+        result?.autoAccepted ? "You're Friends!" : "Friend Request Sent",
+        result?.autoAccepted
+          ? `You and ${otherUserName} are now friends.`
+          : `${otherUserName} will need to accept your request.`,
+      );
+    },
+    onError: (err: any) => {
+      Alert.alert("Could Not Send Request", err?.message || "Something went wrong. Please try again.");
+    },
+  });
+
+  const acceptFriendRequestMutation = useMutation({
+    mutationFn: async () => {
+      if (!friendshipStatus?.requestId) throw new Error("Request not found");
+      return apiRequest("POST", `/api/friends/requests/${friendshipStatus.requestId}/accept`, {});
+    },
+    onSuccess: () => {
+      invalidateFriendship();
+      setShowChatSettings(false);
+      Alert.alert("You're Friends!", `You and ${otherUserName} are now friends.`);
+    },
+    onError: (err: any) => {
+      Alert.alert("Could Not Accept", err?.message || "Something went wrong. Please try again.");
+    },
+  });
+
+  const removeFriendMutation = useMutation({
+    mutationFn: async () => apiRequest("DELETE", `/api/friends/${otherUserId}`),
+    onSuccess: () => {
+      invalidateFriendship();
+      setShowChatSettings(false);
+    },
+    onError: (err: any) => {
+      Alert.alert("Could Not Remove Friend", err?.message || "Something went wrong. Please try again.");
+    },
+  });
+
+  const handleFriendAction = () => {
+    const status = friendshipStatus?.status ?? 'none';
+    if (status === 'none') {
+      sendFriendRequestMutation.mutate();
+    } else if (status === 'request_received') {
+      acceptFriendRequestMutation.mutate();
+    } else if (status === 'request_sent') {
+      Alert.alert("Request Pending", `Your friend request to ${otherUserName} hasn't been accepted yet.`);
+    } else if (status === 'friends') {
+      const doRemove = () => removeFriendMutation.mutate();
+      if (Platform.OS === "web") {
+        if (window.confirm(`Remove ${otherUserName} as a friend?`)) doRemove();
+      } else {
+        Alert.alert(
+          "Remove Friend",
+          `Remove ${otherUserName} as a friend? They'll no longer show up for location requests or friends-only stories.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Remove", style: "destructive", onPress: doRemove },
+          ],
+        );
+      }
+    }
+  };
+
   const handleBlockUser = () => {
     if (!otherUserId) {
       Alert.alert("Cannot Block", "User information is still loading. Please try again in a moment.");
@@ -651,6 +733,16 @@ export default function ConversationScreen() {
         if (data.conversationId !== conversationId) return;
         setConversationTimer(Number(data.seconds ?? data.disappearingTimer ?? 0));
       });
+      socket.on('friend-request-received', (data: { senderId: string }) => {
+        if (data.senderId !== otherUserId) return;
+        queryClient.invalidateQueries({ queryKey: [`/api/friends/status/${otherUserId}`] });
+        queryClient.invalidateQueries({ queryKey: ["/api/friends/requests"] });
+      });
+      socket.on('friend-request-accepted', (data: { byUserId: string }) => {
+        if (data.byUserId !== otherUserId) return;
+        queryClient.invalidateQueries({ queryKey: [`/api/friends/status/${otherUserId}`] });
+        queryClient.invalidateQueries({ queryKey: ["/api/friends"] });
+      });
 
       // Stash refs for cleanup
       messageStatusHandlerRef = messageStatusHandler;
@@ -685,6 +777,8 @@ export default function ConversationScreen() {
         socket.off('message-deleted-for-everyone');
         socket.off('messages-expired');
         socket.off('disappearing-timer-changed');
+        socket.off('friend-request-received');
+        socket.off('friend-request-accepted');
       }
       if (typingIndicatorTimeout) {
         clearTimeout(typingIndicatorTimeout);
@@ -4256,6 +4350,51 @@ export default function ConversationScreen() {
                       : conversationTimer === 64800 ? "18 hours"
                       : conversationTimer === 86400 ? "24 hours"
                       : `${Math.round(conversationTimer/60)} min`}
+                  </ThemedText>
+                </View>
+                <Feather name="chevron-right" size={18} color={theme.textSecondary} />
+              </AnimatedPressable>
+
+              <AnimatedPressable
+                style={[styles.settingsOption, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}
+                onPress={handleFriendAction}
+                disabled={
+                  sendFriendRequestMutation.isPending ||
+                  acceptFriendRequestMutation.isPending ||
+                  removeFriendMutation.isPending
+                }
+              >
+                <View style={[styles.settingsOptionIcon, { backgroundColor: friendshipStatus?.status === 'friends' ? '#4ECDC4' : '#1ABC9C' }]}>
+                  {sendFriendRequestMutation.isPending || acceptFriendRequestMutation.isPending || removeFriendMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Feather
+                      name={
+                        friendshipStatus?.status === 'friends' ? 'user-check'
+                        : friendshipStatus?.status === 'request_received' ? 'user-plus'
+                        : friendshipStatus?.status === 'request_sent' ? 'clock'
+                        : 'user-plus'
+                      }
+                      size={20}
+                      color="#fff"
+                    />
+                  )}
+                </View>
+                <View style={styles.settingsOptionText}>
+                  <ThemedText type="body" style={{ fontWeight: "600" }} numberOfLines={1}>
+                    {friendshipStatus?.status === 'friends' ? 'Friends'
+                      : friendshipStatus?.status === 'request_received' ? 'Accept Friend Request'
+                      : friendshipStatus?.status === 'request_sent' ? 'Request Sent'
+                      : 'Add Friend'}
+                  </ThemedText>
+                  <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 2 }} numberOfLines={2}>
+                    {friendshipStatus?.status === 'friends'
+                      ? 'Tap to remove — used for location requests and friends-only stories'
+                      : friendshipStatus?.status === 'request_received'
+                      ? `${otherUserName} wants to be your friend`
+                      : friendshipStatus?.status === 'request_sent'
+                      ? `Waiting for ${otherUserName} to accept`
+                      : 'Lets you request their location and see friends-only stories'}
                   </ThemedText>
                 </View>
                 <Feather name="chevron-right" size={18} color={theme.textSecondary} />

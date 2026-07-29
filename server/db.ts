@@ -43,6 +43,14 @@ export async function ensureUserRecoverySchema(): Promise<void> {
         updated_at timestamp DEFAULT now()
       );
     `);
+    // 'accepted' default backfills any pre-existing rows (none of the old
+    // client code ever actually wrote to this table, but this is safe either
+    // way); new pending-request rows explicitly set status='pending' at
+    // insert time, overriding the column default.
+    await pool.query(`
+      ALTER TABLE friends
+        ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'accepted';
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

@@ -50,6 +50,12 @@ export default function SettingsScreen() {
 
   const [readReceipts, setReadReceipts] = useState(true);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const { data: pendingFriendRequests } = useQuery<any[]>({
+    queryKey: ['/api/friends/requests'],
+    enabled: !!user,
+    refetchInterval: 30000,
+  });
+  const pendingFriendRequestCount = pendingFriendRequests?.length ?? 0;
   const [isRemovingAds, setIsRemovingAds] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
@@ -517,7 +523,34 @@ export default function SettingsScreen() {
           </View>
         </Pressable>
 
-        <Pressable 
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={() => navigation.navigate("FriendRequests")}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#1ABC9C" }]}>
+              <Feather name="user-plus" size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">Friend Requests</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Accept or decline pending requests
+              </ThemedText>
+            </View>
+          </View>
+          <View style={styles.badgeRow}>
+            {pendingFriendRequestCount > 0 ? (
+              <View style={[styles.badge, { backgroundColor: theme.error }]}>
+                <ThemedText type="small" style={{ color: "#fff", fontWeight: "600" }}>
+                  {pendingFriendRequestCount}
+                </ThemedText>
+              </View>
+            ) : null}
+            <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+          </View>
+        </Pressable>
+
+        <Pressable
           style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
           onPress={() => navigation.navigate("LastSeenPrivacy")}
         >

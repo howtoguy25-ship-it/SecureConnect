@@ -469,10 +469,15 @@ export const statusMutesRelations = relations(statusMutes, ({ one }) => ({
 }));
 
 // Friends table for privacy control
+// A row is created by the REQUESTER (userId -> friendId) with status
+// 'pending'; the recipient (friendId) accepting flips it to 'accepted'.
+// getFriends() reads accepted rows in EITHER direction so friendship is
+// mutual once accepted, regardless of who sent the original request.
 export const friends = pgTable("friends", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   friendId: varchar("friend_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("accepted"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

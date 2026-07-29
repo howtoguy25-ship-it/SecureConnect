@@ -18,6 +18,7 @@ import CameraScreen from "@/screens/CameraScreen";
 import MiniGamesScreen from "@/screens/MiniGamesScreen";
 import SendPhotoScreen from "@/screens/SendPhotoScreen";
 import MessageRequestsScreen from "@/screens/MessageRequestsScreen";
+import FriendRequestsScreen from "@/screens/FriendRequestsScreen";
 import VirtualNumberScreen from "@/screens/VirtualNumberScreen";
 import QRCodeScreen from "@/screens/QRCodeScreen";
 import LastSeenPrivacyScreen from "@/screens/LastSeenPrivacyScreen";
@@ -64,6 +65,7 @@ export type RootStackParamList = {
   HiddenLocker: undefined;
   Settings: undefined;
   MessageRequests: undefined;
+  FriendRequests: undefined;
   VirtualNumber: undefined;
   AudioCall: { callId: string; receiverId: string | null; receiverName: string; receiverPhoneNumber?: string; isIncoming?: boolean; sealedCall?: boolean };
   VideoCall: { callId: string; receiverId: string | null; receiverName: string; receiverPhoneNumber?: string; isIncoming?: boolean; sealedCall?: boolean };
@@ -250,6 +252,11 @@ export default function RootStackNavigator() {
             name="MessageRequests"
             component={MessageRequestsScreen}
             options={{ headerTitle: "Message Requests" }}
+          />
+          <Stack.Screen
+            name="FriendRequests"
+            component={FriendRequestsScreen}
+            options={{ headerTitle: "Friend Requests" }}
           />
           <Stack.Screen
             name="VirtualNumber"

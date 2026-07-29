@@ -4736,6 +4736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Friends routes
+  // Friends: request-then-accept. GET returns only mutual (accepted) friends.
   app.get('/api/friends', authenticateToken, async (req: AuthRequest, res) => {
     try {
       const friends = await storage.getFriends(req.userId!);
@@ -4746,13 +4747,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Pending requests the CURRENT user has received and can accept/decline.
+  app.get('/api/friends/requests', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const requests = await storage.getPendingFriendRequests(req.userId!);
+      res.json(requests);
+    } catch (error) {
+      console.error('Error getting friend requests:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Relationship state with one specific user — drives the "Add Friend" /
+  // "Request Sent" / "Accept Request" / "Friends" affordance in a chat.
+  app.get('/api/friends/status/:otherUserId', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const result = await storage.getFriendshipStatus(req.userId!, req.params.otherUserId);
+      res.json(result);
+    } catch (error) {
+      console.error('Error getting friendship status:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.post('/api/friends', authenticateToken, async (req: AuthRequest, res) => {
     try {
       const { friendId } = req.body;
-      const friend = await storage.addFriend(req.userId!, friendId);
-      res.json(friend);
+      if (!friendId || typeof friendId !== 'string') {
+        return res.status(400).json({ error: 'friendId is required' });
+      }
+      if (friendId === req.userId) {
+        return res.status(400).json({ error: 'You cannot send yourself a friend request' });
+      }
+      const isBlocked = await storage.isBlockedByEither(req.userId!, friendId);
+      if (isBlocked) {
+        return res.status(403).json({ error: 'Cannot send a friend request to this user' });
+      }
+      const { request, autoAccepted } = await storage.sendFriendRequest(req.userId!, friendId);
+
+      // Notify the recipient — a fresh pending request needs a push (they
+      // may not have the app open); an auto-accept resulting from their own
+      // earlier request just needs a live UI nudge if they're online.
+      const sender = await storage.getUser(req.userId!);
+      const ioRef = getIO();
+      if (autoAccepted) {
+        if (ioRef) ioRef.to(friendId).emit('friend-request-accepted', { requestId: request.id, byUserId: req.userId });
+      } else {
+        if (ioRef) ioRef.to(friendId).emit('friend-request-received', { requestId: request.id, senderId: req.userId });
+        const recipient = await storage.getUser(friendId);
+        if (recipient?.pushToken && recipient.notificationsEnabled !== false) {
+          sendPushNotification(
+            recipient.pushToken,
+            'New friend request',
+            `${sender?.displayName || 'Someone'} wants to add you as a friend`,
+            { type: 'friend-request', requestId: request.id },
+            'activity',
+          ).catch(err => console.error('Failed to send friend-request notification:', err));
+        }
+      }
+
+      res.json({ ...request, autoAccepted });
+    } catch (error: any) {
+      if (error?.message === 'CANNOT_FRIEND_SELF') {
+        return res.status(400).json({ error: 'You cannot send yourself a friend request' });
+      }
+      console.error('Error sending friend request:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/friends/requests/:requestId/accept', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const accepted = await storage.acceptFriendRequest(req.params.requestId, req.userId!);
+      if (!accepted) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      const ioRef = getIO();
+      if (ioRef) ioRef.to(accepted.userId).emit('friend-request-accepted', { requestId: accepted.id, byUserId: req.userId });
+      res.json({ success: true });
     } catch (error) {
-      console.error('Error adding friend:', error);
+      console.error('Error accepting friend request:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/friends/requests/:requestId/decline', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      await storage.declineFriendRequest(req.params.requestId, req.userId!);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error declining friend request:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
