@@ -8,16 +8,22 @@ import { cachedModelIO } from "@/services/cachedModelIO";
 // COCO-SSD fetches its own base model (several MB, model.json + weight shards) from
 // Google's CDN on every single load by default -- there's no persistent cache without this,
 // since tfPlatform.ts's minimal shim doesn't register one the way a browser's IndexedDB-
-// backed handler would. Registered once at module load: intercepts any tfjs-models CDN
-// request and routes it through an on-device disk cache (cachedModelIO) instead, so only the
-// very first vehicle-detection session ever touches the network for this.
-tf.io.registerLoadRouter((url) => {
-  if (typeof url !== "string" || !url.includes("storage.googleapis.com/tfjs-models/")) {
-    return null as unknown as tf.io.IOHandler;
-  }
-  const cacheKey = url.replace(/[^a-zA-Z0-9]/g, "_");
-  return cachedModelIO(url, cacheKey);
-});
+// backed handler would. cachedModelIO (below) intercepts that fetch and routes it through an
+// on-device disk cache instead, so only the very first vehicle-detection session ever touches
+// the network for this.
+//
+// This used to be wired up via tf.io.registerLoadRouter(), which registers a *global* router
+// that competes with tfjs-core's own built-in generic HTTP router (also always registered,
+// also matches any https:// URL). With two routers both claiming the same model URL, tfjs's
+// router registry throws "Found more than one (2) load handlers for URL ..." -- confirmed
+// exactly this error from a real device. Fixed by not registering a competing router at all:
+// loadGraphModel (which coco-ssd calls internally) accepts either a URL string or an IOHandler
+// directly, so the cached handler is passed straight in as `modelUrl` below instead.
+const COCO_SSD_BASE = "lite_mobilenet_v2" as const;
+// Matches coco-ssd's own BASE_PATH + getPrefix(base) + "/model.json" for this base model --
+// see @tensorflow-models/coco-ssd's index.js. Not configurable, so safe to hardcode here.
+const COCO_SSD_MODEL_URL =
+  "https://storage.googleapis.com/tfjs-models/savedmodel/ssdlite_mobilenet_v2/model.json";
 
 // COCO-SSD (the pretrained model this runs) only knows generic COCO classes — "car" /
 // "truck" / "bus" / "motorcycle" -- not "police car" or "ambulance". This app used to run a
@@ -54,7 +60,16 @@ let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
 function loadModel(): Promise<cocoSsd.ObjectDetection> {
   if (!modelPromise) {
     modelPromise = ensureTfReady()
-      .then(() => cocoSsd.load({ base: "lite_mobilenet_v2" }))
+      .then(() =>
+        cocoSsd.load({
+          base: COCO_SSD_BASE,
+          // coco-ssd's own type only declares `modelUrl?: string`, but at runtime it's
+          // handed straight to tfjs-converter's loadGraphModel(), which explicitly accepts
+          // "a url or an IOHandler that loads the model" -- the cast reflects that real,
+          // documented runtime behavior, not a type-checker workaround for a bug.
+          modelUrl: cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2") as unknown as string,
+        })
+      )
       .catch((err) => {
         // Don't leave a permanently-rejected promise cached -- without this, one failed
         // load (a network blip, a cold CDN fetch that timed out) would keep failing
