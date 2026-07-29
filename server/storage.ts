@@ -1530,58 +1530,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(virtualNumbers.id, id));
   }
 
-  // Disposable numbers (VN release, phase 1): a Pryvo number is meant to be
-  // burnable — release it, get a new one, and nothing from the old number
-  // lingers server-side. The CONTACT relationship survives (conversation +
-  // participant rows are untouched, so the same person is still reachable
-  // once the user has a new number); only the message CONTENT exchanged
-  // under the disposed number is wiped. Personal-number conversations are
-  // never touched — this only reaches conversations created in 'virtual'
-  // mode.
-  //
-  // Hidden Locker items are explicitly protected: a user who deliberately
-  // saved something to their private locker shouldn't lose it as a side
-  // effect of burning a number, so any locker item pointing at a
-  // to-be-deleted message is detached (messageId -> null) BEFORE the
-  // delete, rather than letting the schema's ON DELETE CASCADE silently
-  // take the locker item down with it.
-  async wipeVirtualNumberConversationHistory(userId: string): Promise<string[]> {
-    const myVirtualParticipations = await db.select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
-      .where(and(
-        eq(conversationParticipants.userId, userId),
-        eq(conversations.numberType, 'virtual'),
-      ));
-
-    const conversationIds = myVirtualParticipations.map(p => p.conversationId);
-    if (conversationIds.length === 0) return [];
-
-    const messageIdRows = await db.select({ id: messages.id })
-      .from(messages)
-      .where(inArray(messages.conversationId, conversationIds));
-    const messageIds = messageIdRows.map(m => m.id);
-
-    if (messageIds.length > 0) {
-      await db.update(hiddenLockerItems)
-        .set({ messageId: null })
-        .where(inArray(hiddenLockerItems.messageId, messageIds));
-      await db.delete(messages).where(inArray(messages.conversationId, conversationIds));
-    }
-
-    await db.update(conversations)
-      .set({ lastMessagePreview: null })
-      .where(inArray(conversations.id, conversationIds));
-    // Reset for both participants, not just the releasing user — the other
-    // side's unread count would otherwise reference messages that no
-    // longer exist.
-    await db.update(conversationParticipants)
-      .set({ unreadCount: 0 })
-      .where(inArray(conversationParticipants.conversationId, conversationIds));
-
-    return conversationIds;
-  }
-
   // Returns the oldest quarantine-expired released VN in the requested
   // country that was NOT previously owned by `forUserId`, or undefined
   // if the pool is empty. The previousAssignedUserId filter is the

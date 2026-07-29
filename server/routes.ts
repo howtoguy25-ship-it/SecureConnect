@@ -3745,23 +3745,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         preferredNumberType: 'personal',
       });
 
-      // Disposable numbers: burning this number wipes the message content
-      // exchanged under it, but the conversation/contact relationship
-      // survives so the same person is reachable again once this user has
-      // a new number. Notify both sides' open clients to drop their local
-      // cache for these threads rather than showing stale bubbles until
-      // their next fetch.
-      const wipedConversationIds = await storage.wipeVirtualNumberConversationHistory(user.id);
-      if (wipedConversationIds.length > 0) {
-        const ioRef = getIO();
-        if (ioRef) {
-          for (const conversationId of wipedConversationIds) {
-            ioRef.to(`conversation:${conversationId}`).emit('virtual-number-conversation-cleared', {
-              conversationId,
-            });
-          }
-        }
-      }
+      // Disposable numbers: the number itself is burned (30-day Twilio
+      // quarantine, see above), but the conversation AND its message
+      // history now stay intact — disposing only retires the phone number,
+      // it doesn't erase what was said through it. Provisioning a new
+      // number later reuses this same 'virtual' conversation with the same
+      // contact, so history carries forward continuously across numbers.
 
       res.json({ success: true });
     } catch (error) {

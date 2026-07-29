@@ -135,7 +135,7 @@ export default function VirtualNumberScreen() {
   };
 
   const handleRelease = () => {
-    const message = "This clears the message history for conversations you had through this number — your contacts stay, so you can keep chatting once you get a new number. This can't be undone.";
+    const message = "This retires the number itself — your contacts and chat history stay, so you can keep chatting in the same conversation once you get a new number. This can't be undone.";
     if (Platform.OS === "web") {
       const confirmed = window.confirm(`Dispose your Pryvo number? ${message}`);
       if (confirmed) {
@@ -317,7 +317,7 @@ export default function VirtualNumberScreen() {
             )}
           </Pressable>
           <ThemedText type="small" style={[styles.prefDesc, { color: theme.textSecondary, textAlign: "center" }]}>
-            Every Pryvo number is disposable. Disposing it clears the message history from conversations you had through it — your contacts stay, so you can keep chatting once you get a new number.
+            Every Pryvo number is disposable. Disposing it retires the number itself — your contacts and chat history stay, so you can keep chatting in the same conversation once you get a new number.
           </ThemedText>
         </>
       ) : (

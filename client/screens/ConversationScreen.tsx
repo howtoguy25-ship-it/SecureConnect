@@ -640,17 +640,6 @@ export default function ConversationScreen() {
         const ids = new Set(data.messageIds);
         setMessages(prev => prev.filter(m => !ids.has(m.id)));
       });
-      // The other participant disposed their Pryvo number — the server has
-      // hard-deleted this conversation's message history (the conversation
-      // itself stays; see server/storage.ts wipeVirtualNumberConversationHistory).
-      // Clear local state immediately rather than leaving stale bubbles on
-      // screen until the next fetch.
-      socket.on('virtual-number-conversation-cleared', (data: { conversationId: string }) => {
-        if (data.conversationId !== conversationId) return;
-        setMessages([]);
-        decryptCacheRef.current = {};
-        setDecryptedCache({});
-      });
       socket.on('disappearing-timer-changed', (data: { conversationId: string; seconds?: number; disappearingTimer?: number }) => {
         if (data.conversationId !== conversationId) return;
         setConversationTimer(Number(data.seconds ?? data.disappearingTimer ?? 0));
