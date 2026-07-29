@@ -4168,7 +4168,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/objects/*objectPath", async (req, res) => {
+  // Bare "*" (not "*objectPath") — this project is on Express 4, whose
+  // bundled path-to-regexp@0.1.x has no concept of a NAMED wildcard segment.
+  // It parses "*objectPath" as an unnamed wildcard capture immediately
+  // followed by the LITERAL string "objectPath", so the compiled regex only
+  // matches a URL that literally ends in the word "objectPath" — i.e.
+  // effectively never. That silently 404'd every request through this route
+  // (Express's own catch-all "Cannot GET" page, not this handler's 404s)
+  // regardless of what object actually existed. The handler already reads
+  // the path from req.path rather than a named param, so switching to the
+  // bare wildcard needs no other changes.
+  app.get("/objects/*", async (req, res) => {
     const objectStorageService = new ObjectStorageService();
     try {
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
@@ -4204,8 +4214,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 60-day legacy sunset (see docs/e2ee/phase-2-media.md §11) so build-60
   // clients that send plaintext media keep working during cutover.
   const ENC_PATH_PREFIX = "/api/media/encrypted";
+  // Same Express-4/path-to-regexp@0.1.x bare-"*" fix as the /objects/* route
+  // above — "*objectPath" was matching nothing in production, meaning every
+  // encrypted chat photo/video/voice-message and every encrypted Story had
+  // been silently un-fetchable. Handler reads req.path, unaffected.
   app.get(
-    `${ENC_PATH_PREFIX}/*objectPath`,
+    `${ENC_PATH_PREFIX}/*`,
     authenticateToken,
     encryptedMediaRateLimit,
     async (req: AuthRequest, res) => {
@@ -4230,7 +4244,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
-  app.get("/public-objects/*filePath", async (req, res) => {
+  // Same Express-4 bare-"*" fix as the two routes above.
+  app.get("/public-objects/*", async (req, res) => {
     // Extract filePath from the URL path after /public-objects/
     const filePath = req.path.replace('/public-objects/', '');
     const objectStorageService = new ObjectStorageService();
