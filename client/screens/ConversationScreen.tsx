@@ -3,7 +3,7 @@ import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Mo
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, RouteProp, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { NativeStackNavigationProp, NativeStackScreenProps } from "@react-navigation/native-stack";
-import { HeaderButton } from "@react-navigation/elements";
+import { HeaderButton, useHeaderHeight } from "@react-navigation/elements";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { useTheme } from "@/hooks/useTheme";
@@ -101,6 +101,12 @@ export default function ConversationScreen() {
   const route = useRoute<RouteProps>();
   const navigation = useNavigation<NavigationProp>();
   const insets = useSafeAreaInsets();
+  // Real header height (varies by device — Dynamic Island, notch, none —
+  // and by header content) rather than a hardcoded guess, so the
+  // KeyboardAvoidingView below pads by exactly the right amount. A wrong
+  // static number here is what let the keyboard cover the composer /
+  // encryption banner on devices with a taller-than-guessed header.
+  const headerHeight = useHeaderHeight();
   const { theme, isDark } = useTheme();
   const { user } = useAuth();
   
@@ -3640,7 +3646,7 @@ export default function ConversationScreen() {
     <KeyboardAvoidingView 
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
     >
       {chatBackgroundUrl?.startsWith('color:') ? (
         <View style={[styles.backgroundImage, { backgroundColor: chatBackgroundUrl.slice('color:'.length) }]}>

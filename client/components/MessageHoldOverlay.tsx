@@ -7,6 +7,7 @@ import {
   Platform,
   useWindowDimensions,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
@@ -163,13 +164,20 @@ export const MessageHoldOverlay: React.FC<Props> = ({
     if (!lay) return null;
     const safeTop = insets.top + 12;
     const safeBottom = winH - insets.bottom - 12;
-    const menuHeight = actions.length * MENU_ROW_HEIGHT + MENU_VPAD * 2;
+    // Natural height the action list wants — can exceed the screen once a
+    // message has many applicable actions (reply, reply-with-camera,
+    // forward, copy, select, pin, save, info, share, report, hide, delete
+    // can all apply at once). Never assume it fits; always clamp below and
+    // let the menu scroll internally instead of silently rendering off the
+    // bottom of the screen where taps land on nothing.
+    const naturalMenuHeight = actions.length * MENU_ROW_HEIGHT + MENU_VPAD * 2;
+    const minMenuHeight = Math.min(naturalMenuHeight, MENU_ROW_HEIGHT * 3 + MENU_VPAD * 2);
 
     let bubbleY = lay.y;
     const bubbleH = lay.height;
 
     // Required vertical span: tray + gap + bubble + gap + menu
-    const totalSpan = REACTION_TRAY_HEIGHT + REACTION_TRAY_GAP + bubbleH + MENU_GAP + menuHeight;
+    const totalSpan = REACTION_TRAY_HEIGHT + REACTION_TRAY_GAP + bubbleH + MENU_GAP + naturalMenuHeight;
     const available = safeBottom - safeTop;
     if (totalSpan > available) {
       // Not enough room for all three — bias bubble to top so menu is visible.
@@ -177,13 +185,20 @@ export const MessageHoldOverlay: React.FC<Props> = ({
     } else {
       // Try to keep bubble where it is. Push down if tray clips top, push up if menu clips bottom.
       const trayTop = bubbleY - REACTION_TRAY_GAP - REACTION_TRAY_HEIGHT;
-      const menuBottom = bubbleY + bubbleH + MENU_GAP + menuHeight;
+      const menuBottom = bubbleY + bubbleH + MENU_GAP + naturalMenuHeight;
       if (trayTop < safeTop) bubbleY += safeTop - trayTop;
-      const menuBottomNew = bubbleY + bubbleH + MENU_GAP + menuHeight;
+      const menuBottomNew = bubbleY + bubbleH + MENU_GAP + naturalMenuHeight;
       if (menuBottomNew > safeBottom) bubbleY -= menuBottomNew - safeBottom;
       // Final clamp
       bubbleY = Math.max(safeTop + REACTION_TRAY_HEIGHT + REACTION_TRAY_GAP, bubbleY);
     }
+
+    const menuY = bubbleY + bubbleH + MENU_GAP;
+    // Whatever room is actually left on screen below the menu's top,
+    // never less than ~3 rows so the menu is still usable on a very short
+    // screen — this is the height we actually render at; a ScrollView
+    // inside handles anything the natural content exceeds it by.
+    const menuHeight = Math.max(minMenuHeight, Math.min(naturalMenuHeight, safeBottom - menuY));
 
     return {
       bubbleX: lay.x,
@@ -191,7 +206,7 @@ export const MessageHoldOverlay: React.FC<Props> = ({
       bubbleW: lay.width,
       bubbleH,
       trayY: bubbleY - REACTION_TRAY_GAP - REACTION_TRAY_HEIGHT,
-      menuY: bubbleY + bubbleH + MENU_GAP,
+      menuY,
       menuHeight,
     };
   }, [layout, cachedLayout, winH, insets, actions.length]);
@@ -371,6 +386,7 @@ export const MessageHoldOverlay: React.FC<Props> = ({
               left: menuLeft,
               maxWidth: menuMaxWidth,
               width: menuMaxWidth,
+              height: placement.menuHeight,
             },
             menuAnimStyle,
           ]}
@@ -390,37 +406,47 @@ export const MessageHoldOverlay: React.FC<Props> = ({
               },
             ]}
           >
-            {actions.map((action, idx) => (
-              <Pressable
-                key={action.key}
-                onPress={() => {
-                  haptics.light();
-                  action.onPress();
-                }}
-                style={({ pressed }) => [
-                  styles.menuRow,
-                  idx !== actions.length - 1 && {
-                    borderBottomWidth: StyleSheet.hairlineWidth,
-                    borderBottomColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
-                  },
-                  pressed && { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
-                ]}
-              >
-                <ThemedText
-                  style={[
-                    styles.menuLabel,
-                    { color: action.destructive ? '#FF3B30' : theme.text },
+            {/* The action list can be taller than the space we clamped
+                menuHeight to (many applicable actions on a short screen) —
+                scroll internally rather than let rows render past the
+                bottom of the screen where taps land on nothing. */}
+            <ScrollView
+              contentContainerStyle={styles.menuScrollContent}
+              showsVerticalScrollIndicator={actions.length * MENU_ROW_HEIGHT > placement.menuHeight}
+              bounces={false}
+            >
+              {actions.map((action, idx) => (
+                <Pressable
+                  key={action.key}
+                  onPress={() => {
+                    haptics.light();
+                    action.onPress();
+                  }}
+                  style={({ pressed }) => [
+                    styles.menuRow,
+                    idx !== actions.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+                    },
+                    pressed && { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
                   ]}
                 >
-                  {action.label}
-                </ThemedText>
-                <Feather
-                  name={action.icon}
-                  size={18}
-                  color={action.destructive ? '#FF3B30' : action.color ?? theme.text}
-                />
-              </Pressable>
-            ))}
+                  <ThemedText
+                    style={[
+                      styles.menuLabel,
+                      { color: action.destructive ? '#FF3B30' : theme.text },
+                    ]}
+                  >
+                    {action.label}
+                  </ThemedText>
+                  <Feather
+                    name={action.icon}
+                    size={18}
+                    color={action.destructive ? '#FF3B30' : action.color ?? theme.text}
+                  />
+                </Pressable>
+              ))}
+            </ScrollView>
           </BlurView>
         </Animated.View>
       </Animated.View>
@@ -493,6 +519,9 @@ const styles = StyleSheet.create({
     elevation: 9,
   },
   menuInner: {
+    flex: 1,
+  },
+  menuScrollContent: {
     paddingVertical: MENU_VPAD,
   },
   menuRow: {
