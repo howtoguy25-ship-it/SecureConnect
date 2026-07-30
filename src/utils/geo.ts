@@ -137,6 +137,26 @@ export function geohashQueryBounds(
   return Array.from(hashes).map((h) => [h, h + "~"]);
 }
 
+/** Initial compass bearing (0-360, 0 = north) from point 1 to point 2 -- real great-circle
+ *  bearing, not a flat-plane approximation, so it stays accurate at any latitude. */
+export function bearingDegrees(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x =
+    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+/** Signed angular difference `a - b` normalized to (-180, 180] -- e.g. how far right (positive)
+ *  or left (negative) you'd need to turn from heading `b` to face bearing `a`. */
+export function angleDeltaDegrees(a: number, b: number): number {
+  const diff = a - b;
+  return (((diff % 360) + 540) % 360) - 180;
+}
+
 export function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;

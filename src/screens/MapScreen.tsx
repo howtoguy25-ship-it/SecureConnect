@@ -42,7 +42,7 @@ import {
   type TravelMode,
 } from "@/services/directions";
 import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
-import { distanceKm } from "@/utils/geo";
+import { distanceKm, bearingDegrees, angleDeltaDegrees } from "@/utils/geo";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
@@ -207,7 +207,13 @@ export function MapScreen() {
   const navStartedAtRef = useRef(0);
 
   useEffect(() => {
-    if (!route || !followTilt || !currentLatLng) return;
+    // Also skips while vehicle detection is open -- see detectionOpen's own effect-gating
+    // comment further below for why: the MapView is fully covered by that modal and this
+    // native camera animation has zero visible effect while hidden, but still costs real,
+    // continuous native work stacked directly on top of vehicle detection's own tfjs
+    // inference + camera capture loop, a genuine, confirmed contributor to detection
+    // crashing/black-screening when opened mid-navigation.
+    if (!route || !followTilt || !currentLatLng || detectionOpen) return;
     if (Date.now() - navStartedAtRef.current < 1200) return;
     // Deliberately omits pitch/zoom here (animateCamera only touches the fields it's given,
     // leaving the rest alone) -- GPS updates land every ~2s or every 5m travelled, which while
@@ -218,7 +224,7 @@ export function MapScreen() {
     // follow-tilt is first entered (toggleFollowTilt/enterOverviewMode below) -- after that, only
     // center/heading keep tracking live position/direction of travel.
     mapRef.current?.animateCamera({ center: currentLatLng, heading }, { duration: 600 });
-  }, [route, followTilt, currentLatLng, heading]);
+  }, [route, followTilt, currentLatLng, heading, detectionOpen]);
 
   // Refs mirroring currentLatLng/heading so the "entering follow-tilt" effect below can read
   // the freshest value without needing them in its own dependency array -- see why that matters
@@ -239,7 +245,12 @@ export function MapScreen() {
   // heading), so it sets the camera once and then gets out of the way for the per-tick effect
   // above to keep tracking center/heading without re-fighting a manual gesture.
   useEffect(() => {
-    if (!route || !followTilt) return;
+    // See the per-tick effect above for why detectionOpen also skips this -- the map is fully
+    // hidden behind the vehicle-detection modal in that state, so there's nothing to gain from
+    // animating its camera, only real native work stacked on top of an already CPU/memory-heavy
+    // screen. Also means opening detection right as navigation starts can't race this effect's
+    // own pending 1200ms timeout below.
+    if (!route || !followTilt || detectionOpen) return;
     // enterOverviewMode (tap the route line) already sets its own pulled-back camera right
     // after setting followTilt=true -- skip so the two don't race and fight over pitch/zoom.
     if (Date.now() - lineTapAtRef.current < 300) return;
@@ -265,7 +276,7 @@ export function MapScreen() {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [route, followTilt]);
+  }, [route, followTilt, detectionOpen]);
 
   const toggleFollowTilt = useCallback(() => {
     setFollowTilt((was) => {
@@ -710,6 +721,33 @@ export function MapScreen() {
   }, []);
 
   const activeStep = route?.steps[activeStepIndex] ?? null;
+  // Real, live bearing-to-next-maneuver vs. actual direction of travel (GPS course heading,
+  // the same `heading` the map's own arrow puck and chase cam use) -- not a static/fake line.
+  // Passed into VehicleDetectionScreen so its route overlay can skew/shift to reflect which way
+  // the road is actually heading relative to how the phone is currently moving, instead of
+  // always pointing dead ahead regardless of an upcoming turn.
+  const navOverlay = useMemo(() => {
+    if (!route || !currentLatLng || !activeStep) return null;
+    const bearingToNext = bearingDegrees(
+      currentLatLng.latitude,
+      currentLatLng.longitude,
+      activeStep.endLocation.latitude,
+      activeStep.endLocation.longitude
+    );
+    const distanceMeters =
+      distanceKm(
+        currentLatLng.latitude,
+        currentLatLng.longitude,
+        activeStep.endLocation.latitude,
+        activeStep.endLocation.longitude
+      ) * 1000;
+    return {
+      headingDeltaDeg: angleDeltaDegrees(bearingToNext, heading),
+      maneuver: activeStep.maneuver,
+      distanceMeters,
+      instruction: activeStep.instruction,
+    };
+  }, [route, currentLatLng, activeStep, heading]);
   const remainingDistanceMeters = useMemo(
     () => (route ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.distanceMeters, 0) : 0),
     [route, activeStepIndex]
@@ -1148,7 +1186,11 @@ export function MapScreen() {
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
         {detectionOpen && (
           <VehicleDetectionErrorBoundary onClose={() => setDetectionOpen(false)}>
-            <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
+            <VehicleDetectionScreen
+              onClose={() => setDetectionOpen(false)}
+              isNavigating={!!route}
+              navOverlay={navOverlay}
+            />
           </VehicleDetectionErrorBoundary>
         )}
       </Modal>

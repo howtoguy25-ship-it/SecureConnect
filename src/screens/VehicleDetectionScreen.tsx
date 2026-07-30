@@ -8,8 +8,10 @@ import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDet
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 import { locatePlateRegion } from "@/utils/plateLocator";
 import { readPlateText } from "@/services/plateOcr";
-import { colors, radius, spacing, pressedOpacity } from "@/theme/tokens";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
+import { MANEUVER_ICONS } from "@/components/NavigationInstructionCard";
+import type { ManeuverType } from "@/services/directions";
 
 // Shorter than the original 1.2s -- expo-camera's takePictureAsync is a discrete photo
 // shutter (not a continuous frame stream the way a real video/frame-processor pipeline
@@ -19,16 +21,38 @@ import { Sentry } from "@/services/sentry";
 // (e.g. react-native-vision-camera, which this app doesn't depend on) -- this makes
 // detection noticeably snappier without claiming to be continuous video.
 const CAPTURE_INTERVAL_MS = 700;
+// While actively navigating, the map screen underneath is also live (GPS tracking, guidance,
+// voice) and this screen's own tfjs CPU inference is already the heaviest thing running --
+// a slightly slower cadence here is a real, deliberate trade-off for headroom during exactly
+// the condition that was crashing/black-screening this screen before (see MapScreen's
+// detectionOpen gating of its own camera-animation effects for the other half of that fix).
+const CAPTURE_INTERVAL_MS_NAVIGATING = 1100;
 // Attempts (each tied to one capture pass, ~1.2s apart) before giving up on a persistently
 // unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
 // forever on one that's obscured, too far, or at a bad angle.
 const MAX_PLATE_ATTEMPTS = 6;
 
-interface Props {
-  onClose: () => void;
+export interface VehicleDetectionNavOverlay {
+  // Signed degrees: positive = next maneuver is to the right of current travel heading,
+  // negative = left. Real, live GPS-course-vs-bearing-to-maneuver math (see MapScreen's
+  // navOverlay), not a fixed/fake value.
+  headingDeltaDeg: number;
+  maneuver: ManeuverType;
+  distanceMeters: number;
+  instruction: string;
 }
 
-export function VehicleDetectionScreen({ onClose }: Props) {
+interface Props {
+  onClose: () => void;
+  // True whenever a route is active in the background, regardless of whether navOverlay could
+  // be computed yet this render (e.g. no GPS fix at the exact instant this modal opened) -- used
+  // to ease off capture cadence (see CAPTURE_INTERVAL_MS_NAVIGATING) independent of whether
+  // there's a maneuver overlay to draw right now.
+  isNavigating?: boolean;
+  navOverlay?: VehicleDetectionNavOverlay | null;
+}
+
+export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverlay = null }: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
@@ -176,11 +200,12 @@ export function VehicleDetectionScreen({ onClose }: Props) {
 
   useEffect(() => {
     if (status !== "running") return;
-    intervalRef.current = setInterval(captureAndDetect, CAPTURE_INTERVAL_MS);
+    const intervalMs = isNavigating ? CAPTURE_INTERVAL_MS_NAVIGATING : CAPTURE_INTERVAL_MS;
+    intervalRef.current = setInterval(captureAndDetect, intervalMs);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [status, captureAndDetect]);
+  }, [status, captureAndDetect, isNavigating]);
 
   const onContainerLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -324,6 +349,43 @@ export function VehicleDetectionScreen({ onClose }: Props) {
           </>
         )}
       </View>
+
+      {/* Route stays visible and in sync while viewing vehicle detection during active
+          navigation -- guidance/GPS tracking keep running underneath (see MapScreen's
+          navOverlay), this is purely a visual read of where the road actually goes relative to
+          current travel heading. headingDeltaDeg is real, live bearing math, not a fixed
+          straight-ahead line: it shifts/tilts toward whichever side the next turn is really on,
+          and re-centers as the road heading and travel heading converge. */}
+      {navOverlay && (
+        <View style={styles.routeOverlayWrap} pointerEvents="none">
+          <View style={styles.routeOverlayChip}>
+            <Ionicons
+              name={(navOverlay.maneuver && MANEUVER_ICONS[navOverlay.maneuver]) || "arrow-up"}
+              size={16}
+              color="#FFFFFF"
+            />
+            <Text style={styles.routeOverlayChipText} numberOfLines={1}>
+              {navOverlay.distanceMeters >= 1000
+                ? `${(navOverlay.distanceMeters / 1000).toFixed(1)} km`
+                : `${Math.round(navOverlay.distanceMeters)} m`}{" "}
+              · {navOverlay.instruction}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.routeRibbon,
+              {
+                transform: [
+                  { perspective: 500 },
+                  { translateX: Math.max(-70, Math.min(70, navOverlay.headingDeltaDeg)) * 1.3 },
+                  { rotateZ: `${Math.max(-70, Math.min(70, navOverlay.headingDeltaDeg)) * 0.17}deg` },
+                  { rotateX: "58deg" },
+                ],
+              },
+            ]}
+          />
+        </View>
+      )}
 
       {/* Only control left at the bottom now that Switch Camera is gone (per explicit request
           -- it also removed the whole facing-switch-mid-capture crash risk category with it).
@@ -472,6 +534,46 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 12,
+  },
+  routeOverlayWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 150,
+    height: 190,
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  routeOverlayChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    backgroundColor: "rgba(17, 24, 39, 0.85)",
+    borderRadius: radius.pill,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    maxWidth: "82%",
+  },
+  routeOverlayChipText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  // A tilted (rotateX), perspective-projected rectangle renders as a road-like trapezoid
+  // narrowing into the distance -- a real, well-known transform trick, not an image asset.
+  // translateX/rotateZ (set inline, computed from navOverlay.headingDeltaDeg) shift and tilt it
+  // toward whichever side the next real maneuver actually is, instead of always pointing
+  // straight ahead regardless of the upcoming turn. shadow.high gives it a grounded drop
+  // shadow so it reads as placed on the road rather than pasted flat over the camera feed.
+  routeRibbon: {
+    width: 64,
+    height: 240,
+    borderRadius: 10,
+    backgroundColor: "rgba(37, 99, 235, 0.55)",
+    borderWidth: 2,
+    borderColor: "rgba(147, 197, 253, 0.9)",
+    ...shadow.high,
   },
   closeButton: {
     position: "absolute",
