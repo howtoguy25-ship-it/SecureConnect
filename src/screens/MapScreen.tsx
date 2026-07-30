@@ -525,8 +525,55 @@ export function MapScreen() {
   // stays on screen; it only gets replaced once the user zooms back in and pans to a new area.
   const OSM_LAYER_MAX_DELTA = 0.03;
 
+  // Loads traffic-light/speed-camera markers around the user's own position the moment a GPS
+  // fix exists and either layer is toggled on -- independent of the map ever panning or
+  // zooming. Previously the *only* trigger for a fetch was onRegionChangeComplete below, which
+  // needs both an actual region-change event AND a region already narrower than
+  // OSM_LAYER_MAX_DELTA to fire -- but the map's own initialRegion starts at a 0.05 delta,
+  // wider than that threshold, so a fresh app launch (or a toggle flipped on mid-session) left
+  // both layers invisible until the user manually zoomed in, even with the setting already on.
+  // Reset to false whenever both layers are off, so turning either back on fires this again.
+  const osmInitialLoadRef = useRef(false);
+  useEffect(() => {
+    if (!settings.showTrafficLights && !settings.showSpeedCameras) {
+      osmInitialLoadRef.current = false;
+      return;
+    }
+    if (osmInitialLoadRef.current || !currentLatLng) return;
+    osmInitialLoadRef.current = true;
+    const delta = 0.015;
+    const bounds = {
+      sw: {
+        latitude: currentLatLng.latitude - delta / 2,
+        longitude: currentLatLng.longitude - delta / 2,
+      },
+      ne: {
+        latitude: currentLatLng.latitude + delta / 2,
+        longitude: currentLatLng.longitude + delta / 2,
+      },
+    };
+    setOsmLoading(true);
+    fetchOsmTrafficData(bounds, {
+      wantTrafficLights: settings.showTrafficLights,
+      wantSpeedCameras: settings.showSpeedCameras,
+    })
+      .then(setOsmData)
+      .catch((err) => console.warn("[map] initial OSM traffic layer fetch failed", err))
+      .finally(() => setOsmLoading(false));
+  }, [currentLatLng, settings.showTrafficLights, settings.showSpeedCameras]);
+
   const onRegionChangeComplete = useCallback(
-    (region: Region) => {
+    (region: Region, details?: { isGesture?: boolean }) => {
+      // onPanDrag (see onMapPanDrag above) only fires for an actual translating drag -- a pure
+      // two-finger twist-to-rotate or two-finger tilt, held in place with no panning, never
+      // triggers it, so followTilt stayed true and the next GPS tick's chase-cam update
+      // silently snapped heading back to GPS course almost immediately, making a manual rotate
+      // feel like it "didn't take" or needed to be held to fight the snap-back. Google Maps'
+      // native layer reports isGesture: true for *any* user-touch-driven camera change
+      // (pan, pinch, rotate, tilt alike) as opposed to this app's own animateCamera calls, so
+      // this catches the rotate-only case onPanDrag misses.
+      if (details?.isGesture && followTilt) setFollowTilt(false);
+
       // Manual alert placement uses a fixed pin at the center of the screen and moves the map
       // underneath it instead of a draggable Marker (see onAlertTypeSelected above) -- so the
       // "drag" is really just keeping alertPlacementLatLng in sync with wherever the map
@@ -566,7 +613,7 @@ export function MapScreen() {
           .finally(() => setOsmLoading(false));
       }, 1200);
     },
-    [placingAlert, settings.showTrafficLights, settings.showSpeedCameras]
+    [placingAlert, settings.showTrafficLights, settings.showSpeedCameras, followTilt]
   );
 
   const onMapPress = useCallback(
