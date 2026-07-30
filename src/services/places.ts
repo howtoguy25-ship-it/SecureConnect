@@ -85,11 +85,13 @@ export interface PlaceInfo extends PlaceDetails {
   reviews: PlaceReview[];
 }
 
-// Real POI-tap-to-info requires *some* place near the tapped coordinate to look up. iOS uses
-// Apple's native MapKit here (not PROVIDER_GOOGLE), and react-native-maps' own onPoiClick is
-// Google-Maps-only on iOS -- so there's no native "which business did they tap" event to read
-// on this platform. This is the workaround: treat any map tap as "find whatever's closest to
-// here" via Nearby Search, then pull full details for it.
+// Real POI-tap-to-info requires *some* place near the tapped coordinate to look up.
+// react-native-maps' own onPoiClick would be a real native "which business did they tap" event
+// on the current Google-provider MapView, but this predates the switch to Google on iOS (it
+// used to be Apple's MapKit there, which has no such event) and works identically regardless of
+// provider, so it was left as-is rather than reworked into a still-untested native-event path
+// right alongside a provider change. Treats any map tap as "find whatever's closest to here"
+// via Nearby Search, then pulls full details for it.
 //
 // This used to pass a fixed `radius` with no `rankby`/`type` -- Nearby Search's default order
 // for a plain radius search is *prominence* (rating/importance), not distance, and with no

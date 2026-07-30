@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Platform, Modal, Share, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Pressable, Modal, Share, ActivityIndicator } from "react-native";
 import MapView, {
   PROVIDER_GOOGLE,
   Polyline,
@@ -183,10 +183,10 @@ export function MapScreen() {
 
   // Apple-Maps-style close-follow camera: tilted, zoomed in, rotates to match the direction
   // of travel. Uses react-native-maps' own `camera`/`animateCamera` API (pitch/heading/zoom),
-  // NOT the custom Map3DView module above -- this works on both providers (Apple MapKit on
-  // iOS, Google Maps on Android) with zero native-module risk, which matters given the iOS
-  // crash history around the custom 3D module. Defaults on whenever navigation starts, and
-  // the user can drop back to a flat top-down view without exiting navigation entirely.
+  // NOT the custom Map3DView module above -- a standard MapView camera call, zero native-module
+  // risk, which matters given the iOS crash history around the custom 3D module. Defaults on
+  // whenever navigation starts, and the user can drop back to a flat top-down view without
+  // exiting navigation entirely.
   const [followTilt, setFollowTilt] = useState(true);
 
   const currentLatLng = useMemo(
@@ -197,9 +197,41 @@ export function MapScreen() {
     [location]
   );
 
-  const heading = location?.coords.heading != null && location.coords.heading >= 0
-    ? location.coords.heading
-    : 0;
+  // GPS "course" heading (location.coords.heading) is a real device/OS-reported value, but a
+  // genuinely unreliable one -- iOS commonly reports it as -1 ("invalid") at low speed, right
+  // after a stop, or for a few fixes after starting to move again, which is exactly when a
+  // driver is most likely to be turning onto a new street. Defaulting straight to 0 in that
+  // case (the old behavior) meant the map silently snapped to "facing north" and stayed there
+  // instead of rotating with an actual turn -- a real, confirmed bug, not just a rare edge case.
+  // The fallback below derives a real heading from the bearing between the last two GPS fixes
+  // instead of giving up -- genuine, live movement direction, just computed from position deltas
+  // rather than read off the GPS chip's own course field.
+  const derivedHeadingRef = useRef(0);
+  const prevLatLngForHeadingRef = useRef<LatLng | null>(null);
+  useEffect(() => {
+    if (!currentLatLng) return;
+    const prev = prevLatLngForHeadingRef.current;
+    prevLatLngForHeadingRef.current = currentLatLng;
+    if (!prev) return;
+    const movedMeters =
+      distanceKm(prev.latitude, prev.longitude, currentLatLng.latitude, currentLatLng.longitude) * 1000;
+    // Skip tiny/noisy movement (GPS jitter while stationary or barely moving) -- recomputing a
+    // bearing from a couple of meters of noise would make the arrow/camera spin erratically
+    // instead of just holding the last known real direction of travel, which is what every real
+    // nav app does while stopped at a light or in traffic.
+    if (movedMeters < 3) return;
+    derivedHeadingRef.current = bearingDegrees(
+      prev.latitude,
+      prev.longitude,
+      currentLatLng.latitude,
+      currentLatLng.longitude
+    );
+  }, [currentLatLng]);
+
+  const heading =
+    location?.coords.heading != null && location.coords.heading >= 0
+      ? location.coords.heading
+      : derivedHeadingRef.current;
 
   // Guards the very first tick after a route starts so the fitToCoordinates overview (below,
   // in onDestinationSelected) gets a moment on screen before the camera snaps into the tilted
@@ -226,57 +258,41 @@ export function MapScreen() {
     mapRef.current?.animateCamera({ center: currentLatLng, heading }, { duration: 600 });
   }, [route, followTilt, currentLatLng, heading, detectionOpen]);
 
-  // Refs mirroring currentLatLng/heading so the "entering follow-tilt" effect below can read
-  // the freshest value without needing them in its own dependency array -- see why that matters
-  // right below.
-  const chaseCamLatLngRef = useRef(currentLatLng);
-  chaseCamLatLngRef.current = currentLatLng;
-  const chaseCamHeadingRef = useRef(heading);
-  chaseCamHeadingRef.current = heading;
-
   // Actually applies the "tilted, zoomed in" chase cam the comment above promises -- followTilt
   // defaulting to true was previously the *only* thing that happened on nav start; the per-tick
   // effect above deliberately never sets pitch/zoom (by design, so it doesn't fight a manual
-  // tilt gesture), and no other code path ever applied one either. The real, confirmed result:
-  // navigation stayed flat/top-down by default the entire time you drove, only ever tilting if
-  // you happened to manually toggle Recenter off then on, or tap the route line -- not the
-  // "Apple-Maps-style close-follow" the app was supposed to default to. This fires exactly once
-  // per transition into follow-tilt (deps are just route/followTilt, not the live position/
-  // heading), so it sets the camera once and then gets out of the way for the per-tick effect
-  // above to keep tracking center/heading without re-fighting a manual gesture.
+  // tilt gesture), and no other code path ever applied one either. Tracks whether it's already
+  // been applied for the *current* follow-tilt session via a ref flag, reset whenever
+  // route/followTilt changes (below) -- rather than the previous one-shot setTimeout, which
+  // fired exactly once at a fixed moment and, if no GPS fix existed yet at that exact instant
+  // (a real, confirmed race, not hypothetical), silently gave up for the rest of that navigation
+  // session with no retry. This version instead just checks "already applied?" on every GPS
+  // tick and, if not, tries again -- so it's naturally
+  // retried on the very next real position fix instead of only ever getting one shot.
+  const chaseCamAppliedRef = useRef(false);
+  useEffect(() => {
+    // Don't clobber enterOverviewMode's own "already handled, don't reapply the default chase
+    // cam" flag -- it sets chaseCamAppliedRef itself right before this effect would otherwise
+    // run on the same followTilt-becomes-true transition and immediately undo it.
+    if (Date.now() - lineTapAtRef.current < 300) return;
+    chaseCamAppliedRef.current = false;
+  }, [route, followTilt]);
+
   useEffect(() => {
     // See the per-tick effect above for why detectionOpen also skips this -- the map is fully
     // hidden behind the vehicle-detection modal in that state, so there's nothing to gain from
     // animating its camera, only real native work stacked on top of an already CPU/memory-heavy
-    // screen. Also means opening detection right as navigation starts can't race this effect's
-    // own pending 1200ms timeout below.
+    // screen.
     if (!route || !followTilt || detectionOpen) return;
-    // enterOverviewMode (tap the route line) already sets its own pulled-back camera right
-    // after setting followTilt=true -- skip so the two don't race and fight over pitch/zoom.
-    if (Date.now() - lineTapAtRef.current < 300) return;
-    let cancelled = false;
-    const applyChaseCam = () => {
-      if (cancelled) return;
-      const center = chaseCamLatLngRef.current;
-      if (!center) return;
-      mapRef.current?.animateCamera(
-        { center, heading: chaseCamHeadingRef.current, pitch: 60, zoom: 18 },
-        { duration: 700 }
-      );
-    };
-    const elapsed = Date.now() - navStartedAtRef.current;
-    if (elapsed >= 1200) {
-      applyChaseCam();
-      return () => {
-        cancelled = true;
-      };
-    }
-    const timeout = setTimeout(applyChaseCam, 1200 - elapsed);
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [route, followTilt, detectionOpen]);
+    if (chaseCamAppliedRef.current) return;
+    if (!currentLatLng) return;
+    // enterOverviewMode (tap the route line) sets chaseCamAppliedRef itself and applies its own
+    // pulled-back camera -- this only ever needs to handle the "just started/resumed following"
+    // case, not the "user tapped the line" one.
+    if (Date.now() - navStartedAtRef.current < 1200) return;
+    chaseCamAppliedRef.current = true;
+    mapRef.current?.animateCamera({ center: currentLatLng, heading, pitch: 60, zoom: 18 }, { duration: 700 });
+  }, [route, followTilt, detectionOpen, currentLatLng, heading]);
 
   const toggleFollowTilt = useCallback(() => {
     setFollowTilt((was) => {
@@ -302,6 +318,10 @@ export function MapScreen() {
   const lineTapAtRef = useRef(0);
   const enterOverviewMode = useCallback(() => {
     lineTapAtRef.current = Date.now();
+    // Marks the chase-cam as "already handled" for this follow-tilt session so the default
+    // chase-cam effect doesn't try to reapply its own pitch/zoom over this pulled-back view on
+    // the very next GPS tick -- this call sets the camera explicitly right below.
+    chaseCamAppliedRef.current = true;
     setFollowTilt(true);
     if (currentLatLng) {
       mapRef.current?.animateCamera(
@@ -796,10 +816,21 @@ export function MapScreen() {
       {DIAGNOSTIC_DISABLE_MAPVIEW ? (
         <View style={[StyleSheet.absoluteFill, styles.mapPlaceholder]} />
       ) : (
-      /* Google provider needs a custom dev client on iOS (unavailable in Expo Go); Android gets it for free. */
+      // Google provider on every platform, iOS included. iOS defaulting to Apple's native
+      // MapKit (provider left unset) used to be deliberate here, reasoned as "Google needs a
+      // custom dev client on iOS, unavailable in Expo Go" -- true for Expo Go, but this app is
+      // never run in Expo Go; it's always a real EAS-built binary, so that caveat never actually
+      // applied to it. The real, confirmed cost of leaving iOS on Apple Maps: customMapStyle
+      // (the map color theme picker in Settings) is a silent no-op on Apple's native renderer --
+      // it has no equivalent JSON styling mechanism at all, so every theme *looked* identical
+      // (Apple's own fixed light/dark palette) regardless of which one was selected. The
+      // react-native-maps Google config plugin + a real GOOGLE_MAPS_IOS_API_KEY (confirmed set
+      // in EAS's production env) are already wired in app.config.js, so this is switching on
+      // infrastructure that was already fully built, not adding new native surface from
+      // scratch.
       <MapView
         ref={mapRef}
-        provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
+        provider={PROVIDER_GOOGLE}
         mapType={mapType}
         // The custom theme style only ever applies to the "standard" map type -- satellite/
         // hybrid imagery has no styleable roads/land polygons to restyle, so Google/Apple just

@@ -5,10 +5,11 @@
  * one keeps a deliberately high contrast between road surface and label text so street names
  * stay legible glancing at it while driving -- the actual point of a map, regardless of theme.
  *
- * Only actually renders on Android and on iOS builds using PROVIDER_GOOGLE -- Apple's native
- * MapKit (react-native-maps' default iOS renderer when no provider is set) has no equivalent
- * JSON styling mechanism, so this prop is a harmless no-op there rather than an error. See
- * MapScreen.tsx for which provider each platform currently uses.
+ * Requires the Google Maps provider (MapScreen.tsx renders with provider={PROVIDER_GOOGLE} on
+ * every platform) -- Apple's native MapKit has no equivalent JSON styling mechanism at all, so
+ * this prop is a silent no-op there. That used to be iOS's actual renderer, which is exactly
+ * why the theme picker looked like it did nothing on iOS -- every theme rendered as Apple's own
+ * fixed palette regardless of which one was selected.
  */
 export type MapThemeKey = "normal" | "purpleBlue" | "blueGrey" | "greenYellow";
 

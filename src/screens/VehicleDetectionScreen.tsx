@@ -31,6 +31,33 @@ const CAPTURE_INTERVAL_MS_NAVIGATING = 1100;
 // unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
 // forever on one that's obscured, too far, or at a bad angle.
 const MAX_PLATE_ATTEMPTS = 6;
+// Real, confirmed failure mode this guards against: takePictureAsync's promise never settling
+// at all (neither resolving nor rejecting) -- a stalled native camera call would otherwise leave
+// capturingRef permanently true, silently freezing every future capture tick forever with zero
+// user-visible feedback ("black screen, doesn't respond"). Racing it against a plain timer
+// means the app's own logic always gets control back, whether or not the native call ever does.
+const CAPTURE_TIMEOUT_MS = 6000;
+// Consecutive capture failures (timeouts or thrown errors) before giving up and surfacing the
+// existing error+Retry UI instead of quietly retrying forever -- one bad frame shouldn't error
+// out immediately (real, temporary hiccups happen), but a real, ongoing problem should always
+// end up somewhere the user can see and act on, never an indefinitely stuck screen.
+const MAX_CONSECUTIVE_CAPTURE_FAILURES = 4;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 export interface VehicleDetectionNavOverlay {
   // Signed degrees: positive = next maneuver is to the right of current travel heading,
@@ -98,9 +125,15 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
   // state itself -- keeps captureAndDetect referentially stable (empty deps), so the capture
   // interval effect below doesn't tear down and rebuild every time a plate read resolves.
   const plateTextsRef = useRef(new Map<number, string>());
+  const consecutiveFailuresRef = useRef(0);
 
   const [retryCount, setRetryCount] = useState(0);
   const retryLoad = useCallback(() => {
+    consecutiveFailuresRef.current = 0;
+    // A stuck/timed-out capture is exactly the kind of failure Retry needs to actually clear --
+    // without this, a genuinely hung previous capture would leave this permanently true and
+    // silently block every capture tick after "retrying" too, same as before Retry was pressed.
+    capturingRef.current = false;
     setStatus("loading-model");
     setErrorMessage(null);
     setRetryCount((n) => n + 1);
@@ -127,8 +160,13 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
     capturingRef.current = true;
     try {
       Sentry.logger.info("vehicle-detection: calling takePictureAsync");
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.4, skipProcessing: true });
+      const photo = await withTimeout(
+        cameraRef.current.takePictureAsync({ quality: 0.4, skipProcessing: true }),
+        CAPTURE_TIMEOUT_MS,
+        "takePictureAsync"
+      );
       if (!photo || unmountedRef.current) return;
+      consecutiveFailuresRef.current = 0;
       Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
       const decoded = await decodePhotoForDetection(photo.uri);
@@ -193,6 +231,20 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
       }
     } catch (err) {
       console.warn("[vehicle-detection] capture/detect failed", err);
+      Sentry.logger.error("vehicle-detection: capture/detect failed", { error: String(err) });
+      if (unmountedRef.current) return;
+      consecutiveFailuresRef.current += 1;
+      // A single bad frame is normal (a real hiccup, not a real problem) and just gets silently
+      // retried on the next tick -- only surface the error+Retry UI once it's clearly not a
+      // one-off, so the screen never sits indefinitely frozen with zero feedback ("black screen,
+      // doesn't respond") but also doesn't flash an error over one missed frame.
+      if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_CAPTURE_FAILURES) {
+        Sentry.logger.error("vehicle-detection: giving up after repeated capture failures", {
+          consecutiveFailures: consecutiveFailuresRef.current,
+        });
+        setErrorMessage("Vehicle detection stalled -- tap Retry to restart it.");
+        setStatus("error");
+      }
     } finally {
       capturingRef.current = false;
     }
@@ -212,8 +264,24 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
     setContainerSize({ width, height });
   }, []);
 
+  // useCameraPermissions() reports its result as null until the async permission check
+  // resolves -- this used to just return an empty black View with genuinely nothing else on
+  // it, no Close, no spinner, no way out. If that check is ever slow (or, on some real device/
+  // OS combination, never actually resolves), this was a real, confirmed dead end: a
+  // permanently blank black screen with zero UI, not caught by the render error boundary
+  // because nothing here ever throws -- it just never renders anything. Always giving this
+  // state a spinner + a working Close means there is never a state this screen can render
+  // that has no way out.
   if (!permission) {
-    return <View style={styles.container} />;
+    return (
+      <View style={styles.permissionContainer}>
+        <ActivityIndicator color="#fff" />
+        <Text style={styles.permissionText}>Checking camera access…</Text>
+        <Pressable onPress={onClose}>
+          <Text style={styles.closeLink}>Close</Text>
+        </Pressable>
+      </View>
+    );
   }
 
   if (!permission.granted) {

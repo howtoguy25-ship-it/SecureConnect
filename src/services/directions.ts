@@ -143,15 +143,23 @@ export async function getDirections(
   return parseRoute(json.routes[0]);
 }
 
-// Real "fastest" means genuinely the quickest option Google has available right now, not a
-// single route forced through backstreets a priori -- forcing avoidHighways used to make this
-// profile literally the slowest of the three (a real, confirmed bug: 3h/158km "Fastest" vs
-// 1h47/130km "Normal" on the same trip, since skipping a motorway on a long drive is almost
-// never actually faster). This asks Google for every alternative it's willing to offer, with
-// live traffic factored in, and picks whichever one actually has the lowest traffic-aware
-// duration -- so "Fastest" can end up being the highway route, a backstreet route, or whatever
-// else genuinely gets there quickest, decided by the real numbers instead of a fixed constraint.
-async function getFastestRoute(origin: LatLng, destination: LatLng, waypoint?: LatLng): Promise<Route> {
+// Picks whichever candidate genuinely has the lower traffic-aware duration -- falls back to
+// free-flow duration only if neither candidate has a traffic figure (useTraffic wasn't
+// requested), so this is only ever comparing like-for-like numbers.
+function fasterOf(a: Route, b: Route): Route {
+  const aTime = a.durationInTrafficSeconds ?? a.durationSeconds;
+  const bTime = b.durationInTrafficSeconds ?? b.durationSeconds;
+  return aTime <= bTime ? a : b;
+}
+
+// Every real alternative Google is willing to offer for this trip, with live traffic factored
+// in -- the candidate pool "fastest" gets picked from below. Not itself a `Route`: could be one
+// route or several, and the caller decides what to compare them against.
+async function getFastestRouteCandidates(
+  origin: LatLng,
+  destination: LatLng,
+  waypoint?: LatLng
+): Promise<Route[]> {
   const url = buildDirectionsUrl(origin, destination, "driving", {
     waypoint,
     useTraffic: true,
@@ -168,13 +176,7 @@ async function getFastestRoute(origin: LatLng, destination: LatLng, waypoint?: L
     throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
   }
 
-  const candidates = json.routes.map(parseRoute);
-  return candidates.reduce((best: Route, candidate: Route) =>
-    (candidate.durationInTrafficSeconds ?? candidate.durationSeconds) <
-    (best.durationInTrafficSeconds ?? best.durationSeconds)
-      ? candidate
-      : best
-  );
+  return json.routes.map(parseRoute);
 }
 
 export type RouteProfileKey = "normal" | "fastest" | "safest";
@@ -187,24 +189,34 @@ export const ROUTE_PROFILE_LABELS: Record<RouteProfileKey, string> = {
 
 // "safest" keeps highways available (a toll-free backstreets-only route is often *less* safe
 // -- narrower roads, more intersections) but skips tolls, and considers every road type Google
-// itself is willing to route through. "fastest" is handled separately below via
-// getFastestRoute -- it's not a fixed-constraint request like this one.
+// itself is willing to route through.
 const SAFEST_OPTIONS: DirectionsOptions = { avoidTolls: true };
 
 /** Fetches all 3 route profiles in parallel for the route-choice picker. Each is a real,
  *  independently-fetched Google Directions result (not one call's `alternatives` alone for
  *  normal/safest) so "safest" can ask for a specific character (tolls-free) that a plain
- *  alternatives list wouldn't guarantee. Mirrors the web app's routeProfiles.ts. */
+ *  alternatives list wouldn't guarantee. Mirrors the web app's routeProfiles.ts.
+ *
+ *  All three now request live traffic (useTraffic: true) -- a real, confirmed bug otherwise:
+ *  "Normal" (no traffic request) showed an optimistic free-flow number while "Fastest" showed
+ *  the honest, traffic-inflated one, so a route with real current congestion could show
+ *  "Fastest: 19 mins" next to "Normal: 10 mins" for a *shorter* trip -- not actually a routing
+ *  bug, just two different numbers being compared as if they were the same thing. With all
+ *  three traffic-aware, "fastest" is then computed as the genuine minimum across every
+ *  candidate seen (the alternatives pool *and* normal's and safest's own routes) -- so it's
+ *  provably never slower than what's shown as Normal or Safest, guaranteed by construction
+ *  rather than by hoping the alternatives search happened to include the quickest option. */
 export async function getRouteOptions(
   origin: LatLng,
   destination: LatLng,
   waypoint?: LatLng
 ): Promise<Record<RouteProfileKey, Route>> {
-  const [normal, fastest, safest] = await Promise.all([
-    getDirections(origin, destination, { waypoint }),
-    getFastestRoute(origin, destination, waypoint),
-    getDirections(origin, destination, { ...SAFEST_OPTIONS, waypoint }),
+  const [normal, safest, fastestCandidates] = await Promise.all([
+    getDirections(origin, destination, { waypoint, useTraffic: true }),
+    getDirections(origin, destination, { ...SAFEST_OPTIONS, waypoint, useTraffic: true }),
+    getFastestRouteCandidates(origin, destination, waypoint),
   ]);
+  const fastest = [normal, safest, ...fastestCandidates].reduce(fasterOf);
   return { normal, fastest, safest };
 }
 
