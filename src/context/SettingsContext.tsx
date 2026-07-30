@@ -5,7 +5,12 @@ import {
   saveSettings,
   type AppSettings,
 } from "@/services/settings";
-import { getVoiceEnabled, setVoiceEnabled as persistVoiceEnabled } from "@/services/voice";
+import {
+  getVoiceEnabled,
+  setVoiceEnabled as persistVoiceEnabled,
+  getVoiceVolume,
+  setVoiceVolume as persistVoiceVolume,
+} from "@/services/voice";
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -13,6 +18,8 @@ interface SettingsContextValue {
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   voiceEnabled: boolean;
   toggleVoiceEnabled: () => Promise<void>;
+  voiceVolume: number;
+  setVoiceVolume: (value: number) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
@@ -21,11 +28,14 @@ const SettingsContext = createContext<SettingsContextValue>({
   updateSettings: async () => {},
   voiceEnabled: true,
   toggleVoiceEnabled: async () => {},
+  voiceVolume: 1,
+  setVoiceVolume: async () => {},
 });
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [voiceEnabled, setVoiceEnabledState] = useState(true);
+  const [voiceVolume, setVoiceVolumeState] = useState(1);
   const [loaded, setLoaded] = useState(false);
 
   // DIAGNOSTIC BUILD -- see src/services/firebase.ts's DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE
@@ -44,6 +54,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSettings(stored);
       const voice = await getVoiceEnabled(stored.defaultVoiceEnabled);
       setVoiceEnabledState(voice);
+      const volume = await getVoiceVolume(1);
+      setVoiceVolumeState(volume);
       setLoaded(true);
     })();
   }, []);
@@ -63,9 +75,22 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     await persistVoiceEnabled(next);
   }, [voiceEnabled]);
 
+  const setVoiceVolume = useCallback(async (value: number) => {
+    setVoiceVolumeState(value);
+    await persistVoiceVolume(value);
+  }, []);
+
   return (
     <SettingsContext.Provider
-      value={{ settings, loaded, updateSettings, voiceEnabled, toggleVoiceEnabled }}
+      value={{
+        settings,
+        loaded,
+        updateSettings,
+        voiceEnabled,
+        toggleVoiceEnabled,
+        voiceVolume,
+        setVoiceVolume,
+      }}
     >
       {children}
     </SettingsContext.Provider>

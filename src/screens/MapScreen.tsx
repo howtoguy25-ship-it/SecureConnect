@@ -71,7 +71,7 @@ const MAX_POI_TAP_DISTANCE_METERS = 120;
 export function MapScreen() {
   const { location } = useLocation();
   const { user } = useAuth();
-  const { settings, voiceEnabled } = useSettings();
+  const { settings, voiceEnabled, voiceVolume } = useSettings();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
 
@@ -397,9 +397,9 @@ export function MapScreen() {
     );
     if (nextIndex !== activeStepIndex) setActiveStepIndex(nextIndex);
     if (stepToSpeak && voiceEnabled) {
-      speak(stepToSpeak.instruction);
+      speak(stepToSpeak.instruction, voiceVolume);
     }
-  }, [currentLatLng, route, voiceEnabled, activeStepIndex]);
+  }, [currentLatLng, route, voiceEnabled, voiceVolume, activeStepIndex]);
 
   // EV Radar (Phase 6): start/stop siren detection with the map screen lifecycle -- mount-once
   // (deps: []), NOT re-keyed on location. It used to also depend on currentLatLng/user/
