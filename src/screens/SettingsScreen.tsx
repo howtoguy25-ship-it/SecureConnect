@@ -26,7 +26,7 @@ function sensitivityLabel(value: number): string {
 // real, full styling lives in utils/mapStyle.ts; this is only a preview.
 const MAP_THEME_ORDER: MapThemeKey[] = ["normal", "purpleBlue", "blueGrey", "greenYellow"];
 const MAP_THEME_SWATCH_COLORS: Record<MapThemeKey, [string, string]> = {
-  normal: ["#000000", "#22c55e"],
+  normal: ["#14201a", "#34d976"],
   purpleBlue: ["#1a1033", "#8b7cf6"],
   blueGrey: ["#232a35", "#5b9bf0"],
   greenYellow: ["#0f2417", "#facc15"],

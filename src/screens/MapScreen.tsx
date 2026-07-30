@@ -197,6 +197,20 @@ export function MapScreen() {
     [location]
   );
 
+  // `initialRegion` above is a mount-time-only prop, so it never moves the map once the very
+  // first real GPS fix actually lands -- this is that correction, firing exactly once as soon
+  // as a real position exists (skipped while navigating since confirmRoute/the chase-cam
+  // effects already own the camera then). Without this, a location permission grant + first fix
+  // landing even a moment after the map's first render left the map stuck on the placeholder
+  // coordinate for the rest of the session -- the real, confirmed "why is it showing San
+  // Francisco" bug, not a rare edge case.
+  const recenteredOnFixRef = useRef(false);
+  useEffect(() => {
+    if (recenteredOnFixRef.current || !currentLatLng || route) return;
+    recenteredOnFixRef.current = true;
+    mapRef.current?.animateCamera({ center: currentLatLng }, { duration: 500 });
+  }, [currentLatLng, route]);
+
   // GPS "course" heading (location.coords.heading) is a real device/OS-reported value, but a
   // genuinely unreliable one -- iOS commonly reports it as -1 ("invalid") at low speed, right
   // after a stop, or for a few fixes after starting to move again, which is exactly when a
@@ -843,6 +857,19 @@ export function MapScreen() {
         // Reverts to the normal dot the instant navigation ends (route becomes null).
         showsUserLocation={!route}
         showsMyLocationButton={false}
+        // Explicit rather than relying on the library default -- two-finger twist-to-rotate
+        // and two-finger drag-to-tilt are both genuinely native MapView gestures, not something
+        // this app has to implement by hand.
+        rotateEnabled
+        pitchEnabled
+        // `initialRegion` is a mount-time-only prop -- react-native-maps never re-reads it once
+        // the map has rendered once. A real GPS fix normally takes a second or two after
+        // launch/permission-grant to arrive, so this coordinate (San Francisco -- an arbitrary
+        // engineering placeholder, not meant to mean anything) briefly shows before the very
+        // next effect below corrects it to the real position the instant one exists. This used
+        // to have no such correction at all -- if the first fix hadn't landed yet at the exact
+        // moment this mounted, the map just silently stayed on this placeholder forever, which
+        // is exactly the confirmed "why is it showing San Francisco, I'm in Sydney" bug.
         initialRegion={{
           latitude: currentLatLng?.latitude ?? 37.7749,
           longitude: currentLatLng?.longitude ?? -122.4194,

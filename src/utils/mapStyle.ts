@@ -20,28 +20,31 @@ export const MAP_THEME_LABELS: Record<MapThemeKey, string> = {
   greenYellow: "Green & Yellow",
 };
 
-// TrackLine's original brand look -- black background, green highways/text. Unchanged from
-// before the theme picker existed; just renamed into the theme map as the "Normal" default.
+// TrackLine's original brand look -- black background, green highways/text. Lightened from the
+// original pure-black (#000000) background and dimmer greens -- real feedback: streets and
+// street names were hard to make out against how dark it was. Land is now a lighter charcoal
+// and every green (labels, arterial/local road fill, park) is a noticeably brighter shade, so
+// the road network and place names stand out clearly instead of blending into the background.
 const NORMAL_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#000000" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#000000" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#7ea787" }] },
-  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#bcd6c1" }] },
+  { elementType: "geometry", stylers: [{ color: "#14201a" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#0a120d" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#a3d6ac" }] },
+  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#dcf2e0" }] },
   { featureType: "poi", stylers: [{ visibility: "simplified" }] },
-  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#587a5e" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#0e1f11" }] },
-  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#4f7a58" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#141814" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#000000" }] },
-  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#6f8f75" }] },
-  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#1a231b" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#22c55e" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#000000" }] },
-  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#d9ffe4" }] },
-  { featureType: "road.highway", elementType: "labels.text.stroke", stylers: [{ color: "#000000" }] },
+  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#7fa886" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#1c3324" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#79a681" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#28352c" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#0a120d" }] },
+  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9dc4a4" }] },
+  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#324a39" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#34d976" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#0a120d" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#eafff1" }] },
+  { featureType: "road.highway", elementType: "labels.text.stroke", stylers: [{ color: "#0a120d" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#04120a" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#3d6b4c" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0a2318" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5c9c74" }] },
 ];
 
 // Deep indigo/purple land, violet-blue water, bright lavender highways -- streets get a

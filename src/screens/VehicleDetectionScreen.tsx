@@ -37,6 +37,16 @@ const MAX_PLATE_ATTEMPTS = 6;
 // user-visible feedback ("black screen, doesn't respond"). Racing it against a plain timer
 // means the app's own logic always gets control back, whether or not the native call ever does.
 const CAPTURE_TIMEOUT_MS = 6000;
+// Same protection for the JPEG decode step -- pure JS, no native camera hardware involved, so
+// a much shorter bound than detection is enough.
+const DECODE_TIMEOUT_MS = 5000;
+// Longer than the other two -- deliberately: loadModelSkippingWarmup (vehicleDetection.ts)
+// defers coco-ssd's one-time warmup inference onto whichever frame happens to be the *first*
+// one actually run through detectVehiclesInPhoto, specifically so the loading screen itself
+// doesn't have to wait for it. That means this one call can legitimately take much longer than
+// a normal frame on a slow/CPU-only device -- a short timeout here would misfire on totally
+// healthy first-frame behavior, not a real hang.
+const DETECT_TIMEOUT_MS = 15000;
 // Consecutive capture failures (timeouts or thrown errors) before giving up and surfacing the
 // existing error+Retry UI instead of quietly retrying forever -- one bad frame shouldn't error
 // out immediately (real, temporary hiccups happen), but a real, ongoing problem should always
@@ -169,9 +179,13 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
       consecutiveFailuresRef.current = 0;
       Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
-      const decoded = await decodePhotoForDetection(photo.uri);
+      const decoded = await withTimeout(
+        decodePhotoForDetection(photo.uri),
+        DECODE_TIMEOUT_MS,
+        "decodePhotoForDetection"
+      );
       if (unmountedRef.current) return;
-      const detected = await detectVehiclesInPhoto(decoded);
+      const detected = await withTimeout(detectVehiclesInPhoto(decoded), DETECT_TIMEOUT_MS, "detectVehiclesInPhoto");
       if (unmountedRef.current) return;
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
       setBoxes(tracked);
