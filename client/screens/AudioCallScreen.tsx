@@ -391,14 +391,7 @@ export default function AudioCallScreen() {
             </View>
           ) : null}
 
-          {Platform.OS === 'web' && localStatus === 'connected' ? (
-            <View style={[styles.webNotice, { backgroundColor: theme.backgroundDefault }]}>
-              <Feather name="info" size={14} color={theme.textSecondary} />
-              <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: 6 }}>
-                Full audio available in native app
-              </ThemedText>
-            </View>
-          ) : isFullyConnected ? (
+          {isFullyConnected ? (
             <View style={[styles.connectedBadge, { backgroundColor: theme.success + "10" }]}>
               <Feather name="check-circle" size={14} color={theme.success} />
               <ThemedText type="small" style={{ color: theme.success, marginLeft: 6 }}>
@@ -536,14 +529,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     justifyContent: "center",
     alignItems: "center",
-  },
-  webNotice: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
   },
   connectedBadge: {
     flexDirection: "row",
