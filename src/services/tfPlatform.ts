@@ -1,5 +1,15 @@
 import * as tf from "@tensorflow/tfjs";
 import "@tensorflow/tfjs-backend-cpu";
+// Side-effect import, straight at the specific file rather than the package's main index (which
+// would also pull in its camera/asyncStorageIO modules this app doesn't use) -- registers a
+// *lazy* 'rn-webgl' GPU backend factory (real GPU acceleration via expo-gl, only actually
+// creates a GL context if/when tf.setBackend('rn-webgl') below is called; importing this alone
+// touches no camera/GPU resource). This same file also calls tf.setPlatform() with its own
+// platform shim as an unconditional side effect of being imported -- ensureTfReady() below
+// always re-asserts this file's own PlatformReactNative immediately after, so that call never
+// actually stays in effect; only the backend registration is kept from this import.
+import "@tensorflow/tfjs-react-native/dist/platform_react_native";
+import { Sentry } from "@/services/sentry";
 
 // @tensorflow/tfjs-react-native used to double as tfjs-core's *required* platform
 // registration for React Native (fetch/now/encode/decode/isTypedArray) -- without it,
@@ -42,13 +52,41 @@ class PlatformReactNative implements tf.Platform {
   }
 }
 
+// Real kill switch, not just a hypothetical -- flip to false to instantly revert every device
+// to the known-working CPU-only path (matching every build before this one) without touching
+// anything else, the same DIAGNOSTIC_DISABLE_* pattern already used elsewhere in this app for
+// exactly this kind of "can't fully verify without a real device" risk.
+const GPU_BACKEND_ENABLED = true;
+
+async function selectBackend(): Promise<void> {
+  if (GPU_BACKEND_ENABLED) {
+    try {
+      Sentry.logger.info("tfPlatform: attempting rn-webgl (GPU) backend");
+      const ok = await tf.setBackend("rn-webgl");
+      if (!ok) throw new Error("tf.setBackend('rn-webgl') returned false");
+      Sentry.logger.info("tfPlatform: rn-webgl (GPU) backend active");
+      return;
+    } catch (err) {
+      // Real, expected fallback path on any device/OS combination where expo-gl's context
+      // creation fails for any reason -- never lets a GPU-init problem take down detection
+      // entirely, just quietly runs the same CPU backend every build before this one used.
+      Sentry.logger.error("tfPlatform: rn-webgl backend unavailable, falling back to CPU", {
+        error: String(err),
+      });
+      console.warn("[tfPlatform] GPU (rn-webgl) backend unavailable, falling back to CPU", err);
+    }
+  }
+  await tf.setBackend("cpu");
+}
+
 let readyPromise: Promise<void> | null = null;
 
-/** Registers the React Native platform shim and the CPU backend exactly once. */
+/** Registers the React Native platform shim and picks a backend (GPU with a CPU fallback)
+ *  exactly once. */
 export function ensureTfReady(): Promise<void> {
   if (!readyPromise) {
     tf.env().setPlatform("react-native", new PlatformReactNative());
-    readyPromise = tf.setBackend("cpu").then(() => tf.ready());
+    readyPromise = selectBackend().then(() => tf.ready());
   }
   return readyPromise;
 }
