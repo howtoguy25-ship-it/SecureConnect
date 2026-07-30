@@ -3666,26 +3666,35 @@ export default function ConversationScreen() {
         onScrollToIndexFailed={() => {}}
         onScrollBeginDrag={() => { if (holdMessage) closeHoldOverlay(); }}
         ListHeaderComponent={
-          <View style={styles.encryptionBanner}>
-            <Feather
-              name={encryptionState === "no_keys" ? "unlock" : "lock"}
-              size={12}
-              color={encryptionState === "no_keys" ? "#FF9500" : theme.textSecondary}
-            />
-            <ThemedText type="small" style={{
-              color: encryptionState === "no_keys" ? "#FF9500" : theme.textSecondary,
-              marginLeft: 4,
-            }}>
-              {encryptionState === "encrypted"
-                ? "Messages are end-to-end encrypted"
-                : encryptionState === "securing"
-                ? "Setting up encryption..."
-                : encryptionState === "no_keys"
-                ? (queuedTextSends.length + queuedMediaSends.length > 0
-                    ? `Recipient hasn't set up encryption keys — ${queuedTextSends.length + queuedMediaSends.length} message${queuedTextSends.length + queuedMediaSends.length === 1 ? '' : 's'} will send once they do`
-                    : "Recipient hasn't set up encryption keys")
-                : "Encryption session reset"}
-            </ThemedText>
+          <View style={styles.encryptionBannerWrapper}>
+            <View style={[
+              styles.encryptionBanner,
+              { backgroundColor: encryptionState === "no_keys" ? "#FF950018" : theme.backgroundSecondary },
+            ]}>
+              <Feather
+                name={encryptionState === "no_keys" ? "unlock" : "lock"}
+                size={12}
+                color={encryptionState === "no_keys" ? "#FF9500" : theme.textSecondary}
+                style={styles.encryptionBannerIcon}
+              />
+              <ThemedText
+                type="small"
+                style={[
+                  styles.encryptionBannerText,
+                  { color: encryptionState === "no_keys" ? "#FF9500" : theme.textSecondary },
+                ]}
+              >
+                {encryptionState === "encrypted"
+                  ? "Messages are end-to-end encrypted"
+                  : encryptionState === "securing"
+                  ? "Setting up encryption..."
+                  : encryptionState === "no_keys"
+                  ? (queuedTextSends.length + queuedMediaSends.length > 0
+                      ? `Recipient hasn't set up encryption keys — ${queuedTextSends.length + queuedMediaSends.length} message${queuedTextSends.length + queuedMediaSends.length === 1 ? '' : 's'} will send once they do`
+                      : "Recipient hasn't set up encryption keys")
+                  : "Encryption session reset"}
+              </ThemedText>
+            </View>
           </View>
         }
         ListEmptyComponent={
@@ -5183,12 +5192,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Spacing.sm,
   },
+  // Wrapper gives the banner its own reserved block in the list's normal
+  // flow (extra bottom margin) so a longer message — e.g. the "N messages
+  // will send once they do" queued-count text, which can wrap to 2-3
+  // lines — never sits close enough to the first message bubble below it
+  // to visually collide with it.
+  encryptionBannerWrapper: {
+    marginBottom: Spacing.md,
+  },
   encryptionBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginHorizontal: Spacing.md,
+  },
+  encryptionBannerIcon: {
+    marginTop: 2,
+  },
+  encryptionBannerText: {
+    flex: 1,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    marginLeft: 6,
+    lineHeight: 16,
   },
   messageList: {
     paddingHorizontal: Spacing.md,
