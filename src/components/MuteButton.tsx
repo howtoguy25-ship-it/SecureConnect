@@ -11,6 +11,7 @@ export function MuteButton() {
     <Pressable
       onPress={toggleVoiceEnabled}
       style={({ pressed }) => [styles.button, pressed && { opacity: pressedOpacity }]}
+      hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={voiceEnabled ? "Mute voice guidance" : "Unmute voice guidance"}
     >
@@ -21,8 +22,8 @@ export function MuteButton() {
 
 const styles = StyleSheet.create({
   button: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     alignItems: "center",

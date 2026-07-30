@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, type LayoutChangeEvent } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteStep } from "@/services/directions";
@@ -35,6 +35,13 @@ interface Props {
   // this (a bigger, easier target than a small dedicated button would be), while share/exit
   // keep their own separate buttons so they're never accidentally triggered by the same tap.
   onExpandDirections: () => void;
+  // Reports the card's real rendered height (instruction text can wrap to 2 lines, meta text
+  // can wrap too) so callers positioning other controls below it -- see MapScreen's
+  // topRightControls -- can react to the actual height instead of guessing a fixed number.
+  // A guessed constant meant the button column below could end up overlapping the bottom of a
+  // taller (longer-instruction) card, which is exactly what made those buttons intermittently
+  // miss taps depending on which instruction happened to be showing.
+  onHeightChange?: (height: number) => void;
 }
 
 export function NavigationInstructionCard({
@@ -45,13 +52,18 @@ export function NavigationInstructionCard({
   onExit,
   onShareEta,
   onExpandDirections,
+  onHeightChange,
 }: Props) {
   const insets = useSafeAreaInsets();
   if (!step) return null;
   const icon = (step.maneuver && MANEUVER_ICONS[step.maneuver]) || "arrow-up";
 
+  const onLayout = (e: LayoutChangeEvent) => {
+    onHeightChange?.(e.nativeEvent.layout.height);
+  };
+
   return (
-    <View style={[styles.card, { top: insets.top + spacing.md }]}>
+    <View style={[styles.card, { top: insets.top + spacing.md }]} onLayout={onLayout}>
       <Pressable
         style={({ pressed }) => [styles.tapArea, pressed && { opacity: pressedOpacity }]}
         onPress={onExpandDirections}

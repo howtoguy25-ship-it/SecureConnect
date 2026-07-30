@@ -89,15 +89,24 @@ export interface PlaceInfo extends PlaceDetails {
 // Apple's native MapKit here (not PROVIDER_GOOGLE), and react-native-maps' own onPoiClick is
 // Google-Maps-only on iOS -- so there's no native "which business did they tap" event to read
 // on this platform. This is the workaround: treat any map tap as "find whatever's closest to
-// here" via Nearby Search, then pull full details for it. A small fixed radius (rather than
-// rankby=distance, which requires a keyword/name/type we don't have) keeps results limited to
-// places actually near the tap instead of matching something arbitrarily far away.
-const POI_LOOKUP_RADIUS_METERS = 60;
-
+// here" via Nearby Search, then pull full details for it.
+//
+// This used to pass a fixed `radius` with no `rankby`/`type` -- Nearby Search's default order
+// for a plain radius search is *prominence* (rating/importance), not distance, and with no
+// `type` filter that ranking pool includes localities/administrative areas alongside real
+// businesses. Confirmed on a real device: tapping directly on a small shop pin returned
+// "Sydney, Sydney NSW, Australia" (a locality result outranking the actual business a few
+// meters away) instead of the shop itself. `rankby=distance` fixes the ordering to genuine
+// closest-first, but Google requires either a `keyword`, `name`, or `type` alongside it --
+// `type=establishment` is exactly "any real business/POI," which both satisfies that
+// requirement and excludes locality/political results outright. `radius` isn't a valid param
+// together with `rankby=distance`, so the distance sanity-check moves to the caller (which
+// already fetches full place details, including geometry, right after this).
 export async function findNearestPlace(location: LatLng): Promise<{ placeId: string } | null> {
   const params = new URLSearchParams({
     location: `${location.latitude},${location.longitude}`,
-    radius: String(POI_LOOKUP_RADIUS_METERS),
+    rankby: "distance",
+    type: "establishment",
     key: env.googlePlacesApiKey,
   });
 

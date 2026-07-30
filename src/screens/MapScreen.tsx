@@ -33,8 +33,16 @@ import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
 import { PlaceInfoSheet } from "@/screens/PlaceInfoSheet";
 import { OsmMarkerSheet, type OsmMarkerKind } from "@/screens/OsmMarkerSheet";
-import { getRouteOptions, DirectionsApiError, type Route, type RouteProfileKey } from "@/services/directions";
+import {
+  getRouteOptions,
+  getDirectionsForMode,
+  DirectionsApiError,
+  type Route,
+  type RouteProfileKey,
+  type TravelMode,
+} from "@/services/directions";
 import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
+import { distanceKm } from "@/utils/geo";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
@@ -55,6 +63,10 @@ import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { Sentry } from "@/services/sentry";
 
 const DIAGNOSTIC_DISABLE_MAPVIEW = false;
+// See onMapPress's POI lookup -- rankby=distance has no radius bound, so this is the sanity
+// check that keeps an empty tap (open water, a park, a gap between buildings) from confidently
+// showing whatever real business happens to be nearest, however far that actually is.
+const MAX_POI_TAP_DISTANCE_METERS = 120;
 
 export function MapScreen() {
   const { location } = useLocation();
@@ -72,6 +84,11 @@ export function MapScreen() {
 
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
+  // Real measured height of NavigationInstructionCard (see its onHeightChange) -- the button
+  // column below it (Recenter/mute/settings) positions off this instead of a fixed guess, so
+  // it never ends up partly hidden behind a taller-than-expected card. 96 is just the
+  // reasonable single-line fallback for the one frame before the first real measurement lands.
+  const [instructionCardHeight, setInstructionCardHeight] = useState(96);
   const guidanceRef = useRef(createGuidanceState());
   // Exact arrival coordinate for the highlighted destination marker below -- kept separate
   // from route.polyline's last point so it's the real picked place, not whatever pixel the
@@ -88,6 +105,12 @@ export function MapScreen() {
   const [stopLocation, setStopLocation] = useState<LatLng | null>(null);
   const [pickingStop, setPickingStop] = useState(false);
   const [routeOptions, setRouteOptions] = useState<Record<RouteProfileKey, Route> | null>(null);
+  // Driving gets the 3-way Normal/Fastest/Safest picker above; every other travel mode gets a
+  // single real route here instead -- Google has exactly one meaningful route per mode in the
+  // overwhelming majority of cases (transit in particular is governed by real timetables, not
+  // alternative road choices), so a 3-way picker wouldn't mean anything for them.
+  const [modeRoute, setModeRoute] = useState<Route | null>(null);
+  const [travelMode, setTravelMode] = useState<TravelMode>("driving");
   const [loadingRouteOptions, setLoadingRouteOptions] = useState(false);
   const [routeOptionsError, setRouteOptionsError] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<RouteProfileKey>("normal");
@@ -196,6 +219,53 @@ export function MapScreen() {
     // center/heading keep tracking live position/direction of travel.
     mapRef.current?.animateCamera({ center: currentLatLng, heading }, { duration: 600 });
   }, [route, followTilt, currentLatLng, heading]);
+
+  // Refs mirroring currentLatLng/heading so the "entering follow-tilt" effect below can read
+  // the freshest value without needing them in its own dependency array -- see why that matters
+  // right below.
+  const chaseCamLatLngRef = useRef(currentLatLng);
+  chaseCamLatLngRef.current = currentLatLng;
+  const chaseCamHeadingRef = useRef(heading);
+  chaseCamHeadingRef.current = heading;
+
+  // Actually applies the "tilted, zoomed in" chase cam the comment above promises -- followTilt
+  // defaulting to true was previously the *only* thing that happened on nav start; the per-tick
+  // effect above deliberately never sets pitch/zoom (by design, so it doesn't fight a manual
+  // tilt gesture), and no other code path ever applied one either. The real, confirmed result:
+  // navigation stayed flat/top-down by default the entire time you drove, only ever tilting if
+  // you happened to manually toggle Recenter off then on, or tap the route line -- not the
+  // "Apple-Maps-style close-follow" the app was supposed to default to. This fires exactly once
+  // per transition into follow-tilt (deps are just route/followTilt, not the live position/
+  // heading), so it sets the camera once and then gets out of the way for the per-tick effect
+  // above to keep tracking center/heading without re-fighting a manual gesture.
+  useEffect(() => {
+    if (!route || !followTilt) return;
+    // enterOverviewMode (tap the route line) already sets its own pulled-back camera right
+    // after setting followTilt=true -- skip so the two don't race and fight over pitch/zoom.
+    if (Date.now() - lineTapAtRef.current < 300) return;
+    let cancelled = false;
+    const applyChaseCam = () => {
+      if (cancelled) return;
+      const center = chaseCamLatLngRef.current;
+      if (!center) return;
+      mapRef.current?.animateCamera(
+        { center, heading: chaseCamHeadingRef.current, pitch: 60, zoom: 18 },
+        { duration: 700 }
+      );
+    };
+    const elapsed = Date.now() - navStartedAtRef.current;
+    if (elapsed >= 1200) {
+      applyChaseCam();
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timeout = setTimeout(applyChaseCam, 1200 - elapsed);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [route, followTilt]);
 
   const toggleFollowTilt = useCallback(() => {
     setFollowTilt((was) => {
@@ -330,21 +400,40 @@ export function MapScreen() {
     sirenDetection.setSensitivity(settings.sirenSensitivity);
   }, [settings.sirenSensitivity]);
 
+  // `mode` is always passed explicitly by every call site (never defaulted/read off the
+  // `travelMode` closure) -- onSelectTravelMode below needs to fetch for the *new* mode the
+  // instant it's picked, before the setTravelMode state update has actually landed, so passing
+  // it as a plain argument sidesteps any stale-closure risk entirely.
   const fetchRouteOptions = useCallback(
-    async (destination: LatLng, waypoint?: LatLng) => {
+    async (destination: LatLng, waypoint: LatLng | undefined, mode: TravelMode) => {
       if (!currentLatLng) return;
       setLoadingRouteOptions(true);
       setRouteOptionsError(null);
       try {
-        const options = await getRouteOptions(currentLatLng, destination, waypoint);
-        setRouteOptions(options);
-        setSelectedProfile("normal");
-        mapRef.current?.fitToCoordinates(options.normal.polyline, {
-          edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
-          animated: true,
-        });
+        if (mode === "driving") {
+          const options = await getRouteOptions(currentLatLng, destination, waypoint);
+          setRouteOptions(options);
+          setModeRoute(null);
+          setSelectedProfile("normal");
+          mapRef.current?.fitToCoordinates(options.normal.polyline, {
+            edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+            animated: true,
+          });
+        } else {
+          // Walking/bicycling/transit: one real route from Google for that mode, not a
+          // driving-route estimate scaled by some guessed speed factor -- genuine distance and
+          // duration for how that mode actually gets there, transit included (Google's transit
+          // directions factor in real published timetables, not just travel speed).
+          const modeResult = await getDirectionsForMode(currentLatLng, destination, mode, waypoint);
+          setModeRoute(modeResult);
+          setRouteOptions(null);
+          mapRef.current?.fitToCoordinates(modeResult.polyline, {
+            edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+            animated: true,
+          });
+        }
       } catch (err) {
-        Sentry.logger.error("map: failed to fetch route options", { error: String(err) });
+        Sentry.logger.error("map: failed to fetch route options", { error: String(err), mode });
         console.warn("[map] failed to fetch route options", err);
         // Same underlying cause as the destination search billing check below -- the
         // Directions API call hits the exact same Google Cloud project/key, so it fails the
@@ -436,6 +525,19 @@ export function MapScreen() {
         })
         .then((info) => {
           if (!info) return;
+          // rankby=distance (see findNearestPlace) can still legitimately return a real
+          // business that's genuinely far from an empty tap (e.g. tapping open water or a
+          // park with no nearby POIs at all) -- Nearby Search has no radius bound in that
+          // mode. A sanity distance check here means a tap with nothing actually close by
+          // shows no sheet at all instead of confidently attaching an unrelated business to
+          // wherever was tapped.
+          const distMeters = distanceKm(
+            coordinate.latitude,
+            coordinate.longitude,
+            info.location.latitude,
+            info.location.longitude
+          ) * 1000;
+          if (distMeters > MAX_POI_TAP_DISTANCE_METERS) return;
           setPlaceInfo(info);
           placeInfoSheetRef.current?.expand();
         })
@@ -453,7 +555,10 @@ export function MapScreen() {
       if (!currentLatLng) return;
       setPendingDestination(place);
       setStopLocation(null);
-      fetchRouteOptions(place.location);
+      // A fresh destination pick always starts from Drive -- predictable default, matches how
+      // the picker looked before travel modes existed.
+      setTravelMode("driving");
+      fetchRouteOptions(place.location, undefined, "driving");
     },
     [currentLatLng, fetchRouteOptions]
   );
@@ -463,9 +568,19 @@ export function MapScreen() {
       if (!pendingDestination) return;
       setStopLocation(place.location);
       setPickingStop(false);
-      fetchRouteOptions(pendingDestination.location, place.location);
+      fetchRouteOptions(pendingDestination.location, place.location, travelMode);
     },
-    [pendingDestination, fetchRouteOptions]
+    [pendingDestination, fetchRouteOptions, travelMode]
+  );
+
+  const onSelectTravelMode = useCallback(
+    (mode: TravelMode) => {
+      setTravelMode(mode);
+      if (pendingDestination) {
+        fetchRouteOptions(pendingDestination.location, stopLocation ?? undefined, mode);
+      }
+    },
+    [pendingDestination, stopLocation, fetchRouteOptions]
   );
 
   const onSelectProfile = useCallback(
@@ -483,8 +598,8 @@ export function MapScreen() {
   );
 
   const confirmRoute = useCallback(() => {
-    if (!routeOptions || !pendingDestination) return;
-    const chosen = routeOptions[selectedProfile];
+    const chosen = travelMode === "driving" ? routeOptions?.[selectedProfile] : modeRoute;
+    if (!chosen || !pendingDestination) return;
     guidanceRef.current = createGuidanceState();
     setActiveStepIndex(0);
     setRoute(chosen);
@@ -496,15 +611,18 @@ export function MapScreen() {
       animated: true,
     });
     setRouteOptions(null);
+    setModeRoute(null);
     setPendingDestination(null);
-  }, [routeOptions, selectedProfile, pendingDestination]);
+  }, [routeOptions, modeRoute, travelMode, selectedProfile, pendingDestination]);
 
   const cancelRouteOptions = useCallback(() => {
     setRouteOptions(null);
+    setModeRoute(null);
     setPendingDestination(null);
     setStopLocation(null);
     setPickingStop(false);
     setRouteOptionsError(null);
+    setTravelMode("driving");
   }, []);
 
   const exitNavigation = useCallback(() => {
@@ -809,6 +927,9 @@ export function MapScreen() {
       {!route && pendingDestination && !pickingStop && (
         <RouteOptionsCard
           options={routeOptions}
+          modeRoute={modeRoute}
+          travelMode={travelMode}
+          onSelectTravelMode={onSelectTravelMode}
           loading={loadingRouteOptions}
           errorText={routeOptionsError}
           selected={selectedProfile}
@@ -829,16 +950,25 @@ export function MapScreen() {
           onExit={exitNavigation}
           onShareEta={shareEta}
           onExpandDirections={() => directionsSheetRef.current?.expand()}
+          onHeightChange={setInstructionCardHeight}
         />
       )}
 
       {/* Pushed below the instruction card while navigating (instead of sharing its top
           offset) so it never overlaps the turn text -- it used to sit at the same `top` as
-          the full-width card and render on top of its right edge. */}
+          the full-width card and render on top of its right edge. This used to be a fixed
+          "+96" guess, but the card's real height varies with how many lines the instruction/
+          meta text wrap to (a long instruction like "At the roundabout, take the 1st exit onto
+          Noble Ave..." wraps taller than a short one) -- a guess that undershot the real height
+          meant this whole button column, mute included, could end up partly behind the card,
+          which is exactly what made the volume button intermittently miss taps depending on
+          which instruction happened to be showing. instructionCardHeight (measured via the
+          card's own onLayout) replaces the guess with the real number; 96 only remains as the
+          fallback for the one frame before the very first measurement lands. */}
       <View
         style={[
           styles.topRightControls,
-          { top: insets.top + spacing.md + (route ? 96 : 0) },
+          { top: insets.top + spacing.md + (route ? instructionCardHeight + spacing.md : 0) },
         ]}
       >
         {/* A real, clearly-labeled "Recenter" pill once the user has panned away (manual drag
@@ -849,6 +979,7 @@ export function MapScreen() {
           <Pressable
             style={({ pressed }) => [styles.recenterPill, pressed && { opacity: pressedOpacity }]}
             onPress={toggleFollowTilt}
+            hitSlop={8}
             accessibilityLabel="Recenter on my location"
           >
             <Ionicons name="navigate" size={16} color="#FFFFFF" />
@@ -859,6 +990,7 @@ export function MapScreen() {
           <Pressable
             style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
             onPress={toggleFollowTilt}
+            hitSlop={8}
             accessibilityLabel="Exit close-follow view"
           >
             <Ionicons name="close" size={20} color={colors.text} />
@@ -882,6 +1014,7 @@ export function MapScreen() {
         <Pressable
           style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
           onPress={() => navigation.navigate("Settings")}
+          hitSlop={8}
           accessibilityLabel="Settings"
         >
           <Ionicons name="settings-outline" size={20} color={colors.text} />
@@ -1190,12 +1323,15 @@ const styles = StyleSheet.create({
   },
   topRightControls: {
     position: "absolute",
-    right: spacing.md,
-    gap: spacing.sm,
+    // Hugs the true right edge (rather than floating inward) so this reads as a compact,
+    // edge-anchored toolbar the way Apple/Google Maps' own side controls do, instead of a
+    // column of buttons sitting out over the middle of the route/map.
+    right: spacing.sm,
+    gap: spacing.xs + 2,
   },
   settingsButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     alignItems: "center",
@@ -1206,7 +1342,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs + 2,
-    height: 44,
+    height: 40,
     paddingHorizontal: spacing.md,
     borderRadius: radius.pill,
     backgroundColor: colors.accent,
@@ -1218,8 +1354,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   osmLoadingBadge: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     alignItems: "center",

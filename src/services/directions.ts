@@ -70,36 +70,7 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-export async function getDirections(
-  origin: LatLng,
-  destination: LatLng,
-  options: DirectionsOptions = {}
-): Promise<Route> {
-  const { avoidHighways, avoidTolls, waypoint, useTraffic } = options;
-
-  const avoid = [avoidHighways && "highways", avoidTolls && "tolls"].filter(Boolean).join("|");
-
-  const url =
-    "https://maps.googleapis.com/maps/api/directions/json" +
-    `?origin=${origin.latitude},${origin.longitude}` +
-    `&destination=${destination.latitude},${destination.longitude}` +
-    `&mode=driving&key=${env.googleDirectionsApiKey}` +
-    (avoid ? `&avoid=${avoid}` : "") +
-    (waypoint ? `&waypoints=${waypoint.latitude},${waypoint.longitude}` : "") +
-    (useTraffic ? `&departure_time=now&traffic_model=best_guess` : "");
-
-  const res = await fetch(url);
-  const json = await res.json();
-
-  if (json.status !== "OK" || !json.routes?.length) {
-    Sentry.logger.error("directions: request failed", {
-      status: json.status,
-      errorMessage: json.error_message,
-    });
-    throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
-  }
-
-  const route = json.routes[0];
+function parseRoute(route: any): Route {
   const leg = route.legs[0];
 
   const steps: RouteStep[] = leg.steps.map((step: any) => ({
@@ -131,6 +102,81 @@ export async function getDirections(
   };
 }
 
+function buildDirectionsUrl(
+  origin: LatLng,
+  destination: LatLng,
+  mode: TravelMode,
+  options: DirectionsOptions & { alternatives?: boolean }
+): string {
+  const { avoidHighways, avoidTolls, waypoint, useTraffic, alternatives } = options;
+  const avoid = [avoidHighways && "highways", avoidTolls && "tolls"].filter(Boolean).join("|");
+
+  return (
+    "https://maps.googleapis.com/maps/api/directions/json" +
+    `?origin=${origin.latitude},${origin.longitude}` +
+    `&destination=${destination.latitude},${destination.longitude}` +
+    `&mode=${mode}&key=${env.googleDirectionsApiKey}` +
+    (avoid ? `&avoid=${avoid}` : "") +
+    (waypoint ? `&waypoints=${waypoint.latitude},${waypoint.longitude}` : "") +
+    (useTraffic ? `&departure_time=now&traffic_model=best_guess` : "") +
+    (alternatives ? `&alternatives=true` : "")
+  );
+}
+
+export async function getDirections(
+  origin: LatLng,
+  destination: LatLng,
+  options: DirectionsOptions = {}
+): Promise<Route> {
+  const url = buildDirectionsUrl(origin, destination, "driving", options);
+  const res = await fetch(url);
+  const json = await res.json();
+
+  if (json.status !== "OK" || !json.routes?.length) {
+    Sentry.logger.error("directions: request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
+  }
+
+  return parseRoute(json.routes[0]);
+}
+
+// Real "fastest" means genuinely the quickest option Google has available right now, not a
+// single route forced through backstreets a priori -- forcing avoidHighways used to make this
+// profile literally the slowest of the three (a real, confirmed bug: 3h/158km "Fastest" vs
+// 1h47/130km "Normal" on the same trip, since skipping a motorway on a long drive is almost
+// never actually faster). This asks Google for every alternative it's willing to offer, with
+// live traffic factored in, and picks whichever one actually has the lowest traffic-aware
+// duration -- so "Fastest" can end up being the highway route, a backstreet route, or whatever
+// else genuinely gets there quickest, decided by the real numbers instead of a fixed constraint.
+async function getFastestRoute(origin: LatLng, destination: LatLng, waypoint?: LatLng): Promise<Route> {
+  const url = buildDirectionsUrl(origin, destination, "driving", {
+    waypoint,
+    useTraffic: true,
+    alternatives: true,
+  });
+  const res = await fetch(url);
+  const json = await res.json();
+
+  if (json.status !== "OK" || !json.routes?.length) {
+    Sentry.logger.error("directions: fastest-route request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
+  }
+
+  const candidates = json.routes.map(parseRoute);
+  return candidates.reduce((best: Route, candidate: Route) =>
+    (candidate.durationInTrafficSeconds ?? candidate.durationSeconds) <
+    (best.durationInTrafficSeconds ?? best.durationSeconds)
+      ? candidate
+      : best
+  );
+}
+
 export type RouteProfileKey = "normal" | "fastest" | "safest";
 
 export const ROUTE_PROFILE_LABELS: Record<RouteProfileKey, string> = {
@@ -139,36 +185,61 @@ export const ROUTE_PROFILE_LABELS: Record<RouteProfileKey, string> = {
   safest: "Safest",
 };
 
-// Three real, independently-fetched Google Directions results, not one call's
-// `alternatives` -- alternatives are Google's own idea of "other reasonable routes" and
-// don't let us ask for a specific character (backstreets-only, tolls-free, etc.) the way
-// separate `avoid`/traffic-aware requests do. Mirrors the web app's routeProfiles.ts.
-const ROUTE_PROFILE_OPTIONS: Record<RouteProfileKey, DirectionsOptions> = {
-  // No constraints -- Google's own default best route, unhurried.
-  normal: {},
-  // Backstreets, live-traffic-aware duration so the picker can show "there's traffic" --
-  // this is the one profile actually worth the extra traffic-model request.
-  fastest: { avoidHighways: true, useTraffic: true },
-  // Keeps highways available (a toll-free backstreets-only route is often *less* safe --
-  // narrower roads, more intersections) but skips tolls, and considers every road type
-  // Google itself is willing to route through.
-  safest: { avoidTolls: true },
-};
+// "safest" keeps highways available (a toll-free backstreets-only route is often *less* safe
+// -- narrower roads, more intersections) but skips tolls, and considers every road type Google
+// itself is willing to route through. "fastest" is handled separately below via
+// getFastestRoute -- it's not a fixed-constraint request like this one.
+const SAFEST_OPTIONS: DirectionsOptions = { avoidTolls: true };
 
-/** Fetches all 3 route profiles in parallel for the route-choice picker. */
+/** Fetches all 3 route profiles in parallel for the route-choice picker. Each is a real,
+ *  independently-fetched Google Directions result (not one call's `alternatives` alone for
+ *  normal/safest) so "safest" can ask for a specific character (tolls-free) that a plain
+ *  alternatives list wouldn't guarantee. Mirrors the web app's routeProfiles.ts. */
 export async function getRouteOptions(
   origin: LatLng,
   destination: LatLng,
   waypoint?: LatLng
 ): Promise<Record<RouteProfileKey, Route>> {
-  const entries = await Promise.all(
-    (Object.keys(ROUTE_PROFILE_OPTIONS) as RouteProfileKey[]).map(async (key) => {
-      const route = await getDirections(origin, destination, {
-        ...ROUTE_PROFILE_OPTIONS[key],
-        waypoint,
-      });
-      return [key, route] as const;
-    })
-  );
-  return Object.fromEntries(entries) as Record<RouteProfileKey, Route>;
+  const [normal, fastest, safest] = await Promise.all([
+    getDirections(origin, destination, { waypoint }),
+    getFastestRoute(origin, destination, waypoint),
+    getDirections(origin, destination, { ...SAFEST_OPTIONS, waypoint }),
+  ]);
+  return { normal, fastest, safest };
+}
+
+export type TravelMode = "driving" | "walking" | "bicycling" | "transit";
+
+export const TRAVEL_MODE_LABELS: Record<TravelMode, string> = {
+  driving: "Drive",
+  walking: "Walk",
+  bicycling: "Bike",
+  transit: "Transit",
+};
+
+/** A single real route for a non-driving travel mode (walking/bicycling/transit) -- genuine
+ *  Google Directions results for that mode, not an estimate derived from the driving route.
+ *  Unlike driving, these don't get a 3-way Normal/Fastest/Safest picker: Google has exactly
+ *  one meaningful route per mode in the overwhelming majority of cases (transit trips in
+ *  particular are governed by real timetables, not alternative road choices). */
+export async function getDirectionsForMode(
+  origin: LatLng,
+  destination: LatLng,
+  mode: Exclude<TravelMode, "driving">,
+  waypoint?: LatLng
+): Promise<Route> {
+  const url = buildDirectionsUrl(origin, destination, mode, { waypoint });
+  const res = await fetch(url);
+  const json = await res.json();
+
+  if (json.status !== "OK" || !json.routes?.length) {
+    Sentry.logger.error("directions: mode request failed", {
+      mode,
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
+  }
+
+  return parseRoute(json.routes[0]);
 }
