@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { AlertType } from "@/types/alert";
+import type { MapThemeKey } from "@/utils/mapStyle";
 
 export const ALL_ALERT_TYPES: AlertType[] = [
   "police",
@@ -31,6 +32,8 @@ export interface AppSettings {
   // reports above, which are temporary/mobile and user-submitted.
   showTrafficLights: boolean;
   showSpeedCameras: boolean;
+  // Which map color theme customMapStyle renders -- see utils/mapStyle.ts.
+  mapTheme: MapThemeKey;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -42,6 +45,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultVoiceEnabled: true,
   showTrafficLights: true,
   showSpeedCameras: true,
+  mapTheme: "normal",
 };
 
 const STORAGE_KEY = "@trackline/settings";

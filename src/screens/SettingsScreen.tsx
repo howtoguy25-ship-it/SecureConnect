@@ -13,6 +13,7 @@ import { BUSINESS_INFO } from "@/config/business";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
 import { ALERT_LABELS, type AlertType } from "@/types/alert";
+import { MAP_THEME_LABELS, type MapThemeKey } from "@/utils/mapStyle";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 
 function sensitivityLabel(value: number): string {
@@ -20,6 +21,16 @@ function sensitivityLabel(value: number): string {
   if (value <= 0.7) return "Medium";
   return "High";
 }
+
+// Small background/highway-accent pair per theme, just for the picker swatches below -- the
+// real, full styling lives in utils/mapStyle.ts; this is only a preview.
+const MAP_THEME_ORDER: MapThemeKey[] = ["normal", "purpleBlue", "blueGrey", "greenYellow"];
+const MAP_THEME_SWATCH_COLORS: Record<MapThemeKey, [string, string]> = {
+  normal: ["#000000", "#22c55e"],
+  purpleBlue: ["#1a1033", "#8b7cf6"],
+  blueGrey: ["#232a35", "#5b9bf0"],
+  greenYellow: ["#0f2417", "#facc15"],
+};
 
 export function SettingsScreen() {
   const { settings, updateSettings } = useSettings();
@@ -96,6 +107,11 @@ export function SettingsScreen() {
     [updateSettings]
   );
 
+  const onMapThemeSelect = useCallback(
+    (theme: MapThemeKey) => updateSettings({ mapTheme: theme }),
+    [updateSettings]
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Section title="Account">
@@ -162,6 +178,39 @@ export function SettingsScreen() {
               />
             </View>
           ))}
+        </View>
+      </Section>
+
+      <Section title="Map appearance">
+        <Text style={styles.helperText}>
+          Recolors the whole map -- land, water, roads, and highways together -- not just a
+          tint. Every theme keeps road labels high-contrast against the road surface so street
+          names stay easy to read while driving.
+        </Text>
+        <View style={styles.themeGrid}>
+          {MAP_THEME_ORDER.map((theme) => {
+            const isSelected = settings.mapTheme === theme;
+            const [bg, accent] = MAP_THEME_SWATCH_COLORS[theme];
+            return (
+              <Pressable
+                key={theme}
+                onPress={() => onMapThemeSelect(theme)}
+                style={({ pressed }) => [
+                  styles.themeTile,
+                  isSelected && styles.themeTileSelected,
+                  pressed && { opacity: pressedOpacity },
+                ]}
+                accessibilityLabel={`${MAP_THEME_LABELS[theme]} map theme`}
+              >
+                <View style={[styles.themeSwatch, { backgroundColor: bg }]}>
+                  <View style={[styles.themeSwatchAccent, { backgroundColor: accent }]} />
+                </View>
+                <Text style={[styles.themeTileLabel, isSelected && styles.themeTileLabelSelected]}>
+                  {MAP_THEME_LABELS[theme]}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </Section>
 
@@ -304,6 +353,47 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontWeight: "700",
     fontSize: 14,
+  },
+  themeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  themeTile: {
+    width: "47%",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  themeTileSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.surfaceMuted,
+  },
+  themeSwatch: {
+    width: "100%",
+    height: 44,
+    borderRadius: radius.sm,
+    overflow: "hidden",
+    justifyContent: "flex-end",
+  },
+  themeSwatchAccent: {
+    height: 12,
+    width: "60%",
+    alignSelf: "center",
+    marginBottom: 8,
+    borderRadius: 3,
+  },
+  themeTileLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  themeTileLabelSelected: {
+    color: colors.accent,
+    fontWeight: "700",
   },
   alertTypeGrid: {
     gap: spacing.sm,

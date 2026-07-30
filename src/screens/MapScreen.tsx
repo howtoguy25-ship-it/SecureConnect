@@ -15,7 +15,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
-import { TRACKLINE_MAP_STYLE } from "@/utils/mapStyle";
+import { MAP_THEME_STYLES } from "@/utils/mapStyle";
 
 import { useLocation } from "@/context/LocationContext";
 import { useAuth } from "@/context/AuthContext";
@@ -801,10 +801,10 @@ export function MapScreen() {
         ref={mapRef}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         mapType={mapType}
-        // The custom black/green style only ever applies to the "standard" map type --
-        // satellite/hybrid imagery has no styleable roads/land polygons to restyle, so
-        // Google/Apple just ignore it there. Safe to always pass.
-        customMapStyle={TRACKLINE_MAP_STYLE}
+        // The custom theme style only ever applies to the "standard" map type -- satellite/
+        // hybrid imagery has no styleable roads/land polygons to restyle, so Google/Apple just
+        // ignore it there. Safe to always pass. Theme picked in Settings (see mapStyle.ts).
+        customMapStyle={MAP_THEME_STYLES[settings.mapTheme]}
         style={StyleSheet.absoluteFill}
         // The default blue-dot puck is swapped for a custom heading-rotated arrow (below)
         // while actively navigating -- a plain dot doesn't communicate which way you're
