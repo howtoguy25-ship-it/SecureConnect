@@ -150,13 +150,6 @@ export function bearingDegrees(lat1: number, lon1: number, lat2: number, lon2: n
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-/** Signed angular difference `a - b` normalized to (-180, 180] -- e.g. how far right (positive)
- *  or left (negative) you'd need to turn from heading `b` to face bearing `a`. */
-export function angleDeltaDegrees(a: number, b: number): number {
-  const diff = a - b;
-  return (((diff % 360) + 540) % 360) - 180;
-}
-
 export function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;

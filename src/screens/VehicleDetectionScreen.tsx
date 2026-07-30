@@ -6,12 +6,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { detectVehiclesInPhoto, decodePhotoForDetection, warmUpModel } from "@/services/vehicleDetection";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
-import { locatePlateRegion } from "@/utils/plateLocator";
+import { locatePlateRegion, type PlateRegion } from "@/utils/plateLocator";
 import { readPlateText } from "@/services/plateOcr";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
-import { MANEUVER_ICONS } from "@/components/NavigationInstructionCard";
-import type { ManeuverType } from "@/services/directions";
 
 // Shorter than the original 1.2s -- expo-camera's takePictureAsync is a discrete photo
 // shutter (not a continuous frame stream the way a real video/frame-processor pipeline
@@ -19,7 +17,9 @@ import type { ManeuverType } from "@/services/directions";
 // JPEG decode + COCO-SSD inference to actually finish before the next capture fires. It's a
 // real, honest limitation of expo-camera's still-photo API versus a true frame processor
 // (e.g. react-native-vision-camera, which this app doesn't depend on) -- this makes
-// detection noticeably snappier without claiming to be continuous video.
+// detection noticeably snappier without claiming to be continuous video. A capture already in
+// flight just makes the next tick a no-op (see capturingRef below) rather than stacking, so
+// this cadence stays safe even on a slower device/frame.
 const CAPTURE_INTERVAL_MS = 700;
 // While actively navigating, the map screen underneath is also live (GPS tracking, guidance,
 // voice) and this screen's own tfjs CPU inference is already the heaviest thing running --
@@ -69,27 +69,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-export interface VehicleDetectionNavOverlay {
-  // Signed degrees: positive = next maneuver is to the right of current travel heading,
-  // negative = left. Real, live GPS-course-vs-bearing-to-maneuver math (see MapScreen's
-  // navOverlay), not a fixed/fake value.
-  headingDeltaDeg: number;
-  maneuver: ManeuverType;
-  distanceMeters: number;
-  instruction: string;
-}
-
 interface Props {
   onClose: () => void;
-  // True whenever a route is active in the background, regardless of whether navOverlay could
-  // be computed yet this render (e.g. no GPS fix at the exact instant this modal opened) -- used
-  // to ease off capture cadence (see CAPTURE_INTERVAL_MS_NAVIGATING) independent of whether
-  // there's a maneuver overlay to draw right now.
+  // True whenever a route is active in the background -- used to ease off capture cadence (see
+  // CAPTURE_INTERVAL_MS_NAVIGATING). This screen used to also draw a route overlay while
+  // navigating, removed per explicit request: it covered too much of the frame to actually
+  // point a camera at nearby vehicles through, which is the entire point of this screen.
   isNavigating?: boolean;
-  navOverlay?: VehicleDetectionNavOverlay | null;
 }
 
-export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverlay = null }: Props) {
+export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
@@ -97,10 +86,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
   const [boxes, setBoxes] = useState<TrackedBox[]>([]);
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null);
-  // Plate text is display-only -- keyed by track id, never written anywhere but this
-  // component's own state, cleared the moment a vehicle's track is pruned (see
-  // pruneStalePlateState below). Nothing here is persisted or sent off-device.
-  const [plateTexts, setPlateTexts] = useState<Map<number, string>>(new Map());
+  // Plate text (plus the real estimated region it was actually cropped from -- see
+  // plateLocator.ts -- so the on-screen frame can be sized/positioned to the real plate instead
+  // of a generic floating label) is display-only -- keyed by track id, never written anywhere
+  // but this component's own state, cleared the moment a vehicle's track is pruned (see below).
+  // Nothing here is persisted or sent off-device.
+  const [plateTexts, setPlateTexts] = useState<Map<number, { text: string; region: PlateRegion }>>(
+    new Map()
+  );
   // Track ids with a confirmed, actually-strobing lightbar signature (see
   // lightbarDetector.ts) -- real detected evidence, not a model's guess at vehicle type.
   const [emergencyTrackIds, setEmergencyTrackIds] = useState<Set<number>>(new Set());
@@ -134,7 +127,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
   // Mirrors `plateTexts` state so captureAndDetect can check it without depending on the
   // state itself -- keeps captureAndDetect referentially stable (empty deps), so the capture
   // interval effect below doesn't tear down and rebuild every time a plate read resolves.
-  const plateTextsRef = useRef(new Map<number, string>());
+  const plateTextsRef = useRef(new Map<number, { text: string; region: PlateRegion }>());
   const consecutiveFailuresRef = useRef(0);
 
   const [retryCount, setRetryCount] = useState(0);
@@ -170,8 +163,18 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
     capturingRef.current = true;
     try {
       Sentry.logger.info("vehicle-detection: calling takePictureAsync");
+      // skipProcessing was here for capture speed, but expo-camera's own docs are explicit
+      // about the real cost: "enabling skipProcessing would cause orientation uncertainty...
+      // the obtained image would be displayed wrongly (rotated by 90°, 180°, or 270°)."
+      // Detection runs on the raw, unrotated pixel buffer while the box/plate overlay math
+      // below assumes it matches the portrait preview orientation -- confirmed root cause of
+      // boxes not accurately squaring up on the actual vehicle. skipProcessing also silently
+      // discarded the `quality` option entirely ("If enabled, quality option is discarded"),
+      // so removing it makes `quality: 0.4` actually take effect for the first time, which
+      // should offset some of the added capture latency from real, correctly-oriented
+      // processing.
       const photo = await withTimeout(
-        cameraRef.current.takePictureAsync({ quality: 0.4, skipProcessing: true }),
+        cameraRef.current.takePictureAsync({ quality: 0.4 }),
         CAPTURE_TIMEOUT_MS,
         "takePictureAsync"
       );
@@ -234,7 +237,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
         readPlateText(photo.uri, region)
           .then((text) => {
             if (!text || unmountedRef.current) return;
-            plateTextsRef.current.set(trackId, text);
+            plateTextsRef.current.set(trackId, { text, region });
             setPlateTexts(new Map(plateTextsRef.current));
           })
           .catch((err) => {
@@ -331,7 +334,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
           const [x, y, w, h] = box.bbox;
           const isEmergency = emergencyTrackIds.has(box.id);
           const isSelected = selectedTrackId === box.id;
-          const plateText = plateTexts.get(box.id);
+          const plateInfo = plateTexts.get(box.id);
           const speedLabel =
             box.state === "parked"
               ? "PARKED"
@@ -341,54 +344,73 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
                   ? "steady"
                   : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
           return (
-            <Pressable
-              key={box.id}
-              onPress={() => onSelectBox(box.id)}
-              style={[
-                styles.box,
-                isEmergency && styles.boxEmergency,
-                isSelected && styles.boxSelected,
-                {
-                  left: x * scale + offsetX,
-                  top: y * scale + offsetY,
-                  width: w * scale,
-                  height: h * scale,
-                },
-              ]}
-            >
-              <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
-                {isEmergency ? `${box.label} — lights active` : `${box.label} ${Math.round(box.score * 100)}%`}
-              </Text>
-              {/* Anchored top-right, just outside the box edge, separate from the type/
-                  confidence label at top-left -- so it never overlaps the vehicle or the
-                  other label, and updates live every frame the tracker emits a speed. */}
-              {speedLabel && (
-                <Text
-                  style={[styles.speedLabel, box.state === "parked" && styles.speedLabelParked]}
-                >
-                  {speedLabel}
+            <React.Fragment key={box.id}>
+              <Pressable
+                onPress={() => onSelectBox(box.id)}
+                style={[
+                  styles.box,
+                  isEmergency && styles.boxEmergency,
+                  isSelected && styles.boxSelected,
+                  {
+                    left: x * scale + offsetX,
+                    top: y * scale + offsetY,
+                    width: w * scale,
+                    height: h * scale,
+                  },
+                ]}
+              >
+                <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
+                  {isEmergency ? `${box.label} — lights active` : `${box.label} ${Math.round(box.score * 100)}%`}
                 </Text>
-              )}
-              {/* Plate text only ever appears once on-device OCR actually confirms a real
-                  read (see plateOcr.ts) -- never a location guess with nothing behind it, and
-                  never stored or sent anywhere, just held in this screen's own state for as
-                  long as the vehicle stays tracked. Anchored bottom-center so it never
-                  competes with the type/speed badges at the top of the box. */}
-              {plateText && (
-                <View style={styles.plateLabelWrap} pointerEvents="none">
-                  <Text style={styles.plateLabel}>{plateText}</Text>
+                {/* Anchored top-right, just outside the box edge, separate from the type/
+                    confidence label at top-left -- so it never overlaps the vehicle or the
+                    other label, and updates live every frame the tracker emits a speed. */}
+                {speedLabel && (
+                  <Text
+                    style={[styles.speedLabel, box.state === "parked" && styles.speedLabelParked]}
+                  >
+                    {speedLabel}
+                  </Text>
+                )}
+                {/* Tap a box to lock visual focus on it when several vehicles are in frame --
+                    a this-screen, this-session UI aid only (like tapping to focus a camera).
+                    Nothing about the selection is saved, stored, or sent anywhere; it clears the
+                    moment the vehicle leaves frame or this screen closes. */}
+                {isSelected && (
+                  <View style={styles.selectedBadge} pointerEvents="none">
+                    <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                  </View>
+                )}
+              </Pressable>
+              {/* Plate text only ever appears once on-device OCR actually confirms a real read
+                  (see plateOcr.ts) -- never a location guess with nothing behind it, and never
+                  stored or sent anywhere, just held in this screen's own state for as long as
+                  the vehicle stays tracked. The frame itself is the *real* estimated plate
+                  rectangle (plateLocator.ts's region, the same crop OCR actually read from) in
+                  its own real position, not a generic label floating under the vehicle box --
+                  rendered as a sibling of the vehicle box (not nested in it) since the plate
+                  region has its own independent coordinates in the source photo. */}
+              {plateInfo && (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.plateFrame,
+                    {
+                      left: plateInfo.region.x * scale + offsetX,
+                      top: plateInfo.region.y * scale + offsetY,
+                      width: plateInfo.region.w * scale,
+                      height: plateInfo.region.h * scale,
+                    },
+                  ]}
+                >
+                  <View style={styles.plateFrameLabelWrap}>
+                    <Text style={styles.plateFrameLabelText} numberOfLines={1}>
+                      {plateInfo.text}
+                    </Text>
+                  </View>
                 </View>
               )}
-              {/* Tap a box to lock visual focus on it when several vehicles are in frame --
-                  a this-screen, this-session UI aid only (like tapping to focus a camera).
-                  Nothing about the selection is saved, stored, or sent anywhere; it clears the
-                  moment the vehicle leaves frame or this screen closes. */}
-              {isSelected && (
-                <View style={styles.selectedBadge} pointerEvents="none">
-                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                </View>
-              )}
-            </Pressable>
+            </React.Fragment>
           );
         })}
 
@@ -431,43 +453,6 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false, navOverl
           </>
         )}
       </View>
-
-      {/* Route stays visible and in sync while viewing vehicle detection during active
-          navigation -- guidance/GPS tracking keep running underneath (see MapScreen's
-          navOverlay), this is purely a visual read of where the road actually goes relative to
-          current travel heading. headingDeltaDeg is real, live bearing math, not a fixed
-          straight-ahead line: it shifts/tilts toward whichever side the next turn is really on,
-          and re-centers as the road heading and travel heading converge. */}
-      {navOverlay && (
-        <View style={styles.routeOverlayWrap} pointerEvents="none">
-          <View style={styles.routeOverlayChip}>
-            <Ionicons
-              name={(navOverlay.maneuver && MANEUVER_ICONS[navOverlay.maneuver]) || "arrow-up"}
-              size={16}
-              color="#FFFFFF"
-            />
-            <Text style={styles.routeOverlayChipText} numberOfLines={1}>
-              {navOverlay.distanceMeters >= 1000
-                ? `${(navOverlay.distanceMeters / 1000).toFixed(1)} km`
-                : `${Math.round(navOverlay.distanceMeters)} m`}{" "}
-              · {navOverlay.instruction}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.routeRibbon,
-              {
-                transform: [
-                  { perspective: 500 },
-                  { translateX: Math.max(-70, Math.min(70, navOverlay.headingDeltaDeg)) * 1.3 },
-                  { rotateZ: `${Math.max(-70, Math.min(70, navOverlay.headingDeltaDeg)) * 0.17}deg` },
-                  { rotateX: "58deg" },
-                ],
-              },
-            ]}
-          />
-        </View>
-      )}
 
       {/* Only control left at the bottom now that Switch Camera is gone (per explicit request
           -- it also removed the whole facing-switch-mid-capture crash risk category with it).
@@ -571,14 +556,22 @@ const styles = StyleSheet.create({
   speedLabelParked: {
     backgroundColor: "#4B5563",
   },
-  plateLabelWrap: {
+  // Sized/positioned to the real estimated plate rectangle (see the render call site) -- an
+  // exact frame around the actual plate, not a generic fixed-size badge floating near it.
+  plateFrame: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "#22D3EE",
+    borderRadius: 3,
+  },
+  plateFrameLabelWrap: {
     position: "absolute",
     bottom: -24,
     left: 0,
     right: 0,
     alignItems: "center",
   },
-  plateLabel: {
+  plateFrameLabelText: {
     backgroundColor: "#22D3EE",
     color: "#111827",
     fontSize: 12,
@@ -616,46 +609,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 12,
-  },
-  routeOverlayWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 150,
-    height: 190,
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  routeOverlayChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs + 2,
-    backgroundColor: "rgba(17, 24, 39, 0.85)",
-    borderRadius: radius.pill,
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-    maxWidth: "82%",
-  },
-  routeOverlayChipText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  // A tilted (rotateX), perspective-projected rectangle renders as a road-like trapezoid
-  // narrowing into the distance -- a real, well-known transform trick, not an image asset.
-  // translateX/rotateZ (set inline, computed from navOverlay.headingDeltaDeg) shift and tilt it
-  // toward whichever side the next real maneuver actually is, instead of always pointing
-  // straight ahead regardless of the upcoming turn. shadow.high gives it a grounded drop
-  // shadow so it reads as placed on the road rather than pasted flat over the camera feed.
-  routeRibbon: {
-    width: 64,
-    height: 240,
-    borderRadius: 10,
-    backgroundColor: "rgba(37, 99, 235, 0.55)",
-    borderWidth: 2,
-    borderColor: "rgba(147, 197, 253, 0.9)",
-    ...shadow.high,
   },
   closeButton: {
     position: "absolute",

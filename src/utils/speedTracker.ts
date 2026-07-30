@@ -28,6 +28,9 @@ interface InternalTrack {
   // Last time this track had an *actual* detection match -- not touched while a track is
   // being carried forward through its grace period below.
   lastSeenMs: number;
+  // Smoothed (DISTANCE_SMOOTHING), not the raw per-frame estimate -- see its own comment below
+  // for why smoothing this specifically (not just the bbox) was the real fix for wildly jumping
+  // speed readings.
   distanceM: number;
   speedKmh: number | null;
   center: [number, number];
@@ -62,6 +65,21 @@ const TRACK_GRACE_MS = 600;
 // vehicle that isn't really moving relative to the frame, which read as the box not quite
 // "attached" to the vehicle.
 const BBOX_SMOOTHING = 0.4;
+// The real, confirmed fix for speed readings jumping around (0, then 100, then 25 km/h on a
+// vehicle that isn't doing anything of the sort): distance was being estimated from the box
+// width of that frame's *raw* detection, not the smoothed box used for rendering -- and since
+// speed is a derivative (distance change / a short ~0.7-1.1s time step), even a few pixels of
+// ordinary detector width jitter got amplified into a large apparent speed swing every tick.
+// Smoothing distance directly (its own EMA, not just inherited from bbox smoothing, since the
+// width-to-distance transform is nonlinear) tames that at the source.
+const DISTANCE_SMOOTHING = 0.35;
+// Second layer of protection: even a smoothed distance signal can still produce one genuinely
+// implausible reading (a brief false rematch to a different nearby vehicle, a single very bad
+// frame). No real car changes speed anywhere near this fast -- 0-100 km/h in under 4 seconds is
+// already supercar-tier acceleration -- so clamp the maximum speed change any single tick is
+// allowed to report, relative to elapsed time, rather than ever displaying a physically
+// impossible jump.
+const MAX_ACCEL_KMH_PER_SEC = 25;
 
 function boxCenter(bbox: [number, number, number, number]): [number, number] {
   return [bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2];
@@ -120,7 +138,7 @@ export function createSpeedTracker() {
         }
       }
 
-      const distanceM = estimateDistanceM(det.bbox[2], imageWidthPx);
+      const rawDistanceM = estimateDistanceM(det.bbox[2], imageWidthPx);
       let speedKmh: number | null = null;
 
       if (best) {
@@ -151,11 +169,21 @@ export function createSpeedTracker() {
           }
         }
 
+        // Smoothed against the track's own previous smoothed distance, not the raw estimate --
+        // see DISTANCE_SMOOTHING's comment above for why this (not just bbox smoothing) is what
+        // actually stops speed from swinging wildly frame to frame.
+        const distanceM = best.distanceM + (rawDistanceM - best.distanceM) * DISTANCE_SMOOTHING;
+
         const dtSec = (nowMs - best.lastSeenMs) / 1000;
         if (state === "moving" && dtSec > 0.15) {
           const closingMPerSec = (best.distanceM - distanceM) / dtSec;
-          const rawKmh = closingMPerSec * 3.6;
-          speedKmh = best.speedKmh === null ? rawKmh : best.speedKmh * 0.6 + rawKmh * 0.4;
+          let rawKmh = closingMPerSec * 3.6;
+          if (best.speedKmh !== null) {
+            // Clamp to a physically plausible acceleration -- see MAX_ACCEL_KMH_PER_SEC.
+            const maxDeltaKmh = MAX_ACCEL_KMH_PER_SEC * dtSec;
+            rawKmh = Math.max(best.speedKmh - maxDeltaKmh, Math.min(best.speedKmh + maxDeltaKmh, rawKmh));
+          }
+          speedKmh = best.speedKmh === null ? rawKmh : best.speedKmh * 0.7 + rawKmh * 0.3;
         } else if (state === "moving") {
           speedKmh = best.speedKmh;
         } else {
@@ -191,7 +219,7 @@ export function createSpeedTracker() {
           id,
           bbox: det.bbox,
           lastSeenMs: nowMs,
-          distanceM,
+          distanceM: rawDistanceM,
           speedKmh: null,
           center: [cx, cy],
           state: "moving",

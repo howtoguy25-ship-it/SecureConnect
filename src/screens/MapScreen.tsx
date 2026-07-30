@@ -42,7 +42,7 @@ import {
   type TravelMode,
 } from "@/services/directions";
 import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
-import { distanceKm, bearingDegrees, angleDeltaDegrees } from "@/utils/geo";
+import { distanceKm, bearingDegrees } from "@/utils/geo";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
@@ -755,33 +755,6 @@ export function MapScreen() {
   }, []);
 
   const activeStep = route?.steps[activeStepIndex] ?? null;
-  // Real, live bearing-to-next-maneuver vs. actual direction of travel (GPS course heading,
-  // the same `heading` the map's own arrow puck and chase cam use) -- not a static/fake line.
-  // Passed into VehicleDetectionScreen so its route overlay can skew/shift to reflect which way
-  // the road is actually heading relative to how the phone is currently moving, instead of
-  // always pointing dead ahead regardless of an upcoming turn.
-  const navOverlay = useMemo(() => {
-    if (!route || !currentLatLng || !activeStep) return null;
-    const bearingToNext = bearingDegrees(
-      currentLatLng.latitude,
-      currentLatLng.longitude,
-      activeStep.endLocation.latitude,
-      activeStep.endLocation.longitude
-    );
-    const distanceMeters =
-      distanceKm(
-        currentLatLng.latitude,
-        currentLatLng.longitude,
-        activeStep.endLocation.latitude,
-        activeStep.endLocation.longitude
-      ) * 1000;
-    return {
-      headingDeltaDeg: angleDeltaDegrees(bearingToNext, heading),
-      maneuver: activeStep.maneuver,
-      distanceMeters,
-      instruction: activeStep.instruction,
-    };
-  }, [route, currentLatLng, activeStep, heading]);
   const remainingDistanceMeters = useMemo(
     () => (route ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.distanceMeters, 0) : 0),
     [route, activeStepIndex]
@@ -1244,11 +1217,7 @@ export function MapScreen() {
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
         {detectionOpen && (
           <VehicleDetectionErrorBoundary onClose={() => setDetectionOpen(false)}>
-            <VehicleDetectionScreen
-              onClose={() => setDetectionOpen(false)}
-              isNavigating={!!route}
-              navOverlay={navOverlay}
-            />
+            <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} isNavigating={!!route} />
           </VehicleDetectionErrorBoundary>
         )}
       </Modal>
