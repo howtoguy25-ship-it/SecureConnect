@@ -217,6 +217,12 @@ export default function ConversationScreen() {
   const [otherUserPhone, setOtherUserPhone] = useState<string | undefined>(undefined);
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  // Guards the initial scroll-to-bottom on conversation open so it fires
+  // exactly once per screen focus (see fetchMessages / onContentSizeChange
+  // below), rather than fighting the user every time content size changes
+  // afterward (e.g. they've scrolled up to read history and a new message
+  // arrives — that case is handled by its own explicit scrollToEnd calls).
+  const didInitialScrollRef = useRef(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTypingEmit = useRef<number>(0);
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
@@ -727,6 +733,17 @@ export default function ConversationScreen() {
           }
         });
         setReactionsMap(initialReactions);
+
+        // Land on the most recent message on open, same as every other
+        // chat app — without this, opening a conversation with more
+        // history than fits on one screen left you wherever the list
+        // defaults to (effectively scrolled past the real content, into
+        // the reserved bottom padding), so the actual messages were only
+        // reachable by scrolling up to find them. The actual scroll
+        // happens in onContentSizeChange below, once this batch has
+        // really laid out — flip the guard here so that callback knows
+        // a fresh load just landed and it's safe to jump.
+        didInitialScrollRef.current = false;
       }
       try {
         const metaRes = await fetchWithTimeout(new URL(`/api/conversations/${conversationId}`, baseUrl), {
@@ -3665,6 +3682,12 @@ export default function ConversationScreen() {
         showsVerticalScrollIndicator={false}
         onScrollToIndexFailed={() => {}}
         onScrollBeginDrag={() => { if (holdMessage) closeHoldOverlay(); }}
+        onContentSizeChange={() => {
+          if (!didInitialScrollRef.current) {
+            didInitialScrollRef.current = true;
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }
+        }}
         ListHeaderComponent={
           <View style={styles.encryptionBannerWrapper}>
             <View style={[
