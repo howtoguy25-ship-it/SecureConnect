@@ -24,6 +24,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ScreenCapture from "expo-screen-capture";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { playSendSound, playReceiveSound } from "@/utils/sounds";
 import { getSocket, connectSocket } from "@/lib/socket";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -176,20 +177,33 @@ export default function ConversationScreen() {
   // encryption keys. Nothing here is ever transmitted unencrypted — each
   // entry is replayed through the normal encrypt-then-send path (text via
   // deliverEncryptedText, media via uploadAndSendMedia) once a prekey
-  // bundle becomes fetchable. Screen-lifetime only (not persisted): if the
-  // app is killed before delivery, the bubble simply stays "queued" and a
-  // fresh signalEncrypt attempt happens next time this chat is opened.
+  // bundle becomes fetchable. Persisted to AsyncStorage per conversation
+  // (not just component state) — a queued send that was never delivered
+  // never made it into the server's message history, so if the state
+  // lived only in memory, simply leaving this screen and coming back
+  // (a normal stack pop, which unmounts the screen) would silently erase
+  // the message the user thinks they already sent.
   const [queuedTextSends, setQueuedTextSends] = useState<Array<{
     tempId: string;
     messageContent: string;
     replySnapshot: { id: string; senderId: string } | null;
+    createdAt: string;
   }>>([]);
   const [queuedMediaSends, setQueuedMediaSends] = useState<Array<{
+    tempId: string;
     uri: string;
     mediaType: 'image' | 'video' | 'audio' | 'file';
     fileName?: string;
   }>>([]);
   const isFlushingQueueRef = useRef(false);
+  const queuedSendsStorageKey = `queued_sends_${conversationId}`;
+
+  const persistQueuedSends = (
+    text: typeof queuedTextSends,
+    media: typeof queuedMediaSends,
+  ) => {
+    AsyncStorage.setItem(queuedSendsStorageKey, JSON.stringify({ text, media })).catch(() => {});
+  };
   // Build 74 — 'personal' | 'virtual' | null (null = not yet known, e.g.
   // an older deployed server that doesn't return numberType). Sealed
   // sender is virtual-conversation-only; when we KNOW the conversation
@@ -668,8 +682,44 @@ export default function ConversationScreen() {
         const data = await response.json();
         const now = Date.now();
         const filtered = (data || []).filter((m: Message) => !m.expiresAt || new Date(m.expiresAt).getTime() > now);
-        setMessages(filtered);
-        buildDecryptedCache(filtered);
+
+        // Re-hydrate any locally-queued sends (recipient hadn't published
+        // encryption keys yet) that were persisted before this screen last
+        // unmounted. Without this, a queued message the user believes they
+        // already sent would silently vanish the moment they navigate away
+        // and back — it was never in the server's response above, since it
+        // was never actually delivered.
+        let withQueued: Message[] = filtered;
+        try {
+          const raw = await AsyncStorage.getItem(queuedSendsStorageKey);
+          if (raw) {
+            const parsed = JSON.parse(raw) as {
+              text?: typeof queuedTextSends;
+              media?: typeof queuedMediaSends;
+            };
+            if (Array.isArray(parsed.text) && parsed.text.length > 0) {
+              setQueuedTextSends(parsed.text);
+              const queuedMessages: Message[] = parsed.text.map((item) => ({
+                id: item.tempId,
+                senderId: user?.id || '',
+                content: item.messageContent,
+                mediaUrl: null,
+                mediaType: null,
+                status: 'queued',
+                createdAt: item.createdAt,
+                isHidden: false,
+                transcription: null,
+              }));
+              withQueued = [...filtered, ...queuedMessages];
+            }
+            if (Array.isArray(parsed.media) && parsed.media.length > 0) {
+              setQueuedMediaSends(parsed.media);
+            }
+          }
+        } catch {}
+
+        setMessages(withQueued);
+        buildDecryptedCache(withQueued);
         const initialReactions: Record<string, Record<string, string[]>> = {};
         filtered.forEach((msg: Message & { reactions?: Record<string, string[]> | null }) => {
           if (msg.reactions && typeof msg.reactions === 'object') {
@@ -1383,7 +1433,11 @@ export default function ConversationScreen() {
           // moment their keys become fetchable.
           setEncryptionState("no_keys");
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'queued' } : m));
-          setQueuedTextSends(prev => [...prev, { tempId, messageContent, replySnapshot }]);
+          setQueuedTextSends(prev => {
+            const next = [...prev, { tempId, messageContent, replySnapshot, createdAt: optimisticMessage.createdAt }];
+            persistQueuedSends(next, queuedMediaSends);
+            return next;
+          });
           if (replySnapshot) setReplyTo(null);
           haptics.light();
           return;
@@ -1656,7 +1710,11 @@ export default function ConversationScreen() {
               // acceptable, same trade-off already made for the ordinary
               // send-fails-after-upload case a few lines down).
               setEncryptionState("no_keys");
-              setQueuedMediaSends(prev => [...prev, { uri, mediaType: type, fileName }]);
+              setQueuedMediaSends(prev => {
+                const next = [...prev, { tempId: `temp-media-${Date.now()}`, uri, mediaType: type, fileName }];
+                persistQueuedSends(queuedTextSends, next);
+                return next;
+              });
               haptics.light();
               return;
             }
@@ -1844,6 +1902,12 @@ export default function ConversationScreen() {
       try {
         const textBatch = queuedTextSends;
         setQueuedTextSends([]);
+        // Clear the persisted copy now — every item in this batch is about
+        // to either deliver for real (server has it) or get marked
+        // 'failed' in-memory (no auto-retry on hard failure, same as any
+        // other failed send), so nothing here should survive to be
+        // replayed a second time on the next mount.
+        persistQueuedSends([], []);
         for (const item of textBatch) {
           if (cancelled) break;
           try {
