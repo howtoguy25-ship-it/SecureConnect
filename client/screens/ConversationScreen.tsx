@@ -24,6 +24,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ScreenCapture from "expo-screen-capture";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { playSendSound, playReceiveSound } from "@/utils/sounds";
 import { getSocket, connectSocket } from "@/lib/socket";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -160,7 +161,30 @@ export default function ConversationScreen() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [statusQuote, setStatusQuote] = useState<StatusReplyQuote | null>(route.params?.statusReplyQuote ?? null);
   const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null);
+  // "Save" — a device-local per-message bookmark distinct from Pin (Pin is
+  // one-per-conversation and shows a banner; Save can mark many messages
+  // and highlights each bubble in place). Not synced to the other party or
+  // across devices by design, same trust model as a personal favorite.
+  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
   const [conversationTimer, setConversationTimer] = useState<number>(0);
+  // Local outbox for sends attempted before the recipient has published
+  // encryption keys. Nothing here is ever transmitted unencrypted — each
+  // entry is replayed through the normal encrypt-then-send path (text via
+  // deliverEncryptedText, media via uploadAndSendMedia) once a prekey
+  // bundle becomes fetchable. Screen-lifetime only (not persisted): if the
+  // app is killed before delivery, the bubble simply stays "queued" and a
+  // fresh signalEncrypt attempt happens next time this chat is opened.
+  const [queuedTextSends, setQueuedTextSends] = useState<Array<{
+    tempId: string;
+    messageContent: string;
+    replySnapshot: { id: string; senderId: string } | null;
+  }>>([]);
+  const [queuedMediaSends, setQueuedMediaSends] = useState<Array<{
+    uri: string;
+    mediaType: 'image' | 'video' | 'audio' | 'file';
+    fileName?: string;
+  }>>([]);
+  const isFlushingQueueRef = useRef(false);
   // Build 74 — 'personal' | 'virtual' | null (null = not yet known, e.g.
   // an older deployed server that doesn't return numberType). Sealed
   // sender is virtual-conversation-only; when we KNOW the conversation
@@ -211,38 +235,83 @@ export default function ConversationScreen() {
   const bubbleRefs = useRef<Map<string, View | null>>(new Map());
   const holdRequestId = useRef(0);
 
+  // Shared by the mount check and the no_keys poller below — returns true
+  // once the recipient has a usable session/prekey bundle.
+  const checkForRecipientKeys = useCallback(async (): Promise<boolean> => {
+    try {
+      const token = await getStoredToken();
+      const baseUrl = getApiUrl();
+      const sessionExists = await hasSession(otherUserId);
+      if (sessionExists) {
+        setEncryptionState("encrypted");
+        return true;
+      }
+      const bundleRes = await fetch(
+        new URL(`/api/e2ee/prekeys/bundle/${otherUserId}`, baseUrl).toString(),
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (bundleRes.status === 404) {
+        setEncryptionState("no_keys");
+        return false;
+      }
+      if (bundleRes.ok) {
+        const bundle: PreKeyBundle = await bundleRes.json();
+        setPreKeyBundle(bundle);
+        setEncryptionState("encrypted");
+        return true;
+      }
+      setEncryptionState("no_keys");
+      return false;
+    } catch {
+      setEncryptionState("no_keys");
+      return false;
+    }
+  }, [otherUserId]);
+
   useEffect(() => {
     if (!otherUserId) return;
-    const initSession = async () => {
-      try {
-        const token = await getStoredToken();
-        const baseUrl = getApiUrl();
-        const sessionExists = await hasSession(otherUserId);
-        if (sessionExists) {
-          setEncryptionState("encrypted");
-          return;
+    checkForRecipientKeys();
+  }, [otherUserId, checkForRecipientKeys]);
+
+  // Recipient hasn't finished E2EE setup yet — poll for their keys every
+  // few seconds instead of making the user manually retry. Stops as soon
+  // as encryptionState leaves "no_keys" (either keys show up, or the
+  // screen unmounts).
+  useEffect(() => {
+    if (encryptionState !== "no_keys") return;
+    const interval = setInterval(() => {
+      checkForRecipientKeys();
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [encryptionState, checkForRecipientKeys]);
+
+  const savedMessagesStorageKey = `saved_messages_${conversationId}`;
+
+  useEffect(() => {
+    if (!conversationId) return;
+    AsyncStorage.getItem(savedMessagesStorageKey)
+      .then((raw) => {
+        if (!raw) { setSavedMessageIds(new Set()); return; }
+        try {
+          const ids: string[] = JSON.parse(raw);
+          setSavedMessageIds(new Set(ids));
+        } catch {
+          setSavedMessageIds(new Set());
         }
-        const bundleRes = await fetch(
-          new URL(`/api/e2ee/prekeys/bundle/${otherUserId}`, baseUrl).toString(),
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (bundleRes.status === 404) {
-          setEncryptionState("no_keys");
-          return;
-        }
-        if (bundleRes.ok) {
-          const bundle: PreKeyBundle = await bundleRes.json();
-          setPreKeyBundle(bundle);
-          setEncryptionState("encrypted");
-        } else {
-          setEncryptionState("no_keys");
-        }
-      } catch {
-        setEncryptionState("no_keys");
-      }
-    };
-    initSession();
-  }, [otherUserId]);
+      })
+      .catch(() => {});
+  }, [conversationId]);
+
+  const handleToggleSaveMessage = (messageId: string) => {
+    setSavedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      AsyncStorage.setItem(savedMessagesStorageKey, JSON.stringify(Array.from(next))).catch(() => {});
+      return next;
+    });
+    haptics.light();
+  };
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener(
@@ -884,7 +953,7 @@ export default function ConversationScreen() {
       if (decryptCacheRef.current[msg.id] !== undefined) continue;
       if (!msg.content) { decryptCacheRef.current[msg.id] = ""; continue; }
       const isOwn = msg.senderId === user.id;
-      if (isOwn && msg.status === "sending") { decryptCacheRef.current[msg.id] = msg.content; continue; }
+      if (isOwn && (msg.status === "sending" || msg.status === "queued")) { decryptCacheRef.current[msg.id] = msg.content; continue; }
       try {
         const decrypted = await decryptMessageAsync(msg);
         decryptCacheRef.current[msg.id] = decrypted ?? msg.content;
@@ -956,13 +1025,17 @@ export default function ConversationScreen() {
   // just typed messages. Returns the persisted message row on success,
   // or null on failure (caller decides how to surface the error).
   //
-  // Replies aren't supported here because location/contact-card don't
-  // have a replyTo affordance; pass null explicitly to keep the call
-  // sites grep-friendly.
+  // Location/contact-card/media callers pass null (no replyTo affordance
+  // there). "Reply with Camera" and any future reply-capable media send
+  // pass the quoted message's {id, senderId} — same replyToMessageId /
+  // replyToSenderId shape handleSend already uses for text replies, and
+  // same restriction: replies always go through the legacy /api/messages
+  // route because /send-sealed doesn't accept them (see handleSend's
+  // comment on why sealed sender and replies are mutually exclusive).
   const sendTextLikeMessage = useCallback(
     async (
       enc: { ciphertext: string; encryptionVersion: string; e2eeInitEnvelope: any },
-      _replyTo: null,
+      replyTo: { id: string; senderId: string } | null,
     ): Promise<any | null> => {
       // Build 63 Phase B — close the cold-start capability window.
       //
@@ -1009,7 +1082,7 @@ export default function ConversationScreen() {
         );
         return null;
       }
-      if (eligibility.eligible) {
+      if (eligibility.eligible && !replyTo) {
         const sealedResult = await sendSealedMessage({
           conversationId,
           receiverId: otherUserId,
@@ -1031,6 +1104,8 @@ export default function ConversationScreen() {
           content: enc.ciphertext,
           encryptionVersion: enc.encryptionVersion,
           e2eeInitEnvelope: enc.e2eeInitEnvelope,
+          replyToMessageId: replyTo?.id ?? undefined,
+          replyToSenderId: replyTo?.senderId ?? undefined,
         }),
       });
       if (!response.ok) return null;
@@ -1055,6 +1130,167 @@ export default function ConversationScreen() {
     return true;
   };
 
+  // Extracted from handleSend so the queued-outbox flush (see
+  // flushQueuedTextSends) can deliver a message through the exact same
+  // sealed-vs-legacy branch once encryption becomes possible, instead of
+  // duplicating this ~120 lines of routing logic. Assumes `outgoing` is
+  // already a successfully-encrypted payload — callers own the encrypt step
+  // (and its no_keys handling) themselves.
+  const deliverEncryptedText = async (
+    outgoing: OutgoingMessage,
+    tempId: string,
+    messageContent: string,
+    replySnapshot: { id: string; senderId: string } | null,
+  ): Promise<void> => {
+    const token = await getStoredToken();
+    const baseUrl = getApiUrl();
+
+    // Build 63 Phase A — sealed-sender branch. When the sender is on
+    // app mode with an active virtual number AND the recipient is on
+    // a build that understands sealed sender, the message goes through
+    // the /send-sealed chokepoint that strips senderId before the
+    // recipient sees it. On HTTP 409 we silently retry via /messages
+    // so an old recipient is never left with an unreadable bubble.
+    // Note: replies fall back to legacy /messages, because the
+    // /send-sealed route does not accept replyToSenderId today (it
+    // would re-introduce the very identifier the route is designed to
+    // strip). Replies remain unsealed by design — they reveal sender
+    // identity in the quoted preview anyway.
+    // Build 63 Phase B — same cold-start capability resolution as
+    // sendTextLikeMessage. See that helper for the rationale.
+    // Build 74 — same known-personal-conversation skip as
+    // sendTextLikeMessage: the sealed route 400s on personal
+    // conversations by design, so go straight to legacy there.
+    const knownPersonalConv = conversationNumberType === 'personal';
+    let capability: boolean | undefined = otherUserData?.supportsSealedSender;
+    let eligibility: SealedSenderEligibility = knownPersonalConv
+      ? { eligible: false }
+      : checkSealedSenderEligibility({
+          currentUser: user,
+          recipientSupportsSealedSender: capability,
+        });
+    if (eligibility.reason === "recipient-capability-unknown") {
+      capability = await fetchRecipientCapability(otherUserId);
+      eligibility = checkSealedSenderEligibility({
+        currentUser: user,
+        recipientSupportsSealedSender: capability,
+      });
+    }
+    // Fail-closed: if the capability lookup failed (network/5xx),
+    // do NOT downgrade to legacy /api/messages — that would leak the
+    // sender's userId. Roll back the optimistic bubble and prompt
+    // the user to retry. Replies are exempt because they go to
+    // legacy by design (the sealed route doesn't accept replyTo).
+    if (
+      !replySnapshot &&
+      eligibility.reason === "recipient-capability-unknown" &&
+      user?.preferredNumberType === "app" &&
+      !vnInactive
+    ) {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      Alert.alert(
+        "Connection issue",
+        "Couldn't confirm the recipient's encryption settings. Check your connection and try again.",
+      );
+      return;
+    }
+    const useSealed = eligibility.eligible && !replySnapshot;
+
+    let response: Response | undefined;
+    let usedSealedRoute = false;
+    if (useSealed) {
+      const sealedResult = await sendSealedMessage({
+        conversationId,
+        receiverId: otherUserId,
+        content: outgoing.ciphertext,
+        e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
+      });
+      if (sealedResult.ok) {
+        const message = sealedResult.message;
+        setMessages((prev) => prev.map(m => m.id === tempId ? message : m));
+        if (message?.id && message?.content) {
+          decryptCacheRef.current[message.id] = messageContent;
+          setDecryptedCache(prev => ({ ...prev, [message.id]: messageContent }));
+        }
+        setReplyTo(null);
+        flatListRef.current?.scrollToEnd({ animated: true });
+        playSendSound();
+        usedSealedRoute = true;
+      } else if (sealedResult.fallbackToLegacy) {
+        // Recipient is on an old build — fall through to /api/messages.
+        if (__DEV__) console.log('[sealedSender] 409 fallback to /api/messages');
+      } else if (sealedResult.status === 429) {
+        // Mirror the legacy-route handling for rate-limit responses.
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        Alert.alert(
+          'Daily limit reached',
+          'Your account has been temporarily limited by our Trust & Safety system. You can send up to a few messages per day. This limit resets each day.',
+        );
+        return;
+      } else {
+        // Non-409 non-429 sealed failure: mark failed (no retry — the
+        // legacy route would likely fail too, and silently retrying
+        // could double-send if the sealed write actually landed).
+        setMessages(prev => prev.map(m =>
+          m.id === tempId ? { ...m, status: 'failed' } : m,
+        ));
+        return;
+      }
+    }
+
+    if (!usedSealedRoute) {
+      response = await fetch(new URL('/api/messages', baseUrl), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          conversationId,
+          receiverId: otherUserId,
+          content: outgoing.ciphertext,
+          encryptionVersion: outgoing.encryptionVersion,
+          e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
+          // Only the messageId is sent; the recipient renders the quoted
+          // preview from their own decrypted local cache to avoid leaking
+          // plaintext to the server.
+          replyToMessageId: replySnapshot?.id ?? undefined,
+          replyToSenderId: replySnapshot?.senderId ?? undefined,
+        }),
+      });
+    }
+
+    if (usedSealedRoute) {
+      // Already handled above; skip the legacy-response branch.
+    } else if (response && response.ok) {
+      const message = await response.json();
+      setMessages((prev) => prev.map(m => m.id === tempId ? message : m));
+      if (message?.id && message?.content) {
+        decryptCacheRef.current[message.id] = messageContent;
+        setDecryptedCache(prev => ({ ...prev, [message.id]: messageContent }));
+      }
+      setReplyTo(null);
+      flatListRef.current?.scrollToEnd({ animated: true });
+      playSendSound();
+    } else if (response && response.status === 429) {
+      // AI moderation has rate-limited this user. Roll back the optimistic
+      // bubble and surface the limit message so they understand why.
+      let body: any = {};
+      try { body = await response.json(); } catch {}
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      Alert.alert(
+        'Daily limit reached',
+        body?.error ||
+          `Your account has been temporarily limited by our Trust & Safety system. You can send up to ${body?.perDay ?? 5} messages per day. This limit resets each day.`,
+      );
+    } else {
+      // Any other non-OK status: mark the bubble as failed so the user can retry.
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, status: 'failed' } : m,
+      ));
+    }
+  };
+
   const handleSend = async () => {
     if (!newMessage.trim() || isSending) return;
 
@@ -1068,6 +1304,9 @@ export default function ConversationScreen() {
       ? buildStatusReplyEnvelope(quoteSnapshot, typedText)
       : typedText;
     const tempId = `temp-${Date.now()}`;
+    const replySnapshot = replyTo
+      ? { id: replyTo.id, senderId: replyTo.senderId }
+      : null;
 
     const optimisticMessage: Message = {
       id: tempId,
@@ -1093,9 +1332,6 @@ export default function ConversationScreen() {
     }
 
     try {
-      const token = await getStoredToken();
-      const baseUrl = getApiUrl();
-
       let outgoing: OutgoingMessage;
       try {
         outgoing = await signalEncrypt(
@@ -1107,164 +1343,25 @@ export default function ConversationScreen() {
         setEncryptionState("encrypted");
       } catch (encErr: any) {
         if (encErr?.message === "no_keys") {
+          // Don't drop the message — the recipient just hasn't finished
+          // E2EE setup yet, which is common right after they sign up.
+          // Queue it locally; queuedTextFlushEffect below auto-delivers
+          // it (still fully encrypted, never sent in the clear) the
+          // moment their keys become fetchable.
           setEncryptionState("no_keys");
-          setMessages(prev => prev.filter(m => m.id !== tempId));
-          Alert.alert("Cannot send", "Recipient hasn't set up encryption keys yet.");
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'queued' } : m));
+          setQueuedTextSends(prev => [...prev, { tempId, messageContent, replySnapshot }]);
+          if (replySnapshot) setReplyTo(null);
+          haptics.light();
           return;
         }
         throw encErr;
       }
 
-      const replySnapshot = replyTo;
-
-      // Build 63 Phase A — sealed-sender branch. When the sender is on
-      // app mode with an active virtual number AND the recipient is on
-      // a build that understands sealed sender, the message goes through
-      // the /send-sealed chokepoint that strips senderId before the
-      // recipient sees it. On HTTP 409 we silently retry via /messages
-      // so an old recipient is never left with an unreadable bubble.
-      // Note: replies fall back to legacy /messages, because the
-      // /send-sealed route does not accept replyToSenderId today (it
-      // would re-introduce the very identifier the route is designed to
-      // strip). Replies remain unsealed by design — they reveal sender
-      // identity in the quoted preview anyway.
-      // Build 63 Phase B — same cold-start capability resolution as
-      // sendTextLikeMessage. See that helper for the rationale.
-      // Build 74 — same known-personal-conversation skip as
-      // sendTextLikeMessage: the sealed route 400s on personal
-      // conversations by design, so go straight to legacy there.
-      const knownPersonalConv = conversationNumberType === 'personal';
-      let capability: boolean | undefined = otherUserData?.supportsSealedSender;
-      let eligibility: SealedSenderEligibility = knownPersonalConv
-        ? { eligible: false }
-        : checkSealedSenderEligibility({
-            currentUser: user,
-            recipientSupportsSealedSender: capability,
-          });
-      if (eligibility.reason === "recipient-capability-unknown") {
-        capability = await fetchRecipientCapability(otherUserId);
-        eligibility = checkSealedSenderEligibility({
-          currentUser: user,
-          recipientSupportsSealedSender: capability,
-        });
-      }
-      // Fail-closed: if the capability lookup failed (network/5xx),
-      // do NOT downgrade to legacy /api/messages — that would leak the
-      // sender's userId. Roll back the optimistic bubble and prompt
-      // the user to retry. Replies are exempt because they go to
-      // legacy by design (the sealed route doesn't accept replyTo).
-      if (
-        !replySnapshot &&
-        eligibility.reason === "recipient-capability-unknown" &&
-        user?.preferredNumberType === "app" &&
-        !vnInactive
-      ) {
-        setMessages(prev => prev.filter(m => m.id !== tempId));
-        Alert.alert(
-          "Connection issue",
-          "Couldn't confirm the recipient's encryption settings. Check your connection and try again.",
-        );
-        setIsSending(false);
-        return;
-      }
-      const useSealed = eligibility.eligible && !replySnapshot;
-
-      let response: Response | undefined;
-      let usedSealedRoute = false;
-      if (useSealed) {
-        const sealedResult = await sendSealedMessage({
-          conversationId,
-          receiverId: otherUserId,
-          content: outgoing.ciphertext,
-          e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
-        });
-        if (sealedResult.ok) {
-          const message = sealedResult.message;
-          setMessages((prev) => prev.map(m => m.id === tempId ? message : m));
-          if (message?.id && message?.content) {
-            decryptCacheRef.current[message.id] = messageContent;
-            setDecryptedCache(prev => ({ ...prev, [message.id]: messageContent }));
-          }
-          setReplyTo(null);
-          flatListRef.current?.scrollToEnd({ animated: true });
-          playSendSound();
-          usedSealedRoute = true;
-        } else if (sealedResult.fallbackToLegacy) {
-          // Recipient is on an old build — fall through to /api/messages.
-          if (__DEV__) console.log('[sealedSender] 409 fallback to /api/messages');
-        } else if (sealedResult.status === 429) {
-          // Mirror the legacy-route handling for rate-limit responses.
-          setMessages(prev => prev.filter(m => m.id !== tempId));
-          Alert.alert(
-            'Daily limit reached',
-            'Your account has been temporarily limited by our Trust & Safety system. You can send up to a few messages per day. This limit resets each day.',
-          );
-          return;
-        } else {
-          // Non-409 non-429 sealed failure: mark failed (no retry — the
-          // legacy route would likely fail too, and silently retrying
-          // could double-send if the sealed write actually landed).
-          setMessages(prev => prev.map(m =>
-            m.id === tempId ? { ...m, status: 'failed' } : m,
-          ));
-          return;
-        }
-      }
-
-      if (!usedSealedRoute) {
-        response = await fetch(new URL('/api/messages', baseUrl), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            conversationId,
-            receiverId: otherUserId,
-            content: outgoing.ciphertext,
-            encryptionVersion: outgoing.encryptionVersion,
-            e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
-            // Only the messageId is sent; the recipient renders the quoted
-            // preview from their own decrypted local cache to avoid leaking
-            // plaintext to the server.
-            replyToMessageId: replySnapshot?.id ?? undefined,
-            replyToSenderId: replySnapshot?.senderId ?? undefined,
-          }),
-        });
-      }
-
-      if (usedSealedRoute) {
-        // Already handled above; skip the legacy-response branch.
-      } else if (response && response.ok) {
-        const message = await response.json();
-        setMessages((prev) => prev.map(m => m.id === tempId ? message : m));
-        if (message?.id && message?.content) {
-          decryptCacheRef.current[message.id] = messageContent;
-          setDecryptedCache(prev => ({ ...prev, [message.id]: messageContent }));
-        }
-        setReplyTo(null);
-        flatListRef.current?.scrollToEnd({ animated: true });
-        playSendSound();
-      } else if (response && response.status === 429) {
-        // AI moderation has rate-limited this user. Roll back the optimistic
-        // bubble and surface the limit message so they understand why.
-        let body: any = {};
-        try { body = await response.json(); } catch {}
-        setMessages(prev => prev.filter(m => m.id !== tempId));
-        Alert.alert(
-          'Daily limit reached',
-          body?.error ||
-            `Your account has been temporarily limited by our Trust & Safety system. You can send up to ${body?.perDay ?? 5} messages per day. This limit resets each day.`,
-        );
-      } else {
-        // Any other non-OK status: mark the bubble as failed so the user can retry.
-        setMessages(prev => prev.map(m =>
-          m.id === tempId ? { ...m, status: 'failed' } : m,
-        ));
-      }
+      await deliverEncryptedText(outgoing, tempId, messageContent, replySnapshot);
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages((prev) => prev.map(m => 
+      setMessages((prev) => prev.map(m =>
         m.id === tempId ? { ...m, status: 'failed' } : m
       ));
     } finally {
@@ -1518,10 +1615,16 @@ export default function ConversationScreen() {
             );
           } catch (encErr: any) {
             if (encErr?.message === "no_keys") {
-              Alert.alert(
-                "Cannot send",
-                "Recipient hasn't set up encryption keys yet.",
-              );
+              // Same outbox treatment as text: don't drop it, queue the
+              // original local file for a fresh upload+encrypt+send once
+              // the recipient's keys become fetchable (queuedSendFlushEffect
+              // below). The ciphertext blob already written to GCS above is
+              // orphaned (pure ciphertext, no metadata tying it to anyone —
+              // acceptable, same trade-off already made for the ordinary
+              // send-fails-after-upload case a few lines down).
+              setEncryptionState("no_keys");
+              setQueuedMediaSends(prev => [...prev, { uri, mediaType: type, fileName }]);
+              haptics.light();
               return;
             }
             throw encErr;
@@ -1538,13 +1641,18 @@ export default function ConversationScreen() {
           // sendTextLikeMessage encapsulates: eligibility check, sealed POST,
           // 409 sentinel fallback to /api/messages, and legacy POST when
           // ineligible. Returns the persisted row or null on failure.
+          // Reads replyTo directly off state (same source the composer's
+          // reply bar reads) so "Reply with Camera" — and any media sent
+          // while a reply is staged — actually carries the quote instead
+          // of silently dropping it.
+          const mediaReplySnapshot = replyTo;
           const message = await sendTextLikeMessage(
             {
               ciphertext: outgoing.ciphertext,
               encryptionVersion: outgoing.encryptionVersion,
               e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
             },
-            /* replyTo */ null,
+            mediaReplySnapshot ? { id: mediaReplySnapshot.id, senderId: mediaReplySnapshot.senderId } : null,
           );
           if (!message) {
             // sendTextLikeMessage returns null on any non-OK response.
@@ -1568,6 +1676,7 @@ export default function ConversationScreen() {
             setDecryptedCache(prev => ({ ...prev, [message.id]: envelopeText }));
             setDecryptedMediaUris(prev => ({ ...prev, [message.id]: uri }));
           }
+          if (mediaReplySnapshot) setReplyTo(null);
           flatListRef.current?.scrollToEnd({ animated: true });
           playSendSound();
           return;
@@ -1683,6 +1792,47 @@ export default function ConversationScreen() {
       setIsSending(false);
     }
   };
+
+  // Drains queuedTextSends/queuedMediaSends the moment the recipient's keys
+  // become available (encryptionState flips to "encrypted" via
+  // checkForRecipientKeys' poll). Text is delivered directly through
+  // deliverEncryptedText using a fresh signalEncrypt call; media is
+  // re-run through uploadAndSendMedia end-to-end (re-upload + re-encrypt),
+  // since the original attempt's upload happened before the no_keys error
+  // and its ciphertext blob was left orphaned.
+  useEffect(() => {
+    if (encryptionState !== "encrypted") return;
+    if (queuedTextSends.length === 0 && queuedMediaSends.length === 0) return;
+    if (isFlushingQueueRef.current) return;
+
+    let cancelled = false;
+    (async () => {
+      isFlushingQueueRef.current = true;
+      try {
+        const textBatch = queuedTextSends;
+        setQueuedTextSends([]);
+        for (const item of textBatch) {
+          if (cancelled) break;
+          try {
+            const outgoing = await signalEncrypt(user?.id ?? "", otherUserId, item.messageContent, preKeyBundle);
+            await deliverEncryptedText(outgoing, item.tempId, item.messageContent, item.replySnapshot);
+          } catch (err) {
+            console.error('[outbox] queued text delivery failed:', err);
+            setMessages(prev => prev.map(m => m.id === item.tempId ? { ...m, status: 'failed' } : m));
+          }
+        }
+        const mediaBatch = queuedMediaSends;
+        setQueuedMediaSends([]);
+        for (const item of mediaBatch) {
+          if (cancelled) break;
+          await uploadAndSendMedia(item.uri, item.mediaType, item.fileName);
+        }
+      } finally {
+        isFlushingQueueRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [encryptionState, queuedTextSends, queuedMediaSends, otherUserId, preKeyBundle, user?.id]);
 
   const startVoiceRecording = async () => {
     // Step the user through what's failing rather than silently swallowing
@@ -2519,6 +2669,15 @@ export default function ConversationScreen() {
     haptics.light();
   };
 
+  const handleReplyWithCamera = () => {
+    if (!selectedMessage) return;
+    setReplyTo(selectedMessage);
+    setShowMessageOptions(false);
+    setSelectedMessage(null);
+    haptics.light();
+    handleTakePhoto();
+  };
+
   const handlePinMessage = async () => {
     if (!selectedMessage) return;
     const id = selectedMessage.id;
@@ -2870,7 +3029,7 @@ export default function ConversationScreen() {
       );
     }
 
-    const rawDisplayContent = isOwn && item.status === 'sending'
+    const rawDisplayContent = isOwn && (item.status === 'sending' || item.status === 'queued')
       ? item.content
       : (decryptedCache[item.id] ?? tryDecrypt(item.content, item.id));
 
@@ -2891,17 +3050,25 @@ export default function ConversationScreen() {
     // was attached, displayContent ends up null and the text block is skipped.
     const displayContent = mediaEnvelope ? null : (statusReply ? statusReply.text : rawDisplayContent);
 
+    const isSaved = savedMessageIds.has(item.id);
+
     const handlePress = () => {
       if (isSelectMode) {
         toggleMessageSelection(item.id);
+        return;
+      }
+      // Tap a saved (highlighted) bubble to unsave it — saving itself only
+      // happens through the hold menu, so a plain tap never saves.
+      if (isSaved) {
+        handleToggleSaveMessage(item.id);
       }
     };
 
     return (
-      <Pressable 
+      <Pressable
         onPress={handlePress}
         style={[
-          styles.messageWrapper, 
+          styles.messageWrapper,
           isOwn ? styles.ownMessageWrapper : styles.otherMessageWrapper,
           isSelectMode && styles.selectModeWrapper,
         ]}
@@ -2929,6 +3096,7 @@ export default function ConversationScreen() {
             {
               backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary,
             },
+            isSaved && { borderWidth: 2, borderColor: '#FFD60A' },
             isSelected && { opacity: 0.8 },
             // Disable native browser text-selection / iOS callout on long-press.
             Platform.OS === 'web' && ({
@@ -3279,6 +3447,8 @@ export default function ConversationScreen() {
             </ThemedText>
             {item.status === 'sending' ? (
               <ActivityIndicator size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
+            ) : item.status === 'queued' ? (
+              <Feather name="clock" size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
             ) : item.status === 'failed' ? (
               <AnimatedPressable 
                 onPress={() => {
@@ -3414,7 +3584,9 @@ export default function ConversationScreen() {
                 : encryptionState === "securing"
                 ? "Setting up encryption..."
                 : encryptionState === "no_keys"
-                ? "Recipient hasn't set up encryption keys"
+                ? (queuedTextSends.length + queuedMediaSends.length > 0
+                    ? `Recipient hasn't set up encryption keys — ${queuedTextSends.length + queuedMediaSends.length} message${queuedTextSends.length + queuedMediaSends.length === 1 ? '' : 's'} will send once they do`
+                    : "Recipient hasn't set up encryption keys")
                 : "Encryption session reset"}
             </ThemedText>
           </View>
@@ -4827,6 +4999,8 @@ export default function ConversationScreen() {
         const list: HoldAction[] = [
           { key: 'reply', label: 'Reply', icon: 'corner-up-left',
             onPress: () => { closeHoldOverlay(); handleReplyToMessage(); } },
+          { key: 'reply-camera', label: 'Reply with Camera', icon: 'camera',
+            onPress: () => { closeHoldOverlay(); handleReplyWithCamera(); } },
           { key: 'forward', label: 'Forward', icon: 'corner-up-right',
             onPress: () => { closeHoldOverlay(); handleForwardMessage(); } },
         ];
@@ -4837,6 +5011,14 @@ export default function ConversationScreen() {
         list.push({ key: 'pin', label: pinnedMessageId === holdMessage.id ? 'Unpin' : 'Pin',
           icon: 'bookmark',
           onPress: () => { closeHoldOverlay(); handlePinMessage(); } });
+        // Save is a device-local highlight+bookmark; it doesn't make sense
+        // for messages that are about to disappear, so it's hidden entirely
+        // when this conversation has a disappearing-messages timer active.
+        if (conversationTimer === 0) {
+          list.push({ key: 'save', label: savedMessageIds.has(holdMessage.id) ? 'Unsave' : 'Save',
+            icon: savedMessageIds.has(holdMessage.id) ? 'star' : 'star',
+            onPress: () => { closeHoldOverlay(); handleToggleSaveMessage(holdMessage.id); } });
+        }
         list.push({ key: 'info', label: 'Message Info', icon: 'info',
           onPress: () => { closeHoldOverlay(); handleShowMessageInfo(); } });
         list.push({ key: 'share', label: 'Share', icon: 'share',
