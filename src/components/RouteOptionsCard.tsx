@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, type LayoutChangeEvent } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Route, RouteProfileKey, TravelMode } from "@/services/directions";
@@ -43,6 +43,10 @@ interface Props {
   onCancel: () => void;
   onAddStop: () => void;
   hasStop: boolean;
+  // Real measured card height, so the caller can fit the previewed route's polyline above it
+  // instead of guessing a fixed bottom padding that this card -- 3 route options, a mode row,
+  // and Add stop/Start -- reliably grows taller than.
+  onHeightChange?: (height: number) => void;
 }
 
 export function RouteOptionsCard({
@@ -58,13 +62,18 @@ export function RouteOptionsCard({
   onCancel,
   onAddStop,
   hasStop,
+  onHeightChange,
 }: Props) {
   const insets = useSafeAreaInsets();
   const isDriving = travelMode === "driving";
   const hasResult = isDriving ? !!options : !!modeRoute;
 
+  const onLayout = (e: LayoutChangeEvent) => {
+    onHeightChange?.(e.nativeEvent.layout.height);
+  };
+
   return (
-    <View style={[styles.card, { bottom: insets.bottom + spacing.xl }]}>
+    <View style={[styles.card, { bottom: insets.bottom + spacing.xl }]} onLayout={onLayout}>
       <View style={styles.header}>
         <Text style={styles.title}>Choose a route</Text>
         <Pressable onPress={onCancel} hitSlop={12} accessibilityLabel="Cancel route selection">

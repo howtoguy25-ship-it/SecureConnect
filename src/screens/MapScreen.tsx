@@ -89,6 +89,11 @@ export function MapScreen() {
   // it never ends up partly hidden behind a taller-than-expected card. 96 is just the
   // reasonable single-line fallback for the one frame before the first real measurement lands.
   const [instructionCardHeight, setInstructionCardHeight] = useState(96);
+  // Same pattern as instructionCardHeight above, for RouteOptionsCard (see its onHeightChange)
+  // -- the route-preview polyline's fitToCoordinates bottom padding uses this real number
+  // instead of a fixed guess, so the previewed route never ends up partly hidden behind the
+  // card. 320 is a reasonable fallback for the one frame before the first real measurement.
+  const [routeCardHeight, setRouteCardHeight] = useState(320);
   const guidanceRef = useRef(createGuidanceState());
   // Exact arrival coordinate for the highlighted destination marker below -- kept separate
   // from route.polyline's last point so it's the real picked place, not whatever pixel the
@@ -324,6 +329,20 @@ export function MapScreen() {
     });
   }, [currentLatLng]);
 
+  // General-purpose "snap back to my location" -- unlike the nav-only Recenter pill above
+  // (only ever rendered once route && !followTilt), this is meant to be on screen at all times,
+  // browsing the map with no destination picked included, so panning/zooming away always has a
+  // way back. While actively navigating it just resumes the existing chase-cam follow instead
+  // of animating the camera itself, so it doesn't fight/duplicate that effect's own camera work.
+  const onRecenter = useCallback(() => {
+    if (!currentLatLng) return;
+    if (route) {
+      if (!followTilt) toggleFollowTilt();
+      return;
+    }
+    mapRef.current?.animateCamera({ center: currentLatLng }, { duration: 500 });
+  }, [currentLatLng, route, followTilt, toggleFollowTilt]);
+
   // Tapping the route line pulls the camera back into a wider, still-tilted "overview" --
   // Apple/Google Maps' own convention when you tap the route during nav: not the tight
   // chase-cam (that's what the small toggle button gives you), but a pulled-back 3D view that
@@ -461,7 +480,7 @@ export function MapScreen() {
           setModeRoute(null);
           setSelectedProfile("normal");
           mapRef.current?.fitToCoordinates(options.normal.polyline, {
-            edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+            edgePadding: { top: 120, right: 60, bottom: routeCardHeight + spacing.md, left: 60 },
             animated: true,
           });
         } else {
@@ -473,7 +492,7 @@ export function MapScreen() {
           setModeRoute(modeResult);
           setRouteOptions(null);
           mapRef.current?.fitToCoordinates(modeResult.polyline, {
-            edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+            edgePadding: { top: 120, right: 60, bottom: routeCardHeight + spacing.md, left: 60 },
             animated: true,
           });
         }
@@ -494,7 +513,7 @@ export function MapScreen() {
         setLoadingRouteOptions(false);
       }
     },
-    [currentLatLng]
+    [currentLatLng, routeCardHeight]
   );
 
   // Min zoom before the OSM layer *re-fetches* -- a zoomed-out view spans too wide an area for
@@ -634,12 +653,12 @@ export function MapScreen() {
       const previewRoute = routeOptions?.[key];
       if (previewRoute) {
         mapRef.current?.fitToCoordinates(previewRoute.polyline, {
-          edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
+          edgePadding: { top: 120, right: 60, bottom: routeCardHeight + spacing.md, left: 60 },
           animated: true,
         });
       }
     },
-    [routeOptions]
+    [routeOptions, routeCardHeight]
   );
 
   const confirmRoute = useCallback(() => {
@@ -1007,6 +1026,7 @@ export function MapScreen() {
           onCancel={cancelRouteOptions}
           onAddStop={() => setPickingStop(true)}
           hasStop={!!stopLocation}
+          onHeightChange={setRouteCardHeight}
         />
       )}
 
@@ -1090,11 +1110,12 @@ export function MapScreen() {
         </Pressable>
       </View>
 
-      {/* Hidden while a bottom sheet is open or an alert is being placed -- previously these
-          stayed rendered at their normal position underneath a sheet, and whichever FAB sat
-          just above the sheet's top edge showed as a clipped sliver peeking out from behind
-          it instead of being cleanly covered or cleanly visible. */}
-      {!anySheetOpen && !placingAlert && (
+      {/* Hidden while a bottom sheet is open, an alert is being placed, or the route/stop
+          picker card is up (pendingDestination) -- previously these stayed rendered at their
+          normal position underneath whichever card was showing, and the FAB right above that
+          card's top edge visibly collided with it (the satellite/camera buttons overlapping
+          "Fastest"/"Safest" rows) instead of being cleanly covered or cleanly visible. */}
+      {!anySheetOpen && !placingAlert && !pendingDestination && (
         <>
       <Pressable
         style={({ pressed }) => [
@@ -1154,6 +1175,23 @@ export function MapScreen() {
         accessibilityLabel={mapType === "hybrid" ? "Switch to standard map" : "Switch to satellite map"}
       >
         <Ionicons name="map-outline" size={22} color="#FFFFFF" />
+      </Pressable>
+
+      {/* Permanent recenter button -- always in this stack, on top of the satellite and "+"
+          buttons below it, regardless of whether navigation is active. Previously the only
+          recenter control was the nav-only pill up top (only ever rendered once
+          route && !followTilt is true), so there was no way back to your own location at all
+          while just browsing the map before picking a destination. */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.fabSecondary,
+          { bottom: insets.bottom + 24 + (isMap3DSupported ? 280 : 210) },
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={onRecenter}
+        accessibilityLabel="Recenter on my location"
+      >
+        <Ionicons name="locate" size={22} color="#FFFFFF" />
       </Pressable>
         </>
       )}
