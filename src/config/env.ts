@@ -40,4 +40,9 @@ export const env = {
   // Optional -- Sentry.init() below is a no-op without this, so an empty string here just
   // means crash reporting stays Firestore-only rather than breaking anything.
   sentryDsn: extra.sentryDsn ?? "",
+  // Genuinely optional (not `required()`, which would log a misleading "you forgot this"
+  // warning on every launch) -- Google Sign-In is a real feature, but the app works fully
+  // without it configured. GoogleSignInButton disables itself and explains why when this is
+  // empty, rather than the button doing nothing or crashing on tap.
+  googleIosClientId: extra.googleIosClientId ?? "",
 };

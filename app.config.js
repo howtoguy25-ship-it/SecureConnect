@@ -1,5 +1,16 @@
 require("dotenv/config");
 
+// @react-native-google-signin/google-signin's config plugin throws at config-evaluation time
+// (failing the whole build) if given an iosUrlScheme that isn't set, so this is only included
+// once a real one exists -- until then, Google Sign-In's native module still links fine (JS
+// package autolinking doesn't depend on this plugin), it just isn't configured yet, so tapping
+// the button fails gracefully with a caught error instead of the entire app failing to build.
+// Real value comes from Firebase Console -> Project settings -> Add app -> iOS (bundle id
+// com.trackline.navigate) -> download GoogleService-Info.plist -> its REVERSED_CLIENT_ID field.
+const googleSigninPlugins = process.env.GOOGLE_IOS_URL_SCHEME
+  ? [["@react-native-google-signin/google-signin", { iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME }]]
+  : [];
+
 /** @type {import('@expo/config-types').ExpoConfig} */
 module.exports = {
   expo: {
@@ -126,6 +137,8 @@ module.exports = {
         },
       ],
       "./modules/map3d/plugin/withGoogleMaps3DSignatureFix.js",
+      "expo-apple-authentication",
+      ...googleSigninPlugins,
       // Only uploads debug symbols/source maps during EAS builds once org/project/authToken
       // are set (from sentry.io -- Settings -> Auth Tokens for the token) -- harmless no-op
       // config without them, Sentry.init() below still works and reports crashes either way,
@@ -161,6 +174,12 @@ module.exports = {
       firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET,
       firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
       firebaseAppId: process.env.FIREBASE_APP_ID,
+      // The Google Sign-In *iOS* OAuth client ID -- distinct from any "Web client ID" the
+      // Firebase Console shows by default (that one's for the web app's signInWithPopup flow
+      // and won't work here). Comes from the same GoogleService-Info.plist mentioned above
+      // (its CLIENT_ID field), or Google Cloud Console -> APIs & Services -> Credentials -> an
+      // OAuth 2.0 Client ID of type "iOS".
+      googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID,
       admobBannerAndroidUnitId: process.env.ADMOB_ANDROID_BANNER_UNIT_ID,
       admobBannerIosUnitId: process.env.ADMOB_IOS_BANNER_UNIT_ID,
       admobAppOpenAndroidUnitId: process.env.ADMOB_ANDROID_APP_OPEN_UNIT_ID,

@@ -3,11 +3,13 @@ import { NavigationContainer, type NavigationContainerRef } from "@react-navigat
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { MapScreen } from "@/screens/MapScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
+import { SignInScreen } from "@/screens/SignInScreen";
 import { navigationIntegration } from "@/services/sentry";
 
 export type RootStackParamList = {
   Map: undefined;
   Settings: undefined;
+  SignIn: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -26,6 +28,11 @@ export function RootNavigator() {
           name="Settings"
           component={SettingsScreen}
           options={{ headerShown: true, title: "Settings" }}
+        />
+        <Stack.Screen
+          name="SignIn"
+          component={SignInScreen}
+          options={{ headerShown: true, title: "Sign In" }}
         />
       </Stack.Navigator>
     </NavigationContainer>

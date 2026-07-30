@@ -1,15 +1,19 @@
 import React, { useCallback } from "react";
-import { View, Text, Image, StyleSheet, Switch, ScrollView } from "react-native";
+import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable } from "react-native";
 import Slider from "@react-native-community/slider";
 import Constants from "expo-constants";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSettings } from "@/context/SettingsContext";
 import { useAuth } from "@/context/AuthContext";
 import { syncAlertRadiusToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
+import { signOutUser } from "@/services/firebase";
 import { BUSINESS_INFO } from "@/config/business";
-import { colors, radius, shadow, spacing } from "@/theme/tokens";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
 import { ALERT_LABELS, type AlertType } from "@/types/alert";
+import type { RootStackParamList } from "@/navigation/RootNavigator";
 
 function sensitivityLabel(value: number): string {
   if (value <= 0.4) return "Low";
@@ -20,6 +24,11 @@ function sensitivityLabel(value: number): string {
 export function SettingsScreen() {
   const { settings, updateSettings } = useSettings();
   const { user } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  // Every device is signed in anonymously from launch (see firebase.ts's ensureSignedIn) --
+  // isAnonymous is the real signal for "hasn't actually signed in with an identity yet",
+  // not just user being null/non-null.
+  const isSignedIn = !!user && !user.isAnonymous;
 
   const onRadiusChange = useCallback(
     async (value: number) => {
@@ -89,6 +98,33 @@ export function SettingsScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Section title="Account">
+        {isSignedIn ? (
+          <>
+            <Text style={styles.rowLabel}>Signed in as {user.email ?? user.displayName ?? "you"}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.signOutButton, pressed && { opacity: pressedOpacity }]}
+              onPress={() => signOutUser()}
+            >
+              <Text style={styles.signOutButtonText}>Sign out</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Text style={styles.helperText}>
+              Not signed in -- everything still works. Sign in to make your reports and settings
+              recoverable if you get a new phone.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [styles.signInButton, pressed && { opacity: pressedOpacity }]}
+              onPress={() => navigation.navigate("SignIn")}
+            >
+              <Text style={styles.signInButtonText}>Sign in</Text>
+            </Pressable>
+          </>
+        )}
+      </Section>
+
       <Section title="Live alerts">
         <Row label="Receive alerts">
           <Switch
@@ -246,6 +282,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     lineHeight: 17,
+  },
+  signInButton: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md - 2,
+    alignItems: "center",
+  },
+  signInButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  signOutButton: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md - 2,
+    alignItems: "center",
+  },
+  signOutButtonText: {
+    color: colors.danger,
+    fontWeight: "700",
+    fontSize: 14,
   },
   alertTypeGrid: {
     gap: spacing.sm,
