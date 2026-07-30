@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
-import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { detectVehiclesInPhoto, decodePhotoForDetection, warmUpModel } from "@/services/vehicleDetection";
@@ -31,7 +31,6 @@ interface Props {
 export function VehicleDetectionScreen({ onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
-  const [facing, setFacing] = useState<CameraType>("back");
   const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<TrackedBox[]>([]);
@@ -44,6 +43,16 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   // Track ids with a confirmed, actually-strobing lightbar signature (see
   // lightbarDetector.ts) -- real detected evidence, not a model's guess at vehicle type.
   const [emergencyTrackIds, setEmergencyTrackIds] = useState<Set<number>>(new Set());
+  // Tapping a box locks visual focus onto that one vehicle (a highlighted outline + checkmark)
+  // when several are in frame -- purely a this-screen, this-session UI focus aid, the same way
+  // tapping a subject focuses a camera. Deliberately NOT a save/record feature: nothing here is
+  // written to storage, sent anywhere, or retrievable after this screen closes -- it clears the
+  // moment the vehicle's track is dropped or the screen closes, exactly like the live plate
+  // text above.
+  const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
+  const onSelectBox = useCallback((id: number) => {
+    setSelectedTrackId((prev) => (prev === id ? null : id));
+  }, []);
 
   const cameraRef = useRef<CameraView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -58,11 +67,6 @@ export function VehicleDetectionScreen({ onClose }: Props) {
       unmountedRef.current = true;
     };
   }, []);
-  // Briefly pauses captures around a camera facing switch -- expo-camera reconfigures (and
-  // effectively remounts) the native capture session when `facing` changes, and firing
-  // takePictureAsync into that transition was a real, plausible crash path, not just a UX
-  // rough edge.
-  const pausedRef = useRef(false);
   const speedTrackerRef = useRef(createSpeedTracker());
   const plateAttemptsRef = useRef(new Map<number, number>());
   const platesReadingRef = useRef(new Set<number>());
@@ -95,7 +99,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   }, [retryCount]);
 
   const captureAndDetect = useCallback(async () => {
-    if (capturingRef.current || pausedRef.current || unmountedRef.current || !cameraRef.current) return;
+    if (capturingRef.current || unmountedRef.current || !cameraRef.current) return;
     capturingRef.current = true;
     try {
       Sentry.logger.info("vehicle-detection: calling takePictureAsync");
@@ -111,6 +115,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
       setBoxes(tracked);
 
       const liveIds = speedTrackerRef.current.liveTrackIds();
+      setSelectedTrackId((prev) => (prev !== null && !liveIds.has(prev) ? null : prev));
 
       // Real, evidence-based emergency-lightbar check (actively strobing red/blue light),
       // not a guess at vehicle type -- see lightbarDetector.ts.
@@ -182,24 +187,6 @@ export function VehicleDetectionScreen({ onClose }: Props) {
     setContainerSize({ width, height });
   }, []);
 
-  const toggleFacing = useCallback(() => {
-    // Pause captures across the switch -- expo-camera reconfigures the native capture session
-    // when `facing` changes, and a takePictureAsync landing mid-reconfiguration was a real,
-    // plausible crash path, not just a cosmetic glitch. 600ms comfortably covers the native
-    // session teardown/recreate on both platforms without being long enough to feel laggy.
-    pausedRef.current = true;
-    setBoxes([]);
-    plateAttemptsRef.current.clear();
-    platesReadingRef.current.clear();
-    plateTextsRef.current = new Map();
-    setPlateTexts(new Map());
-    setEmergencyTrackIds(new Set());
-    setFacing((prev) => (prev === "back" ? "front" : "back"));
-    setTimeout(() => {
-      if (!unmountedRef.current) pausedRef.current = false;
-    }, 600);
-  }, []);
-
   if (!permission) {
     return <View style={styles.container} />;
   }
@@ -229,13 +216,14 @@ export function VehicleDetectionScreen({ onClose }: Props) {
 
   return (
     <View style={styles.container} onLayout={onContainerLayout}>
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} />
+      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
 
       {photoSize &&
         containerSize &&
         boxes.map((box) => {
           const [x, y, w, h] = box.bbox;
           const isEmergency = emergencyTrackIds.has(box.id);
+          const isSelected = selectedTrackId === box.id;
           const plateText = plateTexts.get(box.id);
           const speedLabel =
             box.state === "parked"
@@ -246,11 +234,13 @@ export function VehicleDetectionScreen({ onClose }: Props) {
                   ? "steady"
                   : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
           return (
-            <View
+            <Pressable
               key={box.id}
+              onPress={() => onSelectBox(box.id)}
               style={[
                 styles.box,
                 isEmergency && styles.boxEmergency,
+                isSelected && styles.boxSelected,
                 {
                   left: x * scale + offsetX,
                   top: y * scale + offsetY,
@@ -282,7 +272,16 @@ export function VehicleDetectionScreen({ onClose }: Props) {
                   <Text style={styles.plateLabel}>{plateText}</Text>
                 </View>
               )}
-            </View>
+              {/* Tap a box to lock visual focus on it when several vehicles are in frame --
+                  a this-screen, this-session UI aid only (like tapping to focus a camera).
+                  Nothing about the selection is saved, stored, or sent anywhere; it clears the
+                  moment the vehicle leaves frame or this screen closes. */}
+              {isSelected && (
+                <View style={styles.selectedBadge} pointerEvents="none">
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                </View>
+              )}
+            </Pressable>
           );
         })}
 
@@ -299,7 +298,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         )}
         {status === "running" && (
           <Text style={styles.bannerText}>
-            Detecting vehicles ({facing === "back" ? "back" : "front"} camera) — amber box,
+            Detecting vehicles — amber box,
             generic "Vehicle"/"Heavy Vehicle". Turns red with "lights active" only once an
             actual strobing red/blue light is confirmed in view for a few seconds — real
             detected evidence, not a guess at vehicle type (a marked/unmarked car with no
@@ -326,19 +325,9 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         )}
       </View>
 
-      <Pressable
-        style={({ pressed }) => [
-          styles.switchButton,
-          { bottom: insets.bottom + spacing.xl },
-          pressed && { opacity: pressedOpacity },
-        ]}
-        onPress={toggleFacing}
-        accessibilityLabel="Switch camera"
-      >
-        <Ionicons name="camera-reverse" size={22} color={colors.text} />
-        <Text style={styles.switchButtonText}>Switch camera</Text>
-      </Pressable>
-
+      {/* Only control left at the bottom now that Switch Camera is gone (per explicit request
+          -- it also removed the whole facing-switch-mid-capture crash risk category with it).
+          Centered and a bit larger since it's the sole action here. */}
       <Pressable
         style={({ pressed }) => [
           styles.closeButton,
@@ -346,6 +335,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={onClose}
+        accessibilityLabel="Close vehicle detection"
       >
         <Text style={styles.closeButtonText}>Close</Text>
       </Pressable>
@@ -392,6 +382,21 @@ const styles = StyleSheet.create({
   },
   boxEmergency: {
     borderColor: "#DC2626",
+  },
+  boxSelected: {
+    borderColor: "#22D3EE",
+    borderWidth: 4,
+  },
+  selectedBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#22D3EE",
+    alignItems: "center",
+    justifyContent: "center",
   },
   boxLabel: {
     position: "absolute",
@@ -468,33 +473,17 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 12,
   },
-  switchButton: {
-    position: "absolute",
-    right: spacing.xl,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: radius.pill,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm - 2,
-  },
-  switchButtonText: {
-    color: colors.text,
-    fontWeight: "700",
-    fontSize: 13,
-  },
   closeButton: {
     position: "absolute",
-    left: spacing.xl,
+    alignSelf: "center",
     backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 22,
+    borderRadius: radius.pill,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
   },
   closeButtonText: {
     color: "#111827",
     fontWeight: "700",
-    fontSize: 13,
+    fontSize: 15,
   },
 });

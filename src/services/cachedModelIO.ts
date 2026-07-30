@@ -1,5 +1,6 @@
 import * as tf from "@tensorflow/tfjs";
 import { Directory, File, Paths } from "expo-file-system";
+import { Sentry } from "@/services/sentry";
 
 // COCO-SSD's default load() fetches its graph model (several MB across model.json + weight
 // shards) from Google's CDN over the network EVERY time the vehicle detection screen opens --
@@ -26,6 +27,7 @@ export function cachedModelIO(networkUrl: string, cacheKey: string): tf.io.IOHan
           const modelTopology = JSON.parse(await topologyFile.text());
           const weightSpecs = JSON.parse(await weightSpecsFile.text());
           const weightBytes = await weightDataFile.bytes();
+          Sentry.logger.info("cachedModelIO: cache hit, loaded from disk", { cacheKey });
           return {
             modelTopology,
             weightSpecs,
@@ -36,12 +38,18 @@ export function cachedModelIO(networkUrl: string, cacheKey: string): tf.io.IOHan
           };
         }
       } catch (err) {
+        Sentry.logger.warn("cachedModelIO: cached model unreadable, refetching from network", {
+          cacheKey,
+          error: String(err),
+        });
         console.warn("[cachedModelIO] cached model unreadable, refetching from network", err);
       }
 
+      Sentry.logger.info("cachedModelIO: cache miss, fetching from network", { cacheKey, networkUrl });
       const httpHandler = tf.io.browserHTTPRequest(networkUrl);
       if (!httpHandler.load) throw new Error("browserHTTPRequest handler has no load()");
       const artifacts = await httpHandler.load();
+      Sentry.logger.info("cachedModelIO: network fetch complete", { cacheKey });
 
       try {
         if (!dir.exists) dir.create({ intermediates: true });
@@ -62,9 +70,11 @@ export function cachedModelIO(networkUrl: string, cacheKey: string): tf.io.IOHan
           offset += buf.byteLength;
         }
         weightDataFile.write(combined);
+        Sentry.logger.info("cachedModelIO: wrote model to disk cache", { cacheKey });
       } catch (err) {
         // Cache write failed (disk full, permissions, etc) -- harmless, just means next
         // launch fetches over the network again instead of from disk.
+        Sentry.logger.warn("cachedModelIO: failed to write model cache", { cacheKey, error: String(err) });
         console.warn("[cachedModelIO] failed to write model cache", err);
       }
 

@@ -49,6 +49,7 @@ import {
 import { sirenDetection } from "@/services/sirenDetection";
 import { fetchOsmTrafficData, type OsmTrafficData } from "@/services/osmTrafficData";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
+import { VehicleDetectionErrorBoundary } from "@/components/VehicleDetectionErrorBoundary";
 import type { AlertDoc, AlertType } from "@/types/alert";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { Sentry } from "@/services/sentry";
@@ -1012,7 +1013,11 @@ export function MapScreen() {
           `detectionOpen` too means Close now genuinely unmounts it -- camera session torn down,
           interval cleared, no work left running once the modal is gone. */}
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
-        {detectionOpen && <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />}
+        {detectionOpen && (
+          <VehicleDetectionErrorBoundary onClose={() => setDetectionOpen(false)}>
+            <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
+          </VehicleDetectionErrorBoundary>
+        )}
       </Modal>
 
       <AlertReportSheet

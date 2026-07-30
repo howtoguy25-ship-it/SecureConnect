@@ -4,6 +4,7 @@ import * as jpeg from "jpeg-js";
 import { File } from "expo-file-system";
 import { ensureTfReady } from "@/services/tfPlatform";
 import { cachedModelIO } from "@/services/cachedModelIO";
+import { Sentry } from "@/services/sentry";
 
 // COCO-SSD fetches its own base model (several MB, model.json + weight shards) from
 // Google's CDN on every single load by default -- there's no persistent cache without this,
@@ -67,12 +68,14 @@ export interface DecodedPhoto {
 // camera responsive right away, not fighting a blocked JS thread) -- is a straightforward win
 // for how this feature is actually used.
 function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
+  Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup start");
   const objectDetection = new cocoSsd.ObjectDetection(COCO_SSD_BASE);
   return tf.loadGraphModel(cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2")).then((model) => {
     // ObjectDetection.model is only "private" in its .d.ts -- a real, plain instance property
     // at runtime, which is exactly what coco-ssd's own load() sets it to internally. Only
     // reaching around the type here to skip the warmup call load() would otherwise also do.
     (objectDetection as unknown as { model: tf.GraphModel }).model = model;
+    Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup done, graph model assigned");
     return objectDetection;
   });
 }
@@ -83,12 +86,17 @@ let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
 
 function loadModel(): Promise<cocoSsd.ObjectDetection> {
   if (!modelPromise) {
+    Sentry.logger.info("vehicleDetection: loadModel -- ensureTfReady start");
     modelPromise = ensureTfReady()
-      .then(() => loadModelSkippingWarmup())
+      .then(() => {
+        Sentry.logger.info("vehicleDetection: ensureTfReady done");
+        return loadModelSkippingWarmup();
+      })
       .catch((err) => {
         // Don't leave a permanently-rejected promise cached -- without this, one failed
         // load (a network blip, a cold CDN fetch that timed out) would keep failing
         // instantly forever, even after connectivity recovers, until the app fully restarts.
+        Sentry.logger.error("vehicleDetection: loadModel failed", { error: String(err) });
         modelPromise = null;
         throw err;
       });
@@ -97,20 +105,21 @@ function loadModel(): Promise<cocoSsd.ObjectDetection> {
 }
 
 export async function warmUpModel(): Promise<void> {
+  Sentry.logger.info("vehicleDetection: warmUpModel called");
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(
-      () =>
-        reject(
-          new Error(
-            "Detection model is taking unusually long to load -- check your connection, or try again."
-          )
-        ),
-      MODEL_LOAD_TIMEOUT_MS
-    );
+    timeoutHandle = setTimeout(() => {
+      Sentry.logger.error("vehicleDetection: warmUpModel timed out", { timeoutMs: MODEL_LOAD_TIMEOUT_MS });
+      reject(
+        new Error(
+          "Detection model is taking unusually long to load -- check your connection, or try again."
+        )
+      );
+    }, MODEL_LOAD_TIMEOUT_MS);
   });
   try {
     await Promise.race([loadModel(), timeout]);
+    Sentry.logger.info("vehicleDetection: warmUpModel resolved");
   } finally {
     clearTimeout(timeoutHandle!);
   }
