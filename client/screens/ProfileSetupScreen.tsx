@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, StyleSheet, TextInput, Pressable, ActivityIndicator } from "react-native";
+import { View, StyleSheet, TextInput, Pressable, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/ThemedText";
 import { Button } from "@/components/Button";
@@ -22,12 +22,41 @@ const AVATAR_COLORS = [
 export default function ProfileSetupScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
-  const { setUser } = useAuth();
-  
+  const { setUser, logout } = useAuth();
+
   const [displayName, setDisplayName] = useState("");
   const [avatarIndex, setAvatarIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoingBack, setIsGoingBack] = useState(false);
   const [error, setError] = useState("");
+
+  // This screen only mounts once the phone number is already verified — at
+  // this stage there's no navigation stack to pop back into (Welcome/
+  // PhoneInput/VerifyCode aren't even mounted while it's showing). "Back"
+  // here means abandoning this verified session and re-entering a phone
+  // number from scratch, so it goes through the same logout() used
+  // elsewhere in the app rather than a plain navigation.goBack().
+  const handleBack = () => {
+    Alert.alert(
+      "Change phone number?",
+      "You'll need to verify your phone number again.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Go Back",
+          style: "destructive",
+          onPress: async () => {
+            setIsGoingBack(true);
+            try {
+              await logout();
+            } finally {
+              setIsGoingBack(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleContinue = async () => {
     if (!displayName.trim()) {
@@ -60,6 +89,22 @@ export default function ProfileSetupScreen() {
         },
       ]}
     >
+      <Pressable
+        onPress={handleBack}
+        disabled={isGoingBack || isLoading}
+        hitSlop={12}
+        style={[styles.backButton, { top: insets.top + Spacing.md }]}
+      >
+        {isGoingBack ? (
+          <ActivityIndicator size="small" color={theme.text} />
+        ) : (
+          <>
+            <Feather name="chevron-left" size={22} color={theme.text} />
+            <ThemedText type="body" style={{ color: theme.text }}>Back</ThemedText>
+          </>
+        )}
+      </Pressable>
+
       <View style={styles.form}>
         <ThemedText type="h2" style={styles.title}>
           Set up your profile
@@ -143,6 +188,15 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: Spacing["2xl"],
     justifyContent: "space-between",
+  },
+  backButton: {
+    position: "absolute",
+    left: Spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: Spacing.xs,
+    paddingRight: Spacing.md,
+    zIndex: 1,
   },
   form: {
     gap: Spacing.lg,

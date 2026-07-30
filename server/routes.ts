@@ -2666,6 +2666,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // "Save" hold-menu action — private per-user bookmark, backed by the
+  // message_saves table so it survives reinstalls/new devices instead of
+  // living only in local AsyncStorage. Unlike pin/unpin above, this is
+  // never broadcast over the socket — the other participant never learns
+  // what you've saved.
+  app.get('/api/conversations/:id/saved-messages', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const ids = await storage.getSavedMessageIds(req.userId!, req.params.id);
+      res.json({ savedMessageIds: ids });
+    } catch (error) {
+      console.error('Error fetching saved messages:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/messages/:id/save', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const ok = await storage.saveMessage(req.userId!, req.params.id);
+      if (!ok) return res.status(403).json({ error: 'Cannot save this message' });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error saving message:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/messages/:id/save', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      await storage.unsaveMessage(req.userId!, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error unsaving message:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // Per-chat disappearing-message timer (seconds; 0 = off).
   app.patch('/api/conversations/:id/timer', authenticateToken, async (req: AuthRequest, res) => {
     try {

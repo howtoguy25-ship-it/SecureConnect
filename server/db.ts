@@ -51,6 +51,22 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       ALTER TABLE friends
         ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'accepted';
     `);
+    // Backing store for the "Save" hold-menu action — per-user, per-message,
+    // so it survives reinstalls/new devices instead of living only in local
+    // AsyncStorage. Deliberately NOT shared with the other party: saving is
+    // a personal bookmark, not a conversation-wide state like Pin.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS message_saves (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        message_id varchar NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        created_at timestamp DEFAULT now(),
+        UNIQUE (user_id, message_id)
+      );
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS message_saves_user_id_idx ON message_saves (user_id);
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

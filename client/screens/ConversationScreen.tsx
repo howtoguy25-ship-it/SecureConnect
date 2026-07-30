@@ -24,7 +24,6 @@ import * as Clipboard from "expo-clipboard";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ScreenCapture from "expo-screen-capture";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { playSendSound, playReceiveSound } from "@/utils/sounds";
 import { getSocket, connectSocket } from "@/lib/socket";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -285,32 +284,60 @@ export default function ConversationScreen() {
     return () => clearInterval(interval);
   }, [encryptionState, checkForRecipientKeys]);
 
-  const savedMessagesStorageKey = `saved_messages_${conversationId}`;
-
+  // Loaded from the server (message_saves table) rather than local
+  // AsyncStorage, so a saved/highlighted message survives reinstalls and
+  // shows up the same way on any device the user logs into — it's still
+  // private to this user (never broadcast to the other participant),
+  // just not device-local.
   useEffect(() => {
     if (!conversationId) return;
-    AsyncStorage.getItem(savedMessagesStorageKey)
-      .then((raw) => {
-        if (!raw) { setSavedMessageIds(new Set()); return; }
-        try {
-          const ids: string[] = JSON.parse(raw);
-          setSavedMessageIds(new Set(ids));
-        } catch {
-          setSavedMessageIds(new Set());
-        }
-      })
-      .catch(() => {});
+    (async () => {
+      try {
+        const token = await getStoredToken();
+        const res = await fetch(new URL(`/api/conversations/${conversationId}/saved-messages`, getApiUrl()), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const { savedMessageIds: ids } = await res.json();
+        setSavedMessageIds(new Set(ids ?? []));
+      } catch (e) {
+        console.error('Error loading saved messages:', e);
+      }
+    })();
   }, [conversationId]);
 
   const handleToggleSaveMessage = (messageId: string) => {
+    const wasSaved = savedMessageIds.has(messageId);
+    // Optimistic update — the bubble highlight/unhighlight should feel
+    // instant; the server call runs in the background and rolls back on
+    // failure.
     setSavedMessageIds((prev) => {
       const next = new Set(prev);
-      if (next.has(messageId)) next.delete(messageId);
+      if (wasSaved) next.delete(messageId);
       else next.add(messageId);
-      AsyncStorage.setItem(savedMessagesStorageKey, JSON.stringify(Array.from(next))).catch(() => {});
       return next;
     });
     haptics.light();
+    (async () => {
+      try {
+        const token = await getStoredToken();
+        const url = new URL(`/api/messages/${messageId}/save`, getApiUrl());
+        const res = await fetch(url, {
+          method: wasSaved ? 'DELETE' : 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`save request failed: ${res.status}`);
+      } catch (e) {
+        console.error('Error toggling saved message:', e);
+        // Roll back the optimistic flip so the UI matches server truth.
+        setSavedMessageIds((prev) => {
+          const next = new Set(prev);
+          if (wasSaved) next.add(messageId);
+          else next.delete(messageId);
+          return next;
+        });
+      }
+    })();
   };
 
   useEffect(() => {

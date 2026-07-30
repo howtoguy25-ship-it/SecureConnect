@@ -1,4 +1,4 @@
-import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings } from "@shared/schema";
+import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings, messageSaves } from "@shared/schema";
 import type { User, InsertUser, Message, InsertMessage, Conversation, Call, HiddenLockerItem, VerificationCode, PendingContact, JoinNotification, MessageRequest, Status, StatusView, Friend, LocationShare, LocationRequest, VirtualNumber, ExternalSms, UserBlock, UserReport, InsertUserReport, ScheduledMessage, UserDevice, SignedPrekey, OneTimePrekey, LoginEvent } from "@shared/schema";
 import { gt, lt, lte, ilike } from "drizzle-orm";
 import { db } from "./db";
@@ -83,6 +83,9 @@ export interface IStorage {
   setConversationTimer(conversationId: string, userId: string, seconds: number): Promise<boolean>;
   pinMessage(conversationId: string, messageId: string, userId: string): Promise<boolean>;
   unpinMessage(conversationId: string, userId: string): Promise<boolean>;
+  saveMessage(userId: string, messageId: string): Promise<boolean>;
+  unsaveMessage(userId: string, messageId: string): Promise<boolean>;
+  getSavedMessageIds(userId: string, conversationId: string): Promise<string[]>;
   deleteMessageForMe(messageId: string, userId: string): Promise<boolean>;
   deleteMessageForEveryone(messageId: string, userId: string): Promise<Message | undefined>;
   forwardMessage(originalMessageId: string, targetConversationId: string, senderId: string, receiverId: string | null): Promise<Message | null>;
@@ -537,6 +540,34 @@ export class DatabaseStorage implements IStorage {
     if (!isParticipant) return false;
     await db.update(conversations).set({ pinnedMessageId: null }).where(eq(conversations.id, conversationId));
     return true;
+  }
+
+  async saveMessage(userId: string, messageId: string): Promise<boolean> {
+    const msg = await this.getMessage(messageId);
+    if (!msg) return false;
+    const isParticipant = await this.isConversationParticipant(msg.conversationId, userId);
+    if (!isParticipant) return false;
+    const [existing] = await db.select().from(messageSaves)
+      .where(and(eq(messageSaves.userId, userId), eq(messageSaves.messageId, messageId)));
+    if (existing) return true;
+    await db.insert(messageSaves).values({ userId, messageId });
+    return true;
+  }
+
+  async unsaveMessage(userId: string, messageId: string): Promise<boolean> {
+    await db.delete(messageSaves)
+      .where(and(eq(messageSaves.userId, userId), eq(messageSaves.messageId, messageId)));
+    return true;
+  }
+
+  async getSavedMessageIds(userId: string, conversationId: string): Promise<string[]> {
+    const isParticipant = await this.isConversationParticipant(conversationId, userId);
+    if (!isParticipant) return [];
+    const rows = await db.select({ messageId: messageSaves.messageId })
+      .from(messageSaves)
+      .innerJoin(messages, eq(messages.id, messageSaves.messageId))
+      .where(and(eq(messageSaves.userId, userId), eq(messages.conversationId, conversationId)));
+    return rows.map(r => r.messageId);
   }
 
   async deleteMessageForMe(messageId: string, userId: string): Promise<boolean> {

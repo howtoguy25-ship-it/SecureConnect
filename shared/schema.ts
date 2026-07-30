@@ -494,6 +494,16 @@ export const friendsRelations = relations(friends, ({ one }) => ({
   }),
 }));
 
+// Personal, per-user "Save" bookmark on a message (hold-menu action).
+// Deliberately not shared with the other party — unlike Pin, which is a
+// single conversation-wide field, a save is private to whoever tapped it.
+export const messageSaves = pgTable("message_saves", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Location sharing tables (VIP only)
 export const locationShares = pgTable("location_shares", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
