@@ -48,6 +48,26 @@ export default function SecurityQuestionsSetupScreen() {
       }
       return;
     }
+    // A blocking confirm, not just the banner above — these answers are
+    // encrypted the instant Set succeeds and Pryvo can never read or
+    // recover them afterward, so this is the last moment to back out and
+    // write them down first.
+    const confirmed = await new Promise<boolean>((resolve) => {
+      if (Platform.OS === "web") {
+        resolve(window.confirm("Have you saved these answers somewhere safe (written down or in a password manager)?\n\nOnce you tap Set, they're encrypted and Pryvo can never read or recover them for you."));
+        return;
+      }
+      Alert.alert(
+        "Have you saved these answers?",
+        "Once you tap Set, they're encrypted and Pryvo can never read or recover them for you. Make sure you've written them down or stored them in a password manager first.",
+        [
+          { text: "Go back", style: "cancel", onPress: () => resolve(false) },
+          { text: "Yes, I've saved them", onPress: () => resolve(true) },
+        ],
+      );
+    });
+    if (!confirmed) return;
+
     setSaving(true);
     try {
       await apiRequest("POST", "/api/auth/security-questions/set", {
@@ -118,6 +138,16 @@ export default function SecurityQuestionsSetupScreen() {
         </View>
       ) : (
         <>
+          <View style={[styles.warningBanner, { backgroundColor: theme.warning + "18", borderColor: theme.warning + "60" }]}>
+            <Feather name="alert-triangle" size={20} color={theme.warning} style={{ marginBottom: 8 }} />
+            <ThemedText type="body" style={{ fontWeight: "700", color: theme.warning, marginBottom: 4 }}>
+              Save these answers somewhere safe
+            </ThemedText>
+            <ThemedText type="small" style={{ color: theme.textSecondary, lineHeight: 18 }}>
+              Write them down, or store them in a password manager, before you continue. Pryvo encrypts your answers immediately and can never read or recover them for you — if you forget them, you could permanently lose access to your account.
+            </ThemedText>
+          </View>
+
           <View style={styles.field}>
             <ThemedText type="body" style={{ fontWeight: "600", marginBottom: 8 }}>
               What is your favourite dish?
@@ -214,6 +244,12 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     borderWidth: 1,
     padding: Spacing.md,
+  },
+  warningBanner: {
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   primaryBtn: {
     paddingVertical: 14,
