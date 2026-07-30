@@ -12,7 +12,7 @@ module.exports = () => {
       ios: {
         supportsTablet: true,
         requireFullScreen: false,
-        buildNumber: "92",
+        buildNumber: "93",
         bundleIdentifier: "com.adham.salameh.secureconnectchat",
         icon: "./assets/images/icon.png",
         privacyManifests: {
@@ -35,7 +35,6 @@ module.exports = () => {
           NSPhotoLibraryAddUsageDescription: "Pryvo saves photos and videos you receive in chats to your photo library when you tap save.",
           NSContactsUsageDescription: "Pryvo uses your contacts to let you start chats and calls with people you already know. Your contacts stay on your device and are never uploaded.",
           NSLocationWhenInUseUsageDescription: "Pryvo uses your location only when you tap Share Location in a chat, so the friend you're messaging can see where you are.",
-          NSFaceIDUsageDescription: "Pryvo uses Face ID to unlock your hidden message locker.",
           NSUserTrackingUsageDescription: "Your data will be used to deliver ads that are more relevant to you. Pryvo shares your device identifier with ad partners only if you allow tracking.",
           // App Store Guideline 2.5.4: only declare background modes we actually implement.
           // We rely on standard remote notifications + foreground signaling for calls.
