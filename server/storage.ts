@@ -68,6 +68,7 @@ export interface IStorage {
 
   // Account deletion (build 62) — two-phase: request → 30-day grace → tombstone.
   requestAccountDeletion(userId: string): Promise<{ scheduledFor: Date }>;
+  emergencyDeleteAccount(userId: string): Promise<void>;
   cancelAccountDeletion(userId: string): Promise<void>;
   getDueAccountDeletions(limit?: number): Promise<Array<{ id: string }>>;
   executeHardDelete(userId: string): Promise<void>;
@@ -2326,6 +2327,21 @@ export class DatabaseStorage implements IStorage {
       tokenVersion: sql`COALESCE(${users.tokenVersion}, 0) + 1`,
     }).where(eq(users.id, userId));
     return { scheduledFor };
+  }
+
+  // Owner-only emergency path: skips the normal 30-day grace period by
+  // backdating pendingDeletionAt into the past, then immediately runs the
+  // exact same transactional hard-delete the sweep uses. Used when the
+  // account holder is locked out of both login (forgot a security-question
+  // answer) and the Account-ID recovery flow (which itself requires both
+  // answers), and needs the phone number freed up right away to sign up
+  // fresh — see /api/auth/account/emergency-reset/confirm.
+  async emergencyDeleteAccount(userId: string): Promise<void> {
+    await db.update(users).set({
+      pendingDeletionAt: new Date(Date.now() - 1000),
+      deletionInitiatedAt: new Date(),
+    }).where(eq(users.id, userId));
+    await this.executeHardDelete(userId);
   }
 
   async cancelAccountDeletion(userId: string): Promise<void> {

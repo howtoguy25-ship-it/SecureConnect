@@ -138,6 +138,12 @@ const verifyCodeRateLimit = makePreAuthRateLimiter("verify-code", 10, 10 * 60_00
 // stops both "one IP cycling phones" and "one phone DOS'd from one IP"
 // patterns.
 const sendCodeRateLimit = makePreAuthRateLimiter("send-code", 5, 10 * 60_000);
+// 3 emergency-reset attempts / hour / (ip, phone). This path immediately
+// destroys an account on SMS possession alone (no Account ID, no security
+// questions) — it's scoped to the owner's number only (see isOwnerPhone
+// gate on the routes below), but still rate-limited like any other
+// pre-auth OTP surface in case that number's SIM is ever compromised.
+const emergencyResetRateLimit = makePreAuthRateLimiter("emergency-reset", 3, 60 * 60_000);
 // 5 invite sends / 10 min / (userId, target-phone). The endpoint is
 // authenticated but a compromised account could still loop on it to
 // SMS-bomb a number on our dime — this caps the per-user-per-target
@@ -1588,7 +1594,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Strict exact match only - no suffix matching
     return digitsOnly === ownerDigits;
   };
-  
+
+  // ─── Owner emergency account reset ────────────────────────────────────
+  // Last-resort recovery for the ONE number that already bypasses the
+  // normal owner-gated admin routes: if the owner forgets a security-
+  // question answer, they can't log in (fresh sessions require it) AND
+  // can't use /recover/verify (which itself requires both answers). This
+  // path proves identity with SMS possession alone and immediately
+  // hard-deletes the account (skipping the normal 30-day grace period) so
+  // the number is free to sign up again right away. Deliberately NOT
+  // exposed for any other phone number — regular users keep the stronger
+  // Account-ID + two-answers recovery flow, since SMS-only account
+  // destruction would otherwise be a real downgrade in account security.
+  app.post('/api/auth/account/emergency-reset/request-otp', async (req, res) => {
+    try {
+      const { phoneNumber: rawPhone } = req.body;
+      if (!rawPhone || typeof rawPhone !== 'string') {
+        return res.status(400).json({ error: 'Please enter your phone number.' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const phoneNumber = `+${digitsOnly}`;
+
+      if (!isOwnerPhone(phoneNumber)) {
+        return res.status(403).json({ error: 'This reset path is not available for this number.' });
+      }
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = emergencyResetRateLimit(() => `${ipKey}|${phoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const user = await storage.getUserByPhone(phoneNumber);
+      if (!user) {
+        // Nothing to reset. Respond success anyway so this can't be used
+        // to probe whether a number has an account.
+        return res.json({ success: true });
+      }
+
+      const code = generateVerificationCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      await storage.createVerificationCode(phoneNumber, code, expiresAt);
+
+      const twilioConfigured = (process.env.TWILIO_ACCOUNT_SID || process.env.Twilio_Account_SID) &&
+                               (process.env.TWILIO_AUTH_TOKEN || process.env.Twilio_Auth_Token) &&
+                               (process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number);
+      if (twilioConfigured) {
+        const result = await sendVerificationSMS(phoneNumber, code);
+        if (!result.success) {
+          return res.status(400).json({ error: result.userMessage || 'Failed to send verification code' });
+        }
+      } else {
+        console.log(`[EMERGENCY RESET] Code for ${phoneNumber}: ${code}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[emergency-reset] request-otp error:', error);
+      res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+  });
+
+  app.post('/api/auth/account/emergency-reset/confirm', async (req, res) => {
+    try {
+      const { phoneNumber: rawPhone, code } = req.body;
+      if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
+        return res.status(400).json({ error: 'Phone number and code are required' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const phoneNumber = `+${digitsOnly}`;
+
+      if (!isOwnerPhone(phoneNumber)) {
+        return res.status(403).json({ error: 'This reset path is not available for this number.' });
+      }
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = verifyCodeRateLimit(() => `emergency-reset|${ipKey}|${phoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const vc = await storage.getVerificationCode(phoneNumber, code);
+      if (!vc || new Date(vc.expiresAt).getTime() < Date.now()) {
+        return res.status(400).json({ error: 'Invalid or expired verification code' });
+      }
+      await storage.markCodeVerified(vc.id);
+
+      const user = await storage.getUserByPhone(phoneNumber);
+      if (!user) {
+        return res.json({ success: true }); // already gone / never existed
+      }
+
+      console.log(`[EMERGENCY RESET] Immediate account deletion for ${phoneNumber} (user ${user.id})`);
+      await storage.emergencyDeleteAccount(user.id);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[emergency-reset] confirm error:', error);
+      res.status(500).json({ error: 'Failed to reset account' });
+    }
+  });
+
   app.get('/api/review-mode', (req, res) => {
     res.json({ reviewMode: reviewModeEnabled });
   });
