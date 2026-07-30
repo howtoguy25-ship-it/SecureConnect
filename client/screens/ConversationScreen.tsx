@@ -2975,11 +2975,18 @@ export default function ConversationScreen() {
           ) : null}
 
           {hasMedia && (effectiveMediaType === 'image' || effectiveMediaType === 'gif') && effectiveMediaUrl ? (
-            <View style={styles.mediaContainer}>
+            // contentFit="contain" (not "cover") -- the box below is a fixed
+            // square, and "cover" scales+crops non-square media to fill it,
+            // silently cutting off edges. Most GIFs are wide/landscape, so
+            // this was cropping roughly half of every GIF sent. "contain"
+            // guarantees the whole image is always visible; any letterboxing
+            // is filled with the bubble's own background so it blends in
+            // rather than showing as a visible gap.
+            <View style={[styles.mediaContainer, { backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary }]}>
               <Image
                 source={{ uri: effectiveMediaUrl }}
                 style={styles.mediaImage}
-                contentFit="cover"
+                contentFit="contain"
               />
             </View>
           ) : null}
