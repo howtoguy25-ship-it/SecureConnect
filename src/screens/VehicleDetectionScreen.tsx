@@ -48,6 +48,21 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   const cameraRef = useRef<CameraView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const capturingRef = useRef(false);
+  // Set the instant this screen unmounts (now a real unmount -- see MapScreen.tsx's Modal
+  // fix -- not just hidden behind a still-visible-but-invisible modal). Checked after every
+  // await in captureAndDetect below so an in-flight capture/detect/state-update chain can't
+  // keep running (or touch a torn-down native camera session) after the screen is gone.
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+  // Briefly pauses captures around a camera facing switch -- expo-camera reconfigures (and
+  // effectively remounts) the native capture session when `facing` changes, and firing
+  // takePictureAsync into that transition was a real, plausible crash path, not just a UX
+  // rough edge.
+  const pausedRef = useRef(false);
   const speedTrackerRef = useRef(createSpeedTracker());
   const plateAttemptsRef = useRef(new Map<number, number>());
   const platesReadingRef = useRef(new Set<number>());
@@ -80,16 +95,18 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   }, [retryCount]);
 
   const captureAndDetect = useCallback(async () => {
-    if (capturingRef.current || !cameraRef.current) return;
+    if (capturingRef.current || pausedRef.current || unmountedRef.current || !cameraRef.current) return;
     capturingRef.current = true;
     try {
       Sentry.logger.info("vehicle-detection: calling takePictureAsync");
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.4, skipProcessing: true });
-      if (!photo) return;
+      if (!photo || unmountedRef.current) return;
       Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
       const decoded = await decodePhotoForDetection(photo.uri);
+      if (unmountedRef.current) return;
       const detected = await detectVehiclesInPhoto(decoded);
+      if (unmountedRef.current) return;
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
       setBoxes(tracked);
 
@@ -135,7 +152,7 @@ export function VehicleDetectionScreen({ onClose }: Props) {
         const trackId = box.id;
         readPlateText(photo.uri, region)
           .then((text) => {
-            if (!text) return;
+            if (!text || unmountedRef.current) return;
             plateTextsRef.current.set(trackId, text);
             setPlateTexts(new Map(plateTextsRef.current));
           })
@@ -166,6 +183,11 @@ export function VehicleDetectionScreen({ onClose }: Props) {
   }, []);
 
   const toggleFacing = useCallback(() => {
+    // Pause captures across the switch -- expo-camera reconfigures the native capture session
+    // when `facing` changes, and a takePictureAsync landing mid-reconfiguration was a real,
+    // plausible crash path, not just a cosmetic glitch. 600ms comfortably covers the native
+    // session teardown/recreate on both platforms without being long enough to feel laggy.
+    pausedRef.current = true;
     setBoxes([]);
     plateAttemptsRef.current.clear();
     platesReadingRef.current.clear();
@@ -173,6 +195,9 @@ export function VehicleDetectionScreen({ onClose }: Props) {
     setPlateTexts(new Map());
     setEmergencyTrackIds(new Set());
     setFacing((prev) => (prev === "back" ? "front" : "back"));
+    setTimeout(() => {
+      if (!unmountedRef.current) pausedRef.current = false;
+    }, 600);
   }, []);
 
   if (!permission) {

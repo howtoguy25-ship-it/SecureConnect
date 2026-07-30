@@ -1002,8 +1002,17 @@ export function MapScreen() {
         </View>
       )}
 
+      {/* Modal's own `visible` prop only controls whether the native modal is *presented* --
+          it does NOT unmount its children when set to false. Rendering VehicleDetectionScreen
+          unconditionally here meant tapping Close just hid the modal while the camera session,
+          the capture interval, and every state update it drives kept running invisibly in the
+          background -- which is exactly why Close looked like it "didn't work" and is a strong
+          candidate for the reported crashes (a hidden/backgrounded camera continuing to fire
+          native capture calls, especially colliding with a facing switch). Gating the child on
+          `detectionOpen` too means Close now genuinely unmounts it -- camera session torn down,
+          interval cleared, no work left running once the modal is gone. */}
       <Modal visible={detectionOpen} animationType="slide" onRequestClose={() => setDetectionOpen(false)}>
-        <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />
+        {detectionOpen && <VehicleDetectionScreen onClose={() => setDetectionOpen(false)} />}
       </Modal>
 
       <AlertReportSheet
