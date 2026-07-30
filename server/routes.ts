@@ -1697,6 +1697,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Admin login (web sign-in "Admin" shortcut) ───────────────────────
+  // Same phone+SMS-OTP proof as normal sign-in, but gated to the owner
+  // number BEFORE a code is ever sent (normal /api/auth/send-code has no
+  // such gate — it'll happily text and auto-create an account for any
+  // number). Issues a short-lived token scoped to a single admin-dashboard
+  // visit; deliberately never touches the normal login session — the web
+  // client keeps this token local to the admin screens only.
+  app.post('/api/auth/admin-login/send-code', async (req, res) => {
+    try {
+      const { phoneNumber: rawPhone } = req.body;
+      if (!rawPhone || typeof rawPhone !== 'string') {
+        return res.status(400).json({ error: 'Please enter your phone number.' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const phoneNumber = `+${digitsOnly}`;
+
+      if (!isOwnerPhone(phoneNumber)) {
+        return res.status(403).json({ error: 'This sign-in is for the app owner only.' });
+      }
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = sendCodeRateLimit(() => `admin-login|${ipKey}|${phoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const code = generateVerificationCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      await storage.createVerificationCode(phoneNumber, code, expiresAt);
+
+      const twilioConfigured = (process.env.TWILIO_ACCOUNT_SID || process.env.Twilio_Account_SID) &&
+                               (process.env.TWILIO_AUTH_TOKEN || process.env.Twilio_Auth_Token) &&
+                               (process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number);
+      if (twilioConfigured) {
+        const result = await sendVerificationSMS(phoneNumber, code);
+        if (!result.success) {
+          return res.status(400).json({ error: result.userMessage || 'Failed to send verification code' });
+        }
+      } else {
+        console.log(`[ADMIN LOGIN] Code for ${phoneNumber}: ${code}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[admin-login] send-code error:', error);
+      res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+  });
+
+  app.post('/api/auth/admin-login/verify', async (req, res) => {
+    try {
+      const { phoneNumber: rawPhone, code } = req.body;
+      if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
+        return res.status(400).json({ error: 'Phone number and code are required' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const phoneNumber = `+${digitsOnly}`;
+
+      if (!isOwnerPhone(phoneNumber)) {
+        return res.status(403).json({ error: 'This sign-in is for the app owner only.' });
+      }
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = verifyCodeRateLimit(() => `admin-login|${ipKey}|${phoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const vc = await storage.getVerificationCode(phoneNumber, code);
+      if (!vc || new Date(vc.expiresAt).getTime() < Date.now()) {
+        return res.status(400).json({ error: 'Invalid or expired verification code' });
+      }
+      await storage.markCodeVerified(vc.id);
+
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (!user) {
+        user = await storage.createUser({ phoneNumber });
+      }
+
+      // Shorter-lived than the normal 30-day session token — this one is
+      // meant for a single admin-dashboard visit, not an ongoing session.
+      const tokenVersion = user.tokenVersion ?? 0;
+      const token = jwt.sign({ userId: user.id, tv: tokenVersion }, JWT_SECRET, { expiresIn: '12h' });
+
+      res.json({ success: true, token });
+    } catch (error) {
+      console.error('[admin-login] verify error:', error);
+      res.status(500).json({ error: 'Failed to verify code' });
+    }
+  });
+
   app.get('/api/review-mode', (req, res) => {
     res.json({ reviewMode: reviewModeEnabled });
   });

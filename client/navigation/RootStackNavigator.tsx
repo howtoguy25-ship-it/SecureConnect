@@ -30,6 +30,8 @@ import SafeCodeScreen from "@/screens/SafeCodeScreen";
 import SecurityQuestionsSetupScreen from "@/screens/SecurityQuestionsSetupScreen";
 import SecurityQuestionsVerifyScreen from "@/screens/SecurityQuestionsVerifyScreen";
 import RecoverAccountScreen from "@/screens/RecoverAccountScreen";
+import AdminLoginScreen from "@/screens/AdminLoginScreen";
+import AdminDashboardScreen from "@/screens/AdminDashboardScreen";
 import LoginHistoryScreen from "@/screens/LoginHistoryScreen";
 import PeekDetectionSettingsScreen from "@/screens/PeekDetectionSettingsScreen";
 import RingtoneScreen from "@/screens/RingtoneScreen";
@@ -51,6 +53,8 @@ export type RootStackParamList = {
   PhoneInput: undefined;
   VerifyCode: { phoneNumber: string; demoCode?: string };
   RecoverAccount: undefined;
+  AdminLogin: undefined;
+  AdminDashboard: { token: string };
   ProfileSetup: undefined;
   SecurityQuestionsSetup: undefined;
   SecurityQuestionsVerify: undefined;
@@ -187,6 +191,16 @@ export default function RootStackNavigator() {
             name="RecoverAccount"
             component={RecoverAccountScreen}
             options={{ headerTitle: "Recover Account" }}
+          />
+          <Stack.Screen
+            name="AdminLogin"
+            component={AdminLoginScreen}
+            options={{ headerTitle: "Admin Sign In" }}
+          />
+          <Stack.Screen
+            name="AdminDashboard"
+            component={AdminDashboardScreen}
+            options={{ headerTitle: "Admin Dashboard", headerBackVisible: false }}
           />
         </>
       ) : needsProfileSetup ? (

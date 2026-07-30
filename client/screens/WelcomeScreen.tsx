@@ -436,6 +436,18 @@ export default function WelcomeScreen() {
             <FeatureChip icon="shield" label="Secure" />
             <FeatureChip icon="zap" label="Fast" />
           </View>
+
+          {/* Owner-only shortcut, web only — the mobile apps never need this
+              since the owner already gets full admin tools in Settings
+              after a normal login. On web it's the fastest way in. */}
+          {Platform.OS === "web" ? (
+            <Pressable onPress={() => navigation.navigate("AdminLogin")} style={styles.adminLink}>
+              <Feather name="shield" size={12} color="rgba(255,255,255,0.5)" />
+              <ThemedText type="small" style={styles.adminLinkText}>
+                Admin sign in
+              </ThemedText>
+            </Pressable>
+          ) : null}
         </KeyboardAwareScrollViewCompat>
       </LinearGradient>
 
@@ -686,6 +698,17 @@ const styles = StyleSheet.create({
   featureChipText: {
     color: "rgba(255,255,255,0.95)",
     fontWeight: "500",
+  },
+  adminLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: Spacing.xl,
+    padding: Spacing.sm,
+  },
+  adminLinkText: {
+    color: "rgba(255,255,255,0.5)",
   },
   modalContainer: {
     flex: 1,
