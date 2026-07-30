@@ -53,31 +53,38 @@ export interface DecodedPhoto {
   data: Uint8Array;
 }
 
-// coco-ssd's load() isn't just a download -- it also runs a real warmup inference (a
-// tf.zeros([1,300,300,3]) tensor through the *entire* SSD-MobileNet graph) before resolving,
-// and this app's tfPlatform.ts deliberately runs tfjs on the CPU backend only (no WebGL/GPU
-// acceleration -- that needs expo-gl + real device verification, the same category of risk as
-// the Maps 3D SDK crash history elsewhere in this app, not something to wire in blind).
-// SSD-MobileNet's warmup pass on CPU-only Hermes can genuinely take much longer than a simple
-// network fetch would -- 25s was tuned for "slow download", not "slow inference", and was
-// cutting real loads off before they finished on real hardware.
-const MODEL_LOAD_TIMEOUT_MS = 75000;
+// coco-ssd's own load() isn't just a download -- it also runs a real warmup inference (a
+// tf.zeros([1,300,300,3]) tensor through the *entire* SSD-MobileNet graph, awaiting every
+// output tensor's .data()) before resolving. On this app's CPU-only tfjs backend (no WebGL/GPU
+// acceleration -- that needs expo-gl + real device verification, a bigger, riskier change than
+// this) that warmup pass is a genuinely heavy synchronous-ish computation, and was almost all
+// of "takes long to load" -- the actual network fetch (especially once disk-cached) is fast.
+// Below skips that warmup entirely and only does the fetch/parse, matching the "load
+// immediately" ask directly: the model graph exists but nothing has run through it yet, so the
+// very first real detection pass (in detectVehiclesInPhoto) absorbs that one-time compute
+// instead of a dedicated loading screen doing it up front. That trade -- a slightly slower
+// first detected frame vs. a screen that's immediately live and interactive (Close/Switch
+// camera responsive right away, not fighting a blocked JS thread) -- is a straightforward win
+// for how this feature is actually used.
+function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
+  const objectDetection = new cocoSsd.ObjectDetection(COCO_SSD_BASE);
+  return tf.loadGraphModel(cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2")).then((model) => {
+    // ObjectDetection.model is only "private" in its .d.ts -- a real, plain instance property
+    // at runtime, which is exactly what coco-ssd's own load() sets it to internally. Only
+    // reaching around the type here to skip the warmup call load() would otherwise also do.
+    (objectDetection as unknown as { model: tf.GraphModel }).model = model;
+    return objectDetection;
+  });
+}
+
+const MODEL_LOAD_TIMEOUT_MS = 25000;
 
 let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
 
 function loadModel(): Promise<cocoSsd.ObjectDetection> {
   if (!modelPromise) {
     modelPromise = ensureTfReady()
-      .then(() =>
-        cocoSsd.load({
-          base: COCO_SSD_BASE,
-          // coco-ssd's own type only declares `modelUrl?: string`, but at runtime it's
-          // handed straight to tfjs-converter's loadGraphModel(), which explicitly accepts
-          // "a url or an IOHandler that loads the model" -- the cast reflects that real,
-          // documented runtime behavior, not a type-checker workaround for a bug.
-          modelUrl: cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2") as unknown as string,
-        })
-      )
+      .then(() => loadModelSkippingWarmup())
       .catch((err) => {
         // Don't leave a permanently-rejected promise cached -- without this, one failed
         // load (a network blip, a cold CDN fetch that timed out) would keep failing
