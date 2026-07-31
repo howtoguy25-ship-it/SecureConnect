@@ -1,5 +1,5 @@
-import React from "react";
-import { View, Text, StyleSheet, Pressable, type LayoutChangeEvent } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { View, Text, StyleSheet, Pressable, Animated, type LayoutChangeEvent } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteStep } from "@/services/directions";
@@ -55,6 +55,35 @@ export function NavigationInstructionCard({
   onHeightChange,
 }: Props) {
   const insets = useSafeAreaInsets();
+
+  // Slides the instruction content down (with a fade) into place every time the *active step*
+  // actually changes -- i.e. "the driver just completed a turn and this is the next one" --
+  // not on every GPS tick, which would re-trigger constantly since etaText/distanceRemainingText
+  // update far more often than the step itself does. Tracked by the instruction text's own
+  // identity rather than a separate index prop, since two different steps are never going to
+  // share the exact same instruction text back to back.
+  const translateY = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+  const prevInstructionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!step) return;
+    if (prevInstructionRef.current === null) {
+      // First real instruction of this navigation session -- settles in place immediately,
+      // nothing to animate from yet.
+      prevInstructionRef.current = step.instruction;
+      return;
+    }
+    if (prevInstructionRef.current === step.instruction) return;
+    prevInstructionRef.current = step.instruction;
+    translateY.setValue(-22);
+    opacity.setValue(0);
+    Animated.parallel([
+      Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 380, useNativeDriver: true }),
+    ]).start();
+  }, [step, translateY, opacity]);
+
   if (!step) return null;
   const icon = (step.maneuver && MANEUVER_ICONS[step.maneuver]) || "arrow-up";
 
@@ -69,18 +98,20 @@ export function NavigationInstructionCard({
         onPress={onExpandDirections}
         accessibilityLabel="Show full route directions"
       >
-        <View style={styles.iconWrap}>
-          <Ionicons name={icon} size={30} color="#FFFFFF" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.instruction} numberOfLines={2}>
-            {step.instruction}
-          </Text>
-          <Text style={styles.meta}>
-            {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
-            {distanceRemainingText} left
-          </Text>
-        </View>
+        <Animated.View style={[styles.animatedContent, { transform: [{ translateY }], opacity }]}>
+          <View style={styles.iconWrap}>
+            <Ionicons name={icon} size={30} color="#FFFFFF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.instruction} numberOfLines={2}>
+              {step.instruction}
+            </Text>
+            <Text style={styles.meta}>
+              {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
+              {distanceRemainingText} left
+            </Text>
+          </View>
+        </Animated.View>
       </Pressable>
       <Pressable
         onPress={onShareEta}
@@ -117,6 +148,8 @@ const styles = StyleSheet.create({
   },
   tapArea: {
     flex: 1,
+  },
+  animatedContent: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,

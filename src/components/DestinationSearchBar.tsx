@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { View, TextInput, FlatList, Text, Pressable, StyleSheet, ActivityIndicator, Keyboard } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,8 +9,18 @@ import {
   type PlacePrediction,
   type PlaceDetails,
 } from "@/services/places";
+import {
+  getSearchHistory,
+  addSearchHistoryEntry,
+  removeSearchHistoryEntry,
+  clearSearchHistory,
+} from "@/services/searchHistory";
 import type { LatLng } from "@/utils/polyline";
-import { colors, radius, shadow, spacing } from "@/theme/tokens";
+import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
+
+// Default collapsed count for "Recent searches" -- the dropdown toggle expands to the full
+// stored history (see searchHistory.ts's own cap) and collapses back to this.
+const COLLAPSED_HISTORY_COUNT = 3;
 
 interface Props {
   biasLocation?: LatLng;
@@ -31,13 +41,26 @@ export function DestinationSearchBar({
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [isFocused, setIsFocused] = useState(false);
+  // Deliberately NOT driven by TextInput focus state -- a blur fires the instant a history row
+  // (or the old predictions list, which has the same shape of problem) is tapped, since the
+  // tap itself moves focus off the input. Gating visibility on "is the input focused" would
+  // unmount the row out from under the user's finger before the tap could register. Instead
+  // this tracks "should the recent-searches panel be showing" as its own independent state,
+  // exactly the same way the predictions list already only depends on predictions.length.
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [history, setHistory] = useState<PlaceDetails[]>([]);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    getSearchHistory().then(setHistory);
+  }, []);
 
   const dismissSearch = useCallback(() => {
     Keyboard.dismiss();
     setPredictions([]);
+    setHistoryVisible(false);
   }, []);
 
   const onChangeText = useCallback(
@@ -47,8 +70,10 @@ export function DestinationSearchBar({
       if (!text.trim()) {
         setPredictions([]);
         setErrorText(null);
+        setHistoryVisible(true);
         return;
       }
+      setHistoryVisible(false);
       debounceRef.current = setTimeout(async () => {
         setLoading(true);
         setErrorText(null);
@@ -78,13 +103,23 @@ export function DestinationSearchBar({
     [biasLocation]
   );
 
+  const selectPlace = useCallback(
+    (place: PlaceDetails) => {
+      setQuery(place.name);
+      setPredictions([]);
+      Keyboard.dismiss();
+      setHistoryVisible(false);
+      addSearchHistoryEntry(place).then(setHistory);
+      onDestinationSelected(place);
+    },
+    [onDestinationSelected]
+  );
+
   const onSelectPrediction = useCallback(
     async (prediction: PlacePrediction) => {
       try {
         const details = await getPlaceDetails(prediction.placeId);
-        setQuery(details.name);
-        setPredictions([]);
-        onDestinationSelected(details);
+        selectPlace(details);
       } catch (err) {
         setErrorText(
           err instanceof PlacesApiError
@@ -93,8 +128,25 @@ export function DestinationSearchBar({
         );
       }
     },
-    [onDestinationSelected]
+    [selectPlace]
   );
+
+  const onRemoveHistoryEntry = useCallback((placeId: string) => {
+    removeSearchHistoryEntry(placeId).then((next) => {
+      setHistory(next);
+      if (next.length <= COLLAPSED_HISTORY_COUNT) setHistoryExpanded(false);
+    });
+  }, []);
+
+  const onClearAllHistory = useCallback(() => {
+    clearSearchHistory().then(() => {
+      setHistory([]);
+      setHistoryExpanded(false);
+    });
+  }, []);
+
+  const showHistory = historyVisible && !query.trim() && predictions.length === 0 && history.length > 0;
+  const visibleHistory = historyExpanded ? history : history.slice(0, COLLAPSED_HISTORY_COUNT);
 
   return (
     <>
@@ -102,16 +154,20 @@ export function DestinationSearchBar({
           the keyboard just stayed open, blocking most of the screen with no obvious way out
           short of the keyboard's own dismiss key. Sits behind the search box in paint order
           (rendered first), so it only catches taps that land outside the box/dropdown, which
-          keep working normally. */}
-      {isFocused && <Pressable style={StyleSheet.absoluteFill} onPress={dismissSearch} />}
+          keep working normally. Gated on whichever dropdown can actually be showing, not raw
+          focus -- see historyVisible's own comment for why focus alone isn't the right signal. */}
+      {(historyVisible || predictions.length > 0) && (
+        <Pressable style={StyleSheet.absoluteFill} onPress={dismissSearch} />
+      )}
       <View style={[styles.container, { top: insets.top + spacing.md }]}>
         <View style={styles.inputRow}>
           <Ionicons name="search" size={18} color={colors.textMuted} />
           <TextInput
             value={query}
             onChangeText={onChangeText}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
+            onFocus={() => {
+              if (!query.trim()) setHistoryVisible(true);
+            }}
             placeholder={placeholder}
             placeholderTextColor={colors.textFaint}
             style={styles.input}
@@ -148,6 +204,53 @@ export function DestinationSearchBar({
               </Pressable>
             )}
           />
+        )}
+        {showHistory && (
+          <View style={styles.list}>
+            <View style={styles.historyHeader}>
+              <Text style={styles.historyHeaderText}>Recent searches</Text>
+              <View style={styles.historyHeaderActions}>
+                <Pressable onPress={onClearAllHistory} hitSlop={8} accessibilityLabel="Clear all recent searches">
+                  <Text style={styles.clearAllText}>Clear all</Text>
+                </Pressable>
+                {history.length > COLLAPSED_HISTORY_COUNT && (
+                  <Pressable
+                    onPress={() => setHistoryExpanded((v) => !v)}
+                    hitSlop={8}
+                    style={styles.dropdownButton}
+                    accessibilityLabel={historyExpanded ? "Show fewer recent searches" : "Show all recent searches"}
+                  >
+                    <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textMuted} />
+                  </Pressable>
+                )}
+              </View>
+            </View>
+            {visibleHistory.map((place) => (
+              <View key={place.placeId} style={styles.row}>
+                <Pressable style={styles.historyRowMain} onPress={() => selectPlace(place)}>
+                  <Ionicons name="time-outline" size={16} color={colors.textMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.primaryText} numberOfLines={1}>
+                      {place.name}
+                    </Text>
+                    {!!place.address && (
+                      <Text style={styles.secondaryText} numberOfLines={1}>
+                        {place.address}
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+                <Pressable
+                  onPress={() => onRemoveHistoryEntry(place.placeId)}
+                  hitSlop={10}
+                  style={styles.historyRemoveButton}
+                  accessibilityLabel={`Remove ${place.name} from recent searches`}
+                >
+                  <Ionicons name="close" size={16} color={colors.textFaint} />
+                </Pressable>
+              </View>
+            ))}
+          </View>
         )}
       </View>
     </>
@@ -195,7 +298,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    maxHeight: 260,
+    maxHeight: 320,
     ...shadow.low,
   },
   row: {
@@ -219,5 +322,52 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  historyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  historyHeaderText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  historyHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  clearAllText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.accent,
+  },
+  dropdownButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  historyRowMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  historyRemoveButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

@@ -145,6 +145,14 @@ export async function signInWithEmail(email: string, password: string): Promise<
   return result.user;
 }
 
-export function signOutUser(): Promise<void> {
-  return signOut(auth);
+export async function signOutUser(): Promise<void> {
+  await signOut(auth);
+  // This app is designed to always have at least an anonymous session -- every device gets a
+  // stable uid for alert/report ownership (see ensureSignedIn above), and plenty of other code
+  // (nearby alerts, reporting, etc) simply checks for a truthy `user` without distinguishing
+  // anonymous from real. Signing out of a real identity shouldn't leave the rest of the app
+  // broken until the next full restart happens to re-trigger ensureSignedIn -- immediately
+  // re-establishing a fresh anonymous session here keeps everything else working exactly the
+  // way it already did before the user ever signed in.
+  await signInAnonymously(auth);
 }

@@ -42,7 +42,7 @@ import {
   type TravelMode,
 } from "@/services/directions";
 import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
-import { distanceKm, bearingDegrees } from "@/utils/geo";
+import { distanceKm, bearingDegrees, distanceToPolylineMeters } from "@/utils/geo";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
@@ -95,6 +95,9 @@ export function MapScreen() {
   // card. 320 is a reasonable fallback for the one frame before the first real measurement.
   const [routeCardHeight, setRouteCardHeight] = useState(320);
   const guidanceRef = useRef(createGuidanceState());
+  // True only while a fresh route is actively being fetched after drifting off the current one
+  // -- drives the small "Rerouting..." banner below.
+  const [rerouting, setRerouting] = useState(false);
   // Exact arrival coordinate for the highlighted destination marker below -- kept separate
   // from route.polyline's last point so it's the real picked place, not whatever pixel the
   // polyline decoder happened to end on.
@@ -419,6 +422,66 @@ export function MapScreen() {
       speak(stepToSpeak.instruction, voiceVolume);
     }
   }, [currentLatLng, route, voiceEnabled, voiceVolume, activeStepIndex]);
+
+  // Real, automatic reroute -- previously guidance (above) only ever advanced *forward* through
+  // the existing route's own steps; if a turn/exit was missed entirely, the current step's end
+  // point never got close (and the skip-ahead check inside evaluateGuidance only covers jumps
+  // still roughly *along* the route), so guidance just sat frozen on the same stale instruction
+  // forever with no recovery -- a real, confirmed dead end reported directly ("I've missed my
+  // exit/street and it didn't reroute"). This instead measures live distance from the *route
+  // line itself* (not just the next step's endpoint), which catches a genuinely wrong-direction
+  // miss that forward-only step advancement can never detect.
+  const OFF_ROUTE_METERS = 60;
+  // Requires the drift to still be true a couple of GPS ticks later, not just one, before
+  // reacting -- a single noisy/bad fix (a tunnel, tall buildings) briefly reading "off route"
+  // shouldn't kick off a real reroute on its own.
+  const OFF_ROUTE_CONFIRM_TICKS = 2;
+  // Once a reroute fires, this is the minimum gap before another one can -- otherwise a fresh
+  // reroute that's *itself* briefly still off the eventual snapped route (GPS drift right after
+  // a fetch) could immediately trigger a second one, and so on back-to-back.
+  const REROUTE_COOLDOWN_MS = 15000;
+  const offRouteStreakRef = useRef(0);
+  const lastRerouteAtRef = useRef(0);
+  useEffect(() => {
+    if (!route || !currentLatLng || !destinationLatLng) {
+      offRouteStreakRef.current = 0;
+      return;
+    }
+    const distMeters = distanceToPolylineMeters(currentLatLng.latitude, currentLatLng.longitude, route.polyline);
+    if (distMeters <= OFF_ROUTE_METERS) {
+      offRouteStreakRef.current = 0;
+      return;
+    }
+    offRouteStreakRef.current += 1;
+    if (offRouteStreakRef.current < OFF_ROUTE_CONFIRM_TICKS) return;
+    if (Date.now() - lastRerouteAtRef.current < REROUTE_COOLDOWN_MS) return;
+
+    offRouteStreakRef.current = 0;
+    lastRerouteAtRef.current = Date.now();
+    setRerouting(true);
+    Sentry.logger.info("map: off-route detected, rerouting", { distMeters: Math.round(distMeters) });
+
+    const reroutePromise =
+      travelMode === "driving"
+        ? getRouteOptions(currentLatLng, destinationLatLng).then((options) => options[selectedProfile])
+        : getDirectionsForMode(currentLatLng, destinationLatLng, travelMode);
+
+    reroutePromise
+      .then((fresh) => {
+        guidanceRef.current = createGuidanceState();
+        setActiveStepIndex(0);
+        setRoute(fresh);
+        mapRef.current?.fitToCoordinates(fresh.polyline, {
+          edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
+          animated: true,
+        });
+      })
+      .catch((err) => {
+        console.warn("[map] reroute failed", err);
+        Sentry.logger.error("map: reroute failed", { error: String(err) });
+      })
+      .finally(() => setRerouting(false));
+  }, [currentLatLng, route, destinationLatLng, travelMode, selectedProfile]);
 
   // EV Radar (Phase 6): start/stop siren detection with the map screen lifecycle -- mount-once
   // (deps: []), NOT re-keyed on location. It used to also depend on currentLatLng/user/
@@ -941,19 +1004,19 @@ export function MapScreen() {
         )}
         {/* Preview of whichever route profile is highlighted in the picker below, before
             the user commits to it with Start -- "click a route, see its line" like Apple/
-            Google Maps' own route picker. Red (not the same blue as the committed route below,
-            or the destination halo) so it stays visible against every map theme -- the old
-            blue preview was the exact same shade as several themes' own road color (e.g. Blue
-            & Grey), making it functionally invisible on top of a same-colored street. Dashed on
-            top of that so it's still visually distinct from the solid committed-route line
-            (the two are mutually exclusive: `route` is only ever set once routeOptions has been
-            cleared by confirmRoute). */}
+            Google Maps' own route picker. Red and thick (not the same blue as the committed
+            route below, or the destination halo) so it stays visible against every map theme --
+            the old blue preview was the exact same shade as several themes' own road color
+            (e.g. Blue & Grey), making it functionally invisible on top of a same-colored
+            street. Dashed on top of that so it's still visually distinct from the solid
+            committed-route line (the two are mutually exclusive: `route` is only ever set once
+            routeOptions has been cleared by confirmRoute). */}
         {routeOptions && (
           <Polyline
             coordinates={routeOptions[selectedProfile].polyline}
-            strokeWidth={5}
+            strokeWidth={7}
             strokeColor="#DC2626"
-            lineDashPattern={[8, 6]}
+            lineDashPattern={[10, 7]}
           />
         )}
         {/* Highlighted arrival spot -- the exact picked destination (not wherever the
@@ -1092,6 +1155,19 @@ export function MapScreen() {
           onExpandDirections={() => directionsSheetRef.current?.expand()}
           onHeightChange={setInstructionCardHeight}
         />
+      )}
+
+      {/* Off-route auto-reroute is silent otherwise -- a fresh route fetch (a real network
+          call) can take a moment, and with zero feedback that gap could easily read as the app
+          having frozen or missed the miss entirely, right when trust in the nav matters most. */}
+      {rerouting && (
+        <View
+          style={[styles.reroutingBadge, { top: insets.top + spacing.md + instructionCardHeight + spacing.md }]}
+          accessibilityLabel="Rerouting"
+        >
+          <ActivityIndicator size="small" color="#FFFFFF" />
+          <Text style={styles.reroutingBadgeText}>Rerouting…</Text>
+        </View>
       )}
 
       {/* Pushed below the instruction card while navigating (instead of sharing its top
@@ -1519,6 +1595,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.low,
+  },
+  reroutingBadge: {
+    position: "absolute",
+    left: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.dark,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    ...shadow.medium,
+  },
+  reroutingBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   placeInfoLoadingBadge: {
     position: "absolute",

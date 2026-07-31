@@ -1,5 +1,13 @@
-import React from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, type LayoutChangeEvent } from "react-native";
+import React, { useEffect, useRef } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  Animated,
+  type LayoutChangeEvent,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Route, RouteProfileKey, TravelMode } from "@/services/directions";
@@ -68,12 +76,50 @@ export function RouteOptionsCard({
   const isDriving = travelMode === "driving";
   const hasResult = isDriving ? !!options : !!modeRoute;
 
+  // "Peek" -- picking a route profile (tap Normal/Fastest/Safest) briefly slides this card
+  // partway down off-screen so more of the map (and the red preview line above it) is visible,
+  // then slides back up on its own after a few seconds -- a good look at the route/how long
+  // it'll take without the card fully hiding it, and without needing a manual dismiss.
+  const PEEK_DOWN_MS = 7000;
+  const cardHeightRef = useRef(0);
+  const peekTranslateY = useRef(new Animated.Value(0)).current;
+  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Skips the very first render's "selection" (the default profile the card mounts with,
+  // never an actual tap) -- only a real change in `selected` (an actual pick) should trigger
+  // the peek.
+  const mountedSelectedRef = useRef(selected);
+
+  useEffect(() => {
+    if (mountedSelectedRef.current === selected) return;
+    mountedSelectedRef.current = selected;
+    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    const peekDistance = Math.max(cardHeightRef.current * 0.55, 170);
+    Animated.timing(peekTranslateY, { toValue: peekDistance, duration: 260, useNativeDriver: true }).start();
+    peekTimerRef.current = setTimeout(() => {
+      Animated.timing(peekTranslateY, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    }, PEEK_DOWN_MS);
+  }, [selected, peekTranslateY]);
+
+  useEffect(
+    () => () => {
+      if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    },
+    []
+  );
+
   const onLayout = (e: LayoutChangeEvent) => {
+    cardHeightRef.current = e.nativeEvent.layout.height;
     onHeightChange?.(e.nativeEvent.layout.height);
   };
 
   return (
-    <View style={[styles.card, { bottom: insets.bottom + spacing.xl }]} onLayout={onLayout}>
+    <Animated.View
+      style={[
+        styles.card,
+        { bottom: insets.bottom + spacing.xl, transform: [{ translateY: peekTranslateY }] },
+      ]}
+      onLayout={onLayout}
+    >
       <View style={styles.header}>
         <Text style={styles.title}>Choose a route</Text>
         <Pressable onPress={onCancel} hitSlop={12} accessibilityLabel="Cancel route selection">
@@ -204,7 +250,7 @@ export function RouteOptionsCard({
           </Pressable>
         </>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
