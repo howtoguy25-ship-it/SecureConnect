@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import * as AppleAuthentication from "expo-apple-authentication";
+import * as Crypto from "expo-crypto";
 import { GoogleSignin, GoogleSigninButton, isErrorWithCode, statusCodes } from "@react-native-google-signin/google-signin";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -22,6 +23,7 @@ import {
 import { env } from "@/config/env";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
+import { Sentry } from "@/services/sentry";
 
 // Real Firebase-backed sign-in (Google/Apple/Email), optional -- the app already works fully
 // signed in anonymously (see firebase.ts's ensureSignedIn), this just upgrades that same
@@ -52,21 +54,33 @@ export function SignInScreen() {
     setError(null);
     setBusy(true);
     try {
+      // Firebase's Apple provider requires a nonce for replay protection: Apple needs the
+      // SHA-256 hash (hex) so it can embed it in the identity token's own "nonce" claim,
+      // Firebase needs the original raw value back so it can hash it itself and compare.
+      // This was the real, confirmed cause of Apple sign-in failing with "Firebase: Duplicate
+      // credential received... (auth/missing-or-invalid-nonce)" even after the token's
+      // audience itself checked out (that was a separate, already-fixed Firebase Console
+      // config issue) -- no nonce was ever generated or passed on either side before this.
+      const rawNonce = Crypto.randomUUID();
+      const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, rawNonce);
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
       if (!credential.identityToken) {
         throw new Error("Apple didn't return an identity token -- try again.");
       }
-      await signInWithAppleCredential(credential.identityToken);
+      await signInWithAppleCredential(credential.identityToken, rawNonce);
+      Sentry.logger.info("sign-in: Apple sign-in succeeded");
       navigation.goBack();
     } catch (err: any) {
       // A real, expected outcome (user tapped Cancel on the system sheet), not an error to
       // show -- matches how the Google branch below treats its own cancel code.
       if (err?.code === "ERR_REQUEST_CANCELED") return;
+      Sentry.logger.error("sign-in: Apple sign-in failed", { error: String(err), code: err?.code });
       setError(err instanceof Error ? err.message : "Apple sign-in failed.");
     } finally {
       setBusy(false);
@@ -83,13 +97,32 @@ export function SignInScreen() {
     try {
       await GoogleSignin.hasPlayServices();
       const response = await GoogleSignin.signIn();
-      if (response.type !== "success" || !response.data.idToken) {
+      if (response.type !== "success") {
+        Sentry.logger.info("sign-in: Google sign-in returned non-success", { type: response.type });
         return; // user cancelled the native sheet -- not an error
       }
+      if (!response.data.idToken) {
+        // A real, confirmed failure mode, not a cancellation -- the native picker completed
+        // (an account was actually chosen) but Google didn't hand back a usable ID token, so
+        // there's nothing to give Firebase. Previously this fell into the same silent `return`
+        // as an actual cancel, which is exactly what looked like the whole flow "just resets"
+        // with zero explanation -- the picker visibly ran and "succeeded" from the user's
+        // side, then nothing happened and Settings still showed not signed in.
+        Sentry.logger.error("sign-in: Google sign-in succeeded with no idToken", {
+          hasUser: !!response.data.user,
+        });
+        setError("Google didn't return a usable sign-in token -- try again.");
+        return;
+      }
       await signInWithGoogleCredential(response.data.idToken);
+      Sentry.logger.info("sign-in: Google sign-in succeeded");
       navigation.goBack();
     } catch (err: any) {
       if (isErrorWithCode(err) && err.code === statusCodes.SIGN_IN_CANCELLED) return;
+      Sentry.logger.error("sign-in: Google sign-in failed", {
+        error: String(err),
+        code: isErrorWithCode(err) ? err.code : undefined,
+      });
       setError(err instanceof Error ? err.message : "Google sign-in failed.");
     } finally {
       setBusy(false);

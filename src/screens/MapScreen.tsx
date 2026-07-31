@@ -941,14 +941,18 @@ export function MapScreen() {
         )}
         {/* Preview of whichever route profile is highlighted in the picker below, before
             the user commits to it with Start -- "click a route, see its line" like Apple/
-            Google Maps' own route picker. Dashed so it's visually distinct from the solid
-            committed-route line above (the two are mutually exclusive: `route` is only ever
-            set once routeOptions has been cleared by confirmRoute). */}
+            Google Maps' own route picker. Red (not the same blue as the committed route below,
+            or the destination halo) so it stays visible against every map theme -- the old
+            blue preview was the exact same shade as several themes' own road color (e.g. Blue
+            & Grey), making it functionally invisible on top of a same-colored street. Dashed on
+            top of that so it's still visually distinct from the solid committed-route line
+            (the two are mutually exclusive: `route` is only ever set once routeOptions has been
+            cleared by confirmRoute). */}
         {routeOptions && (
           <Polyline
             coordinates={routeOptions[selectedProfile].polyline}
-            strokeWidth={4}
-            strokeColor="#2563EB"
+            strokeWidth={5}
+            strokeColor="#DC2626"
             lineDashPattern={[8, 6]}
           />
         )}
