@@ -9,7 +9,12 @@ import { File } from "expo-file-system";
 // files, all require()'d as Metro assets) entirely from local bundled files -- no network.
 export function bundledModelIO(
   modelJsonModule: number,
-  weightModules: number[]
+  weightModules: number[],
+  // "layers-model" default preserves the exact prior behavior for vehicleClassifier.ts (the
+  // only caller before this became reusable for coco-ssd's graph model too, which needs
+  // "graph-model" instead) -- tfjs's loaders don't actually validate this field at runtime,
+  // but setting it correctly keeps the returned artifacts honest metadata either way.
+  format: "layers-model" | "graph-model" = "layers-model"
 ): tf.io.IOHandler {
   return {
     load: async (): Promise<tf.io.ModelArtifacts> => {
@@ -34,7 +39,7 @@ export function bundledModelIO(
         modelTopology: modelJson.modelTopology,
         weightSpecs,
         weightData,
-        format: "layers-model",
+        format,
         generatedBy: "TensorFlow.js tfjs-layers Converter",
         convertedBy: null,
       };

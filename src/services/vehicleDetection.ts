@@ -4,7 +4,33 @@ import * as jpeg from "jpeg-js";
 import { File } from "expo-file-system";
 import { ensureTfReady } from "@/services/tfPlatform";
 import { cachedModelIO } from "@/services/cachedModelIO";
+import { bundledModelIO } from "@/services/modelAssetIO";
 import { Sentry } from "@/services/sentry";
+
+// Bundled directly into the app binary (require()'d so Metro packages these as local assets --
+// see metro.config.js's .bin registration and modelAssetIO.ts) -- the real fix for "loads
+// immediately," ahead of App Store submission: cachedModelIO's disk cache only helps from the
+// *second* launch onward, so every fresh install's very first vehicle-detection open still had
+// to fetch ~18MB from Google's CDN over the network before anything could load, with no bound
+// on how slow/flaky that connection might be (exactly what an App Store reviewer or a driver on
+// weak cellular could hit first). Bundling the same model.json + weight shards this app already
+// fetches at runtime means the very first launch loads with zero network dependency at all,
+// identical file bytes either way.
+// Named model.json.bin (not model.json) deliberately -- Metro's default sourceExts already
+// includes "json", meaning a plain require(".../model.json") would be parsed inline as a JS
+// object at bundle time, not treated as a Metro *asset* the way modelAssetIO.ts's
+// Asset.fromModule() needs (a numeric asset module id it can resolve to a local file URI).
+// The ".bin" extension (registered as an assetExt in metro.config.js) is what makes this
+// resolve as an asset; expo-file-system's File.json() parses it as JSON regardless of its
+// actual file extension once downloaded, so the renamed file's content is unchanged.
+const bundledCocoSsdModelJson = require("../../assets/models/ssdlite_mobilenet_v2/model.json.bin");
+const bundledCocoSsdWeights = [
+  require("../../assets/models/ssdlite_mobilenet_v2/group1-shard1of5.bin"),
+  require("../../assets/models/ssdlite_mobilenet_v2/group1-shard2of5.bin"),
+  require("../../assets/models/ssdlite_mobilenet_v2/group1-shard3of5.bin"),
+  require("../../assets/models/ssdlite_mobilenet_v2/group1-shard4of5.bin"),
+  require("../../assets/models/ssdlite_mobilenet_v2/group1-shard5of5.bin"),
+];
 
 // COCO-SSD fetches its own base model (several MB, model.json + weight shards) from
 // Google's CDN on every single load by default -- there's no persistent cache without this,
@@ -67,17 +93,38 @@ export interface DecodedPhoto {
 // first detected frame vs. a screen that's immediately live and interactive (Close/Switch
 // camera responsive right away, not fighting a blocked JS thread) -- is a straightforward win
 // for how this feature is actually used.
-function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
+async function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
   Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup start");
   const objectDetection = new cocoSsd.ObjectDetection(COCO_SSD_BASE);
-  return tf.loadGraphModel(cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2")).then((model) => {
-    // ObjectDetection.model is only "private" in its .d.ts -- a real, plain instance property
-    // at runtime, which is exactly what coco-ssd's own load() sets it to internally. Only
-    // reaching around the type here to skip the warmup call load() would otherwise also do.
-    (objectDetection as unknown as { model: tf.GraphModel }).model = model;
-    Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup done, graph model assigned");
-    return objectDetection;
-  });
+
+  let model: tf.GraphModel;
+  try {
+    // Primary path: the exact same model file, already bundled into the app binary -- zero
+    // network involved, so this resolves in however long it takes to read ~18MB off local
+    // disk (effectively instant), not however long the user's connection to Google's CDN
+    // happens to take on any given launch.
+    model = await tf.loadGraphModel(
+      bundledModelIO(bundledCocoSsdModelJson, bundledCocoSsdWeights, "graph-model")
+    );
+    Sentry.logger.info("vehicleDetection: loaded from bundled app assets, no network used");
+  } catch (err) {
+    // Defensive fallback only -- the bundled assets are always present in a real build (they're
+    // require()'d above, so Metro can't produce a build missing them), but this keeps the
+    // previously-working network+disk-cache path as a safety net rather than a hard failure if
+    // the bundled read ever does fail for some unforeseen reason.
+    Sentry.logger.error("vehicleDetection: bundled model load failed, falling back to network", {
+      error: String(err),
+    });
+    console.warn("[vehicleDetection] bundled model load failed, falling back to network", err);
+    model = await tf.loadGraphModel(cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2"));
+  }
+
+  // ObjectDetection.model is only "private" in its .d.ts -- a real, plain instance property
+  // at runtime, which is exactly what coco-ssd's own load() sets it to internally. Only
+  // reaching around the type here to skip the warmup call load() would otherwise also do.
+  (objectDetection as unknown as { model: tf.GraphModel }).model = model;
+  Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup done, graph model assigned");
+  return objectDetection;
 }
 
 const MODEL_LOAD_TIMEOUT_MS = 25000;
