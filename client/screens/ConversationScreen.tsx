@@ -2563,39 +2563,35 @@ export default function ConversationScreen() {
     setSelectedMessage(null);
   };
 
+  // No confirmation dialog here by design — DeleteConfirmSheet.onDeleteForMe
+  // already IS the confirmation (the user picked "Delete for me" from an
+  // explicit sheet after long-pressing and tapping "Delete"). Stacking a
+  // second native Alert.alert on top, in the same tick the sheet's own
+  // Modal closes, raced the two presentations on iOS and could hang the
+  // UI — the actual cause of a real "freezes when deleting" report.
   const handleDeleteMessage = async () => {
     if (!selectedMessage) return;
-    
-    Alert.alert(
-      'Delete Message',
-      'Are you sure you want to delete this message? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const token = await getStoredToken();
-              const baseUrl = getApiUrl();
-              const response = await fetch(new URL(`/api/messages/${selectedMessage.id}`, baseUrl), {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` },
-              });
-              
-              if (response.ok) {
-                setMessages((prev) => prev.filter((m) => m.id !== selectedMessage.id));
-                haptics.success();
-              }
-            } catch (error) {
-              console.error('Error deleting message:', error);
-            }
-          },
-        },
-      ]
-    );
+    const id = selectedMessage.id;
     setShowMessageOptions(false);
     setSelectedMessage(null);
+    try {
+      const token = await getStoredToken();
+      const baseUrl = getApiUrl();
+      const response = await fetch(new URL(`/api/messages/${id}`, baseUrl), {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        setMessages((prev) => prev.filter((m) => m.id !== id));
+        haptics.success();
+      } else {
+        Alert.alert('Could Not Delete', 'Please check your connection and try again.');
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      Alert.alert('Could Not Delete', 'Please check your connection and try again.');
+    }
   };
 
   const submitReport = async (
