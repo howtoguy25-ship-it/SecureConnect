@@ -202,7 +202,18 @@ export default function WelcomeScreen() {
     setIsLoading(true);
     setError("");
 
-    const fullNumber = `${selectedCountry.dial}${trimmed}`;
+    // Most countries' national numbers are written with a leading trunk
+    // "0" that must be dropped once a country code is prefixed (e.g. an
+    // Australian mobile is locally "0474 011 265" but internationally
+    // "+61474011265", not "+610474011265"). Without stripping it, this
+    // produced an invalid E.164 number that DID still often reach the
+    // carrier for verification, but silently broke any later server-side
+    // SMS send that validates the "to" number strictly (e.g. Twilio
+    // rejecting the account-deletion confirmation code with "please enter
+    // a valid phone number"). No real NANP/mobile number legitimately
+    // starts with 0 after its country code, so this is safe everywhere.
+    const nationalNumber = trimmed.replace(/^0+/, "");
+    const fullNumber = `${selectedCountry.dial}${nationalNumber}`;
     const result = await sendVerificationCode(fullNumber);
 
     setIsLoading(false);

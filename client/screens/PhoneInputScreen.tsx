@@ -133,7 +133,10 @@ export default function PhoneInputScreen() {
     setIsLoading(true);
     setError("");
 
-    const fullNumber = `${selectedCountry.dial}${trimmed}`;
+    // Strip a leading trunk "0" before prefixing the country code — see
+    // the identical fix + explanation in WelcomeScreen.tsx's handleContinue.
+    const nationalNumber = trimmed.replace(/^0+/, "");
+    const fullNumber = `${selectedCountry.dial}${nationalNumber}`;
     const result = await sendVerificationCode(fullNumber);
 
     setIsLoading(false);

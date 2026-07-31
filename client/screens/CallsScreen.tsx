@@ -160,7 +160,9 @@ export default function CallsScreen() {
   const handleDialNumber = async () => {
     if (dialNumber.length < 6) return;
     
-    const fullNumber = `${selectedCountry.dial}${dialNumber}`;
+    // Strip a leading trunk "0" before prefixing the country code — see
+    // the identical fix + explanation in WelcomeScreen.tsx's handleContinue.
+    const fullNumber = `${selectedCountry.dial}${dialNumber.replace(/^0+/, "")}`;
     const phoneUrl = `tel:${fullNumber}`;
     
     try {

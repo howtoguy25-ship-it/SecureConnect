@@ -121,7 +121,9 @@ export default function NewMessageScreen() {
   };
 
   const getFullPhoneNumber = () => {
-    return `${selectedCountry.dial}${phoneNumber}`;
+    // Strip a leading trunk "0" before prefixing the country code — see
+    // the identical fix + explanation in WelcomeScreen.tsx's handleContinue.
+    return `${selectedCountry.dial}${phoneNumber.replace(/^0+/, "")}`;
   };
 
   const handleSearch = async () => {
