@@ -1455,6 +1455,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.userId!);
       if (!user) return res.status(404).json({ error: 'User not found' });
 
+      // Apple reviewer / demo account: same bypass as /api/auth/send-code.
+      // The reserved NANP fictional numbers (+1 555-123-4567 / 555-000-0000)
+      // can never receive a real SMS — Twilio correctly rejects them as
+      // invalid destinations — so without this a reviewer tapping Delete
+      // Account on the demo account (or anyone testing it) always got a
+      // confusing "please enter a valid phone number" error instead of the
+      // account-deletion confirmation flow actually working.
+      if (isAppleReviewTestNumber(user.phoneNumber)) {
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+        await storage.createVerificationCode(user.phoneNumber, APPLE_DEMO_CODE, expiresAt);
+        console.log(`[APPLE REVIEW] Delete-account demo code ready for: ${user.phoneNumber}`);
+        return res.json({ success: true });
+      }
+
       const code = generateVerificationCode();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
       await storage.createVerificationCode(user.phoneNumber, code, expiresAt);
