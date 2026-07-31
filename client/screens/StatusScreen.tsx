@@ -339,11 +339,19 @@ function VideoThumb({ uri, style }: { uri: string; style: any }) {
   return <Image source={{ uri: thumb }} style={style} contentFit="cover" cachePolicy="memory-disk" />;
 }
 
-function StatusVideoPlayer({ uri, style }: { uri: string; style: any }) {
+function StatusVideoPlayer({ uri, style, onComplete }: { uri: string; style: any; onComplete?: () => void }) {
   const player = useVideoPlayer({ uri }, (p) => {
     p.loop = true;
     p.play();
   });
+
+  useEffect(() => {
+    if (!onComplete) return;
+    // loop=true means this fires on every replay — the ref it sets is a
+    // one-way latch, so re-firing on later loops is harmless.
+    const sub = player.addListener('playToEnd', onComplete);
+    return () => sub.remove();
+  }, [player, onComplete]);
 
   return (
     <VideoView
@@ -1280,7 +1288,11 @@ export default function StatusScreen() {
           ) : viewingStatus && getDisplayMediaUri(viewingStatus) ? (
             viewingStatus.mediaType === "video" ? (
               <View style={styles.statusImageContainer}>
-                <StatusVideoPlayer uri={getDisplayMediaUri(viewingStatus) ?? ''} style={styles.statusViewerImage} />
+                <StatusVideoPlayer
+                  uri={getDisplayMediaUri(viewingStatus) ?? ''}
+                  style={styles.statusViewerImage}
+                  onComplete={() => { viewCompletedRef.current = true; }}
+                />
               </View>
             ) : (
               <View style={styles.statusImageContainer}>
