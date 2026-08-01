@@ -514,6 +514,18 @@ export default function HiddenLockerScreen() {
       >
         {isLoading ? <ActivityIndicator color="#fff" /> : (isSettingPin ? "Set PIN" : "Unlock")}
       </Button>
+      {!isSettingPin ? (
+        // The locker's key is derived from the PIN itself — there is no
+        // server-side recovery possible, so "forgot PIN" can only mean
+        // "wipe and start over" (handleResetLocker already implements this,
+        // with a clear destructive-confirmation dialog; it just wasn't
+        // reachable from this locked-out screen before).
+        <Pressable onPress={handleResetLocker} disabled={isLoading} style={styles.forgotPinButton}>
+          <ThemedText type="small" style={{ color: theme.error, textAlign: "center" }}>
+            Forgot PIN? Reset Locker
+          </ThemedText>
+        </Pressable>
+      ) : null}
     </KeyboardAwareScrollViewCompat>
   );
 
@@ -719,6 +731,7 @@ const styles = StyleSheet.create({
   pinInput: { width: "100%", height: Spacing.inputHeight, paddingHorizontal: Spacing.lg, borderRadius: BorderRadius.sm, fontSize: 24, fontWeight: "600", textAlign: "center", letterSpacing: 8, borderWidth: 2, marginBottom: Spacing.lg },
   error: { textAlign: "center", marginBottom: Spacing.md },
   button: { width: "100%" },
+  forgotPinButton: { width: "100%", marginTop: Spacing.lg, padding: Spacing.sm },
   actionBar: { flexDirection: "row", gap: Spacing.md, marginBottom: Spacing.lg },
   actionBarBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1.5 },
   emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingTop: Spacing["5xl"], paddingHorizontal: Spacing["2xl"], gap: Spacing.md },

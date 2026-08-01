@@ -7,6 +7,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Feather } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as VideoThumbnails from "expo-video-thumbnails";
+import * as ScreenCapture from "expo-screen-capture";
 import { Image } from "expo-image";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -431,6 +432,23 @@ export default function StatusScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [allowEditing, setAllowEditing] = useState(false);
 
+  // Block screenshots + screen recording while a story is open fullscreen —
+  // same protection chats, Locker, and Safe Code already get, applied
+  // unconditionally to every user (not gated behind VIP). On iOS this
+  // prevents the system screenshot bitmap; on Android it sets FLAG_SECURE,
+  // which also hides the window from the app-switcher preview.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    if (!showStatusViewer) {
+      ScreenCapture.allowScreenCaptureAsync("status-viewer").catch(() => {});
+      return;
+    }
+    ScreenCapture.preventScreenCaptureAsync("status-viewer").catch(() => {});
+    return () => {
+      ScreenCapture.allowScreenCaptureAsync("status-viewer").catch(() => {});
+    };
+  }, [showStatusViewer]);
+
   const { data: statuses = [], isLoading } = useQuery<Status[]>({
     queryKey: ["/api/statuses"],
   });
@@ -450,6 +468,12 @@ export default function StatusScreen() {
   const [decryptedMedia, setDecryptedMedia] = useState<Record<string, string>>({});
   const [decryptedCaptions, setDecryptedCaptions] = useState<Record<string, string | null>>({});
   const [undecryptable, setUndecryptable] = useState<Record<string, boolean>>({});
+  // Plain (non-encrypted) media <Image> had no onError handling — a failed
+  // network load (expired URL, dropped connection, etc.) rendered nothing
+  // at all: no icon, no message, just a blank tile indistinguishable from
+  // "still loading" or "frozen". Track failures explicitly so we can show
+  // real feedback instead of silence.
+  const [mediaLoadFailed, setMediaLoadFailed] = useState<Record<string, boolean>>({});
   const decryptingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -940,6 +964,10 @@ export default function StatusScreen() {
         <View style={[styles.statusPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
           <Feather name="lock" size={32} color={theme.textSecondary} />
         </View>
+      ) : getDisplayMediaUri(item) && mediaLoadFailed[item.id] ? (
+        <View style={[styles.statusPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
+          <Feather name="alert-triangle" size={32} color={theme.textSecondary} />
+        </View>
       ) : getDisplayMediaUri(item) ? (
         item.mediaType === 'video' ? (
           <View style={styles.statusImage}>
@@ -949,7 +977,13 @@ export default function StatusScreen() {
             </View>
           </View>
         ) : (
-          <Image source={{ uri: getDisplayMediaUri(item) ?? '' }} style={styles.statusImage} contentFit="cover" cachePolicy="memory-disk" />
+          <Image
+            source={{ uri: getDisplayMediaUri(item) ?? '' }}
+            style={styles.statusImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            onError={() => setMediaLoadFailed((prev) => ({ ...prev, [item.id]: true }))}
+          />
         )
       ) : (
         <View style={[styles.statusPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
@@ -1024,6 +1058,10 @@ export default function StatusScreen() {
                       <ActivityIndicator color={theme.textSecondary} />
                     )}
                   </View>
+                ) : getDisplayMediaUri(item) && mediaLoadFailed[item.id] ? (
+                  <View style={[styles.thumbPlaceholder, { backgroundColor: theme.backgroundSecondary }]}>
+                    <Feather name="alert-triangle" size={20} color={theme.textSecondary} />
+                  </View>
                 ) : getDisplayMediaUri(item) ? (
                   item.mediaType === 'video' ? (
                     <View style={styles.thumbImageContainer}>
@@ -1036,7 +1074,13 @@ export default function StatusScreen() {
                     </View>
                   ) : (
                     <View style={styles.thumbImageContainer}>
-                      <Image source={{ uri: getDisplayMediaUri(item) ?? '' }} style={styles.thumbImage} contentFit="cover" cachePolicy="memory-disk" />
+                      <Image
+                        source={{ uri: getDisplayMediaUri(item) ?? '' }}
+                        style={styles.thumbImage}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        onError={() => setMediaLoadFailed((prev) => ({ ...prev, [item.id]: true }))}
+                      />
                     </View>
                   )
                 ) : (
@@ -1285,6 +1329,13 @@ export default function StatusScreen() {
                 Couldn't decrypt this story
               </ThemedText>
             </View>
+          ) : viewingStatus && getDisplayMediaUri(viewingStatus) && mediaLoadFailed[viewingStatus.id] ? (
+            <View style={styles.statusImageContainer}>
+              <Feather name="alert-triangle" size={40} color="#fff" />
+              <ThemedText type="body" style={{ color: "#fff", marginTop: Spacing.md }}>
+                Couldn't load this story
+              </ThemedText>
+            </View>
           ) : viewingStatus && getDisplayMediaUri(viewingStatus) ? (
             viewingStatus.mediaType === "video" ? (
               <View style={styles.statusImageContainer}>
@@ -1303,6 +1354,7 @@ export default function StatusScreen() {
                   cachePolicy="memory-disk"
                   placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
                   transition={200}
+                  onError={() => setMediaLoadFailed((prev) => ({ ...prev, [viewingStatus.id]: true }))}
                 />
               </View>
             )

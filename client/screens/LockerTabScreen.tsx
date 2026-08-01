@@ -338,6 +338,17 @@ export default function LockerTabScreen() {
       >
         {isLoading ? <ActivityIndicator color="#fff" /> : (isSettingPin ? "Create PIN" : "Unlock")}
       </Button>
+      {!isSettingPin ? (
+        // The locker's PIN can't be recovered server-side — "forgot PIN"
+        // can only mean wipe-and-start-over (handleResetLocker already
+        // implements that, with a confirmation dialog; it just wasn't
+        // reachable from this locked-out screen before).
+        <Pressable onPress={handleResetLocker} disabled={isLoading} style={styles.forgotPinButton}>
+          <ThemedText type="small" style={{ color: theme.error, textAlign: "center" }}>
+            Forgot PIN? Reset Locker
+          </ThemedText>
+        </Pressable>
+      ) : null}
     </KeyboardAwareScrollViewCompat>
   );
 
@@ -578,6 +589,11 @@ const styles = StyleSheet.create({
   },
   button: {
     width: "100%",
+  },
+  forgotPinButton: {
+    width: "100%",
+    marginTop: Spacing.lg,
+    padding: Spacing.sm,
   },
   emptyContainer: {
     flex: 1,

@@ -51,7 +51,13 @@ export default function MainTabNavigator() {
       
       if (response.ok) {
         const conversations = await response.json();
-        const total = conversations.reduce((sum: number, conv: any) => sum + (conv.unreadCount || 0), 0);
+        // Archived conversations (e.g. a declined message request) don't
+        // show up in the chat list at all, but their unreadCount was never
+        // reset — "seen" is deliberately suppressed while a request is
+        // still pending, so a declined request's stale unread count would
+        // otherwise inflate this badge forever, even though the user
+        // already answered it.
+        const total = conversations.reduce((sum: number, conv: any) => sum + (conv.isArchived ? 0 : (conv.unreadCount || 0)), 0);
         setTotalUnreadCount(total);
       }
     } catch (error) {
