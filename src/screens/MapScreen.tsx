@@ -9,6 +9,7 @@ import MapView, {
   type MapPressEvent,
 } from "react-native-maps";
 import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
+import * as Location from "expo-location";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
@@ -254,6 +255,37 @@ export function MapScreen() {
     location?.coords.heading != null && location.coords.heading >= 0
       ? location.coords.heading
       : derivedHeadingRef.current;
+
+  // Live device compass heading -- deliberately separate from `heading` above, which is the
+  // direction of TRAVEL (GPS course/derived bearing) and is what the puck arrow + chase-cam
+  // stay locked to. This is which way the PHONE ITSELF is physically pointing right now
+  // (magnetometer), which can easily differ -- held at an angle, mounted sideways, spun around
+  // in a cupholder -- without that meaning the car actually turned. Rendered as a separate
+  // highlight cone on the puck (below) so the route-facing arrow never wobbles with the phone,
+  // while the cone gives a live, real "which way is my phone facing" signal on top of it.
+  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
+  useEffect(() => {
+    if (!route) {
+      setDeviceHeading(null);
+      return;
+    }
+    let subscription: Location.LocationSubscription | null = null;
+    let cancelled = false;
+    Location.watchHeadingAsync((headingData) => {
+      // trueHeading is -1 when the OS can't derive it yet (no location fix for magnetic
+      // declination) -- magHeading is still a real, live compass reading in that case, just
+      // relative to magnetic north instead of true north, close enough for a visual cone.
+      const value = headingData.trueHeading >= 0 ? headingData.trueHeading : headingData.magHeading;
+      if (!cancelled && value >= 0) setDeviceHeading(value);
+    }).then((sub) => {
+      if (cancelled) sub.remove();
+      else subscription = sub;
+    });
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [route]);
 
   // Guards the very first tick after a route starts so the fitToCoordinates overview (below,
   // in onDestinationSelected) gets a moment on screen before the camera snaps into the tilted
@@ -891,6 +923,34 @@ export function MapScreen() {
   }, []);
 
   const activeStep = route?.steps[activeStepIndex] ?? null;
+  // The drawn route line, trimmed to only what's actually still ahead -- previously this was
+  // always the full original route.polyline, so the whole already-driven portion stayed drawn
+  // behind the puck for the entire trip. Each RouteStep carries its own polyline segment, so
+  // "remaining" is every step from activeStepIndex onward, with the *current* step further
+  // trimmed to the closest point to the live GPS fix (not just whole completed steps) -- a
+  // shorter polyline is also real, measurable less work for the native map to redraw on every
+  // pan/zoom frame, which is part of what reads as drag lag on a long route.
+  const remainingPolyline = useMemo(() => {
+    if (!route) return [];
+    const stepsAhead = route.steps.slice(activeStepIndex);
+    if (stepsAhead.length === 0) return [];
+    const [currentStep, ...restSteps] = stepsAhead;
+    let currentStepPolyline = currentStep.polyline;
+    if (currentLatLng && currentStepPolyline.length > 1) {
+      let nearestIdx = 0;
+      let nearestDist = Infinity;
+      for (let i = 0; i < currentStepPolyline.length; i++) {
+        const pt = currentStepPolyline[i];
+        const d = distanceKm(currentLatLng.latitude, currentLatLng.longitude, pt.latitude, pt.longitude);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestIdx = i;
+        }
+      }
+      currentStepPolyline = currentStepPolyline.slice(nearestIdx);
+    }
+    return [...currentStepPolyline, ...restSteps.flatMap((s) => s.polyline)];
+  }, [route, activeStepIndex, currentLatLng?.latitude, currentLatLng?.longitude]);
   const remainingDistanceMeters = useMemo(
     () => (route ? route.steps.slice(activeStepIndex).reduce((sum, s) => sum + s.distanceMeters, 0) : 0),
     [route, activeStepIndex]
@@ -989,23 +1049,44 @@ export function MapScreen() {
         onPress={onMapPress}
         onPanDrag={onMapPanDrag}
       >
-        {route && (
+        {route && remainingPolyline.length > 1 && (
           <Polyline
-            coordinates={route.polyline}
+            coordinates={remainingPolyline}
             strokeWidth={8}
             strokeColor="#2563EB"
             tappable
             onPress={enterOverviewMode}
           />
         )}
+        {/* Live device-compass "flashlight" cone -- separate from the route arrow below and
+            rotated by deviceHeading (magnetometer), not travel heading, so it visually shows
+            which way the PHONE is physically pointing right now without ever moving the
+            route-facing arrow itself. Rendered first so it paints underneath the puck. Anchored
+            at its narrow tip (y: 1) so it fans outward from the puck's exact position instead
+            of rotating around its own center. */}
+        {route && currentLatLng && deviceHeading != null && (
+          <Marker
+            coordinate={currentLatLng}
+            anchor={{ x: 0.5, y: 1 }}
+            flat
+            rotation={deviceHeading}
+            tracksViewChanges={false}
+          >
+            <View style={styles.compassConeGlyph} />
+          </Marker>
+        )}
         {/* Custom heading-rotated arrow puck, replacing the default blue dot (showsUserLocation
             is false above while route is set) -- flat+rotation is react-native-maps' own
             built-in support for a marker that rotates with heading instead of always facing
-            the camera, exactly the "connected to the route/direction of travel" arrow. */}
+            the camera, exactly the "connected to the route/direction of travel" arrow. A plain
+            CSS-drawn triangle (not an icon glyph) so its neutral, unrotated pose is guaranteed
+            to point straight up -- Ionicons' "navigate" glyph is actually drawn pointing
+            up-and-right by design, which made rotation={heading} visibly off by that glyph's
+            own built-in angle no matter what heading correctly computed to. */}
         {route && currentLatLng && (
           <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} tracksViewChanges={false}>
             <View style={styles.navArrowWrap}>
-              <Ionicons name="navigate" size={20} color="#FFFFFF" />
+              <View style={styles.navArrowGlyph} />
             </View>
           </Marker>
         )}
@@ -1471,6 +1552,37 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.medium,
+  },
+  // Plain CSS triangle (border trick) pointing straight up in its neutral, unrotated pose --
+  // see the Marker comment above for why this replaced an icon glyph.
+  navArrowGlyph: {
+    width: 0,
+    height: 0,
+    backgroundColor: "transparent",
+    borderStyle: "solid",
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderBottomWidth: 11,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "#FFFFFF",
+    marginTop: -1,
+  },
+  // Wide, soft, translucent "flashlight" cone -- apex (the narrow point) sits at the puck's
+  // exact coordinate (see the Marker's anchor: {y: 1} above) and fans out in whichever
+  // direction deviceHeading currently points.
+  compassConeGlyph: {
+    width: 0,
+    height: 0,
+    backgroundColor: "transparent",
+    borderStyle: "solid",
+    borderLeftWidth: 26,
+    borderRightWidth: 26,
+    borderTopWidth: 46,
+    borderBottomWidth: 0,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "rgba(37, 99, 235, 0.3)",
   },
   placementPinOverlay: {
     position: "absolute",
