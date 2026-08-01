@@ -260,6 +260,21 @@ export function SettingsScreen() {
         </Text>
       </Section>
 
+      <Section title="Public transit">
+        <View style={styles.warningBox}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.warning} />
+          <Text style={styles.warningText}>
+            Live, real-time bus/train tracking is limited to NSW, Australia.
+          </Text>
+        </View>
+        <Text style={styles.helperText}>
+          Everywhere else — and for anything NSW's live feed doesn't cover — tapping Transit
+          still finds real nearby buses and trains to wherever you're headed, using published
+          timetables (the real line, real stop, and real scheduled departure time, just not a
+          live-tracked vehicle position).
+        </Text>
+      </Section>
+
       <Section title="EV Radar (siren detection)">
         <Row label="Auto-share detections">
           <Switch
@@ -391,6 +406,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     lineHeight: 17,
+  },
+  warningBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: "#FEF3C7",
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#92400E",
+    lineHeight: 18,
   },
   signInButton: {
     backgroundColor: colors.accent,
