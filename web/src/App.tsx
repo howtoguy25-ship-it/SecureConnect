@@ -774,13 +774,45 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRouteKey]);
 
+  // Set just before a *different* route key is picked (see onSelectRouteKey below) so the
+  // fitBounds effect right after knows to skip re-fitting for that one change -- switching
+  // preview routes should only swap which polyline is drawn, at whatever zoom/position the
+  // driver already has, not yank a manually zoomed-in view back out to the new route's bounds.
+  const skipNextRouteFitRef = useRef(false);
+
+  const onSelectRouteKey = useCallback(
+    (key: RouteKey) => {
+      const reselectingSame = key === selectedRouteKey;
+      if (!reselectingSame) {
+        skipNextRouteFitRef.current = true;
+        setSelectedRouteKey(key);
+        return;
+      }
+      // Re-picking the already-selected route is the deliberate "reset the view" gesture --
+      // re-fits to that route's full overview even though the key itself didn't change (so the
+      // effect above wouldn't have fired on its own).
+      const map = mapRef.current;
+      const bounds = routeOptions[key]?.routes[0]?.bounds;
+      if (map && bounds) {
+        map.fitBounds(bounds, { top: 80, right: 60, bottom: routeCardHeight + 20, left: 60 });
+      }
+    },
+    [selectedRouteKey, routeOptions, routeCardHeight]
+  );
+
   // Fits the map to whichever route is previewed, padded for the route-picker card's real
   // measured height (routeCardHeight) -- DirectionsRenderer's own automatic fit (used once
   // navigating starts, via preserveViewport: false then) has no concept of that card sitting
   // over the bottom of the screen, so relying on it alone here left the lower part of the
-  // previewed route hidden behind the card.
+  // previewed route hidden behind the card. Skipped once for a plain route-switch (see
+  // skipNextRouteFitRef above) -- still runs for a genuinely fresh fetch (new destination, new
+  // travel mode) and for the explicit reselect-to-reset gesture handled imperatively above.
   useEffect(() => {
     if (navigating || !directions) return;
+    if (skipNextRouteFitRef.current) {
+      skipNextRouteFitRef.current = false;
+      return;
+    }
     const map = mapRef.current;
     const bounds = directions.routes[0]?.bounds;
     if (!map || !bounds) return;
@@ -1917,7 +1949,7 @@ export default function App() {
         <RouteOptionsCard
           routeOptions={routeOptions}
           selectedRouteKey={selectedRouteKey}
-          onSelect={setSelectedRouteKey}
+          onSelect={onSelectRouteKey}
           travelMode={travelMode}
           onSelectTravelMode={setTravelMode}
           modeRoute={modeRoute}

@@ -759,7 +759,14 @@ export function MapScreen() {
 
   const onSelectProfile = useCallback(
     (key: RouteProfileKey) => {
+      // Switching to a *different* route just swaps which polyline is drawn, at whatever
+      // zoom/position the driver is already looking at -- previously this re-fit the camera to
+      // the newly-picked route's own bounds every time, which yanked a manually zoomed-in view
+      // back out on every tap. Re-picking the route that's ALREADY selected is the deliberate
+      // "reset the view" gesture instead: that one still re-fits to the full route overview.
+      const reselectingSame = key === selectedProfile;
       setSelectedProfile(key);
+      if (!reselectingSame) return;
       const previewRoute = routeOptions?.[key];
       if (previewRoute) {
         mapRef.current?.fitToCoordinates(previewRoute.polyline, {
@@ -768,7 +775,7 @@ export function MapScreen() {
         });
       }
     },
-    [routeOptions, routeCardHeight]
+    [routeOptions, routeCardHeight, selectedProfile]
   );
 
   const confirmRoute = useCallback(() => {
@@ -1325,7 +1332,11 @@ export function MapScreen() {
       </View>
 
       {/* Never shown while navigating -- a driving app shouldn't have anything competing for
-          attention with the road/turn instructions, safety concern first and foremost. */}
+          attention with the road/turn instructions, safety concern first and foremost. Also
+          hidden while the route picker (RouteOptionsCard) is up: that card's own Start/Add-a-
+          stop buttons sit at the very bottom of the screen too, and the banner (a real native
+          view outside this flex layout's height calculation at mount time) was landing right on
+          top of them, making Start unreachable. */}
       {/* DIAGNOSTIC: disabled -- see App.tsx's DIAGNOSTIC_DISABLE_APP_OPEN_AD. BannerAd's own
           native `load` command (Commands.load in GoogleMobileAdsBannerViewNativeComponent.ts)
           is *also* a void-returning TurboModule call, the same crash-signature match as
@@ -1333,7 +1344,7 @@ export function MapScreen() {
           !route is true until navigation starts) -- this was never actually excluded by the
           build 24 AppOpenAdManager-only test, so that test wasn't a clean isolation of ads as
           a whole. Disabling this too for a real one. */}
-      {!route && (
+      {!route && !pendingDestination && (
         <AdsErrorBoundary>
           <BannerAdBar />
         </AdsErrorBoundary>
