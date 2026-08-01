@@ -4,6 +4,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { File } from "expo-file-system";
 import { detectVehiclesInPhoto, decodePhotoForDetection, warmUpModel } from "@/services/vehicleDetection";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
@@ -57,6 +58,23 @@ const MAX_CONSECUTIVE_CAPTURE_FAILURES = 4;
 // this banner had no dismiss control at all on mobile (unlike the web app's equivalent, which
 // does), so it stayed pinned across the whole detection view every single time it was opened.
 const INFO_DISMISSED_KEY = "@trackline/aiDetectionInfoDismissed";
+
+// Four corner brackets instead of a plain solid rectangle -- reads as a real targeting
+// lock (the same visual language as a camera's autofocus/tracking reticle) rather than a
+// generic selection outline, per explicit request for the box to look "professionally
+// placed/locked." Purely cosmetic on top of the same real bbox math below -- the actual
+// detected region a bracket set outlines is unchanged.
+function TargetCorners({ width, height, color }: { width: number; height: number; color: string }) {
+  const len = Math.max(10, Math.min(22, Math.min(width, height) * 0.3));
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <View style={[styles.corner, styles.cornerTL, { width: len, height: len, borderColor: color }]} />
+      <View style={[styles.corner, styles.cornerTR, { width: len, height: len, borderColor: color }]} />
+      <View style={[styles.corner, styles.cornerBL, { width: len, height: len, borderColor: color }]} />
+      <View style={[styles.corner, styles.cornerBR, { width: len, height: len, borderColor: color }]} />
+    </View>
+  );
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -244,6 +262,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       }
       if (pruned) setPlateTexts(new Map(plateTextsRef.current));
 
+      // Collected so the captured photo file (below) is only deleted once every plate-read
+      // that still needs to read bytes off it has actually finished -- readPlateText crops
+      // straight from photo.uri, so deleting it any earlier would race that read.
+      const plateReadPromises: Promise<void>[] = [];
       for (const box of tracked) {
         if (plateTextsRef.current.has(box.id) || platesReadingRef.current.has(box.id)) continue;
         const attempts = plateAttemptsRef.current.get(box.id) ?? 0;
@@ -254,18 +276,33 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         plateAttemptsRef.current.set(box.id, attempts + 1);
         platesReadingRef.current.add(box.id);
         const trackId = box.id;
-        readPlateText(photo.uri, region)
-          .then((text) => {
-            if (!text || unmountedRef.current) return;
-            plateTextsRef.current.set(trackId, { text, region });
-            setPlateTexts(new Map(plateTextsRef.current));
-          })
-          .catch((err) => {
-            Sentry.logger.error("vehicle-detection: plate OCR failed", { error: String(err) });
-            console.warn("[vehicle-detection] plate OCR failed", err);
-          })
-          .finally(() => platesReadingRef.current.delete(trackId));
+        plateReadPromises.push(
+          readPlateText(photo.uri, region)
+            .then((text) => {
+              if (!text || unmountedRef.current) return;
+              plateTextsRef.current.set(trackId, { text, region });
+              setPlateTexts(new Map(plateTextsRef.current));
+            })
+            .catch((err) => {
+              Sentry.logger.error("vehicle-detection: plate OCR failed", { error: String(err) });
+              console.warn("[vehicle-detection] plate OCR failed", err);
+            })
+            .finally(() => platesReadingRef.current.delete(trackId))
+        );
       }
+
+      // Every capture (every ~0.7-1.1s) writes a brand-new temp JPEG that expo-camera never
+      // cleans up on its own -- left alone, a normal multi-minute driving session leaked
+      // hundreds of files onto disk, a real, confirmed contributor to this screen eventually
+      // crashing under storage/memory pressure. Deleted once decode + every plate crop that
+      // reads from it this tick have actually finished (best-effort -- a failed cleanup here
+      // is silently swallowed, never surfaced as a detection failure).
+      const capturedUri = photo.uri;
+      Promise.allSettled(plateReadPromises).finally(() => {
+        try {
+          new File(capturedUri).delete();
+        } catch {}
+      });
     } catch (err) {
       console.warn("[vehicle-detection] capture/detect failed", err);
       Sentry.logger.error("vehicle-detection: capture/detect failed", { error: String(err) });
@@ -363,6 +400,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                 : Math.abs(box.speedKmh) < 3
                   ? "steady"
                   : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
+          const boxWidthPx = w * scale;
+          const boxHeightPx = h * scale;
+          const lockColor = isEmergency ? "#DC2626" : isSelected ? "#22D3EE" : "#F59E0B";
           return (
             <React.Fragment key={box.id}>
               <Pressable
@@ -374,11 +414,12 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                   {
                     left: x * scale + offsetX,
                     top: y * scale + offsetY,
-                    width: w * scale,
-                    height: h * scale,
+                    width: boxWidthPx,
+                    height: boxHeightPx,
                   },
                 ]}
               >
+                <TargetCorners width={boxWidthPx} height={boxHeightPx} color={lockColor} />
                 <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
                   {isEmergency ? `${box.label} — lights active` : `${box.label} ${Math.round(box.score * 100)}%`}
                 </Text>
@@ -423,6 +464,11 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                     },
                   ]}
                 >
+                  <TargetCorners
+                    width={plateInfo.region.w * scale}
+                    height={plateInfo.region.h * scale}
+                    color="#22D3EE"
+                  />
                   <View style={styles.plateFrameLabelWrap}>
                     <Text style={styles.plateFrameLabelText} numberOfLines={1}>
                       {plateInfo.text}
@@ -533,9 +579,17 @@ const styles = StyleSheet.create({
   },
   box: {
     position: "absolute",
-    borderWidth: 3,
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.35)",
+  },
+  corner: {
+    position: "absolute",
     borderColor: "#F59E0B",
   },
+  cornerTL: { top: -1, left: -1, borderTopWidth: 3, borderLeftWidth: 3 },
+  cornerTR: { top: -1, right: -1, borderTopWidth: 3, borderRightWidth: 3 },
+  cornerBL: { bottom: -1, left: -1, borderBottomWidth: 3, borderLeftWidth: 3 },
+  cornerBR: { bottom: -1, right: -1, borderBottomWidth: 3, borderRightWidth: 3 },
   boxEmergency: {
     borderColor: "#DC2626",
   },
@@ -591,9 +645,11 @@ const styles = StyleSheet.create({
     borderColor: "#22D3EE",
     borderRadius: 3,
   },
+  // On top of the plate's own target rectangle (not below it) -- reads as a real label
+  // tagging the locked-on plate, per explicit request.
   plateFrameLabelWrap: {
     position: "absolute",
-    bottom: -24,
+    top: -24,
     left: 0,
     right: 0,
     alignItems: "center",

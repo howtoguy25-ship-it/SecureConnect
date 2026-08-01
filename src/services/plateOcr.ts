@@ -1,4 +1,5 @@
 import { ImageManipulator } from "expo-image-manipulator";
+import { File } from "expo-file-system";
 import { recognizeText } from "rn-mlkit-ocr";
 import type { PlateRegion } from "@/utils/plateLocator";
 import { Sentry } from "@/services/sentry";
@@ -32,12 +33,24 @@ export async function readPlateText(photoUri: string, region: PlateRegion): Prom
   Sentry.logger.info("plateOcr: crop rendered, calling saveAsync");
   const saved = await cropped.saveAsync();
 
-  Sentry.logger.info("plateOcr: calling rn-mlkit-ocr recognizeText");
-  const result = await recognizeText(saved.uri);
-  Sentry.logger.info("plateOcr: recognizeText resolved", { blockCount: result.blocks.length });
-  for (const block of result.blocks) {
-    const candidate = bestPlateCandidate(block.text);
-    if (candidate) return candidate;
+  try {
+    Sentry.logger.info("plateOcr: calling rn-mlkit-ocr recognizeText");
+    const result = await recognizeText(saved.uri);
+    Sentry.logger.info("plateOcr: recognizeText resolved", { blockCount: result.blocks.length });
+    for (const block of result.blocks) {
+      const candidate = bestPlateCandidate(block.text);
+      if (candidate) return candidate;
+    }
+    return null;
+  } finally {
+    // This crop is a brand-new temp file ImageManipulator wrote to disk on every single OCR
+    // attempt (up to MAX_PLATE_ATTEMPTS times per vehicle, for every vehicle in frame, every
+    // ~1s) -- never cleaning it up left hundreds of leaked JPEGs behind after a normal driving
+    // session, a real, confirmed contributor to this screen eventually crashing under storage/
+    // memory pressure on a long session. Best-effort: a failed cleanup here is silently
+    // swallowed rather than surfaced as a plate-read failure.
+    try {
+      new File(saved.uri).delete();
+    } catch {}
   }
-  return null;
 }
