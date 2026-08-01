@@ -223,12 +223,20 @@ export default function ConversationScreen() {
   const [otherUserPhone, setOtherUserPhone] = useState<string | undefined>(undefined);
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
   const flatListRef = useRef<FlatList>(null);
-  // Guards the initial scroll-to-bottom on conversation open so it fires
-  // exactly once per screen focus (see fetchMessages / onContentSizeChange
-  // below), rather than fighting the user every time content size changes
+  // Guards the initial scroll-to-bottom on conversation open so it settles
+  // once per screen focus (see fetchMessages / onContentSizeChange below),
+  // rather than fighting the user every time content size changes
   // afterward (e.g. they've scrolled up to read history and a new message
   // arrives — that case is handled by its own explicit scrollToEnd calls).
   const didInitialScrollRef = useRef(false);
+  // onContentSizeChange fires as soon as the FlatList reports ANY size —
+  // often before message bubbles have resolved their real height (text
+  // wrap, media thumbnails loading in). A one-shot "scroll once then stop"
+  // guard landed above the true bottom because that first report wasn't
+  // the final size. Instead keep re-scrolling on every size change and
+  // only mark the initial scroll "done" once 200ms pass with no further
+  // change — i.e. once layout has actually settled.
+  const initialScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTypingEmit = useRef<number>(0);
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
@@ -778,7 +786,13 @@ export default function ConversationScreen() {
         // reachable by scrolling up to find them. The actual scroll
         // happens in onContentSizeChange below, once this batch has
         // really laid out — flip the guard here so that callback knows
-        // a fresh load just landed and it's safe to jump.
+        // a fresh load just landed and it's safe to jump. Also clear any
+        // settle timer left over from a previous open, so it can't fire
+        // late and prematurely mark THIS load as already settled.
+        if (initialScrollSettleTimerRef.current) {
+          clearTimeout(initialScrollSettleTimerRef.current);
+          initialScrollSettleTimerRef.current = null;
+        }
         didInitialScrollRef.current = false;
       }
       try {
@@ -2614,7 +2628,12 @@ export default function ConversationScreen() {
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
-      const response = await fetch(new URL(`/api/messages/${id}`, baseUrl), {
+      // Was a plain fetch() with no timeout — same bug class already fixed
+      // in the bulk/for-everyone delete paths, but missed here even though
+      // this is the single most-used delete path (hold-menu "Delete for
+      // me"). A hung request here had no way to ever resolve or surface an
+      // error, which is exactly what "freezes when deleting" looks like.
+      const response = await fetchWithTimeout(new URL(`/api/messages/${id}`, baseUrl), {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -2759,17 +2778,20 @@ export default function ConversationScreen() {
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
-      const response = await fetch(new URL(`/api/messages/${selectedMessage.id}/unsend`, baseUrl), {
+      const response = await fetchWithTimeout(new URL(`/api/messages/${selectedMessage.id}/unsend`, baseUrl), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
-      
+
       if (response.ok) {
         setMessages((prev) => prev.filter((m) => m.id !== selectedMessage.id));
         haptics.success();
+      } else {
+        Alert.alert('Could Not Unsend', 'Please check your connection and try again.');
       }
     } catch (error) {
       console.error('Error unsending message:', error);
+      Alert.alert('Could Not Unsend', 'Please check your connection and try again.');
     }
     setShowMessageOptions(false);
     setSelectedMessage(null);
@@ -3767,10 +3789,13 @@ export default function ConversationScreen() {
         onScrollToIndexFailed={() => {}}
         onScrollBeginDrag={() => { if (holdMessage) closeHoldOverlay(); }}
         onContentSizeChange={() => {
-          if (!didInitialScrollRef.current) {
+          if (didInitialScrollRef.current) return;
+          flatListRef.current?.scrollToEnd({ animated: false });
+          if (initialScrollSettleTimerRef.current) clearTimeout(initialScrollSettleTimerRef.current);
+          initialScrollSettleTimerRef.current = setTimeout(() => {
             didInitialScrollRef.current = true;
-            flatListRef.current?.scrollToEnd({ animated: false });
-          }
+            initialScrollSettleTimerRef.current = null;
+          }, 200);
         }}
         ListHeaderComponent={
           <View style={styles.encryptionBannerWrapper}>

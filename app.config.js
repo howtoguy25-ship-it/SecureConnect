@@ -12,7 +12,7 @@ module.exports = () => {
       ios: {
         supportsTablet: true,
         requireFullScreen: false,
-        buildNumber: "103",
+        buildNumber: "104",
         bundleIdentifier: "com.adham.salameh.secureconnectchat",
         icon: "./assets/images/icon.png",
         privacyManifests: {
