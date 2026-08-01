@@ -29,6 +29,12 @@ interface Props {
   // Only set when this bar is standing in for a secondary pick (e.g. "add a stop") that the
   // user should be able to back out of without having picked anything.
   onCancel?: () => void;
+  // Quick-action row shown only in the idle state (before typing/results), same visibility
+  // gate as "Recent searches" below it -- skips typing a destination entirely and routes
+  // straight to the real nearest bus/train stop. Omitted entirely (no row rendered) on the
+  // secondary "add a stop"/mid-nav search bars, where it wouldn't make sense.
+  onFindNearestStation?: () => void;
+  findingNearestStation?: boolean;
 }
 
 export function DestinationSearchBar({
@@ -36,6 +42,8 @@ export function DestinationSearchBar({
   onDestinationSelected,
   placeholder = "Search destination",
   onCancel,
+  onFindNearestStation,
+  findingNearestStation,
 }: Props) {
   const [query, setQuery] = useState("");
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
@@ -146,6 +154,7 @@ export function DestinationSearchBar({
   }, []);
 
   const showHistory = historyVisible && !query.trim() && predictions.length === 0 && history.length > 0;
+  const showQuickActions = historyVisible && !query.trim() && predictions.length === 0 && !!onFindNearestStation;
   const visibleHistory = historyExpanded ? history : history.slice(0, COLLAPSED_HISTORY_COUNT);
 
   return (
@@ -184,6 +193,22 @@ export function DestinationSearchBar({
             <Ionicons name="alert-circle" size={16} color={colors.danger} />
             <Text style={styles.errorText}>{errorText}</Text>
           </View>
+        )}
+        {showQuickActions && (
+          <Pressable
+            style={({ pressed }) => [styles.quickAction, pressed && styles.rowPressed]}
+            onPress={onFindNearestStation}
+            disabled={findingNearestStation}
+          >
+            {findingNearestStation ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Ionicons name="train-outline" size={18} color={colors.accent} />
+            )}
+            <Text style={styles.quickActionText}>
+              {findingNearestStation ? "Finding nearest station…" : "Nearest train/bus station"}
+            </Text>
+          </Pressable>
         )}
         {predictions.length > 0 && (
           <FlatList
@@ -300,6 +325,22 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     maxHeight: 320,
     ...shadow.low,
+  },
+  quickAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
+    ...shadow.low,
+  },
+  quickActionText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.accent,
   },
   row: {
     flexDirection: "row",

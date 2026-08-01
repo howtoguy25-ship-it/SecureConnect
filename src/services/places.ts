@@ -130,6 +130,46 @@ export async function findNearestPlace(location: LatLng): Promise<{ placeId: str
   return nearest ? { placeId: nearest.place_id } : null;
 }
 
+// "Nearest train/bus station" quick action -- same rankby=distance + real-type-filter shape as
+// findNearestPlace above, but scoped to `type=transit_station` (Google's own catch-all for bus
+// stops, train stations, light rail stops, etc.) instead of any establishment, and returns full
+// PlaceDetails directly (name + location) since the caller routes straight to it rather than
+// showing an intermediate result list.
+export async function findNearestTransitStation(location: LatLng): Promise<PlaceDetails | null> {
+  const params = new URLSearchParams({
+    location: `${location.latitude},${location.longitude}`,
+    rankby: "distance",
+    type: "transit_station",
+    key: env.googlePlacesApiKey,
+  });
+
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params.toString()}`
+  );
+  const json = await res.json();
+
+  if (json.status === "ZERO_RESULTS") return null;
+  if (json.status !== "OK") {
+    Sentry.logger.error("places: nearest transit station request failed", {
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new PlacesApiError(json.status, json.error_message);
+  }
+
+  const nearest = json.results?.[0];
+  if (!nearest) return null;
+  return {
+    placeId: nearest.place_id,
+    name: nearest.name,
+    address: nearest.vicinity ?? "",
+    location: {
+      latitude: nearest.geometry.location.lat,
+      longitude: nearest.geometry.location.lng,
+    },
+  };
+}
+
 export async function getPlaceInfo(placeId: string): Promise<PlaceInfo> {
   const params = new URLSearchParams({
     place_id: placeId,

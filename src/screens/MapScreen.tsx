@@ -46,7 +46,13 @@ import {
   type RouteProfileKey,
   type TravelMode,
 } from "@/services/directions";
-import { findNearestPlace, getPlaceInfo, type PlaceDetails, type PlaceInfo } from "@/services/places";
+import {
+  findNearestPlace,
+  findNearestTransitStation,
+  getPlaceInfo,
+  type PlaceDetails,
+  type PlaceInfo,
+} from "@/services/places";
 import { distanceKm, bearingDegrees, distanceToPolylineMeters } from "@/utils/geo";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
@@ -848,6 +854,33 @@ export function MapScreen() {
     [currentLatLng, fetchRouteOptions]
   );
 
+  // "Find nearest station" quick action -- skips typing a destination entirely and routes
+  // straight to whatever real bus/train stop Google's Places data says is genuinely closest,
+  // as a walking trip (getting to a station is a walk, not a drive). Reuses the exact same
+  // pendingDestination/fetchRouteOptions path onDestinationSelected does, so Start/Add-stop/
+  // the route preview line all work identically once there.
+  const [findingNearestStation, setFindingNearestStation] = useState(false);
+  const onFindNearestStation = useCallback(async () => {
+    if (!currentLatLng) return;
+    setFindingNearestStation(true);
+    try {
+      const station = await findNearestTransitStation(currentLatLng);
+      if (!station) {
+        setRouteOptionsError("No nearby train or bus station found.");
+        return;
+      }
+      setPendingDestination(station);
+      setStopLocation(null);
+      setTravelMode("walking");
+      fetchRouteOptions(station.location, undefined, "walking");
+    } catch (err) {
+      console.warn("[map] find nearest station failed", err);
+      Sentry.logger.error("map: find nearest station failed", { error: String(err) });
+    } finally {
+      setFindingNearestStation(false);
+    }
+  }, [currentLatLng, fetchRouteOptions]);
+
   const onStopSelected = useCallback(
     (place: PlaceDetails) => {
       if (!pendingDestination) return;
@@ -1060,6 +1093,26 @@ export function MapScreen() {
   }, []);
 
   const activeStep = route?.steps[activeStepIndex] ?? null;
+  // Real "you've arrived at the stop" detection for a transit trip -- scoped to the FIRST
+  // boarding stop of the whole journey (route.transitSummary.legs[0], see services/
+  // directions.ts), which is the concrete case actually asked for: walk to the stop, then get
+  // told the real departure time once there instead of generic turn-by-turn that doesn't know
+  // the walk is done. Doesn't attempt to detect arrival at a *later* transfer stop mid-trip --
+  // that would need per-step transit metadata this app doesn't parse yet. 40m matches the
+  // OFF_ROUTE_METERS-style tolerance used elsewhere for "close enough" on foot with normal GPS
+  // drift.
+  const firstBoardingStop = route?.transitSummary?.legs[0];
+  const atTransitBoardingStop =
+    !!firstBoardingStop &&
+    !!currentLatLng &&
+    distanceKm(
+      currentLatLng.latitude,
+      currentLatLng.longitude,
+      firstBoardingStop.departureLocation.latitude,
+      firstBoardingStop.departureLocation.longitude
+    ) *
+      1000 <=
+      40;
   // The drawn route line, trimmed to only what's actually still ahead -- previously this was
   // always the full original route.polyline, so the whole already-driven portion stayed drawn
   // behind the puck for the entire trip. Each RouteStep carries its own polyline segment, so
@@ -1369,7 +1422,12 @@ export function MapScreen() {
       )}
 
       {!route && !pendingDestination && !placingAlert && (
-        <DestinationSearchBar biasLocation={currentLatLng ?? undefined} onDestinationSelected={onDestinationSelected} />
+        <DestinationSearchBar
+          biasLocation={currentLatLng ?? undefined}
+          onDestinationSelected={onDestinationSelected}
+          onFindNearestStation={onFindNearestStation}
+          findingNearestStation={findingNearestStation}
+        />
       )}
 
       {!route && pendingDestination && pickingStop && (
@@ -1438,6 +1496,32 @@ export function MapScreen() {
         >
           <ActivityIndicator size="small" color="#FFFFFF" />
           <Text style={styles.reroutingBadgeText}>Rerouting…</Text>
+        </View>
+      )}
+
+      {/* Real "you've arrived at the stop" state for a transit trip -- see
+          atTransitBoardingStop's own comment above for scope (first boarding stop only). Shows
+          the actual departure time already fetched with the route (same Google transit data
+          the picker itself showed), not a live GPS-tracked bus position -- honest about being
+          a schedule-based estimate, matching how the rest of this app already labels its own
+          Directions-derived ETAs. */}
+      {atTransitBoardingStop && firstBoardingStop && (
+        <View
+          style={[styles.transitWaitBadge, { top: insets.top + spacing.md + instructionCardHeight + spacing.md }]}
+          accessibilityLabel="Waiting at boarding stop"
+        >
+          <Ionicons name="bus" size={18} color="#FFFFFF" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.transitWaitTitle}>
+              You've arrived at {firstBoardingStop.departureStop || "the stop"}
+            </Text>
+            <Text style={styles.transitWaitSubtitle}>
+              {firstBoardingStop.lineName ? `${firstBoardingStop.lineName} ` : ""}
+              {firstBoardingStop.departureText
+                ? `departs ${firstBoardingStop.departureText}`
+                : "Real-time Google Directions estimate"}
+            </Text>
+          </View>
         </View>
       )}
 
@@ -1945,6 +2029,30 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "700",
+  },
+  transitWaitBadge: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    ...shadow.medium,
+  },
+  transitWaitTitle: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  transitWaitSubtitle: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    marginTop: 1,
+    opacity: 0.9,
   },
   placeInfoLoadingBadge: {
     position: "absolute",
