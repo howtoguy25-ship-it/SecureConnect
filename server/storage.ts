@@ -18,6 +18,7 @@ export interface IStorage {
   getConversations(userId: string, numberType?: string): Promise<any[]>;
   findConversationBetween(userId1: string, userId2: string, numberType?: string): Promise<Conversation | undefined>;
   getOrCreateConversation(userId1: string, userId2: string, numberType?: string): Promise<Conversation>;
+  getOrCreateConversationAsRequest(initiatorId: string, otherUserId: string, numberType?: string): Promise<Conversation>;
   getConversationMessages(conversationId: string, limit?: number, viewerUserId?: string): Promise<Message[]>;
   getConversationById(conversationId: string): Promise<Conversation | undefined>;
   getConversationParticipants(conversationId: string): Promise<{ userId: string }[]>;
@@ -318,6 +319,20 @@ export class DatabaseStorage implements IStorage {
     ]);
 
     return newConversation;
+  }
+
+  // Same as getOrCreateConversation, but also files a pending message
+  // request the moment a brand-new conversation is created — the single
+  // shared entry point every "start talking to someone new" path should go
+  // through (direct new-message, status reply, etc.) so the accept/decline
+  // gate applies consistently everywhere, not just one route.
+  async getOrCreateConversationAsRequest(initiatorId: string, otherUserId: string, numberType: string = 'personal'): Promise<Conversation> {
+    const existing = await this.findConversationBetween(initiatorId, otherUserId, numberType);
+    const conversation = await this.getOrCreateConversation(initiatorId, otherUserId, numberType);
+    if (!existing) {
+      await this.createMessageRequest(initiatorId, otherUserId, undefined, conversation.id);
+    }
+    return conversation;
   }
 
   async getConversationById(conversationId: string): Promise<Conversation | undefined> {
@@ -1984,7 +1999,7 @@ export class DatabaseStorage implements IStorage {
       if (!allowed) return null;
     }
 
-    const conversation = await this.getOrCreateConversation(viewerId, status.userId);
+    const conversation = await this.getOrCreateConversationAsRequest(viewerId, status.userId);
     return {
       conversationId: conversation.id,
       otherUserId: author.id,

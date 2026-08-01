@@ -2229,12 +2229,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use numberType from request body, default to 'personal'
       const conversationNumberType = numberType || 'personal';
       // Message-request flow: only a genuinely brand-new pairing becomes a
-      // request — check existence BEFORE getOrCreateConversation creates it.
-      const alreadyExisted = !!(await storage.findConversationBetween(req.userId!, otherUserId, conversationNumberType));
-      const conversation = await storage.getOrCreateConversation(req.userId!, otherUserId, conversationNumberType);
-      if (!alreadyExisted) {
-        await storage.createMessageRequest(req.userId!, otherUserId, undefined, conversation.id);
-      }
+      // request — see getOrCreateConversationAsRequest.
+      const conversation = await storage.getOrCreateConversationAsRequest(req.userId!, otherUserId, conversationNumberType);
       res.json(conversation);
     } catch (error) {
       console.error('Error creating conversation:', error);
