@@ -10,6 +10,7 @@ import MapView, {
 } from "react-native-maps";
 import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
 import * as Location from "expo-location";
+import { warmUpModel } from "@/services/vehicleDetection";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
@@ -17,6 +18,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { MAP_THEME_STYLES } from "@/utils/mapStyle";
+import { TRAFFIC_LIGHT_MARKER, SPEED_CAMERA_MARKER } from "@/utils/osmMarkerStyle";
 
 import { useLocation } from "@/context/LocationContext";
 import { useAuth } from "@/context/AuthContext";
@@ -165,6 +167,24 @@ export function MapScreen() {
   }, []);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
+  // Starts loading the vehicle-detection model in the background the moment the map screen is
+  // up, instead of only starting when the driver actually taps "AI Detection" -- the model load
+  // itself (parsing an 18MB graph, plus GPU shader compile if the WebGL backend is available) is
+  // genuine, real computation that takes real time no matter when it runs; this just moves that
+  // wait to happen silently while the driver is looking at the map, not as a blocking screen the
+  // instant they ask for the feature. warmUpModel() caches its result in a module-level promise
+  // (see vehicleDetection.ts's modelPromise), so if this finishes before AI Detection is opened,
+  // opening it is instant; if it's still in flight, the detection screen just awaits the same
+  // promise instead of starting a second load. A short delay so this doesn't compete with the
+  // map's own initial render/GPS fix for CPU/GPU time right at cold-launch. Errors are swallowed
+  // here on purpose -- a failed background preload isn't user-facing; VehicleDetectionScreen's
+  // own retry UI handles a real failure if the driver actually opens the feature.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      warmUpModel().catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
   // Real photorealistic 3D satellite (Android only for now, see modules/map3d) -- Stage 1:
   // core rendering + live position + the active route only, mirroring the web build's own
   // staged rollout. Renders as an overlay on top of the existing MapView, matching how the
@@ -779,6 +799,45 @@ export function MapScreen() {
     [pendingDestination, fetchRouteOptions, travelMode]
   );
 
+  // Real mid-trip "add a stop" -- previously the only Add Stop control was on the pre-Start
+  // route picker (RouteOptionsCard); once Start was actually tapped there was no way to insert
+  // a stop at all, and searching mid-drive just showed the destination search bar floating over
+  // a bare map with no route/puck/turn card in sight (both DestinationSearchBar and
+  // NavigationInstructionCard are rendered here, so this only ever hid one behind the other --
+  // never an actual "select a place" state with nothing else drawn). This overlays the same
+  // search bar on top of the still-live nav view (route line, puck, turn card all stay mounted
+  // underneath, see the addingStopDuringNav-gated render below) and, on a real pick, recomputes
+  // the route through that stop the same way the off-route auto-reroute effect above does,
+  // without leaving/re-entering navigation.
+  const [addingStopDuringNav, setAddingStopDuringNav] = useState(false);
+  const onStopSelectedDuringNav = useCallback(
+    async (place: PlaceDetails) => {
+      setAddingStopDuringNav(false);
+      if (!currentLatLng || !destinationLatLng) return;
+      setStopLocation(place.location);
+      setRerouting(true);
+      try {
+        const fresh =
+          travelMode === "driving"
+            ? (await getRouteOptions(currentLatLng, destinationLatLng, place.location))[selectedProfile]
+            : await getDirectionsForMode(currentLatLng, destinationLatLng, travelMode, place.location);
+        guidanceRef.current = createGuidanceState();
+        setActiveStepIndex(0);
+        setRoute(fresh);
+        mapRef.current?.fitToCoordinates(fresh.polyline, {
+          edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
+          animated: true,
+        });
+      } catch (err) {
+        console.warn("[map] add stop during nav failed", err);
+        Sentry.logger.error("map: add stop during nav failed", { error: String(err) });
+      } finally {
+        setRerouting(false);
+      }
+    },
+    [currentLatLng, destinationLatLng, travelMode, selectedProfile]
+  );
+
   const onSelectTravelMode = useCallback(
     (mode: TravelMode) => {
       setTravelMode(mode);
@@ -1143,7 +1202,7 @@ export function MapScreen() {
               }}
             >
               <View style={styles.osmIconBadgeTrafficLight}>
-                <MaterialCommunityIcons name="traffic-light" size={11} color="#FFFFFF" />
+                <MaterialCommunityIcons name={TRAFFIC_LIGHT_MARKER.icon} size={TRAFFIC_LIGHT_MARKER.glyphSize} color="#FFFFFF" />
               </View>
             </Marker>
           ))}
@@ -1160,7 +1219,7 @@ export function MapScreen() {
               }}
             >
               <View style={styles.osmIconBadgeSpeedCamera}>
-                <MaterialCommunityIcons name="cctv" size={11} color="#FFFFFF" />
+                <MaterialCommunityIcons name={SPEED_CAMERA_MARKER.icon} size={SPEED_CAMERA_MARKER.glyphSize} color="#FFFFFF" />
               </View>
             </Marker>
           ))}
@@ -1245,6 +1304,19 @@ export function MapScreen() {
         />
       )}
 
+      {/* Real mid-trip add-a-stop search -- overlays the turn card at the same top position
+          (same as the pre-Start search bar) but deliberately does NOT touch `route`, so the
+          route line, puck, and live GPS tracking underneath keep running the whole time this is
+          open instead of the screen dropping back to a bare map with no navigation context. */}
+      {route && addingStopDuringNav && (
+        <DestinationSearchBar
+          biasLocation={currentLatLng ?? undefined}
+          onDestinationSelected={onStopSelectedDuringNav}
+          placeholder="Add a stop on the way"
+          onCancel={() => setAddingStopDuringNav(false)}
+        />
+      )}
+
       {/* Off-route auto-reroute is silent otherwise -- a fresh route fetch (a real network
           call) can take a moment, and with zero feedback that gap could easily read as the app
           having frozen or missed the miss entirely, right when trust in the nav matters most. */}
@@ -1307,6 +1379,17 @@ export function MapScreen() {
             whenever not navigating, looking like a broken "voice search" button glued to the
             search input instead of a separate control. */}
         {route && <MuteButton />}
+        {/* Real mid-trip add-a-stop -- see onStopSelectedDuringNav above. */}
+        {route && !addingStopDuringNav && (
+          <Pressable
+            style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
+            onPress={() => setAddingStopDuringNav(true)}
+            hitSlop={8}
+            accessibilityLabel="Add a stop on the way"
+          >
+            <Ionicons name="add-circle-outline" size={20} color={colors.text} />
+          </Pressable>
+        )}
         {/* Overpass (OSM) traffic-light/speed-camera lookups can genuinely take a few
             seconds -- a visible spinner while one is in flight replaces what used to look
             like the layer being permanently stuck with no feedback at all. */}
@@ -1659,21 +1742,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   osmIconBadgeTrafficLight: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#0D9488",
+    width: TRAFFIC_LIGHT_MARKER.badgeSize,
+    height: TRAFFIC_LIGHT_MARKER.badgeSize,
+    borderRadius: TRAFFIC_LIGHT_MARKER.badgeSize / 2,
+    backgroundColor: TRAFFIC_LIGHT_MARKER.color,
     borderWidth: 1.5,
     borderColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   osmIconBadgeSpeedCamera: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#7C3AED",
-    borderWidth: 1.5,
+    width: SPEED_CAMERA_MARKER.badgeSize,
+    height: SPEED_CAMERA_MARKER.badgeSize,
+    borderRadius: SPEED_CAMERA_MARKER.badgeSize / 2,
+    backgroundColor: SPEED_CAMERA_MARKER.color,
+    borderWidth: 2,
     borderColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",

@@ -142,8 +142,12 @@ function currentLocationIcon(): google.maps.Symbol {
 // isn't defined yet at module-load time, only once the Maps script has actually loaded).
 const speedCameraIconCache = new Map<number, google.maps.Icon>();
 function speedCameraIcon(scale: number): google.maps.Icon {
-  const w = Math.round(22 * scale);
-  const h = Math.round(16 * scale);
+  // Deliberately much bigger than the traffic-light icon below -- a fixed speed camera is the
+  // rarer, higher-stakes marker (a real fine, not just "there's a light here"), so it's sized
+  // to stand out and be hard to miss glancing at the map rather than blending in as just
+  // another same-sized dot.
+  const w = Math.round(34 * scale);
+  const h = Math.round(25 * scale);
   let icon = speedCameraIconCache.get(w);
   if (!icon) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 33 24">
@@ -164,8 +168,11 @@ function speedCameraIcon(scale: number): google.maps.Icon {
 
 const trafficLightIconCache = new Map<number, google.maps.Icon>();
 function trafficLightIcon(scale: number): google.maps.Icon {
-  const w = Math.round(15 * scale);
-  const h = Math.round(24 * scale);
+  // Smaller than the speed camera icon above -- traffic lights are by far the more common
+  // marker (dozens on screen at once in a city), so it stays compact to avoid cluttering the
+  // map instead of competing for attention with the rarer, higher-stakes speed camera marker.
+  const w = Math.round(12 * scale);
+  const h = Math.round(19 * scale);
   let icon = trafficLightIconCache.get(w);
   if (!icon) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 24 38">
@@ -1930,6 +1937,7 @@ export default function App() {
                   checked={settings.showTrafficLights}
                   onChange={(e) => setShowTrafficLights(e.target.checked)}
                 />
+                <img src={trafficLightIcon(1).url as string} alt="" className="radius-checkbox-icon" />
                 Show traffic lights
               </label>
               <label className="radius-checkbox">
@@ -1938,6 +1946,7 @@ export default function App() {
                   checked={settings.showSpeedCameras}
                   onChange={(e) => setShowSpeedCameras(e.target.checked)}
                 />
+                <img src={speedCameraIcon(1).url as string} alt="" className="radius-checkbox-icon" />
                 Show speed cameras
               </label>
             </>

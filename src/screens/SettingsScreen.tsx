@@ -2,6 +2,7 @@ import React, { useCallback } from "react";
 import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable } from "react-native";
 import Slider from "@react-native-community/slider";
 import Constants from "expo-constants";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSettings } from "@/context/SettingsContext";
@@ -14,6 +15,7 @@ import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens"
 import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
 import { ALERT_LABELS, type AlertType } from "@/types/alert";
 import { MAP_THEME_LABELS, type MapThemeKey } from "@/utils/mapStyle";
+import { TRAFFIC_LIGHT_MARKER, SPEED_CAMERA_MARKER } from "@/utils/osmMarkerStyle";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 
 function sensitivityLabel(value: number): string {
@@ -215,14 +217,20 @@ export function SettingsScreen() {
       </Section>
 
       <Section title="Map layers">
-        <Row label="Traffic lights">
+        <Row
+          label="Traffic lights"
+          icon={<OsmLayerIcon marker={TRAFFIC_LIGHT_MARKER} enabled={settings.showTrafficLights} />}
+        >
           <Switch
             value={settings.showTrafficLights}
             onValueChange={onShowTrafficLightsToggle}
             trackColor={{ true: colors.accent, false: colors.border }}
           />
         </Row>
-        <Row label="Speed cameras">
+        <Row
+          label="Speed cameras"
+          icon={<OsmLayerIcon marker={SPEED_CAMERA_MARKER} enabled={settings.showSpeedCameras} />}
+        >
           <Switch
             value={settings.showSpeedCameras}
             onValueChange={onShowSpeedCamerasToggle}
@@ -293,11 +301,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, icon, children }: { label: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={styles.rowLabelWrap}>
+        {icon}
+        <Text style={styles.rowLabel}>{label}</Text>
+      </View>
       {children}
+    </View>
+  );
+}
+
+// Same icon/color the map pin itself uses (see osmMarkerStyle.ts) -- muted to grey while the
+// layer is off, full color once it's on, so the toggle visually previews what you're about to
+// see on the map instead of a plain, unrelated on/off switch.
+function OsmLayerIcon({
+  marker,
+  enabled,
+}: {
+  marker: { icon: string; color: string; badgeSize: number; glyphSize: number };
+  enabled: boolean;
+}) {
+  const size = Math.max(marker.badgeSize, 22);
+  return (
+    <View
+      style={[
+        styles.rowIconBadge,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: enabled ? marker.color : colors.border },
+      ]}
+    >
+      <MaterialCommunityIcons name={marker.icon as any} size={marker.glyphSize} color="#FFFFFF" />
     </View>
   );
 }
@@ -321,6 +355,15 @@ const styles = StyleSheet.create({
   },
   row: {
     gap: spacing.sm,
+  },
+  rowLabelWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  rowIconBadge: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   rowLabel: {
     fontSize: 15,

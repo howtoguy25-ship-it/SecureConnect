@@ -6,6 +6,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { env } from "@/config/env";
 import type { LatLng } from "@/utils/polyline";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
+import { TRAFFIC_LIGHT_MARKER, SPEED_CAMERA_MARKER } from "@/utils/osmMarkerStyle";
 
 export type OsmMarkerKind = "traffic_light" | "speed_camera";
 
@@ -21,9 +22,11 @@ const LABELS: Record<OsmMarkerKind, string> = {
   speed_camera: "Speed camera",
 };
 
+// Same icons as the map pin/settings toggle (see osmMarkerStyle.ts) so this sheet matches
+// whichever marker was actually tapped.
 const ICON_NAMES: Record<OsmMarkerKind, string> = {
-  traffic_light: "traffic-light",
-  speed_camera: "cctv",
+  traffic_light: TRAFFIC_LIGHT_MARKER.icon,
+  speed_camera: SPEED_CAMERA_MARKER.icon,
 };
 
 export const OsmMarkerSheet = forwardRef<BottomSheet, Props>(function OsmMarkerSheet(
