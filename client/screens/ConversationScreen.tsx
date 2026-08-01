@@ -157,6 +157,7 @@ export default function ConversationScreen() {
   const [showMessageOptions, setShowMessageOptions] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [isDeletingSelected, setIsDeletingSelected] = useState(false);
   const [showChatSettings, setShowChatSettings] = useState(false);
   const [reportTarget, setReportTarget] = useState<{
     reportedUserId: string;
@@ -3046,23 +3047,49 @@ export default function ConversationScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            if (isDeletingSelected) return;
+            setIsDeletingSelected(true);
             try {
               const token = await getStoredToken();
               const baseUrl = getApiUrl();
               const idsToDelete = Array.from(selectedMessageIds);
-              
-              for (const id of idsToDelete) {
-                await fetch(new URL(`/api/messages/${id}`, baseUrl), {
-                  method: 'DELETE',
-                  headers: { 'Authorization': `Bearer ${token}` },
-                });
-              }
-              
-              setMessages(prev => prev.filter(m => !selectedMessageIds.has(m.id)));
+
+              // Was a sequential loop with a plain fetch() and no timeout —
+              // one slow/hung request stalled every request after it with
+              // zero feedback, indistinguishable from a real freeze. Now
+              // parallel + fetchWithTimeout (same 10s guard every other
+              // network call in this screen already uses), so a stuck
+              // request fails fast instead of hanging forever.
+              const results = await Promise.all(idsToDelete.map(async (id) => {
+                try {
+                  const res = await fetchWithTimeout(new URL(`/api/messages/${id}`, baseUrl), {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                  });
+                  return { id, ok: res.ok };
+                } catch {
+                  return { id, ok: false };
+                }
+              }));
+
+              const deletedIds = new Set(results.filter(r => r.ok).map(r => r.id));
+              setMessages(prev => prev.filter(m => !deletedIds.has(m.id)));
               handleExitSelectMode();
-              haptics.success();
+
+              if (deletedIds.size < idsToDelete.length) {
+                haptics.warning();
+                Alert.alert(
+                  'Some Messages Not Deleted',
+                  `${idsToDelete.length - deletedIds.size} message${idsToDelete.length - deletedIds.size > 1 ? 's' : ''} could not be deleted. Please check your connection and try again.`,
+                );
+              } else {
+                haptics.success();
+              }
             } catch (error) {
               console.error('Error deleting messages:', error);
+              Alert.alert('Could Not Delete', 'Please check your connection and try again.');
+            } finally {
+              setIsDeletingSelected(false);
             }
           },
         },
@@ -3899,12 +3926,16 @@ export default function ConversationScreen() {
               <ThemedText type="small" style={{ color: selectedMessageIds.size > 0 ? theme.primary : theme.textSecondary, marginTop: 2 }}>Share</ThemedText>
             </Pressable>
             
-            <Pressable 
-              style={styles.selectionToolbarButton} 
+            <Pressable
+              style={styles.selectionToolbarButton}
               onPress={handleDeleteSelected}
-              disabled={selectedMessageIds.size === 0}
+              disabled={selectedMessageIds.size === 0 || isDeletingSelected}
             >
-              <Feather name="trash-2" size={22} color={selectedMessageIds.size > 0 ? theme.error : theme.textSecondary} />
+              {isDeletingSelected ? (
+                <ActivityIndicator size="small" color={theme.error} />
+              ) : (
+                <Feather name="trash-2" size={22} color={selectedMessageIds.size > 0 ? theme.error : theme.textSecondary} />
+              )}
               <ThemedText type="small" style={{ color: selectedMessageIds.size > 0 ? theme.error : theme.textSecondary, marginTop: 2 }}>Delete</ThemedText>
             </Pressable>
           </View>
