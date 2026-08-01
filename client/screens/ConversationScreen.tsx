@@ -2865,7 +2865,7 @@ export default function ConversationScreen() {
     setSelectedMessage(null);
     try {
       const token = await getStoredToken();
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         new URL(`/api/messages/${id}/delete-for-everyone`, getApiUrl()),
         {
           method: 'POST',
@@ -2881,6 +2881,7 @@ export default function ConversationScreen() {
       }
     } catch (e) {
       console.error('delete-for-everyone err', e);
+      Alert.alert('Could Not Delete', 'Please check your connection and try again.');
     }
   };
 
@@ -3036,64 +3037,88 @@ export default function ConversationScreen() {
     setSelectedMessageIds(new Set());
   };
 
-  const handleDeleteSelected = async () => {
-    const count = selectedMessageIds.size;
+  // Was a sequential loop with a plain fetch() and no timeout — one slow or
+  // hung request stalled every request after it with zero feedback,
+  // indistinguishable from a real freeze. Now parallel + fetchWithTimeout
+  // (same 10s guard every other network call in this screen already uses),
+  // so a stuck request fails fast instead of hanging forever. Shared by
+  // both the "for me" and "for everyone" bulk actions below.
+  const runBulkDelete = async (
+    idsToDelete: string[],
+    forEveryone: boolean,
+  ) => {
+    if (isDeletingSelected) return;
+    setIsDeletingSelected(true);
+    try {
+      const token = await getStoredToken();
+      const baseUrl = getApiUrl();
+      const results = await Promise.all(idsToDelete.map(async (id) => {
+        try {
+          const res = await fetchWithTimeout(
+            new URL(forEveryone ? `/api/messages/${id}/delete-for-everyone` : `/api/messages/${id}`, baseUrl),
+            {
+              method: forEveryone ? 'POST' : 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
+            },
+          );
+          return { id, ok: res.ok };
+        } catch {
+          return { id, ok: false };
+        }
+      }));
+
+      const deletedIds = new Set(results.filter(r => r.ok).map(r => r.id));
+      setMessages(prev => forEveryone
+        ? prev.map(m => deletedIds.has(m.id) ? { ...m, deletedForEveryone: true, content: null, mediaUrl: null } : m)
+        : prev.filter(m => !deletedIds.has(m.id)));
+      handleExitSelectMode();
+
+      if (deletedIds.size < idsToDelete.length) {
+        haptics.warning();
+        const failedCount = idsToDelete.length - deletedIds.size;
+        Alert.alert(
+          'Some Messages Not Deleted',
+          `${failedCount} message${failedCount > 1 ? 's' : ''} could not be deleted${forEveryone ? ' for everyone' : ''}. Please check your connection and try again.`,
+        );
+      } else {
+        haptics.success();
+      }
+    } catch (error) {
+      console.error('Error deleting messages:', error);
+      Alert.alert('Could Not Delete', 'Please check your connection and try again.');
+    } finally {
+      setIsDeletingSelected(false);
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    const idsToDelete = Array.from(selectedMessageIds);
+    const count = idsToDelete.length;
+    const selectedMsgs = messages.filter(m => selectedMessageIds.has(m.id));
+    const now = Date.now();
+    // Same eligibility rule as the single-message DeleteConfirmSheet: only
+    // offer "for everyone" when every selected message is mine, not already
+    // tombstoned, and still within the 1-hour window.
+    const canDeleteForEveryone = selectedMsgs.length > 0 && selectedMsgs.every((m) =>
+      m.senderId === user?.id &&
+      !m.deletedForEveryone &&
+      (now - new Date(m.createdAt).getTime()) <= 60 * 60 * 1000
+    );
+
+    const buttons: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete for me', style: 'destructive', onPress: () => runBulkDelete(idsToDelete, false) },
+    ];
+    if (canDeleteForEveryone) {
+      buttons.push({ text: 'Delete for everyone', style: 'destructive', onPress: () => runBulkDelete(idsToDelete, true) });
+    }
+
     Alert.alert(
       'Delete Messages',
-      `Delete ${count} selected message${count > 1 ? 's' : ''}? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (isDeletingSelected) return;
-            setIsDeletingSelected(true);
-            try {
-              const token = await getStoredToken();
-              const baseUrl = getApiUrl();
-              const idsToDelete = Array.from(selectedMessageIds);
-
-              // Was a sequential loop with a plain fetch() and no timeout —
-              // one slow/hung request stalled every request after it with
-              // zero feedback, indistinguishable from a real freeze. Now
-              // parallel + fetchWithTimeout (same 10s guard every other
-              // network call in this screen already uses), so a stuck
-              // request fails fast instead of hanging forever.
-              const results = await Promise.all(idsToDelete.map(async (id) => {
-                try {
-                  const res = await fetchWithTimeout(new URL(`/api/messages/${id}`, baseUrl), {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${token}` },
-                  });
-                  return { id, ok: res.ok };
-                } catch {
-                  return { id, ok: false };
-                }
-              }));
-
-              const deletedIds = new Set(results.filter(r => r.ok).map(r => r.id));
-              setMessages(prev => prev.filter(m => !deletedIds.has(m.id)));
-              handleExitSelectMode();
-
-              if (deletedIds.size < idsToDelete.length) {
-                haptics.warning();
-                Alert.alert(
-                  'Some Messages Not Deleted',
-                  `${idsToDelete.length - deletedIds.size} message${idsToDelete.length - deletedIds.size > 1 ? 's' : ''} could not be deleted. Please check your connection and try again.`,
-                );
-              } else {
-                haptics.success();
-              }
-            } catch (error) {
-              console.error('Error deleting messages:', error);
-              Alert.alert('Could Not Delete', 'Please check your connection and try again.');
-            } finally {
-              setIsDeletingSelected(false);
-            }
-          },
-        },
-      ]
+      canDeleteForEveryone
+        ? `Delete ${count} selected message${count > 1 ? 's' : ''}?`
+        : `Delete ${count} selected message${count > 1 ? 's' : ''} for you? ("Delete for everyone" is only available when every selected message is your own, sent within the last hour.)`,
+      buttons,
     );
   };
 
