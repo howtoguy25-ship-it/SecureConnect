@@ -1,11 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { ROUTE_ORDER, ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
+import {
+  ROUTE_ORDER,
+  ROUTE_PROFILES,
+  TRAVEL_MODE_ORDER,
+  TRAVEL_MODE_LABELS,
+  TRAVEL_MODE_ICONS,
+  type RouteKey,
+  type TravelMode,
+} from "@/utils/routeProfiles";
 import "./RouteOptionsCard.css";
 
 interface Props {
   routeOptions: Record<RouteKey, google.maps.DirectionsResult | null>;
   selectedRouteKey: RouteKey;
   onSelect: (key: RouteKey) => void;
+  // Real, independently-fetched Google Directions results per non-driving mode -- see
+  // App.tsx's directions-fetch effect -- not driving-time estimates scaled by a guessed
+  // walking/cycling speed.
+  travelMode: TravelMode;
+  onSelectTravelMode: (mode: TravelMode) => void;
+  modeRoute: google.maps.DirectionsResult | null;
   onStart: () => void;
   onClear: () => void;
   // Real measured card height, so the caller can fit the previewed route above it instead of
@@ -24,12 +38,18 @@ export function RouteOptionsCard({
   routeOptions,
   selectedRouteKey,
   onSelect,
+  travelMode,
+  onSelectTravelMode,
+  modeRoute,
   onStart,
   onClear,
   onHeightChange,
 }: Props) {
+  const isDriving = travelMode === "driving";
   const available = ROUTE_ORDER.filter((key) => routeOptions[key]);
-  const selectedLeg = routeOptions[selectedRouteKey]?.routes[0]?.legs[0];
+  const selectedLeg = isDriving
+    ? routeOptions[selectedRouteKey]?.routes[0]?.legs[0]
+    : modeRoute?.routes[0]?.legs[0];
 
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [peeking, setPeeking] = useState(false);
@@ -75,32 +95,63 @@ export function RouteOptionsCard({
           ✕
         </button>
       </div>
+      {/* Real, independently-fetched Google Directions results per mode -- see App.tsx's
+          directions-fetch effect -- not driving-time estimates scaled by a guessed
+          walking/cycling speed. */}
+      <div className="route-mode-row">
+        {TRAVEL_MODE_ORDER.map((mode) => (
+          <button
+            key={mode}
+            className={`route-mode-button ${mode === travelMode ? "route-mode-button-active" : ""}`}
+            onClick={() => onSelectTravelMode(mode)}
+            aria-label={`${TRAVEL_MODE_LABELS[mode]} directions`}
+          >
+            <span className="route-mode-icon">{TRAVEL_MODE_ICONS[mode]}</span>
+            <span>{TRAVEL_MODE_LABELS[mode]}</span>
+          </button>
+        ))}
+      </div>
       <div className="route-options-list">
-        {available.map((key) => {
-          const leg = routeOptions[key]?.routes[0]?.legs[0];
-          const profile = ROUTE_PROFILES[key];
-          return (
-            <button
-              key={key}
-              className={`route-option-row ${key === selectedRouteKey ? "route-option-selected" : ""}`}
-              onClick={() => onSelect(key)}
-            >
-              <div className="route-option-title">
-                <span className="route-option-label">{profile.label}</span>
-                {/* duration_in_traffic (live, requested via drivingOptions in App.tsx) over
-                    plain duration (static/typical-conditions) whenever Google actually
-                    returned it -- otherwise this shows an honest-looking number that's
-                    quietly ignoring current traffic entirely. */}
-                <span className="route-option-eta">
-                  {leg?.duration_in_traffic?.text ?? leg?.duration?.text ?? "—"}
-                </span>
+        {isDriving
+          ? available.map((key) => {
+              const leg = routeOptions[key]?.routes[0]?.legs[0];
+              const profile = ROUTE_PROFILES[key];
+              return (
+                <button
+                  key={key}
+                  className={`route-option-row ${key === selectedRouteKey ? "route-option-selected" : ""}`}
+                  onClick={() => onSelect(key)}
+                >
+                  <div className="route-option-title">
+                    <span className="route-option-label">{profile.label}</span>
+                    {/* duration_in_traffic (live, requested via drivingOptions in App.tsx) over
+                        plain duration (static/typical-conditions) whenever Google actually
+                        returned it -- otherwise this shows an honest-looking number that's
+                        quietly ignoring current traffic entirely. */}
+                    <span className="route-option-eta">
+                      {leg?.duration_in_traffic?.text ?? leg?.duration?.text ?? "—"}
+                    </span>
+                  </div>
+                  <div className="route-option-subtitle">
+                    {profile.subtitle} · {leg?.distance?.text ?? ""}
+                  </div>
+                </button>
+              );
+            })
+          : modeRoute && (
+              // A single mode has exactly one meaningful route in the overwhelming majority of
+              // cases (transit especially -- it's governed by real timetables, not alternative
+              // road choices), so this is a summary row instead of a 3-way picker.
+              <div className="route-option-row route-option-selected route-option-static">
+                <div className="route-option-title">
+                  <span className="route-option-label">{TRAVEL_MODE_LABELS[travelMode]}</span>
+                  <span className="route-option-eta">{selectedLeg?.duration?.text ?? "—"}</span>
+                </div>
+                <div className="route-option-subtitle">
+                  Real-time Google Directions estimate · {selectedLeg?.distance?.text ?? ""}
+                </div>
               </div>
-              <div className="route-option-subtitle">
-                {profile.subtitle} · {leg?.distance?.text ?? ""}
-              </div>
-            </button>
-          );
-        })}
+            )}
       </div>
       <button className="start-nav-button" onClick={onStart} disabled={!selectedLeg}>
         Start navigation · ETA {selectedLeg?.duration_in_traffic?.text ?? selectedLeg?.duration?.text ?? "…"}

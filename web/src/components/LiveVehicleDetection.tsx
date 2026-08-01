@@ -28,6 +28,12 @@ const HEAVY_VEHICLE_CLASSES = new Set(["truck", "bus"]);
 // frame renders fine. ~8 detections/sec is still smooth for bounding boxes that track a moving
 // vehicle from a phone/laptop camera.
 const MIN_DETECT_INTERVAL_MS = 120;
+// While actively navigating, the map underneath is also doing real work (GPS tracking,
+// directions/ETA recompute, voice guidance, the guide-ribbon canvas draw) and this view's own
+// COCO-SSD inference is already the heaviest thing running -- a slightly slower cadence here
+// (same ~1.6x ease mobile applies for the same reason) trades a bit of detection smoothness for
+// headroom during exactly the condition most likely to make the tab stutter.
+const MIN_DETECT_INTERVAL_MS_NAVIGATING = 200;
 
 // Consecutive detection passes (not wall-clock time, since passes are already throttled
 // above) a vehicle needs to be matched to the same track id before it's shown as "locked
@@ -43,6 +49,31 @@ const LOCK_FRAMES_THRESHOLD = 6;
 // real chances instead of one.
 const PLATE_RETRY_INTERVAL_MS = 900;
 const MAX_PLATE_ATTEMPTS = 8;
+
+// Unlike mobile, this model isn't bundled into the app -- cocoSsd.load() fetches it over the
+// network on first use, so a slow/stalled connection can leave the view stuck on "Loading
+// detection model…" forever with no way out but Close. Same idea for getUserMedia, which can
+// hang indefinitely on some browsers/devices (e.g. a permission prompt that never resolves).
+// Both are raced against a generous-but-bounded timeout so a stall surfaces the existing
+// error+Retry UI instead of looking frozen.
+const MODEL_LOAD_TIMEOUT_MS = 20000;
+const CAMERA_TIMEOUT_MS = 12000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 type FacingMode = "environment" | "user";
 
@@ -307,6 +338,16 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
     localStorage.setItem("trackline.aiDetectionInfoDismissed", "1");
   };
 
+  // Bumping this re-runs the load effect below from scratch (model load + camera request) --
+  // the actual escape hatch for a stalled load, since Close is the only other option once
+  // status is "error".
+  const [retryCount, setRetryCount] = useState(0);
+  const retryLoad = useCallback(() => {
+    setErrorMessage(null);
+    setStatus("loading-model");
+    setRetryCount((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     navigator.mediaDevices
       ?.enumerateDevices()
@@ -324,7 +365,11 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       try {
         if (!modelRef.current) {
           await tf.ready();
-          modelRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+          modelRef.current = await withTimeout(
+            cocoSsd.load({ base: "lite_mobilenet_v2" }),
+            MODEL_LOAD_TIMEOUT_MS,
+            "Detection model load"
+          );
           if (cancelled) return;
           warmUpPlateOcr();
         }
@@ -339,10 +384,14 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         // native crop fell under roughly 40-55px wide -- and upscaling a too-small crop
         // afterward (see plateOcr.ts) can't recover detail that was never captured. `ideal`
         // (not `min`/`exact`) still falls back gracefully on cameras that can't do this.
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
-          audio: false,
-        });
+        const stream = await withTimeout(
+          navigator.mediaDevices.getUserMedia({
+            video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+            audio: false,
+          }),
+          CAMERA_TIMEOUT_MS,
+          "Camera access"
+        );
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -358,7 +407,8 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         detectLoop();
       } catch (err) {
         if (cancelled) return;
-        setErrorMessage(err instanceof Error ? err.message : "Camera or model failed to start.");
+        const message = err instanceof Error ? err.message : "Camera or model failed to start.";
+        setErrorMessage(`${message} -- tap Retry to try again.`);
         setStatus("error");
       }
     }
@@ -373,7 +423,8 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       }
 
       const nowMs = performance.now();
-      if (nowMs - lastDetectMsRef.current < MIN_DETECT_INTERVAL_MS) {
+      const minInterval = navContextRef.current ? MIN_DETECT_INTERVAL_MS_NAVIGATING : MIN_DETECT_INTERVAL_MS;
+      if (nowMs - lastDetectMsRef.current < minInterval) {
         rafRef.current = requestAnimationFrame(detectLoop);
         return;
       }
@@ -590,7 +641,7 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       cancelled = true;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [facingMode]);
+  }, [facingMode, retryCount]);
 
   useEffect(() => {
     return () => {
@@ -667,6 +718,11 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
         </div>
       ) : (
         <>
+          {status === "error" && (
+            <button className="detection-retry" onClick={retryLoad}>
+              🔄 Retry
+            </button>
+          )}
           {canSwitchCamera && (
             <button className="detection-switch" onClick={switchCamera} aria-label="Switch camera">
               🔄 Switch camera

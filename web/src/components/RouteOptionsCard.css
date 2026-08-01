@@ -43,11 +43,46 @@
   cursor: pointer;
 }
 
+.route-mode-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.route-mode-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  border: none;
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--surface-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.route-mode-button-active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.route-mode-icon {
+  font-size: 15px;
+}
+
 .route-options-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.route-option-static {
+  cursor: default;
 }
 
 .route-option-row {

@@ -44,7 +44,7 @@ import {
   clearSearchHistory,
   type SearchHistoryEntry,
 } from "@/services/searchHistory";
-import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
+import { ROUTE_PROFILES, type RouteKey, type TravelMode, toGoogleTravelMode } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
   import("@/components/LiveVehicleDetection").then((m) => ({ default: m.LiveVehicleDetection }))
@@ -286,6 +286,10 @@ export default function App() {
     comfort: null,
   });
   const [selectedRouteKey, setSelectedRouteKey] = useState<RouteKey>("best");
+  const [travelMode, setTravelMode] = useState<TravelMode>("driving");
+  // Real single-route result for walking/bicycling/transit -- see the directions-fetch effect
+  // below. Only ever populated while travelMode !== "driving".
+  const [modeRoute, setModeRoute] = useState<google.maps.DirectionsResult | null>(null);
   const [routeOrigin, setRouteOrigin] = useState<google.maps.LatLngLiteral | null>(null);
   // Real measured height of RouteOptionsCard (see its onHeightChange) -- the route-preview
   // fitBounds effect below uses this real number instead of a fixed guess, so the previewed
@@ -635,12 +639,40 @@ export default function App() {
     const origin = routeOrigin ?? location;
     if (!origin || !destination) {
       setRouteOptions({ best: null, fast: null, comfort: null });
+      setModeRoute(null);
       setDirections(null);
       return;
     }
     const directionsService = new google.maps.DirectionsService();
 
     const waypoints = stopLocation ? [{ location: stopLocation, stopover: true }] : undefined;
+
+    // Walking/bicycling/transit: exactly one real, independently-fetched Google Directions
+    // route for that mode -- not the 3-way Best/Fast/Comfort picker below, which only makes
+    // sense for driving's highway/toll trade-offs (avoidHighways/avoidTolls/drivingOptions
+    // are driving-only params; passing them for another mode isn't meaningful). Transit has
+    // no real notion of an arbitrary mid-trip waypoint (it's governed by fixed timetables),
+    // so a stop is silently dropped for it rather than sent and ignored/erroring.
+    if (travelMode !== "driving") {
+      directionsService.route(
+        {
+          origin,
+          destination,
+          waypoints: travelMode === "transit" ? undefined : waypoints,
+          travelMode: toGoogleTravelMode(travelMode),
+        },
+        (result, status) => {
+          if (status === "OK" && result) {
+            setModeRoute(result);
+            setDirections(result);
+            setActiveStepIndex(0);
+          } else {
+            setModeRoute(null);
+          }
+        }
+      );
+      return;
+    }
 
     if (navigating) {
       const profile = ROUTE_PROFILES[selectedRouteKey];
@@ -715,12 +747,13 @@ export default function App() {
     navigating,
     stopLocation?.lat,
     stopLocation?.lng,
+    travelMode,
   ]);
 
   // Switching which route card is selected (before navigation starts) just swaps in the
   // already-fetched route — no need to hit the Directions API again.
   useEffect(() => {
-    if (navigating) return;
+    if (navigating || travelMode !== "driving") return;
     const chosen = routeOptions[selectedRouteKey];
     if (chosen) {
       setDirections(chosen);
@@ -1116,6 +1149,8 @@ export default function App() {
     const loc = placeDetails?.geometry?.location;
     if (!loc) return;
     setDestination({ lat: loc.lat(), lng: loc.lng() });
+    setTravelMode("driving");
+    setModeRoute(null);
     closeBusinessPanel();
   }, [placeDetails, closeBusinessPanel]);
 
@@ -1238,6 +1273,8 @@ export default function App() {
     const loc = place?.geometry?.location;
     if (!loc) return;
     setDestination({ lat: loc.lat(), lng: loc.lng() });
+    setTravelMode("driving");
+    setModeRoute(null);
     setHistoryPanelOpen(false);
     if (place?.place_id) {
       setSearchHistory(
@@ -1254,6 +1291,8 @@ export default function App() {
 
   const onSelectHistoryEntry = useCallback((entry: SearchHistoryEntry) => {
     setDestination({ lat: entry.lat, lng: entry.lng });
+    setTravelMode("driving");
+    setModeRoute(null);
     setHistoryPanelOpen(false);
     if (searchInputRef.current) searchInputRef.current.value = entry.name;
     setSearchHistory(addSearchHistoryEntry(entry));
@@ -1347,6 +1386,8 @@ export default function App() {
     mapRef.current?.setHeading(0);
     mapRef.current?.setZoom(15);
     setNavCardCollapsed(false);
+    setTravelMode("driving");
+    setModeRoute(null);
     stopSpeaking();
   }, []);
 
@@ -1355,6 +1396,8 @@ export default function App() {
     setDirections(null);
     setRouteOptions({ best: null, fast: null, comfort: null });
     setSelectedRouteKey("best");
+    setTravelMode("driving");
+    setModeRoute(null);
     setRouteOrigin(null);
     setStopLocation(null);
     setAddingStop(false);
@@ -1848,6 +1891,9 @@ export default function App() {
           routeOptions={routeOptions}
           selectedRouteKey={selectedRouteKey}
           onSelect={setSelectedRouteKey}
+          travelMode={travelMode}
+          onSelectTravelMode={setTravelMode}
+          modeRoute={modeRoute}
           onStart={startNavigation}
           onClear={clearRoute}
           onHeightChange={setRouteCardHeight}
