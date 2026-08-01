@@ -1,8 +1,8 @@
 import React from "react";
 import { View, StyleSheet } from "react-native";
 import { Marker } from "react-native-maps";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { ALERT_COLORS, ALERT_ICONS, type AlertDoc } from "@/types/alert";
+import { ALERT_COLORS, type AlertDoc } from "@/types/alert";
+import { AlertTypeGlyph } from "@/components/AlertTypeGlyph";
 
 interface Props {
   alert: AlertDoc;
@@ -21,7 +21,7 @@ export const AlertMarker = React.memo(function AlertMarker({ alert, onPress }: P
       tracksViewChanges={false}
     >
       <View style={[styles.pin, { backgroundColor: ALERT_COLORS[alert.type] }]}>
-        <MaterialCommunityIcons name={ALERT_ICONS[alert.type] as any} size={18} color="#FFFFFF" />
+        <AlertTypeGlyph type={alert.type} size={18} color="#FFFFFF" />
       </View>
     </Marker>
   );

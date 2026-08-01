@@ -2,8 +2,9 @@ import React, { forwardRef, useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
-import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertType } from "@/types/alert";
+import { Ionicons } from "@expo/vector-icons";
+import { ALERT_COLORS, ALERT_LABELS, type AlertType } from "@/types/alert";
+import { AlertTypeGlyph } from "@/components/AlertTypeGlyph";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 const ALERT_TYPES: AlertType[] = [
@@ -63,7 +64,7 @@ export const AlertReportSheet = forwardRef<BottomSheet, Props>(function AlertRep
               onPress={() => onTypeSelected(type)}
               style={({ pressed }) => [styles.typeButton, pressed && { opacity: pressedOpacity }]}
             >
-              <MaterialCommunityIcons name={ALERT_ICONS[type] as any} size={30} color={ALERT_COLORS[type]} />
+              <AlertTypeGlyph type={type} size={30} color={ALERT_COLORS[type]} />
               <Text style={styles.typeLabel}>{ALERT_LABELS[type]}</Text>
             </Pressable>
           ))}

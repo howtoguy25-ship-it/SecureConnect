@@ -78,7 +78,6 @@ export function RouteOptionsCard({
   const { height: windowHeight } = useWindowDimensions();
   const isDriving = travelMode === "driving";
   const hasResult = isDriving ? !!options : !!modeRoute;
-  const showResults = !errorText && !loading && hasResult;
 
   // "Peek" -- picking a route profile (tap Normal/Fastest/Safest) briefly slides this card
   // partway down off-screen so more of the map (and the red preview line above it) is visible,
@@ -106,7 +105,7 @@ export function RouteOptionsCard({
     if (mountedSelectedRef.current === selected) return;
     mountedSelectedRef.current = selected;
     if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    const peekDistance = Math.min(Math.max(cardHeightRef.current * 0.4, 140), 220);
+    const peekDistance = Math.min(Math.max(cardHeightRef.current * 0.3, 100), 160);
     Animated.timing(peekTranslateY, { toValue: peekDistance, duration: 260, useNativeDriver: true }).start();
     peekTimerRef.current = setTimeout(() => {
       Animated.timing(peekTranslateY, { toValue: 0, duration: 280, useNativeDriver: true }).start();
@@ -140,9 +139,12 @@ export function RouteOptionsCard({
         </Pressable>
       </Pressable>
 
-      {/* Scrollable so a tall list (mode row + 3 routes + add-a-stop) can never run off the top
-          of a short screen with no way to reach it -- the Start button below stays outside this
-          ScrollView so it's always the last, always-reachable thing in the card. */}
+      {/* Scrollable, and Start now lives INSIDE this ScrollView as its last item (not a fixed
+          element after it) -- previously a route pick's "peek" (below) could still translate
+          the whole card down far enough to push a fixed Start button off-screen with nothing
+          left to scroll, since the ScrollView's own maxHeight box moved with it. With Start
+          as real scrollable content, whatever sliver of this box is still on-screen can always
+          be scrolled to reach it, peeked or not. */}
       <ScrollView
         style={{ maxHeight: windowHeight * 0.5 }}
         contentContainerStyle={styles.scrollArea}
@@ -262,18 +264,15 @@ export function RouteOptionsCard({
               <Text style={styles.addStopText}>{hasStop ? "Change stop" : "Add a stop on the way"}</Text>
             </Pressable>
           )}
+          <Pressable
+            onPress={onStart}
+            style={({ pressed }) => [styles.startButton, pressed && { opacity: pressedOpacity }]}
+          >
+            <Text style={styles.startButtonText}>Start</Text>
+          </Pressable>
         </>
       )}
       </ScrollView>
-
-      {showResults && (
-        <Pressable
-          onPress={onStart}
-          style={({ pressed }) => [styles.startButton, pressed && { opacity: pressedOpacity }]}
-        >
-          <Text style={styles.startButtonText}>Start</Text>
-        </Pressable>
-      )}
     </Animated.View>
   );
 }

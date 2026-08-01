@@ -3,7 +3,8 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
-import { ALERT_COLORS, ALERT_ICONS, ALERT_LABELS, type AlertDoc } from "@/types/alert";
+import { ALERT_COLORS, ALERT_LABELS, type AlertDoc } from "@/types/alert";
+import { AlertTypeGlyph } from "@/components/AlertTypeGlyph";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 
 interface Props {
@@ -47,7 +48,7 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
           <>
             <View style={styles.header}>
               <View style={[styles.iconWrap, { backgroundColor: ALERT_COLORS[alert.type] }]}>
-                <MaterialCommunityIcons name={ALERT_ICONS[alert.type] as any} size={26} color="#FFFFFF" />
+                <AlertTypeGlyph type={alert.type} size={26} color="#FFFFFF" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title}>{ALERT_LABELS[alert.type]}</Text>

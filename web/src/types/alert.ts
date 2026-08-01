@@ -48,6 +48,8 @@ export const ALERT_EMOJI: Record<AlertType, string> = {
   emergency_vehicle: "🚑",
   hazard: "⚠️",
   camera: "📷",
-  crash: "💥",
+  // A car + impact, not just a bare "💥" burst -- shows an actual car with a crash in front of
+  // it instead of an explosion with no vehicle in the picture at all.
+  crash: "🚗💥",
   traffic_light: "🚦",
 };
