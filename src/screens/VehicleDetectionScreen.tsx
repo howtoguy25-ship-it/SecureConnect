@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { Camera, useCameraDevice, useCameraPermission, type PhotoFile } from "react-native-vision-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -14,15 +14,16 @@ import { useLocation } from "@/context/LocationContext";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
 
-// Shorter than the original 1.2s -- expo-camera's takePictureAsync is a discrete photo
-// shutter (not a continuous frame stream the way a real video/frame-processor pipeline
-// would be), so this is the fastest cadence that still leaves enough time for the shutter +
-// JPEG decode + COCO-SSD inference to actually finish before the next capture fires. It's a
-// real, honest limitation of expo-camera's still-photo API versus a true frame processor
-// (e.g. react-native-vision-camera, which this app doesn't depend on) -- this makes
-// detection noticeably snappier without claiming to be continuous video. A capture already in
-// flight just makes the next tick a no-op (see capturingRef below) rather than stacking, so
-// this cadence stays safe even on a slower device/frame.
+// Shorter than the original 1.2s -- takePhoto() is a discrete photo shutter (not a continuous
+// frame stream the way a real Frame Processor pipeline would be -- this app deliberately
+// doesn't use vision-camera's Frame Processors, since the on-device model here runs on tfjs
+// (services/vehicleDetection.ts), which isn't something a Frame Processor's restricted
+// worklet runtime can call into without swapping the inference engine itself, a much bigger
+// separate project), so this is the fastest cadence that still leaves enough time for the
+// shutter + JPEG decode + COCO-SSD inference to actually finish before the next capture
+// fires. This makes detection noticeably snappier without claiming to be continuous video. A
+// capture already in flight just makes the next tick a no-op (see capturingRef below) rather
+// than stacking, so this cadence stays safe even on a slower device/frame.
 const CAPTURE_INTERVAL_MS = 700;
 // While actively navigating, the map screen underneath is also live (GPS tracking, guidance,
 // voice) and this screen's own tfjs CPU inference is already the heaviest thing running --
@@ -99,6 +100,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+// vision-camera's PhotoFile.path is a bare filesystem path ("/var/mobile/..."), not a URI --
+// unlike expo-camera's photo.uri, which always came back with the file:// scheme already on
+// it. Both expo-file-system's File and expo-image-manipulator expect a real URI, so this adds
+// the scheme back on rather than assuming every caller downstream already handles a bare path.
+function toFileUri(path: string): string {
+  return path.startsWith("file://") ? path : `file://${path}`;
+}
+
 interface Props {
   onClose: () => void;
   // True whenever a route is active in the background -- used to ease off capture cadence (see
@@ -110,7 +119,8 @@ interface Props {
 
 export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props) {
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission] = useCameraPermissions();
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useCameraDevice("back");
   // Real ego GPS speed for turning a tracked vehicle's closing/receding rate into its own
   // actual road speed -- see speedTracker.ts's combineWithEgoSpeed. Reuses the SAME
   // app-wide location watcher LocationProvider already runs (App.tsx) rather than starting a
@@ -145,7 +155,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     setSelectedTrackId((prev) => (prev === id ? null : id));
   }, []);
 
-  const cameraRef = useRef<CameraView>(null);
+  const cameraRef = useRef<Camera>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const capturingRef = useRef(false);
   // Set the instant this screen unmounts (now a real unmount -- see MapScreen.tsx's Modal
@@ -217,23 +227,21 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     if (capturingRef.current || unmountedRef.current || !cameraRef.current) return;
     capturingRef.current = true;
     try {
-      Sentry.logger.info("vehicle-detection: calling takePictureAsync");
-      // skipProcessing was here for capture speed, but expo-camera's own docs are explicit
-      // about the real cost: "enabling skipProcessing would cause orientation uncertainty...
-      // the obtained image would be displayed wrongly (rotated by 90°, 180°, or 270°)."
-      // Detection runs on the raw, unrotated pixel buffer while the box/plate overlay math
-      // below assumes it matches the portrait preview orientation -- confirmed root cause of
-      // boxes not accurately squaring up on the actual vehicle. skipProcessing also silently
-      // discarded the `quality` option entirely ("If enabled, quality option is discarded"),
-      // so removing it makes `quality: 0.4` actually take effect for the first time, which
-      // should offset some of the added capture latency from real, correctly-oriented
-      // processing.
-      const photo = await withTimeout(
-        cameraRef.current.takePictureAsync({ quality: 0.4 }),
+      Sentry.logger.info("vehicle-detection: calling takePhoto");
+      // vision-camera's takePhoto() is a real, lower-overhead native capture than expo-
+      // camera's takePictureAsync() was -- no explicit quality knob here (that's the
+      // <Camera>'s own photoQualityBalance="speed" prop below instead), and orientation is
+      // handled correctly by default (no skipProcessing-style footgun to worry about).
+      // enableShutterSound: false since this fires repeatedly every ~0.7-1.1s for as long as
+      // the screen is open -- a real camera shutter click on every one of those would be a
+      // real, confirmed annoyance, not a bug fix.
+      const photoFile: PhotoFile = await withTimeout(
+        cameraRef.current.takePhoto({ enableShutterSound: false }),
         CAPTURE_TIMEOUT_MS,
-        "takePictureAsync"
+        "takePhoto"
       );
-      if (!photo || unmountedRef.current) return;
+      if (!photoFile || unmountedRef.current) return;
+      const photo = { uri: toFileUri(photoFile.path), width: photoFile.width, height: photoFile.height };
       consecutiveFailuresRef.current = 0;
       Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
@@ -330,12 +338,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         );
       }
 
-      // Every capture (every ~0.7-1.1s) writes a brand-new temp JPEG that expo-camera never
-      // cleans up on its own -- left alone, a normal multi-minute driving session leaked
-      // hundreds of files onto disk, a real, confirmed contributor to this screen eventually
-      // crashing under storage/memory pressure. Deleted once decode + every plate crop that
-      // reads from it this tick have actually finished (best-effort -- a failed cleanup here
-      // is silently swallowed, never surfaced as a detection failure).
+      // Every capture (every ~0.7-1.1s) writes a brand-new temp JPEG that isn't reliably
+      // cleaned up on its own -- vision-camera's own docs are explicit that a captured photo
+      // "might get deleted once the app closes," not before, same as expo-camera's captures
+      // before it. Left alone, a normal multi-minute driving session leaked hundreds of files
+      // onto disk, a real, confirmed contributor to this screen eventually crashing under
+      // storage/memory pressure. Deleted once decode + every plate crop that reads from it
+      // this tick have actually finished (best-effort -- a failed cleanup here is silently
+      // swallowed, never surfaced as a detection failure).
       const capturedUri = photo.uri;
       Promise.allSettled(plateReadPromises).finally(() => {
         try {
@@ -377,27 +387,12 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     setContainerSize({ width, height });
   }, []);
 
-  // useCameraPermissions() reports its result as null until the async permission check
-  // resolves -- this used to just return an empty black View with genuinely nothing else on
-  // it, no Close, no spinner, no way out. If that check is ever slow (or, on some real device/
-  // OS combination, never actually resolves), this was a real, confirmed dead end: a
-  // permanently blank black screen with zero UI, not caught by the render error boundary
-  // because nothing here ever throws -- it just never renders anything. Always giving this
-  // state a spinner + a working Close means there is never a state this screen can render
-  // that has no way out.
-  if (!permission) {
-    return (
-      <View style={styles.permissionContainer}>
-        <ActivityIndicator color="#fff" />
-        <Text style={styles.permissionText}>Checking camera access…</Text>
-        <Pressable onPress={onClose}>
-          <Text style={styles.closeLink}>Close</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  if (!permission.granted) {
+  // vision-camera's useCameraPermission() reads the native permission status synchronously
+  // (unlike expo-camera's async-only useCameraPermissions(), which had a real "still checking,
+  // null" state this screen used to have to guard against with its own dedicated loading
+  // branch) -- hasPermission is always a real boolean from the very first render, so there's
+  // no equivalent indeterminate state left to handle here.
+  if (!hasPermission) {
     return (
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionText}>
@@ -406,6 +401,21 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         <Pressable style={styles.permissionButton} onPress={requestPermission}>
           <Text style={styles.permissionButtonText}>Grant camera access</Text>
         </Pressable>
+        <Pressable onPress={onClose}>
+          <Text style={styles.closeLink}>Close</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Real absent-hardware/still-enumerating state (vision-camera's device list can briefly be
+  // empty right after the native module initializes) -- same "always a working Close, never a
+  // dead-end blank screen" principle as the permission screens above.
+  if (!device) {
+    return (
+      <View style={styles.permissionContainer}>
+        <ActivityIndicator color="#fff" />
+        <Text style={styles.permissionText}>Looking for a camera…</Text>
         <Pressable onPress={onClose}>
           <Text style={styles.closeLink}>Close</Text>
         </Pressable>
@@ -430,7 +440,18 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
 
   return (
     <View style={styles.container} onLayout={onContainerLayout}>
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+      {/* isActive stays true for as long as this component is mounted -- the Modal fix in
+          MapScreen.tsx already guarantees a real unmount (camera session torn down along with
+          everything else) on Close, so there's no separate "pause the session" state needed
+          here. */}
+      <Camera
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        photo={true}
+        photoQualityBalance="speed"
+      />
 
       {photoSize &&
         containerSize &&

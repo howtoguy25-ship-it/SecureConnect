@@ -114,11 +114,29 @@ module.exports = {
             "TrackLine listens for emergency vehicle sirens near you. Audio is analyzed on-device only and is never recorded or stored.",
         },
       ],
+      // Switched from expo-camera to react-native-vision-camera for Live Vehicle Detection --
+      // expo-camera's takePictureAsync() (a full native shutter + JPEG encode + file write on
+      // every single capture, every ~0.7-1.1s, for as long as that screen stays open) was the
+      // real, confirmed cause of the detection screen freezing/becoming unresponsive (Close
+      // button not registering taps) and occasionally crashing outright during real, sustained
+      // use -- vision-camera's capture pipeline is built specifically for this "repeated
+      // capture while doing heavy per-frame work" pattern and is substantially lower-overhead
+      // per shot. Frame processors are explicitly left off (enableFrameProcessors: false) --
+      // this app's on-device model runs on tfjs (services/vehicleDetection.ts), which isn't
+      // something a Frame Processor's restricted worklet runtime can call into without a much
+      // larger separate rewrite (swapping the inference engine itself to something
+      // worklet/native-callable, e.g. a real TFLite model) -- so this keeps the same
+      // interval-driven discrete-photo-capture architecture as before, just backed by a real,
+      // more robust camera session and a genuinely faster capture call.
       [
-        "expo-camera",
+        "react-native-vision-camera",
         {
-          cameraPermission:
+          cameraPermissionText:
             "TrackLine uses your camera for live AI Vehicle Detection, analyzed on-device in real time. Video is never recorded or stored.",
+          enableMicrophonePermission: false,
+          enableLocation: false,
+          enableCodeScanner: false,
+          enableFrameProcessors: false,
         },
       ],
       // On-device (Google ML Kit) text recognition for the plate-number display in Live
