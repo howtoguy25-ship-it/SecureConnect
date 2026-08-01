@@ -3784,7 +3784,7 @@ export default function ConversationScreen() {
         data={messages}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.messageList}
+        contentContainerStyle={[styles.messageList, { paddingTop: headerHeight + Spacing.md }]}
         showsVerticalScrollIndicator={false}
         onScrollToIndexFailed={() => {}}
         onScrollBeginDrag={() => { if (holdMessage) closeHoldOverlay(); }}
@@ -5392,7 +5392,13 @@ const styles = StyleSheet.create({
   },
   messageList: {
     paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.md,
+    // Real top clearance is applied dynamically at the call site
+    // (headerHeight + Spacing.md) — this screen's header is transparent
+    // (floats over the content, see useScreenOptions' default), so a
+    // fixed value here was never enough to clear it. With a short
+    // conversation, or scrolled to the top of a longer one, the topmost
+    // message bubble rendered underneath the header — visible behind
+    // its blur, overlapping the back button/name/call icons.
     paddingBottom: 100,
     flexGrow: 1,
   },
