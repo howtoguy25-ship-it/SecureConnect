@@ -184,6 +184,12 @@ module.exports = {
       admobBannerIosUnitId: process.env.ADMOB_IOS_BANNER_UNIT_ID,
       admobAppOpenAndroidUnitId: process.env.ADMOB_ANDROID_APP_OPEN_UNIT_ID,
       admobAppOpenIosUnitId: process.env.ADMOB_IOS_APP_OPEN_UNIT_ID,
+      // Transport for NSW Open Data (opendata.transport.nsw.gov.au) -- GTFS-realtime vehicle
+      // positions for NSW buses/trains/ferries/light rail. Genuinely optional: services/
+      // liveVehiclePositions.ts returns an empty result with no error when this is unset, so
+      // the app works fine without it (Transit mode already shows real timetable-based ETAs
+      // via Google Directions either way, see the "Public transit" note in Settings).
+      nswTransportApiKey: process.env.NSW_TRANSPORT_API_KEY,
       sentryDsn: process.env.SENTRY_DSN,
       eas: {
         // Not a secret -- EAS project IDs are meant to live directly in config, which is
