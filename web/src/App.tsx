@@ -25,6 +25,7 @@ import { AlertDetailPanel } from "@/components/AlertDetailPanel";
 import { PlacementBar } from "@/components/PlacementBar";
 import { NavigationCard, type NavViewMode } from "@/components/NavigationCard";
 import { NavMiniBox } from "@/components/NavMiniBox";
+import { VoiceControl } from "@/components/VoiceControl";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
@@ -35,6 +36,14 @@ import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
 import { Street3DJoystick } from "@/components/Street3DJoystick";
 import { Map3DView, type Map3DViewHandle } from "@/components/Map3DView";
 import { DestinationPulseCircle } from "@/components/DestinationPulseCircle";
+import { RecentSearchesPanel } from "@/components/RecentSearchesPanel";
+import {
+  getSearchHistory,
+  addSearchHistoryEntry,
+  removeSearchHistoryEntry,
+  clearSearchHistory,
+  type SearchHistoryEntry,
+} from "@/services/searchHistory";
 import { ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 // Lazy-loaded: pulls in TensorFlow.js + COCO-SSD (~2MB), so keep it out of the initial bundle.
 const LiveVehicleDetection = lazy(() =>
@@ -43,10 +52,11 @@ const LiveVehicleDetection = lazy(() =>
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
 import { bearingDegrees, distanceKm, distanceToPolylineMeters } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
-import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "@/utils/mapStyles";
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE, MAP_THEME_STYLES } from "@/utils/mapStyles";
 import { calculateSunTimes } from "@/utils/sunTimes";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmPoint } from "@/services/osmTrafficData";
 import { fetchLiveTrafficCameras, type LiveTrafficCamera } from "@/services/liveTrafficCameras";
+import { speak, stopSpeaking } from "@/services/voice";
 import { LiveCamerasPanel } from "@/components/LiveCamerasPanel";
 import { SpeedLimitSign } from "@/components/SpeedLimitSign";
 import type { DetectionNavContext } from "@/components/LiveVehicleDetection";
@@ -239,9 +249,12 @@ export default function App() {
     setFixedZone,
     setHideDetectionTrace,
     setTheme,
+    setMapTheme,
     setShowTrafficLights,
     setShowSpeedCameras,
     setShowLiveCameras,
+    setVoiceEnabled,
+    setVoiceVolume,
   } = useSettings();
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -279,6 +292,11 @@ export default function App() {
   // route never ends up partly hidden behind the card. 280 is a reasonable fallback for the
   // one frame before the first real measurement lands.
   const [routeCardHeight, setRouteCardHeight] = useState(280);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>(() => getSearchHistory());
+  // Shown while the search input is focused/non-empty-typed -- explicitly NOT tied to blur, since
+  // blur fires before a history row's onClick registers and would hide the panel first.
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const map3dHandleRef = useRef<Map3DViewHandle | null>(null);
@@ -348,6 +366,9 @@ export default function App() {
   // Off-route detection state -- see the reroute effect below for how these are used.
   const offRouteStreakRef = useRef(0);
   const lastRerouteAtRef = useRef(0);
+  // Tracks the last instruction actually spoken, so the voice-guidance effect below only
+  // speaks again once the active step genuinely changes, not on every GPS tick.
+  const lastSpokenInstructionRef = useRef<string | null>(null);
   // Joystick-driven adjustments to the 3D Follow camera, layered on top of the
   // auto-computed travel heading/default tilt so the driver can nudge the view to
   // wherever feels comfortable. Reset via the recenter button.
@@ -856,6 +877,21 @@ export default function App() {
     }
   }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride, mapTypeId]);
 
+  // Spoken turn-by-turn guidance -- speaks the active step's instruction once when it actually
+  // changes (a turn was completed / navigation just started), not on every GPS tick.
+  useEffect(() => {
+    if (!navigating || !directions) {
+      lastSpokenInstructionRef.current = null;
+      return;
+    }
+    const step = directions.routes[0]?.legs[0]?.steps?.[activeStepIndex];
+    if (!step) return;
+    const instructionText = stripHtml(step.instructions);
+    if (lastSpokenInstructionRef.current === instructionText) return;
+    lastSpokenInstructionRef.current = instructionText;
+    if (settings.voiceEnabled) speak(instructionText, settings.voiceVolume);
+  }, [navigating, directions, activeStepIndex, settings.voiceEnabled, settings.voiceVolume]);
+
   // Smoothly eases the 3D Follow camera's heading toward targetHeadingRef every frame
   // instead of snapping to it -- exponential ease (each frame closes ~14% of the remaining
   // angular gap) reads as a natural, weighted turn like a real nav app instead of a jump-cut,
@@ -1200,7 +1236,36 @@ export default function App() {
   const onPlaceChanged = useCallback(() => {
     const place = autocompleteRef.current?.getPlace();
     const loc = place?.geometry?.location;
-    if (loc) setDestination({ lat: loc.lat(), lng: loc.lng() });
+    if (!loc) return;
+    setDestination({ lat: loc.lat(), lng: loc.lng() });
+    setHistoryPanelOpen(false);
+    if (place?.place_id) {
+      setSearchHistory(
+        addSearchHistoryEntry({
+          placeId: place.place_id,
+          name: place.name ?? "",
+          address: place.formatted_address ?? "",
+          lat: loc.lat(),
+          lng: loc.lng(),
+        })
+      );
+    }
+  }, []);
+
+  const onSelectHistoryEntry = useCallback((entry: SearchHistoryEntry) => {
+    setDestination({ lat: entry.lat, lng: entry.lng });
+    setHistoryPanelOpen(false);
+    if (searchInputRef.current) searchInputRef.current.value = entry.name;
+    setSearchHistory(addSearchHistoryEntry(entry));
+  }, []);
+
+  const onRemoveHistoryEntry = useCallback((placeId: string) => {
+    setSearchHistory(removeSearchHistoryEntry(placeId));
+  }, []);
+
+  const onClearHistory = useCallback(() => {
+    clearSearchHistory();
+    setSearchHistory([]);
   }, []);
 
   // Biases (doesn't restrict) destination search toward wherever the user actually is, so
@@ -1282,6 +1347,7 @@ export default function App() {
     mapRef.current?.setHeading(0);
     mapRef.current?.setZoom(15);
     setNavCardCollapsed(false);
+    stopSpeaking();
   }, []);
 
   const clearRoute = useCallback(() => {
@@ -1466,11 +1532,9 @@ export default function App() {
       mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
       styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
         ? undefined
-        : isDarkTheme
-          ? DARK_MAP_STYLE
-          : LIGHT_MAP_STYLE,
+        : (MAP_THEME_STYLES[settings.mapTheme] ?? (isDarkTheme ? DARK_MAP_STYLE : LIGHT_MAP_STYLE)),
     }),
-    [isDarkTheme]
+    [isDarkTheme, settings.mapTheme]
   );
 
   const onMapLoad = useCallback((map: google.maps.Map) => {
@@ -1690,8 +1754,21 @@ export default function App() {
             }}
             onPlaceChanged={onPlaceChanged}
           >
-            <input className="search-input" placeholder="Search destination" />
+            <input
+              ref={searchInputRef}
+              className="search-input"
+              placeholder="Search destination"
+              onFocus={() => setHistoryPanelOpen(true)}
+            />
           </Autocomplete>
+          {historyPanelOpen && (
+            <RecentSearchesPanel
+              history={searchHistory}
+              onSelect={onSelectHistoryEntry}
+              onRemove={onRemoveHistoryEntry}
+              onClearAll={onClearHistory}
+            />
+          )}
         </div>
       )}
 
@@ -1847,6 +1924,15 @@ export default function App() {
         </button>
       )}
 
+      {navigating && (
+        <VoiceControl
+          enabled={settings.voiceEnabled}
+          volume={settings.voiceVolume}
+          onToggleEnabled={() => setVoiceEnabled(!settings.voiceEnabled)}
+          onSetVolume={setVoiceVolume}
+        />
+      )}
+
       {!chromeHidden && (
         <>
           <button className="fab" onClick={() => setReportOpen(true)} aria-label="Report an alert">
@@ -1988,6 +2074,8 @@ export default function App() {
         <AboutPanel
           theme={settings.theme}
           onSetTheme={setTheme}
+          mapTheme={settings.mapTheme}
+          onSetMapTheme={setMapTheme}
           user={user}
           onSignInGoogle={handleSignInGoogle}
           onSignInApple={handleSignInApple}

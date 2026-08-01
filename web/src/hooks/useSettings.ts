@@ -19,6 +19,10 @@ export interface WebSettings {
   // ignores inline tile styling on Map ID-based vector maps, so a custom Map ID would need
   // its own dark variant configured in Cloud Console to fully match.
   theme: "system" | "light" | "dark";
+  // Independent of the light/dark UI theme above -- "normal" keeps using that theme's own
+  // light/dark map style, the other three are fixed color schemes regardless of light/dark
+  // mode. See utils/mapStyles.ts's MAP_THEME_STYLES.
+  mapTheme: "normal" | "purpleBlue" | "blueGrey" | "greenYellow";
   // Independent on/off switches for the two OSM overlay marker types -- the underlying
   // Overpass fetch still runs whenever either is on (it's one combined query), but each
   // layer only renders its own markers when its own switch is on. Both on by default.
@@ -28,6 +32,9 @@ export interface WebSettings {
   // a heavier, opt-in layer, off by default, separate from the lightweight OSM signal/camera
   // points above.
   showLiveCameras: boolean;
+  // Spoken turn-by-turn guidance during navigation (Web Speech API) -- see services/voice.ts.
+  voiceEnabled: boolean;
+  voiceVolume: number;
 }
 
 const DEFAULT_SETTINGS: WebSettings = {
@@ -36,9 +43,12 @@ const DEFAULT_SETTINGS: WebSettings = {
   fixedZone: false,
   hideDetectionTrace: false,
   theme: "system",
+  mapTheme: "normal",
   showTrafficLights: true,
   showSpeedCameras: true,
   showLiveCameras: false,
+  voiceEnabled: true,
+  voiceVolume: 1,
 };
 const STORAGE_KEY = "trackline.settings";
 
@@ -64,11 +74,14 @@ export function useSettings() {
     setHideDetectionTrace: (hideDetectionTrace: boolean) =>
       setSettings((s) => ({ ...s, hideDetectionTrace })),
     setTheme: (theme: WebSettings["theme"]) => setSettings((s) => ({ ...s, theme })),
+    setMapTheme: (mapTheme: WebSettings["mapTheme"]) => setSettings((s) => ({ ...s, mapTheme })),
     setShowTrafficLights: (showTrafficLights: boolean) =>
       setSettings((s) => ({ ...s, showTrafficLights })),
     setShowSpeedCameras: (showSpeedCameras: boolean) =>
       setSettings((s) => ({ ...s, showSpeedCameras })),
     setShowLiveCameras: (showLiveCameras: boolean) =>
       setSettings((s) => ({ ...s, showLiveCameras })),
+    setVoiceEnabled: (voiceEnabled: boolean) => setSettings((s) => ({ ...s, voiceEnabled })),
+    setVoiceVolume: (voiceVolume: number) => setSettings((s) => ({ ...s, voiceVolume })),
   };
 }

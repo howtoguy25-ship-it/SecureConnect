@@ -137,6 +137,61 @@
   color: #fff;
 }
 
+.map-theme-label {
+  margin-top: 16px;
+  width: 100%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--surface-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.map-theme-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.map-theme-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 2px solid var(--surface-border);
+  background: var(--input-bg);
+  cursor: pointer;
+}
+
+.map-theme-tile.map-theme-tile-selected {
+  border-color: #2563eb;
+}
+
+.map-theme-swatch {
+  width: 100%;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-end;
+  padding: 6px;
+}
+
+.map-theme-swatch-accent {
+  width: 60%;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.map-theme-tile-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--surface-text);
+}
+
 .account-section {
   width: 100%;
   display: flex;

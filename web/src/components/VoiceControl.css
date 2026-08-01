@@ -1,0 +1,22 @@
+.voice-control {
+  position: relative;
+}
+
+.voice-control-button {
+  font-size: 22px;
+}
+
+.voice-control-slider-popover {
+  position: absolute;
+  right: 68px;
+  bottom: calc(232px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 8px 14px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  z-index: 11;
+}
+
+.voice-control-slider-popover input[type="range"] {
+  width: 120px;
+}
