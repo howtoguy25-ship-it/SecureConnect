@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -38,10 +38,35 @@ const TRAVEL_MODE_ICONS: Record<TravelMode, keyof typeof Ionicons.glyphMap> = {
   transit: "bus-outline",
 };
 
+// Real vehicle icon per Google transit `vehicle.type` -- falls back to the generic bus icon
+// for anything not explicitly a train/tram/ferry (Google's type list is longer than what's
+// worth a distinct icon here).
+const TRANSIT_VEHICLE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  BUS: "bus-outline",
+  INTERCITY_BUS: "bus-outline",
+  TROLLEYBUS: "bus-outline",
+  HEAVY_RAIL: "train-outline",
+  RAIL: "train-outline",
+  COMMUTER_TRAIN: "train-outline",
+  HIGH_SPEED_TRAIN: "train-outline",
+  METRO_RAIL: "subway-outline",
+  SUBWAY: "subway-outline",
+  TRAM: "subway-outline",
+  LIGHT_RAIL: "subway-outline",
+  FERRY: "boat-outline",
+};
+
 interface Props {
   options: Record<RouteProfileKey, Route> | null;
   // Real single-route result for walking/bicycling/transit -- see MapScreen's fetchRouteOptions.
+  // Always mirrors whichever entry of modeRouteOptions is currently selected.
   modeRoute: Route | null;
+  // Every real alternative Google returned for the current walk/bike/transit trip -- rendered
+  // as a picker list once there's more than one; a single result still uses the plain summary
+  // row so the common transit case (exactly one real itinerary) looks the same as before.
+  modeRouteOptions: Route[];
+  selectedModeRouteIndex: number;
+  onSelectModeRoute: (index: number) => void;
   travelMode: TravelMode;
   onSelectTravelMode: (mode: TravelMode) => void;
   loading: boolean;
@@ -58,9 +83,29 @@ interface Props {
   onHeightChange?: (height: number) => void;
 }
 
+// "Bus 418", "T2 Train", or for a multi-leg trip "Bus 418 + Bus 333" -- the real line(s) this
+// itinerary actually rides, straight from transitSummary (see services/directions.ts). Distinct
+// from just showing the mode icon: this is what actually answers "which bus/train is this."
+function transitTitle(route: Route): string {
+  const legs = route.transitSummary?.legs;
+  if (!legs || legs.length === 0) return TRAVEL_MODE_LABELS.transit;
+  const vehicleWord = (type: string) =>
+    type === "BUS" || type === "INTERCITY_BUS" || type === "TROLLEYBUS"
+      ? "Bus"
+      : type === "FERRY"
+      ? "Ferry"
+      : type.includes("RAIL") || type === "SUBWAY" || type === "TRAM"
+      ? "Train"
+      : "Transit";
+  return legs.map((l) => `${vehicleWord(l.vehicleType)} ${l.lineName}`).join(" + ");
+}
+
 export function RouteOptionsCard({
   options,
   modeRoute,
+  modeRouteOptions,
+  selectedModeRouteIndex,
+  onSelectModeRoute,
   travelMode,
   onSelectTravelMode,
   loading,
@@ -77,6 +122,12 @@ export function RouteOptionsCard({
   const { height: windowHeight } = useWindowDimensions();
   const isDriving = travelMode === "driving";
   const hasResult = isDriving ? !!options : !!modeRoute;
+  // Up to 5 shown at once with a real "Show more" to reveal the rest, per spec -- resets back
+  // to collapsed whenever a fresh set of alternatives comes in (new destination/mode), rather
+  // than staying expanded from a previous search.
+  const [showAllModeRoutes, setShowAllModeRoutes] = useState(false);
+  useEffect(() => setShowAllModeRoutes(false), [modeRouteOptions]);
+  const visibleModeRouteOptions = showAllModeRoutes ? modeRouteOptions : modeRouteOptions.slice(0, 5);
 
   // Previously, picking a route profile also slid this whole card partway down ("peek", to
   // show more of the map) and back up a few seconds later. Removed entirely -- that slide-back-
@@ -192,17 +243,79 @@ export function RouteOptionsCard({
                   </Pressable>
                 );
               })
+            : modeRouteOptions.length > 1
+            ? // Real multiple alternatives -- a walk can have 2-3 genuinely different paths,
+              // and a transit trip can have several genuinely different services (different
+              // bus routes, a bus vs a train). Each row shows the real line(s) for transit
+              // (see transitTitle) or a plain ordinal for walk/bike, since Google doesn't
+              // name road-based alternates the way it names transit lines.
+              visibleModeRouteOptions.map((r, index) => {
+                const isSelected = index === selectedModeRouteIndex;
+                const firstLegIcon =
+                  travelMode === "transit" && r.transitSummary
+                    ? TRANSIT_VEHICLE_ICONS[r.transitSummary.legs[0].vehicleType] ?? TRAVEL_MODE_ICONS.transit
+                    : TRAVEL_MODE_ICONS[travelMode];
+                const title = travelMode === "transit" ? transitTitle(r) : `Route ${index + 1}`;
+                const firstLeg = r.transitSummary?.legs[0];
+                const subtitle =
+                  travelMode === "transit" && firstLeg
+                    ? `${firstLeg.departureText ? `Departs ${firstLeg.departureText}` : "Real-time estimate"}${
+                        r.transitSummary && r.transitSummary.transfers > 0
+                          ? ` · ${r.transitSummary.transfers} transfer${r.transitSummary.transfers > 1 ? "s" : ""}`
+                          : ""
+                      }`
+                    : index === 0
+                    ? "Real-time Google Directions estimate"
+                    : "Alternate route";
+                return (
+                  <Pressable
+                    key={index}
+                    onPress={() => onSelectModeRoute(index)}
+                    style={({ pressed }) => [
+                      styles.option,
+                      isSelected && styles.optionSelected,
+                      pressed && { opacity: pressedOpacity },
+                    ]}
+                  >
+                    <View style={[styles.iconWrap, isSelected && styles.iconWrapSelected]}>
+                      <Ionicons name={firstLegIcon} size={20} color={isSelected ? "#FFFFFF" : colors.textMuted} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.optionTitle}>{title}</Text>
+                      <Text style={styles.optionSubtitle}>{subtitle}</Text>
+                    </View>
+                    <View style={styles.optionStats}>
+                      <Text style={styles.optionEta}>{r.etaText}</Text>
+                      <Text style={styles.optionDistance}>{r.distanceText}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })
             : modeRoute && (
-                // A single mode has exactly one meaningful route in the overwhelming majority
-                // of cases (transit especially -- it's governed by real timetables, not
-                // alternative road choices), so this is a summary row instead of a 3-way picker.
+                // A single mode has exactly one meaningful route in most cases (transit
+                // especially, once deduped -- it's governed by real timetables, not alternative
+                // road choices), so this is a summary row instead of a picker list.
                 <View style={[styles.option, styles.optionSelected]}>
                   <View style={[styles.iconWrap, styles.iconWrapSelected]}>
-                    <Ionicons name={TRAVEL_MODE_ICONS[travelMode]} size={20} color="#FFFFFF" />
+                    <Ionicons
+                      name={
+                        travelMode === "transit" && modeRoute.transitSummary
+                          ? TRANSIT_VEHICLE_ICONS[modeRoute.transitSummary.legs[0].vehicleType] ?? TRAVEL_MODE_ICONS.transit
+                          : TRAVEL_MODE_ICONS[travelMode]
+                      }
+                      size={20}
+                      color="#FFFFFF"
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.optionTitle}>{TRAVEL_MODE_LABELS[travelMode]}</Text>
-                    <Text style={styles.optionSubtitle}>Real-time Google Directions estimate</Text>
+                    <Text style={styles.optionTitle}>
+                      {travelMode === "transit" ? transitTitle(modeRoute) : TRAVEL_MODE_LABELS[travelMode]}
+                    </Text>
+                    <Text style={styles.optionSubtitle}>
+                      {travelMode === "transit" && modeRoute.transitSummary?.legs[0]?.departureText
+                        ? `Departs ${modeRoute.transitSummary.legs[0].departureText}`
+                        : "Real-time Google Directions estimate"}
+                    </Text>
                   </View>
                   <View style={styles.optionStats}>
                     <Text style={styles.optionEta}>{modeRoute.etaText}</Text>
@@ -210,6 +323,16 @@ export function RouteOptionsCard({
                   </View>
                 </View>
               )}
+
+          {!showAllModeRoutes && modeRouteOptions.length > 5 && (
+            <Pressable
+              onPress={() => setShowAllModeRoutes(true)}
+              style={({ pressed }) => [styles.showMoreRow, pressed && { opacity: pressedOpacity }]}
+            >
+              <Text style={styles.showMoreText}>Show {modeRouteOptions.length - 5} more</Text>
+              <Ionicons name="chevron-down" size={16} color={colors.accent} />
+            </Pressable>
+          )}
 
           {/* Transit doesn't support an arbitrary mid-trip waypoint the way a driving/walking/
               cycling route does (Google's Directions API has no real notion of "stop by here"
@@ -365,6 +488,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  showMoreRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: spacing.sm,
+  },
+  showMoreText: {
+    color: colors.accent,
+    fontWeight: "600",
+    fontSize: 13,
   },
   addStopRow: {
     flexDirection: "row",

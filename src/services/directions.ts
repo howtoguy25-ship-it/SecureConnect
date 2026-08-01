@@ -53,6 +53,30 @@ export interface Route {
   // True once durationInTraffic meaningfully exceeds free-flow duration -- the "there's
   // traffic on this one" signal for the route picker, not just noise from rounding.
   hasTrafficDelay?: boolean;
+  // Only set for mode "transit" -- the real bus/train line(s) this itinerary actually rides,
+  // straight from Google's own transit_details per step (not guessed/derived), so the picker
+  // can show "Bus 418" or "T2 Train" instead of just a generic "Transit" label.
+  transitSummary?: TransitSummary;
+}
+
+export interface TransitLeg {
+  vehicleType: string; // Google's vehicle.type, e.g. "BUS", "HEAVY_RAIL", "TRAM"
+  lineName: string; // short_name if set (e.g. "418"), else the full line name
+  lineColor?: string;
+  headsign?: string;
+  agencyName?: string;
+  departureStop: string;
+  arrivalStop: string;
+  departureLocation: LatLng;
+  arrivalLocation: LatLng;
+  departureText?: string; // Google's own localized departure time, e.g. "10:42 am"
+  arrivalText?: string;
+  numStops?: number;
+}
+
+export interface TransitSummary {
+  legs: TransitLeg[]; // in trip order; walking segments between them are omitted
+  transfers: number; // legs.length - 1
 }
 
 export interface DirectionsOptions {
@@ -68,6 +92,38 @@ export interface DirectionsOptions {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function parseTransitSummary(leg: any): TransitSummary | undefined {
+  const legs: TransitLeg[] = leg.steps
+    .filter((step: any) => step.travel_mode === "TRANSIT" && step.transit_details)
+    .map((step: any) => {
+      const td = step.transit_details;
+      const line = td.line ?? {};
+      return {
+        vehicleType: line.vehicle?.type ?? "TRANSIT",
+        lineName: line.short_name ?? line.name ?? "Transit",
+        lineColor: line.color,
+        headsign: td.headsign,
+        agencyName: line.agencies?.[0]?.name,
+        departureStop: td.departure_stop?.name ?? "",
+        arrivalStop: td.arrival_stop?.name ?? "",
+        departureLocation: {
+          latitude: td.departure_stop?.location?.lat,
+          longitude: td.departure_stop?.location?.lng,
+        },
+        arrivalLocation: {
+          latitude: td.arrival_stop?.location?.lat,
+          longitude: td.arrival_stop?.location?.lng,
+        },
+        departureText: td.departure_time?.text,
+        arrivalText: td.arrival_time?.text,
+        numStops: td.num_stops,
+      };
+    });
+
+  if (legs.length === 0) return undefined;
+  return { legs, transfers: legs.length - 1 };
 }
 
 function parseRoute(route: any): Route {
@@ -99,6 +155,7 @@ function parseRoute(route: any): Route {
     hasTrafficDelay:
       durationInTrafficSeconds != null &&
       durationInTrafficSeconds > durationSeconds + Math.max(60, durationSeconds * 0.1),
+    transitSummary: parseTransitSummary(leg),
   };
 }
 
@@ -254,4 +311,47 @@ export async function getDirectionsForMode(
   }
 
   return parseRoute(json.routes[0]);
+}
+
+/** Every real alternative Google offers for a walking/bicycling/transit trip -- unlike
+ *  getDirectionsForMode above (single result, used for reroutes/mid-nav stops where only one
+ *  route actually matters), this is for the route picker itself: a real walk can have 2-3
+ *  genuinely different paths, and a real transit trip can have several genuinely different
+ *  services (different bus routes, a bus vs a train, etc.), each with its own real
+ *  line/timetable -- not synthetic Normal/Fastest/Safest labels the way driving gets, since
+ *  those don't mean anything for a fixed-timetable transit trip. Sorted fastest-first, deduped
+ *  on rounded duration+distance so near-identical alternates Google sometimes returns don't
+ *  show up twice, capped at 6 so the picker list stays scannable. */
+export async function getModeRouteOptions(
+  origin: LatLng,
+  destination: LatLng,
+  mode: Exclude<TravelMode, "driving">,
+  waypoint?: LatLng
+): Promise<Route[]> {
+  const url = buildDirectionsUrl(origin, destination, mode, { waypoint, alternatives: true });
+  const res = await fetch(url);
+  const json = await res.json();
+
+  if (json.status !== "OK" || !json.routes?.length) {
+    Sentry.logger.error("directions: mode alternatives request failed", {
+      mode,
+      status: json.status,
+      errorMessage: json.error_message,
+    });
+    throw new DirectionsApiError(json.status ?? "UNKNOWN_ERROR", json.error_message);
+  }
+
+  const routes: Route[] = json.routes.map(parseRoute);
+  routes.sort((a, b) => a.durationSeconds - b.durationSeconds);
+
+  const seen = new Set<string>();
+  const deduped: Route[] = [];
+  for (const r of routes) {
+    const key = `${Math.round(r.durationSeconds / 30)}:${Math.round(r.distanceMeters / 50)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(r);
+    if (deduped.length >= 6) break;
+  }
+  return deduped;
 }

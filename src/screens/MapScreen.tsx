@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { MAP_THEME_STYLES } from "@/utils/mapStyle";
 import { TRAFFIC_LIGHT_MARKER, SPEED_CAMERA_MARKER } from "@/utils/osmMarkerStyle";
+import { clusterPoints } from "@/utils/markerCluster";
 
 import { useLocation } from "@/context/LocationContext";
 import { useAuth } from "@/context/AuthContext";
@@ -39,6 +40,7 @@ import { OsmMarkerSheet, type OsmMarkerKind } from "@/screens/OsmMarkerSheet";
 import {
   getRouteOptions,
   getDirectionsForMode,
+  getModeRouteOptions,
   DirectionsApiError,
   type Route,
   type RouteProfileKey,
@@ -121,6 +123,12 @@ export function MapScreen() {
   // overwhelming majority of cases (transit in particular is governed by real timetables, not
   // alternative road choices), so a 3-way picker wouldn't mean anything for them.
   const [modeRoute, setModeRoute] = useState<Route | null>(null);
+  // Every real alternative Google returned for the current walking/bicycling/transit trip --
+  // `modeRoute` above always mirrors whichever one of these is currently selected/previewed,
+  // so every other place that already reads `modeRoute` (preview polyline, Start, reroute)
+  // keeps working unchanged; this list only exists to drive the picker itself.
+  const [modeRouteOptions, setModeRouteOptions] = useState<Route[]>([]);
+  const [selectedModeRouteIndex, setSelectedModeRouteIndex] = useState(0);
   const [travelMode, setTravelMode] = useState<TravelMode>("driving");
   const [loadingRouteOptions, setLoadingRouteOptions] = useState(false);
   const [routeOptionsError, setRouteOptionsError] = useState<string | null>(null);
@@ -134,6 +142,10 @@ export function MapScreen() {
   // Overpass query over a huge area), independent of the live community AlertType markers.
   const [osmData, setOsmData] = useState<OsmTrafficData | null>(null);
   const [osmLoading, setOsmLoading] = useState(false);
+  // Current zoom level (region.latitudeDelta), tracked purely to size the traffic-light
+  // clustering grid below -- bigger delta (zoomed out) means bigger cluster cells, so a huge
+  // real-world cluster of signals stays a handful of markers until you actually zoom in on it.
+  const [osmZoomDelta, setOsmZoomDelta] = useState(0.05);
   const osmDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [bannerVisible, setBannerVisible] = useState(false);
@@ -593,20 +605,25 @@ export function MapScreen() {
           const options = await getRouteOptions(currentLatLng, destination, waypoint);
           setRouteOptions(options);
           setModeRoute(null);
+          setModeRouteOptions([]);
           setSelectedProfile("normal");
           mapRef.current?.fitToCoordinates(options.normal.polyline, {
             edgePadding: { top: 120, right: 60, bottom: routeCardHeight + spacing.md, left: 60 },
             animated: true,
           });
         } else {
-          // Walking/bicycling/transit: one real route from Google for that mode, not a
-          // driving-route estimate scaled by some guessed speed factor -- genuine distance and
+          // Walking/bicycling/transit: every real alternative Google offers for that mode, not
+          // a driving-route estimate scaled by some guessed speed factor -- genuine distance and
           // duration for how that mode actually gets there, transit included (Google's transit
-          // directions factor in real published timetables, not just travel speed).
-          const modeResult = await getDirectionsForMode(currentLatLng, destination, mode, waypoint);
-          setModeRoute(modeResult);
+          // directions factor in real published timetables, not just travel speed, and a real
+          // transit trip commonly has several genuinely different services to choose between,
+          // same as a real walk can have more than one genuinely different path).
+          const results = await getModeRouteOptions(currentLatLng, destination, mode, waypoint);
+          setModeRouteOptions(results);
+          setSelectedModeRouteIndex(0);
+          setModeRoute(results[0]);
           setRouteOptions(null);
-          mapRef.current?.fitToCoordinates(modeResult.polyline, {
+          mapRef.current?.fitToCoordinates(results[0].polyline, {
             edgePadding: { top: 120, right: 60, bottom: routeCardHeight + spacing.md, left: 60 },
             animated: true,
           });
@@ -707,6 +724,8 @@ export function MapScreen() {
       // this catches the rotate-only case onPanDrag misses.
       if (details?.isGesture && followTilt) setFollowTilt(false);
 
+      setOsmZoomDelta(region.latitudeDelta);
+
       // Manual alert placement uses a fixed pin at the center of the screen and moves the map
       // underneath it instead of a draggable Marker (see onAlertTypeSelected above) -- so the
       // "drag" is really just keeping alertPlacementLatLng in sync with wherever the map
@@ -748,6 +767,28 @@ export function MapScreen() {
     },
     [placingAlert, settings.showTrafficLights, settings.showSpeedCameras, settings.osmLayerRadiusKm, followTilt]
   );
+
+  // Traffic-light nodes cluster into a single badge wherever they're too dense to render as
+  // individual pins without lagging the map -- a real intersection cluster (several nodes,
+  // one per approach/crossing) can put 10-20+ within a couple hundred meters, and a whole
+  // suburb's worth within the radius setting can be several hundred. Speed cameras are left
+  // unclustered -- they're genuinely sparse (a handful per suburb at most), so there was never
+  // a marker-count problem to solve there, and every one stays individually tappable.
+  // Cell size scales with the current zoom (osmZoomDelta) so clusters split apart into their
+  // real individual pins as the driver zooms in, floored so it never over-clusters at max zoom.
+  const trafficLightClusters = useMemo(() => {
+    const points = osmData?.trafficLights ?? [];
+    if (points.length === 0) return [];
+    const cellSizeDegrees = Math.max(osmZoomDelta / 30, 0.0012);
+    return clusterPoints(points, cellSizeDegrees);
+  }, [osmData?.trafficLights, osmZoomDelta]);
+
+  const onTrafficLightClusterPress = useCallback((lat: number, lng: number) => {
+    mapRef.current?.animateToRegion(
+      { latitude: lat, longitude: lng, latitudeDelta: osmZoomDelta / 4, longitudeDelta: osmZoomDelta / 4 },
+      350
+    );
+  }, [osmZoomDelta]);
 
   const onMapPress = useCallback(
     (e: MapPressEvent) => {
@@ -887,6 +928,23 @@ export function MapScreen() {
     [routeOptions, routeCardHeight, selectedProfile]
   );
 
+  // Same "reselecting the highlighted one re-fits the camera" gesture as onSelectProfile above,
+  // applied to the real Google alternatives list for walking/bicycling/transit.
+  const onSelectModeRoute = useCallback(
+    (index: number) => {
+      const reselectingSame = index === selectedModeRouteIndex;
+      setSelectedModeRouteIndex(index);
+      const picked = modeRouteOptions[index];
+      if (picked) setModeRoute(picked);
+      if (!reselectingSame || !picked) return;
+      mapRef.current?.fitToCoordinates(picked.polyline, {
+        edgePadding: { top: 120, right: 60, bottom: routeCardHeight + spacing.md, left: 60 },
+        animated: true,
+      });
+    },
+    [modeRouteOptions, routeCardHeight, selectedModeRouteIndex]
+  );
+
   const confirmRoute = useCallback(() => {
     const chosen = travelMode === "driving" ? routeOptions?.[selectedProfile] : modeRoute;
     if (!chosen || !pendingDestination) return;
@@ -902,12 +960,14 @@ export function MapScreen() {
     });
     setRouteOptions(null);
     setModeRoute(null);
+    setModeRouteOptions([]);
     setPendingDestination(null);
   }, [routeOptions, modeRoute, travelMode, selectedProfile, pendingDestination]);
 
   const cancelRouteOptions = useCallback(() => {
     setRouteOptions(null);
     setModeRoute(null);
+    setModeRouteOptions([]);
     setPendingDestination(null);
     setStopLocation(null);
     setPickingStop(false);
@@ -1184,6 +1244,19 @@ export function MapScreen() {
             lineDashPattern={[10, 7]}
           />
         )}
+        {/* Same preview treatment for walking/bicycling/transit -- these modes only ever have
+            one `modeRoute` (see RouteOptionsCard) instead of the 3-way `routeOptions` picker
+            above, but that meant this preview line's condition never matched for them at all,
+            so picking Bike/Walk/Transit showed just the bare map with no line until Start was
+            actually pressed. */}
+        {modeRoute && !routeOptions && (
+          <Polyline
+            coordinates={modeRoute.polyline}
+            strokeWidth={7}
+            strokeColor="#DC2626"
+            lineDashPattern={[10, 7]}
+          />
+        )}
         {/* Highlighted arrival spot -- the exact picked destination (not wherever the
             polyline decoder's last point happens to land), so it's obvious exactly which
             building/driveway is the actual arrival point rather than "somewhere on this
@@ -1208,22 +1281,39 @@ export function MapScreen() {
           <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
         ))}
         {settings.showTrafficLights &&
-          osmData?.trafficLights.map((p) => (
-            <Marker
-              key={`tl-${p.id}`}
-              coordinate={{ latitude: p.lat, longitude: p.lng }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
-              onPress={(e) => {
-                e.stopPropagation();
-                onOsmMarkerPress("traffic_light", { latitude: p.lat, longitude: p.lng });
-              }}
-            >
-              <View style={styles.osmIconBadgeTrafficLight}>
-                <MaterialCommunityIcons name={TRAFFIC_LIGHT_MARKER.icon} size={TRAFFIC_LIGHT_MARKER.glyphSize} color="#FFFFFF" />
-              </View>
-            </Marker>
-          ))}
+          trafficLightClusters.map((c) =>
+            c.count === 1 ? (
+              <Marker
+                key={`tl-${c.points[0].id}`}
+                coordinate={{ latitude: c.lat, longitude: c.lng }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onOsmMarkerPress("traffic_light", { latitude: c.lat, longitude: c.lng });
+                }}
+              >
+                <View style={styles.osmIconBadgeTrafficLight}>
+                  <MaterialCommunityIcons name={TRAFFIC_LIGHT_MARKER.icon} size={TRAFFIC_LIGHT_MARKER.glyphSize} color="#FFFFFF" />
+                </View>
+              </Marker>
+            ) : (
+              <Marker
+                key={`tlc-${c.key}`}
+                coordinate={{ latitude: c.lat, longitude: c.lng }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onTrafficLightClusterPress(c.lat, c.lng);
+                }}
+              >
+                <View style={styles.osmClusterBadge}>
+                  <Text style={styles.osmClusterBadgeText}>{c.count}</Text>
+                </View>
+              </Marker>
+            )
+          )}
         {settings.showSpeedCameras &&
           osmData?.speedCameras.map((p) => (
             <Marker
@@ -1295,6 +1385,9 @@ export function MapScreen() {
         <RouteOptionsCard
           options={routeOptions}
           modeRoute={modeRoute}
+          modeRouteOptions={modeRouteOptions}
+          selectedModeRouteIndex={selectedModeRouteIndex}
+          onSelectModeRoute={onSelectModeRoute}
           travelMode={travelMode}
           onSelectTravelMode={onSelectTravelMode}
           loading={loadingRouteOptions}
@@ -1778,6 +1871,22 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
+  },
+  osmClusterBadge: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 6,
+    backgroundColor: TRAFFIC_LIGHT_MARKER.color,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  osmClusterBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
   },
   topRightControls: {
     position: "absolute",
