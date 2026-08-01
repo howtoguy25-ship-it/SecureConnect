@@ -186,6 +186,8 @@ export class DatabaseStorage implements IStorage {
     const myParticipations = await db.select({
       conversationId: conversationParticipants.conversationId,
       unreadCount: conversationParticipants.unreadCount,
+      isArchived: conversationParticipants.isArchived,
+      folder: conversationParticipants.folder,
       convId: conversations.id,
       convNumberType: conversations.numberType,
       convLastMessageAt: conversations.lastMessageAt,
@@ -262,6 +264,12 @@ export class DatabaseStorage implements IStorage {
       otherUser: otherUserMap.get(p.conversationId) || null,
       unreadCount: p.unreadCount || 0,
       isPendingRequest: pendingForMeSet.has(p.conversationId),
+      // Was previously never selected here, so the client's own
+      // isArchived/folder filtering (ChatsScreen) silently never worked —
+      // needed now so declining a message request (which archives it for
+      // the decliner) actually removes it from their main list.
+      isArchived: p.isArchived ?? false,
+      folder: p.folder || 'none',
     }));
 
     // Sort by lastMessageAt descending
