@@ -142,6 +142,49 @@ export function bearingDegrees(lat1: number, lon1: number, lat2: number, lon2: n
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
+/** Shortest distance in meters from a point to a polyline (the minimum over every segment's
+ *  point-to-segment distance) -- the real signal for "has the driver actually left the route,"
+ *  not just "how far from where the route was last computed" (which fires identically whether
+ *  the driver is perfectly on-route or has missed a turn entirely, since it only measures
+ *  distance travelled, not distance *off* the route line). Uses a flat-plane equirectangular
+ *  approximation (fine at the tens/hundreds-of-meters scale this is used at, not meant for
+ *  long-distance navigation math the way distanceKm's real haversine calculation above is). */
+export function distanceToPolylineMeters(
+  lat: number,
+  lon: number,
+  polyline: { lat: number; lng: number }[]
+): number {
+  if (polyline.length === 0) return Infinity;
+  if (polyline.length === 1) {
+    return distanceKm(lat, lon, polyline[0].lat, polyline[0].lng) * 1000;
+  }
+
+  const metersPerDegLat = 111_320;
+  const metersPerDegLon = 111_320 * Math.cos((lat * Math.PI) / 180);
+  const px = lon * metersPerDegLon;
+  const py = lat * metersPerDegLat;
+
+  let minDist = Infinity;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    const ax = a.lng * metersPerDegLon;
+    const ay = a.lat * metersPerDegLat;
+    const bx = b.lng * metersPerDegLon;
+    const by = b.lat * metersPerDegLat;
+
+    const abx = bx - ax;
+    const aby = by - ay;
+    const lengthSq = abx * abx + aby * aby;
+    const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / lengthSq)) : 0;
+    const cx = ax + t * abx;
+    const cy = ay + t * aby;
+    const dist = Math.hypot(px - cx, py - cy);
+    if (dist < minDist) minDist = dist;
+  }
+  return minDist;
+}
+
 export function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;

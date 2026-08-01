@@ -32,6 +32,19 @@
   font-weight: 700;
 }
 
+/* animation replays only when NavMiniBox.tsx re-keys this element -- the active step actually
+   changed -- not on every distance-remaining tick, same pattern as NavigationCard. */
+@keyframes nav-mini-box-slide-in {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .nav-mini-box-text {
   flex: 1;
   font-size: 13px;
@@ -39,6 +52,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  animation: nav-mini-box-slide-in 380ms ease-out;
 }
 
 .nav-mini-box-eta {

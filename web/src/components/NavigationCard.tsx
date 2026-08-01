@@ -56,9 +56,14 @@ export function NavigationCard({
       <button className="nav-card-clear" onClick={onClearRoute} aria-label="Remove route">
         ✕
       </button>
-      <div className="nav-card-instruction">{headline}</div>
-      <div className="nav-card-meta">
-        ETA {etaText} · {distanceRemainingText} remaining
+      {/* Keyed on the raw instruction text (not `headline`, which also changes with distance
+          on every GPS tick) so this block only actually remounts -- and its slide-in animation
+          only actually replays -- when the active step itself changes. */}
+      <div key={instruction} className="nav-card-instruction-block">
+        <div className="nav-card-instruction">{headline}</div>
+        <div className="nav-card-meta">
+          ETA {etaText} · {distanceRemainingText} remaining
+        </div>
       </div>
 
       <NavActionsRow

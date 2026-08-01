@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { ROUTE_ORDER, ROUTE_PROFILES, type RouteKey } from "@/utils/routeProfiles";
 import "./RouteOptionsCard.css";
 
@@ -7,14 +8,67 @@ interface Props {
   onSelect: (key: RouteKey) => void;
   onStart: () => void;
   onClear: () => void;
+  // Real measured card height, so the caller can fit the previewed route above it instead of
+  // guessing a fixed bottom padding this card (3 route options + Start button) can grow taller
+  // than.
+  onHeightChange?: (height: number) => void;
 }
 
-export function RouteOptionsCard({ routeOptions, selectedRouteKey, onSelect, onStart, onClear }: Props) {
+// "Peek" -- picking a route option briefly slides this card partway down off-screen so more of
+// the map (and the red preview line above it) is visible, then slides back up on its own after
+// a few seconds: a good look at the route/how long it'll take without the card fully hiding it,
+// and without needing a manual dismiss.
+const PEEK_DOWN_MS = 7000;
+
+export function RouteOptionsCard({
+  routeOptions,
+  selectedRouteKey,
+  onSelect,
+  onStart,
+  onClear,
+  onHeightChange,
+}: Props) {
   const available = ROUTE_ORDER.filter((key) => routeOptions[key]);
   const selectedLeg = routeOptions[selectedRouteKey]?.routes[0]?.legs[0];
 
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [peeking, setPeeking] = useState(false);
+  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Skips the very first render's "selection" (the default profile the card mounts with,
+  // never an actual tap) -- only a real change in selectedRouteKey (an actual pick) triggers
+  // the peek.
+  const mountedSelectedRef = useRef(selectedRouteKey);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || !onHeightChange) return;
+    onHeightChange(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) onHeightChange(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (mountedSelectedRef.current === selectedRouteKey) return;
+    mountedSelectedRef.current = selectedRouteKey;
+    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    setPeeking(true);
+    peekTimerRef.current = setTimeout(() => setPeeking(false), PEEK_DOWN_MS);
+  }, [selectedRouteKey]);
+
+  useEffect(
+    () => () => {
+      if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    },
+    []
+  );
+
   return (
-    <div className="route-options-card">
+    <div ref={cardRef} className={`route-options-card${peeking ? " route-options-card-peeking" : ""}`}>
       <div className="route-options-header">
         <span>Choose a route</span>
         <button className="route-options-clear" onClick={onClear} aria-label="Remove route">
@@ -33,7 +87,13 @@ export function RouteOptionsCard({ routeOptions, selectedRouteKey, onSelect, onS
             >
               <div className="route-option-title">
                 <span className="route-option-label">{profile.label}</span>
-                <span className="route-option-eta">{leg?.duration?.text ?? "—"}</span>
+                {/* duration_in_traffic (live, requested via drivingOptions in App.tsx) over
+                    plain duration (static/typical-conditions) whenever Google actually
+                    returned it -- otherwise this shows an honest-looking number that's
+                    quietly ignoring current traffic entirely. */}
+                <span className="route-option-eta">
+                  {leg?.duration_in_traffic?.text ?? leg?.duration?.text ?? "—"}
+                </span>
               </div>
               <div className="route-option-subtitle">
                 {profile.subtitle} · {leg?.distance?.text ?? ""}
@@ -43,7 +103,7 @@ export function RouteOptionsCard({ routeOptions, selectedRouteKey, onSelect, onS
         })}
       </div>
       <button className="start-nav-button" onClick={onStart} disabled={!selectedLeg}>
-        Start navigation · ETA {selectedLeg?.duration?.text ?? "…"}
+        Start navigation · ETA {selectedLeg?.duration_in_traffic?.text ?? selectedLeg?.duration?.text ?? "…"}
       </button>
     </div>
   );

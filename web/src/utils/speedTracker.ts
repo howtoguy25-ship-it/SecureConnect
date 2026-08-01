@@ -68,6 +68,19 @@ const TRACK_GRACE_MS = 600;
 // the vehicle. This keeps the drawn box visually steady without meaningfully lagging behind
 // real movement.
 const BBOX_SMOOTHING = 0.55;
+// Distance is a *nonlinear* transform of box width (estimateDistanceM), so smoothing the box
+// alone doesn't equally smooth the distance derived from it -- this is its own separate EMA
+// against the track's own previous smoothed distance, tamping down exactly the width-to-
+// distance amplification that showed up as an occasional real (but wrong) multi-km/h swing
+// even with the box itself reading visually steady.
+const DISTANCE_SMOOTHING = 0.35;
+// Second layer of protection: even a smoothed distance signal can still produce one genuinely
+// implausible reading (a brief false rematch to a different nearby vehicle, one very bad
+// frame). No real car changes speed anywhere near this fast -- 0-100 km/h in under 4 seconds
+// is already supercar-tier acceleration -- so clamp the maximum speed change any single tick
+// is allowed to report, relative to elapsed time, rather than ever displaying a physically
+// impossible jump.
+const MAX_ACCEL_KMH_PER_SEC = 25;
 // How much each new speed reading pulls the running average -- weighted well toward history
 // since a real speed change plays out over a second or more, not one 120ms detection tick, so
 // there's no real cost to leaning harder on smoothing here.
@@ -137,7 +150,11 @@ export function createSpeedTracker() {
         // (fake) closing/receding speed: a few pixels of box-width noise translates to a real
         // multi-km/h swing once divided by a ~120ms tick.
         const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
-        const distanceM = estimateDistanceM(bbox[2], imageWidthPx);
+        // Smoothed against the track's own previous smoothed distance, not just inherited from
+        // the bbox smoothing above -- see DISTANCE_SMOOTHING's comment for why the nonlinear
+        // width-to-distance transform needs its own separate easing.
+        const rawDistanceM = estimateDistanceM(bbox[2], imageWidthPx);
+        const distanceM = best.distanceM + (rawDistanceM - best.distanceM) * DISTANCE_SMOOTHING;
 
         const [cx, cy] = boxCenter(bbox);
         const dispRatio = Math.hypot(cx - best.center[0], cy - best.center[1]) / imageWidthPx;
@@ -173,7 +190,12 @@ export function createSpeedTracker() {
         // the normal cadence would have silently stopped speed from updating at all most frames.
         if (state === "moving" && dtSec > 0.05) {
           const closingMPerSec = (best.distanceM - distanceM) / dtSec;
-          const rawKmh = closingMPerSec * 3.6;
+          let rawKmh = closingMPerSec * 3.6;
+          if (best.speedKmh !== null) {
+            // Clamp to a physically plausible acceleration -- see MAX_ACCEL_KMH_PER_SEC.
+            const maxDeltaKmh = MAX_ACCEL_KMH_PER_SEC * dtSec;
+            rawKmh = Math.max(best.speedKmh - maxDeltaKmh, Math.min(best.speedKmh + maxDeltaKmh, rawKmh));
+          }
           // Smooth against the previous reading so it doesn't jitter frame to frame.
           speedKmh = best.speedKmh === null ? rawKmh : best.speedKmh * (1 - SPEED_SMOOTHING) + rawKmh * SPEED_SMOOTHING;
         } else if (state === "moving") {

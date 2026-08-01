@@ -44,6 +44,24 @@
   cursor: pointer;
 }
 
+/* Replays whenever NavigationCard.tsx re-keys this block (the active step actually changed --
+   the driver completed a turn), not on every GPS tick within the same step (distance-remaining
+   text updates far more often than the step itself). */
+@keyframes nav-instruction-slide-in {
+  from {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.nav-card-instruction-block {
+  animation: nav-instruction-slide-in 380ms ease-out;
+}
+
 .nav-card-instruction {
   font-size: 17px;
   font-weight: 700;

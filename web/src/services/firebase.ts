@@ -104,8 +104,14 @@ export function signInWithApple(): Promise<User> {
   return linkOrSignIn(new OAuthProvider("apple.com"));
 }
 
-export function signOutUser(): Promise<void> {
-  return signOut(auth);
+export async function signOutUser(): Promise<void> {
+  await signOut(auth);
+  // This app is designed to always have at least an anonymous session -- every visitor gets a
+  // stable uid for alert/report ownership (see ensureSignedIn above), and plenty of other code
+  // just checks for a truthy `user` without distinguishing anonymous from real. Baking the
+  // re-anonymization in here (rather than leaving it to whichever call site happens to await
+  // ensureSignedIn() afterward) means signing out is safe no matter what calls it.
+  await signInAnonymously(auth);
 }
 
 // --- Phone number + password sign-in (real Firebase Phone Auth SMS codes, not simulated) ---

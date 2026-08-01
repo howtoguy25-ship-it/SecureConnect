@@ -7,8 +7,8 @@ import {
   DirectionsRenderer,
   Circle,
 } from "@react-google-maps/api";
-import type { User } from "firebase/auth";
-import { ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
+import { onAuthStateChanged, type User } from "firebase/auth";
+import { auth, ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
 import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
 import {
   subscribeNearbyAlerts,
@@ -41,7 +41,7 @@ const LiveVehicleDetection = lazy(() =>
   import("@/components/LiveVehicleDetection").then((m) => ({ default: m.LiveVehicleDetection }))
 );
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
-import { bearingDegrees, distanceKm } from "@/utils/geo";
+import { bearingDegrees, distanceKm, distanceToPolylineMeters } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from "@/utils/mapStyles";
 import { calculateSunTimes } from "@/utils/sunTimes";
@@ -63,6 +63,22 @@ const IS_TOUCH_DEVICE =
 // far from where the route was last computed — keeps ETA/remaining-distance accurate
 // without hammering the Directions API on every GPS tick.
 const REROUTE_THRESHOLD_KM = 0.05;
+// Distance to a step's endpoint (km) below which that maneuver counts as complete and
+// guidance advances to the next step.
+const STEP_COMPLETE_KM = 0.035;
+// How many steps ahead to check for "already passed this one too, in the same GPS tick" --
+// bounded so this stays a cheap, constant-time check every tick instead of scanning the whole
+// remaining route.
+const STEP_SKIP_AHEAD_LIMIT = 4;
+// Real off-route detection thresholds -- see the reroute effect below.
+const OFF_ROUTE_METERS = 60;
+// Requires the drift to still be true a couple of ticks later, not just one, before reacting --
+// a single noisy/bad fix shouldn't kick off a reroute on its own.
+const OFF_ROUTE_CONFIRM_TICKS = 2;
+// Minimum gap between forced off-route reroutes -- otherwise a fresh reroute that's itself
+// briefly still off the eventual snapped route (GPS settling right after a fetch) could
+// immediately trigger a second one back-to-back.
+const OFF_ROUTE_REROUTE_COOLDOWN_MS = 15000;
 
 // Cached by "color:scale" so repeated calls return the *same* object reference instead of a
 // fresh one on every render -- markers (alerts + every OSM traffic light/speed camera, which
@@ -258,6 +274,11 @@ export default function App() {
   });
   const [selectedRouteKey, setSelectedRouteKey] = useState<RouteKey>("best");
   const [routeOrigin, setRouteOrigin] = useState<google.maps.LatLngLiteral | null>(null);
+  // Real measured height of RouteOptionsCard (see its onHeightChange) -- the route-preview
+  // fitBounds effect below uses this real number instead of a fixed guess, so the previewed
+  // route never ends up partly hidden behind the card. 280 is a reasonable fallback for the
+  // one frame before the first real measurement lands.
+  const [routeCardHeight, setRouteCardHeight] = useState(280);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const map3dHandleRef = useRef<Map3DViewHandle | null>(null);
@@ -324,6 +345,9 @@ export default function App() {
   const displayedHeadingRef = useRef(0);
   const lastAppliedTiltRef = useRef<number | null>(null);
   const lastLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
+  // Off-route detection state -- see the reroute effect below for how these are used.
+  const offRouteStreakRef = useRef(0);
+  const lastRerouteAtRef = useRef(0);
   // Joystick-driven adjustments to the 3D Follow camera, layered on top of the
   // auto-computed travel heading/default tilt so the driver can nudge the view to
   // wherever feels comfortable. Reset via the recenter button.
@@ -451,13 +475,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    ensureSignedIn()
-      .then(setUser)
-      .catch((err) => {
-        console.warn("[auth] anonymous sign-in failed", err);
-        const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
-        setAuthError(`Couldn't sign in: ${code ?? (err instanceof Error ? err.message : String(err))}`);
-      });
+    // Bootstraps the very first session (anonymous sign-in if nothing exists yet).
+    ensureSignedIn().catch((err) => {
+      console.warn("[auth] anonymous sign-in failed", err);
+      const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
+      setAuthError(`Couldn't sign in: ${code ?? (err instanceof Error ? err.message : String(err))}`);
+    });
+
+    // The real, persistent subscription -- keeps `user` in sync with Firebase's own auth
+    // state for the rest of the session, not just whatever each individual sign-in/out call
+    // site below happens to pass to setUser itself. Without this, any auth change that isn't
+    // routed through one of those exact call sites would never reflect in the UI.
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    return unsubscribe;
   }, []);
 
   // Records name/email/provider for the admin panel -- never a password, since Firebase
@@ -510,11 +540,13 @@ export default function App() {
   }, []);
 
   const handleSignOut = useCallback(async () => {
-    await signOutUser();
     try {
-      setUser(await ensureSignedIn());
+      // signOutUser() now re-establishes a fresh anonymous session itself (see
+      // services/firebase.ts) -- the persistent onAuthStateChanged listener above picks up
+      // both transitions on its own, no separate ensureSignedIn()/setUser() call needed here.
+      await signOutUser();
     } catch (err) {
-      console.warn("[auth] re-sign-in after sign-out failed", err);
+      console.warn("[auth] sign-out failed", err);
     }
   }, []);
 
@@ -599,6 +631,10 @@ export default function App() {
           travelMode: google.maps.TravelMode.DRIVING,
           avoidHighways: profile.avoidHighways,
           avoidTolls: profile.avoidTolls,
+          // Traffic-aware ETA -- previously none of the three profiles requested this at all,
+          // so every ETA shown was a static/typical-conditions estimate with zero live-traffic
+          // input, not what "Best"/"Fast"/"Comfort" honestly cost right now.
+          drivingOptions: { departureTime: new Date(), trafficModel: google.maps.TrafficModel.BEST_GUESS },
         },
         (result, status) => {
           if (status === "OK" && result) {
@@ -626,6 +662,7 @@ export default function App() {
                 travelMode: google.maps.TravelMode.DRIVING,
                 avoidHighways: profile.avoidHighways,
                 avoidTolls: profile.avoidTolls,
+                drivingOptions: { departureTime: new Date(), trafficModel: google.maps.TrafficModel.BEST_GUESS },
               },
               (result, status) => resolve([key, status === "OK" ? result : null])
             );
@@ -671,6 +708,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRouteKey]);
 
+  // Fits the map to whichever route is previewed, padded for the route-picker card's real
+  // measured height (routeCardHeight) -- DirectionsRenderer's own automatic fit (used once
+  // navigating starts, via preserveViewport: false then) has no concept of that card sitting
+  // over the bottom of the screen, so relying on it alone here left the lower part of the
+  // previewed route hidden behind the card.
+  useEffect(() => {
+    if (navigating || !directions) return;
+    const map = mapRef.current;
+    const bounds = directions.routes[0]?.bounds;
+    if (!map || !bounds) return;
+    map.fitBounds(bounds, { top: 80, right: 60, bottom: routeCardHeight + 20, left: 60 });
+  }, [directions, navigating, routeCardHeight]);
+
   // Live tracking while navigating: advance to the next step as you approach it, rotate
   // the map to face your direction of travel, and trigger a re-route if you've drifted
   // far enough from where the current route was computed.
@@ -705,11 +755,65 @@ export default function App() {
       const stepEnd = currentStep.end_location;
       const distToStepEndKm = distanceKm(location.lat, location.lng, stepEnd.lat(), stepEnd.lng());
       setDistanceToManeuverM(Math.round(distToStepEndKm * 1000));
-      if (distToStepEndKm < 0.03 && activeStepIndex < steps.length - 1) {
+      // Widened from a fixed 30m -- geolocation fixes here can land tens of meters apart
+      // between ticks, especially at highway speed, and a narrow-only capture window was a
+      // real way for a completed instruction to get stuck on screen: a fast-moving car could
+      // land past the 30m mark on the very fix that would have triggered it.
+      if (distToStepEndKm < STEP_COMPLETE_KM && activeStepIndex < steps.length - 1) {
         setActiveStepIndex((i) => i + 1);
+      } else if (distToStepEndKm >= STEP_COMPLETE_KM) {
+        // GPS-jump case: this fix isn't close to the *current* step's end, but check whether
+        // it already landed past one or more of the next few steps too (several short,
+        // closely-spaced maneuvers -- consecutive roundabout exits, a quick double turn --
+        // covered in a single tick). Without this, that one fix would leave activeStepIndex
+        // stuck on an already-passed step instead of advancing to whichever one is actually
+        // next, which is exactly what showed up as a stale, already-completed instruction
+        // staying on screen indefinitely after a fast or GPS-sparse stretch.
+        for (let ahead = 1; ahead <= STEP_SKIP_AHEAD_LIMIT && activeStepIndex + ahead < steps.length; ahead++) {
+          const aheadStep = steps[activeStepIndex + ahead];
+          const aheadEnd = aheadStep.end_location;
+          const distToAheadEndKm = distanceKm(location.lat, location.lng, aheadEnd.lat(), aheadEnd.lng());
+          if (distToAheadEndKm < STEP_COMPLETE_KM) {
+            setActiveStepIndex(Math.min(activeStepIndex + ahead + 1, steps.length - 1));
+            break;
+          }
+        }
       }
     }
 
+    // Real off-route detection -- previously the only reroute trigger was "have I moved 50m
+    // from where the route was last computed" (below), which fires at the exact same cadence
+    // whether the driver is perfectly on-route or has missed a turn entirely. It happens to
+    // eventually recover from a miss too (recomputing from wherever the car currently is), but
+    // only after up to 50m of travel in a possibly wrong direction, and isn't actually
+    // triggered by whether the driver has really left the route. This measures live distance
+    // from the route line itself and forces an immediate reroute once that's sustained and
+    // confirmed, without waiting on the next scheduled 50m-travel refresh below.
+    const routePath = directions.routes[0]?.overview_path;
+    if (routePath && routePath.length > 1) {
+      const distOffRouteM = distanceToPolylineMeters(
+        location.lat,
+        location.lng,
+        routePath.map((p) => ({ lat: p.lat(), lng: p.lng() }))
+      );
+      if (distOffRouteM > OFF_ROUTE_METERS) {
+        offRouteStreakRef.current += 1;
+        if (
+          offRouteStreakRef.current >= OFF_ROUTE_CONFIRM_TICKS &&
+          Date.now() - lastRerouteAtRef.current >= OFF_ROUTE_REROUTE_COOLDOWN_MS
+        ) {
+          offRouteStreakRef.current = 0;
+          lastRerouteAtRef.current = Date.now();
+          setRouteOrigin(location);
+        }
+      } else {
+        offRouteStreakRef.current = 0;
+      }
+    }
+
+    // Keeps ETA/remaining-distance accurate while cruising normally along the route, without
+    // hammering the Directions API on every GPS tick -- unrelated to the off-route recovery
+    // above, which fires independently (and immediately) once a genuine miss is confirmed.
     if (!routeOrigin || distanceKm(routeOrigin.lat, routeOrigin.lng, location.lat, location.lng) > REROUTE_THRESHOLD_KM) {
       setRouteOrigin(location);
     }
@@ -920,6 +1024,23 @@ export default function App() {
         .catch((err) => console.warn("[osm] traffic data fetch failed", err));
     }, 1200);
   }, [settings.showTrafficLights, settings.showSpeedCameras]);
+
+  // onMapIdle (above) only ever runs off the map's own 'idle' event -- which does fire once
+  // after the initial render (so a toggle already on when the map first loads is covered), but
+  // nothing calls it again if the toggle is flipped on later while the map is sitting still.
+  // That left both layers invisible until the next real pan/zoom, even with the setting
+  // already on. This fires the same fetch directly on the off-to-on transition instead.
+  const osmLayersEnabledRef = useRef(settings.showTrafficLights || settings.showSpeedCameras);
+  useEffect(() => {
+    const nowEnabled = settings.showTrafficLights || settings.showSpeedCameras;
+    if (nowEnabled && !osmLayersEnabledRef.current) {
+      // Force a fresh fetch even if the viewport bounds haven't changed since the layers were
+      // last (or never) fetched.
+      lastOsmBoundsRef.current = null;
+      onMapIdle();
+    }
+    osmLayersEnabledRef.current = nowEnabled;
+  }, [settings.showTrafficLights, settings.showSpeedCameras, onMapIdle]);
 
   useEffect(() => {
     if (!selectedPlaceId || !mapRef.current) return;
@@ -1142,7 +1263,11 @@ export default function App() {
 
   const startNavigation = useCallback(() => {
     setNavigating(true);
-    setNavViewMode(null);
+    // Chase-cam engages by default -- previously navigation always started with no view mode
+    // picked, leaving the driver looking at a flat, non-following map until they manually
+    // tapped "3D Follow" every single time. "3D Follow" is still one tap away to back out of
+    // via the existing view-toggle row if they'd rather not have it.
+    setNavViewMode("follow");
     setActiveStepIndex(0);
     setRouteOrigin(location);
     lastLocationRef.current = location;
@@ -1190,9 +1315,10 @@ export default function App() {
   const shareEta = useCallback(() => {
     const leg = directions?.routes[0]?.legs[0];
     if (!leg || !location) return;
-    const arrivalText = formatArrivalClock(Date.now() + (leg.duration?.value ?? 0) * 1000);
+    const eta = leg.duration_in_traffic ?? leg.duration;
+    const arrivalText = formatArrivalClock(Date.now() + (eta?.value ?? 0) * 1000);
     const mapsLink = `https://www.google.com/maps?q=${location.lat},${location.lng}`;
-    const text = `I'm on my way — ETA ${leg.duration?.text ?? ""}, arriving around ${arrivalText}. My current location: ${mapsLink}`;
+    const text = `I'm on my way — ETA ${eta?.text ?? ""}, arriving around ${arrivalText}. My current location: ${mapsLink}`;
     if (navigator.share) {
       navigator.share({ text }).catch(() => {});
     } else if (navigator.clipboard) {
@@ -1250,6 +1376,10 @@ export default function App() {
   const statusMessage = authError ?? locationError ?? null;
   const navSteps = directions?.routes[0]?.legs[0]?.steps ?? [];
   const navLeg = directions?.routes[0]?.legs[0];
+  // duration_in_traffic (live, requested via drivingOptions above) over plain duration
+  // (static/typical-conditions) whenever Google actually returned it -- every ETA shown
+  // during navigation should reflect current traffic, not silently ignore it.
+  const navEta = navLeg?.duration_in_traffic ?? navLeg?.duration;
   const currentStep = navSteps[activeStepIndex] ?? null;
 
   const remainingMeters = navSteps
@@ -1268,8 +1398,8 @@ export default function App() {
       ? {
           instructionText: currentStep ? stripHtml(currentStep.instructions) : "Recalculating…",
           distanceToManeuverM,
-          etaText: navLeg.duration?.text ?? "",
-          arrivalClockText: formatArrivalClock(Date.now() + (navLeg.duration?.value ?? 0) * 1000),
+          etaText: navEta?.text ?? "",
+          arrivalClockText: formatArrivalClock(Date.now() + (navEta?.value ?? 0) * 1000),
           distanceRemainingText,
           bearingToManeuverDeg,
           travelHeadingDeg: heading,
@@ -1479,7 +1609,24 @@ export default function App() {
         )}
 
         {directions && (
-          <DirectionsRenderer directions={directions} options={{ suppressMarkers: true }} />
+          <DirectionsRenderer
+            directions={directions}
+            options={{
+              suppressMarkers: true,
+              // Google's own auto-fit has no concept of the route-picker card sitting at the
+              // bottom of the screen, so it was never accounted for -- the fitBounds effect
+              // below does that explicitly instead, while actually picking a route (not yet
+              // navigating).
+              preserveViewport: !navigating,
+              // Red and thick while still picking a route option -- previously left
+              // completely unstyled (Google's default thin blue), which was the exact same
+              // shade as the eventual committed route below, with no way to tell "this is
+              // just a preview" from "this is what you're now navigating."
+              polylineOptions: !navigating
+                ? { strokeColor: "#DC2626", strokeWeight: 7, strokeOpacity: 0.9 }
+                : undefined,
+            }}
+          />
         )}
 
         {/* A real pin so you can actually see which building/spot you're headed to -- house,
@@ -1626,6 +1773,7 @@ export default function App() {
           onSelect={setSelectedRouteKey}
           onStart={startNavigation}
           onClear={clearRoute}
+          onHeightChange={setRouteCardHeight}
         />
       )}
 
@@ -1644,7 +1792,7 @@ export default function App() {
         <NavigationCard
           step={navSteps[activeStepIndex] ?? null}
           distanceToManeuverM={distanceToManeuverM}
-          etaText={navLeg.duration?.text ?? ""}
+          etaText={navEta?.text ?? ""}
           distanceRemainingText={distanceRemainingText}
           navViewMode={navViewMode}
           onSetNavViewMode={setNavViewMode}
@@ -1663,7 +1811,7 @@ export default function App() {
         <NavMiniBox
           step={navSteps[activeStepIndex] ?? null}
           distanceToManeuverM={distanceToManeuverM}
-          etaText={navLeg.duration?.text ?? ""}
+          etaText={navEta?.text ?? ""}
           onExpand={() => setNavCardCollapsed(false)}
         />
       )}
@@ -1681,6 +1829,22 @@ export default function App() {
           <span>Tap the map to add a stop</span>
           <button onClick={() => setAddingStop(false)}>Cancel</button>
         </div>
+      )}
+
+      {/* Recenter used to disappear entirely during navigation (bundled into the same FAB
+          cluster below, all gated on !chromeHidden, and chromeHidden is true whenever
+          navigating is) -- leaving no way to recenter at all while actually driving, exactly
+          when panning away from your own position is most likely. Rendered as its own
+          standalone button, independent of the browse-mode FAB cluster. */}
+      {navigating && (
+        <button
+          className="fab fab-tertiary"
+          onClick={recenter}
+          disabled={!location}
+          aria-label="Recenter on my location"
+        >
+          ➤
+        </button>
       )}
 
       {!chromeHidden && (

@@ -19,7 +19,11 @@ export function NavMiniBox({ step, distanceToManeuverM, etaText, onExpand }: Pro
   return (
     <button className="nav-mini-box" onClick={onExpand} aria-label="Show full navigation card">
       <span className="nav-mini-box-arrow">↑</span>
-      <span className="nav-mini-box-text">{headline}</span>
+      {/* Keyed on the raw instruction (not `headline`, which also changes with distance every
+          GPS tick) so the slide-in animation only replays when the active step itself changes. */}
+      <span key={instruction} className="nav-mini-box-text">
+        {headline}
+      </span>
       <span className="nav-mini-box-eta">{etaText}</span>
     </button>
   );
