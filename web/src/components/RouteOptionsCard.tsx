@@ -31,8 +31,10 @@ interface Props {
 // "Peek" -- picking a route option briefly slides this card partway down off-screen so more of
 // the map (and the red preview line above it) is visible, then slides back up on its own after
 // a few seconds: a good look at the route/how long it'll take without the card fully hiding it,
-// and without needing a manual dismiss.
-const PEEK_DOWN_MS = 7000;
+// and without needing a manual dismiss. Shortened from 7s to 5s, and tapping anywhere on the
+// card while peeked restores it immediately (see onCardClick below) -- previously the peek slid
+// the Start button itself out of reach with no way back except waiting out the full timer.
+const PEEK_DOWN_MS = 5000;
 
 export function RouteOptionsCard({
   routeOptions,
@@ -87,8 +89,20 @@ export function RouteOptionsCard({
     []
   );
 
+  // Tapping anywhere on the card while it's peeked restores it immediately, instead of making
+  // the driver wait out the full timer to reach the Start button again.
+  const onCardClick = () => {
+    if (!peeking) return;
+    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    setPeeking(false);
+  };
+
   return (
-    <div ref={cardRef} className={`route-options-card${peeking ? " route-options-card-peeking" : ""}`}>
+    <div
+      ref={cardRef}
+      className={`route-options-card${peeking ? " route-options-card-peeking" : ""}`}
+      onClick={onCardClick}
+    >
       <div className="route-options-header">
         <span>Choose a route</span>
         <button className="route-options-clear" onClick={onClear} aria-label="Remove route">

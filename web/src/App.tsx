@@ -378,6 +378,18 @@ export default function App() {
   // wherever feels comfortable. Reset via the recenter button.
   const [manualHeadingOffset, setManualHeadingOffset] = useState(0);
   const [manualTiltOverride, setManualTiltOverride] = useState<number | null>(null);
+  // True the moment the driver actually drags/swipes the map away during 3D Follow --
+  // previously the GPS-tick follow effect below called map.panTo(location) unconditionally
+  // every tick regardless, which yanked the map back to the live position within a second or
+  // two of any manual pan (looked ahead down the road, checked a spot off to the side, etc.),
+  // fighting the very gesture that just moved it. Pauses the auto pan/zoom/tilt/heading
+  // entirely (not just position) until Recenter is tapped, matching the mobile app's
+  // followTilt=false-on-manual-pan behavior -- the view the driver set stays exactly as they
+  // left it instead of snapping back on its own.
+  const [manualViewActive, setManualViewActive] = useState(false);
+  const onMapDragStart = useCallback(() => {
+    if (navigating && navViewMode === "follow") setManualViewActive(true);
+  }, [navigating, navViewMode]);
 
   // Lets the driver collapse the full turn-by-turn card down to a small direction pill --
   // the full card (ETA, action row, view toggle, end-nav button) covers a meaningful chunk
@@ -872,7 +884,7 @@ export default function App() {
       setRouteOrigin(location);
     }
 
-    if (navViewMode === "follow") {
+    if (navViewMode === "follow" && !manualViewActive) {
       // Real photorealistic 3D tiles (Map3DView) render as a separate overlay on top of this
       // classic map when active -- the classic map sits hidden underneath it the whole time.
       // It used to still get a full panTo/setZoom/setTilt every single GPS tick regardless,
@@ -908,7 +920,16 @@ export default function App() {
       // the new bearing every tick, on whichever view is actually on screen.
       targetHeadingRef.current = (currentHeading + manualHeadingOffset + 360) % 360;
     }
-  }, [location?.lat, location?.lng, navigating, navViewMode, manualHeadingOffset, manualTiltOverride, mapTypeId]);
+  }, [
+    location?.lat,
+    location?.lng,
+    navigating,
+    navViewMode,
+    manualHeadingOffset,
+    manualTiltOverride,
+    mapTypeId,
+    manualViewActive,
+  ]);
 
   // Spoken turn-by-turn guidance -- speaks the active step's instruction once when it actually
   // changes (a turn was completed / navigation just started), not on every GPS tick.
@@ -934,7 +955,7 @@ export default function App() {
   // same easing loop itself (see Map3DView.tsx), so running a second one here would just be
   // wasted rAF work on a hidden map, competing with the visible WebGL view for frame time.
   useEffect(() => {
-    if (!navigating || navViewMode !== "follow" || mapTypeId === "hybrid") return;
+    if (!navigating || navViewMode !== "follow" || mapTypeId === "hybrid" || manualViewActive) return;
     const map = mapRef.current;
     if (!map) return;
 
@@ -954,7 +975,7 @@ export default function App() {
     rafId = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(rafId);
-  }, [navigating, navViewMode, mapTypeId]);
+  }, [navigating, navViewMode, mapTypeId, manualViewActive]);
 
   // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
   // maxspeed tags (see osmTrafficData.ts) -- refetched only after moving ~50m so a live GPS
@@ -1372,6 +1393,7 @@ export default function App() {
     // tapped "3D Follow" every single time. "3D Follow" is still one tap away to back out of
     // via the existing view-toggle row if they'd rather not have it.
     setNavViewMode("follow");
+    setManualViewActive(false);
     setActiveStepIndex(0);
     setRouteOrigin(location);
     lastLocationRef.current = location;
@@ -1388,6 +1410,7 @@ export default function App() {
     setNavCardCollapsed(false);
     setTravelMode("driving");
     setModeRoute(null);
+    setManualViewActive(false);
     stopSpeaking();
   }, []);
 
@@ -1443,9 +1466,12 @@ export default function App() {
     if (!navigating) {
       mapRef.current?.setZoom(15);
     } else {
-      // Also doubles as "reset the 3D Follow view" -- clears any joystick adjustment.
+      // Also doubles as "reset the 3D Follow view" -- clears any joystick adjustment AND
+      // resumes the auto-follow camera if a manual drag had paused it (see manualViewActive).
       setManualHeadingOffset(0);
       setManualTiltOverride(null);
+      setManualViewActive(false);
+      lastAppliedTiltRef.current = null;
     }
   }, [location, navigating]);
 
@@ -1625,6 +1651,7 @@ export default function App() {
         tilt={(navigating && navViewMode === "follow") || street3DMode ? 67.5 : 0}
         mapContainerClassName="map-container"
         onZoomChanged={onZoomChanged}
+        onDragStart={onMapDragStart}
         onIdle={onMapIdle}
         options={mapOptions}
         onClick={onMapClick}

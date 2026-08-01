@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   Pressable,
   ActivityIndicator,
   Animated,
+  ScrollView,
+  useWindowDimensions,
   type LayoutChangeEvent,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -73,14 +75,20 @@ export function RouteOptionsCard({
   onHeightChange,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const isDriving = travelMode === "driving";
   const hasResult = isDriving ? !!options : !!modeRoute;
+  const showResults = !errorText && !loading && hasResult;
 
   // "Peek" -- picking a route profile (tap Normal/Fastest/Safest) briefly slides this card
   // partway down off-screen so more of the map (and the red preview line above it) is visible,
   // then slides back up on its own after a few seconds -- a good look at the route/how long
   // it'll take without the card fully hiding it, and without needing a manual dismiss.
-  const PEEK_DOWN_MS = 7000;
+  // Shortened from 7s to 5s, and the peek distance is now capped (was uncapped at 0.55x the
+  // card's own height, which could push the Start button well out of reach on a tall card with
+  // no way back except waiting out the full timer) so the header stays on-screen the whole
+  // time -- tapping it (see restorePeek below) snaps the card back up immediately.
+  const PEEK_DOWN_MS = 5000;
   const cardHeightRef = useRef(0);
   const peekTranslateY = useRef(new Animated.Value(0)).current;
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,11 +97,16 @@ export function RouteOptionsCard({
   // the peek.
   const mountedSelectedRef = useRef(selected);
 
+  const restorePeek = useCallback(() => {
+    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+    Animated.timing(peekTranslateY, { toValue: 0, duration: 220, useNativeDriver: true }).start();
+  }, [peekTranslateY]);
+
   useEffect(() => {
     if (mountedSelectedRef.current === selected) return;
     mountedSelectedRef.current = selected;
     if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    const peekDistance = Math.max(cardHeightRef.current * 0.55, 170);
+    const peekDistance = Math.min(Math.max(cardHeightRef.current * 0.4, 140), 220);
     Animated.timing(peekTranslateY, { toValue: peekDistance, duration: 260, useNativeDriver: true }).start();
     peekTimerRef.current = setTimeout(() => {
       Animated.timing(peekTranslateY, { toValue: 0, duration: 280, useNativeDriver: true }).start();
@@ -120,13 +133,21 @@ export function RouteOptionsCard({
       ]}
       onLayout={onLayout}
     >
-      <View style={styles.header}>
+      <Pressable style={styles.header} onPress={restorePeek} accessibilityLabel="Show route options">
         <Text style={styles.title}>Choose a route</Text>
         <Pressable onPress={onCancel} hitSlop={12} accessibilityLabel="Cancel route selection">
           <Ionicons name="close" size={22} color={colors.textMuted} />
         </Pressable>
-      </View>
+      </Pressable>
 
+      {/* Scrollable so a tall list (mode row + 3 routes + add-a-stop) can never run off the top
+          of a short screen with no way to reach it -- the Start button below stays outside this
+          ScrollView so it's always the last, always-reachable thing in the card. */}
+      <ScrollView
+        style={{ maxHeight: windowHeight * 0.5 }}
+        contentContainerStyle={styles.scrollArea}
+        showsVerticalScrollIndicator={false}
+      >
       {/* Real, independently-fetched Google Directions results per mode -- see
           MapScreen's fetchRouteOptions/getDirectionsForMode -- not driving-time estimates
           scaled by a guessed walking/cycling speed. */}
@@ -241,14 +262,17 @@ export function RouteOptionsCard({
               <Text style={styles.addStopText}>{hasStop ? "Change stop" : "Add a stop on the way"}</Text>
             </Pressable>
           )}
-
-          <Pressable
-            onPress={onStart}
-            style={({ pressed }) => [styles.startButton, pressed && { opacity: pressedOpacity }]}
-          >
-            <Text style={styles.startButtonText}>Start</Text>
-          </Pressable>
         </>
+      )}
+      </ScrollView>
+
+      {showResults && (
+        <Pressable
+          onPress={onStart}
+          style={({ pressed }) => [styles.startButton, pressed && { opacity: pressedOpacity }]}
+        >
+          <Text style={styles.startButtonText}>Start</Text>
+        </Pressable>
       )}
     </Animated.View>
   );
@@ -270,6 +294,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: spacing.xs,
+  },
+  scrollArea: {
+    gap: spacing.sm,
   },
   title: {
     fontSize: 17,

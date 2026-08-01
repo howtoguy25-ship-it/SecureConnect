@@ -5,6 +5,11 @@
   right: 16px;
   max-width: 480px;
   margin: 0 auto;
+  /* Real scroll instead of silently letting content (mode row + 3 routes + Start button) run
+     off the top of a short viewport with no way to reach it -- previously nothing capped this
+     card's height at all. */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
   background: var(--surface);
   border-radius: 16px;
   padding: 14px;
@@ -15,10 +20,12 @@
   transition: transform 280ms ease;
 }
 
-/* Briefly slides the card most of the way down to reveal more map/route after picking a
-   route option -- see RouteOptionsCard.tsx's PEEK_DOWN_MS. */
+/* Briefly slides the card partway down to reveal more map/route after picking a route option --
+   see RouteOptionsCard.tsx's PEEK_DOWN_MS. Capped at 40% (was 60%) so the header/mode row stay
+   on-screen and tappable the whole time -- tapping the card while peeked (see onCardClick)
+   restores it immediately instead of making the driver wait out the timer to reach Start again. */
 .route-options-card-peeking {
-  transform: translateY(60%);
+  transform: translateY(40%);
 }
 
 .route-options-header {
