@@ -2625,27 +2625,43 @@ export default function ConversationScreen() {
     const id = selectedMessage.id;
     setShowMessageOptions(false);
     setSelectedMessage(null);
+
+    // Optimistic: remove from the list the instant the user confirms, instead
+    // of waiting on the network round trip first. Only roll it back if the
+    // request actually fails — this is what makes delete feel instant rather
+    // than "frozen until you leave and re-enter the chat."
+    let removedMessage: Message | undefined;
+    let removedIndex = -1;
+    setMessages((prev) => {
+      removedIndex = prev.findIndex((m) => m.id === id);
+      removedMessage = prev[removedIndex];
+      return prev.filter((m) => m.id !== id);
+    });
+    haptics.success();
+
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
-      // Was a plain fetch() with no timeout — same bug class already fixed
-      // in the bulk/for-everyone delete paths, but missed here even though
-      // this is the single most-used delete path (hold-menu "Delete for
-      // me"). A hung request here had no way to ever resolve or surface an
-      // error, which is exactly what "freezes when deleting" looks like.
       const response = await fetchWithTimeout(new URL(`/api/messages/${id}`, baseUrl), {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
-      if (response.ok) {
-        setMessages((prev) => prev.filter((m) => m.id !== id));
-        haptics.success();
-      } else {
-        Alert.alert('Could Not Delete', 'Please check your connection and try again.');
+      if (!response.ok) {
+        throw new Error('delete failed');
       }
     } catch (error) {
       console.error('Error deleting message:', error);
+      if (removedMessage) {
+        const restored = removedMessage;
+        const insertAt = removedIndex;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === id)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(insertAt, next.length), 0, restored);
+          return next;
+        });
+      }
       Alert.alert('Could Not Delete', 'Please check your connection and try again.');
     }
   };
@@ -2756,18 +2772,18 @@ export default function ConversationScreen() {
 
   const handleUnsendMessage = async () => {
     if (!selectedMessage) return;
-    
+
     const messageTime = new Date(selectedMessage.createdAt).getTime();
     const now = Date.now();
     const fiveMinutes = 5 * 60 * 1000;
-    
+
     if (now - messageTime > fiveMinutes) {
       Alert.alert('Cannot Unsend', 'Messages can only be unsent within 5 minutes of sending.');
       setShowMessageOptions(false);
       setSelectedMessage(null);
       return;
     }
-    
+
     if (selectedMessage.senderId !== user?.id) {
       Alert.alert('Cannot Unsend', 'You can only unsend your own messages.');
       setShowMessageOptions(false);
@@ -2775,26 +2791,45 @@ export default function ConversationScreen() {
       return;
     }
 
+    const id = selectedMessage.id;
+    setShowMessageOptions(false);
+    setSelectedMessage(null);
+
+    // Optimistic: remove immediately, roll back only if the request fails.
+    let removedMessage: Message | undefined;
+    let removedIndex = -1;
+    setMessages((prev) => {
+      removedIndex = prev.findIndex((m) => m.id === id);
+      removedMessage = prev[removedIndex];
+      return prev.filter((m) => m.id !== id);
+    });
+    haptics.success();
+
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
-      const response = await fetchWithTimeout(new URL(`/api/messages/${selectedMessage.id}/unsend`, baseUrl), {
+      const response = await fetchWithTimeout(new URL(`/api/messages/${id}/unsend`, baseUrl), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
-      if (response.ok) {
-        setMessages((prev) => prev.filter((m) => m.id !== selectedMessage.id));
-        haptics.success();
-      } else {
-        Alert.alert('Could Not Unsend', 'Please check your connection and try again.');
+      if (!response.ok) {
+        throw new Error('unsend failed');
       }
     } catch (error) {
       console.error('Error unsending message:', error);
+      if (removedMessage) {
+        const restored = removedMessage;
+        const insertAt = removedIndex;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === id)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(insertAt, next.length), 0, restored);
+          return next;
+        });
+      }
       Alert.alert('Could Not Unsend', 'Please check your connection and try again.');
     }
-    setShowMessageOptions(false);
-    setSelectedMessage(null);
   };
 
   const handleShareMessage = async () => {
@@ -2883,8 +2918,15 @@ export default function ConversationScreen() {
   const handleDeleteForEveryone = async () => {
     if (!selectedMessage) return;
     const id = selectedMessage.id;
+    const original = selectedMessage;
     setShowDeleteSheet(false);
     setSelectedMessage(null);
+
+    // Optimistic: tombstone immediately, restore the original content only
+    // if the request actually fails.
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, deletedForEveryone: true, content: null, mediaUrl: null } : m));
+    haptics.success();
+
     try {
       const token = await getStoredToken();
       const res = await fetchWithTimeout(
@@ -2894,15 +2936,14 @@ export default function ConversationScreen() {
           headers: { 'Authorization': `Bearer ${token}` },
         }
       );
-      if (res.ok) {
-        setMessages(prev => prev.map(m => m.id === id ? { ...m, deletedForEveryone: true, content: null, mediaUrl: null } : m));
-        haptics.success();
-      } else {
+      if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
+        setMessages(prev => prev.map(m => m.id === id ? original : m));
         Alert.alert('Cannot delete', errBody?.error || 'You can only delete your own messages within 1 hour.');
       }
     } catch (e) {
       console.error('delete-for-everyone err', e);
+      setMessages(prev => prev.map(m => m.id === id ? original : m));
       Alert.alert('Could Not Delete', 'Please check your connection and try again.');
     }
   };
@@ -3071,6 +3112,23 @@ export default function ConversationScreen() {
   ) => {
     if (isDeletingSelected) return;
     setIsDeletingSelected(true);
+
+    // Optimistic: apply the delete to local state immediately, before the
+    // network requests even go out, so selecting "Delete" doesn't sit there
+    // looking frozen while requests are in flight. Snapshot the originals so
+    // any that actually fail can be restored afterward.
+    const idSet = new Set(idsToDelete);
+    const snapshot = new Map<string, { message: Message; index: number }>();
+    setMessages((prev) => {
+      prev.forEach((m, index) => {
+        if (idSet.has(m.id)) snapshot.set(m.id, { message: m, index });
+      });
+      return forEveryone
+        ? prev.map(m => idSet.has(m.id) ? { ...m, deletedForEveryone: true, content: null, mediaUrl: null } : m)
+        : prev.filter(m => !idSet.has(m.id));
+    });
+    handleExitSelectMode();
+
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
@@ -3089,15 +3147,32 @@ export default function ConversationScreen() {
         }
       }));
 
-      const deletedIds = new Set(results.filter(r => r.ok).map(r => r.id));
-      setMessages(prev => forEveryone
-        ? prev.map(m => deletedIds.has(m.id) ? { ...m, deletedForEveryone: true, content: null, mediaUrl: null } : m)
-        : prev.filter(m => !deletedIds.has(m.id)));
-      handleExitSelectMode();
+      const failedIds = results.filter(r => !r.ok).map(r => r.id);
 
-      if (deletedIds.size < idsToDelete.length) {
+      if (failedIds.length > 0) {
+        const failedSet = new Set(failedIds);
+        setMessages((prev) => {
+          if (forEveryone) {
+            return prev.map(m => {
+              if (!failedSet.has(m.id)) return m;
+              return snapshot.get(m.id)?.message ?? m;
+            });
+          }
+          const next = [...prev];
+          const toRestore = idsToDelete
+            .filter(id => failedSet.has(id))
+            .map(id => snapshot.get(id))
+            .filter((entry): entry is { message: Message; index: number } => !!entry)
+            .sort((a, b) => a.index - b.index);
+          toRestore.forEach(({ message, index }) => {
+            if (next.some(m => m.id === message.id)) return;
+            next.splice(Math.min(index, next.length), 0, message);
+          });
+          return next;
+        });
+
         haptics.warning();
-        const failedCount = idsToDelete.length - deletedIds.size;
+        const failedCount = failedIds.length;
         Alert.alert(
           'Some Messages Not Deleted',
           `${failedCount} message${failedCount > 1 ? 's' : ''} could not be deleted${forEveryone ? ' for everyone' : ''}. Please check your connection and try again.`,
