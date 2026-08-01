@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { detectVehiclesInPhoto, decodePhotoForDetection, warmUpModel } from "@/services/vehicleDetection";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
@@ -52,6 +53,10 @@ const DETECT_TIMEOUT_MS = 15000;
 // out immediately (real, temporary hiccups happen), but a real, ongoing problem should always
 // end up somewhere the user can see and act on, never an indefinitely stuck screen.
 const MAX_CONSECUTIVE_CAPTURE_FAILURES = 4;
+// Remembers that the driver already closed the "how detection works" explainer -- previously
+// this banner had no dismiss control at all on mobile (unlike the web app's equivalent, which
+// does), so it stayed pinned across the whole detection view every single time it was opened.
+const INFO_DISMISSED_KEY = "@trackline/aiDetectionInfoDismissed";
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -129,6 +134,21 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   // interval effect below doesn't tear down and rebuild every time a plate read resolves.
   const plateTextsRef = useRef(new Map<number, { text: string; region: PlateRegion }>());
   const consecutiveFailuresRef = useRef(0);
+
+  const [infoDismissed, setInfoDismissed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(INFO_DISMISSED_KEY).then((value) => {
+      if (!cancelled && value === "1") setInfoDismissed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const dismissInfo = useCallback(() => {
+    setInfoDismissed(true);
+    AsyncStorage.setItem(INFO_DISMISSED_KEY, "1").catch(() => {});
+  }, []);
 
   const [retryCount, setRetryCount] = useState(0);
   const retryLoad = useCallback(() => {
@@ -414,6 +434,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           );
         })}
 
+      {(status !== "running" || !infoDismissed) && (
       <View style={[styles.banner, { top: insets.top + spacing.md }]}>
         {status === "loading-model" && (
           <>
@@ -425,20 +446,25 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
             <Text style={styles.bannerText}>Loading detection model…</Text>
           </>
         )}
-        {status === "running" && (
-          <Text style={styles.bannerText}>
-            Detecting vehicles — amber box,
-            generic "Vehicle"/"Heavy Vehicle". Turns red with "lights active" only once an
-            actual strobing red/blue light is confirmed in view for a few seconds — real
-            detected evidence, not a guess at vehicle type (a marked/unmarked car with no
-            lights on shows no different to any other car, the same way a driver wouldn't
-            notice one either). Speed (top-right of box) is a rough estimate (assumes average
-            car width, no calibration) — not radar-accurate, and shows "PARKED" once a
-            vehicle has been still for a couple of seconds. A plate number (bottom of box,
-            cyan) only ever appears once real on-device text recognition actually reads one
-            from a face-on vehicle — it's never stored or sent anywhere, just shown live
-            while that vehicle stays in view.
-          </Text>
+        {status === "running" && !infoDismissed && (
+          <>
+            <Text style={styles.bannerText}>
+              Detecting vehicles — amber box,
+              generic "Vehicle"/"Heavy Vehicle". Turns red with "lights active" only once an
+              actual strobing red/blue light is confirmed in view for a few seconds — real
+              detected evidence, not a guess at vehicle type (a marked/unmarked car with no
+              lights on shows no different to any other car, the same way a driver wouldn't
+              notice one either). Speed (top-right of box) is a rough estimate (assumes average
+              car width, no calibration) — not radar-accurate, and shows "PARKED" once a
+              vehicle has been still for a couple of seconds. A plate number (bottom of box,
+              cyan) only ever appears once real on-device text recognition actually reads one
+              from a face-on vehicle — it's never stored or sent anywhere, just shown live
+              while that vehicle stays in view.
+            </Text>
+            <Pressable onPress={dismissInfo} hitSlop={12} accessibilityLabel="Dismiss">
+              <Ionicons name="close" size={20} color="#fff" />
+            </Pressable>
+          </>
         )}
         {status === "error" && (
           <>
@@ -453,6 +479,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           </>
         )}
       </View>
+      )}
 
       {/* Only control left at the bottom now that Switch Camera is gone (per explicit request
           -- it also removed the whole facing-switch-mid-capture crash risk category with it).
