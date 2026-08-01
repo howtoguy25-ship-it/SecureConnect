@@ -19,6 +19,13 @@ export interface TrackedBox {
   label: string;
   confidence?: number;
   speedKmh: number | null;
+  // "absolute" -- a real estimate of the OTHER vehicle's own road speed (ego GPS speed
+  // combined with the closing/receding rate below), the actual number this feature is meant
+  // to show. "closing" -- ego speed wasn't available (no GPS fix, or the phone itself is
+  // stationary), so this is only the closing/receding rate between the two vehicles, which is
+  // NOT the other vehicle's real speed unless the camera itself happens to be still. Callers
+  // must label these differently -- see VehicleDetectionScreen's speedLabel.
+  speedKind: "absolute" | "closing" | null;
   state: "moving" | "parked";
 }
 
@@ -81,6 +88,34 @@ const DISTANCE_SMOOTHING = 0.35;
 // impossible jump.
 const MAX_ACCEL_KMH_PER_SEC = 25;
 
+// Below this ego speed, GPS's own noise floor makes combining it with the closing-rate signal
+// less reliable than just showing the closing rate honestly on its own -- and at very low
+// speed (e.g. stopped at lights) the "vehicle ahead, same direction of travel" assumption this
+// combination relies on holds much less often (cross traffic, pedestrians, a car turning).
+const EGO_SPEED_MIN_MPS = 1.5; // ~5.4 km/h
+
+/** Real relative-velocity kinematics, not a guess: for a vehicle ahead of the camera traveling
+ *  the same direction (the actual, overwhelmingly common case for a forward-facing phone
+ *  mounted while driving -- this is not claimed to hold for a vehicle crossing at an angle or
+ *  genuinely oncoming, which this app has no way to distinguish from vision alone), the target
+ *  vehicle's own road speed = ego's GPS speed minus the closing rate between them (closing
+ *  rate positive while approaching). Falls back to reporting the closing rate itself,
+ *  correctly labeled as such rather than as the target's real speed, whenever ego GPS speed
+ *  isn't available or the phone itself is too close to stationary for the combination to be
+ *  trustworthy -- see EGO_SPEED_MIN_MPS. Never fabricates a number either way. */
+function combineWithEgoSpeed(
+  closingKmh: number | null,
+  state: "moving" | "parked",
+  egoSpeedMps: number | null | undefined
+): { speedKmh: number | null; speedKind: "absolute" | "closing" | null } {
+  if (state === "parked" || closingKmh === null) return { speedKmh: null, speedKind: null };
+  if (egoSpeedMps != null && egoSpeedMps > EGO_SPEED_MIN_MPS) {
+    const egoKmh = egoSpeedMps * 3.6;
+    return { speedKmh: egoKmh - closingKmh, speedKind: "absolute" };
+  }
+  return { speedKmh: closingKmh, speedKind: "closing" };
+}
+
 function boxCenter(bbox: [number, number, number, number]): [number, number] {
   return [bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2];
 }
@@ -115,7 +150,12 @@ export function createSpeedTracker() {
       confidence?: number;
     }[],
     imageWidthPx: number,
-    nowMs: number
+    nowMs: number,
+    // Real ego GPS speed (expo-location's coords.speed, m/s) -- optional, and only ever used
+    // to turn the closing-rate signal into the target vehicle's actual road speed. Omit or
+    // pass null/undefined and every box still gets a real (just differently-labeled) speed
+    // reading -- see combineWithEgoSpeed.
+    egoSpeedMps?: number | null
   ): TrackedBox[] {
     const unmatched = new Set(tracks.map((t) => t.id));
     const result: TrackedBox[] = [];
@@ -193,6 +233,12 @@ export function createSpeedTracker() {
         }
 
         const bbox = smoothBbox(best.bbox, det.bbox, BBOX_SMOOTHING);
+        // `speedKmh` above (fed back into the track for next frame's smoothing) always stays
+        // the closing/receding rate -- that's the real underlying signal being smoothed frame
+        // to frame. The OTHER vehicle's actual road speed (what a driver actually wants to
+        // know) is a separate, one-shot combination with the ego vehicle's own GPS speed,
+        // computed fresh here for `result` only -- see combineWithEgoSpeed's own comment.
+        const { speedKmh: outputSpeedKmh, speedKind } = combineWithEgoSpeed(speedKmh, state, egoSpeedMps);
         nextTracks.push({
           id: best.id,
           bbox,
@@ -210,7 +256,8 @@ export function createSpeedTracker() {
           score: det.score,
           label: det.label,
           confidence: det.confidence,
-          speedKmh,
+          speedKmh: outputSpeedKmh,
+          speedKind,
           state,
         });
       } else {
@@ -233,6 +280,7 @@ export function createSpeedTracker() {
           label: det.label,
           confidence: det.confidence,
           speedKmh: null,
+          speedKind: null,
           state: "moving",
         });
       }

@@ -1,11 +1,12 @@
 import type { DecodedPhoto } from "@/services/vehicleDetection";
 
 // Real, physically-grounded heuristic for spotting an *active* emergency light -- a bright,
-// rapidly toggling red or blue light -- inside a tracked vehicle's box, regardless of
-// whether the vehicle itself looks like a marked police car. Genuine lightbars/dash/grille
-// lights strobe on and off roughly 1-10 times a second at high color saturation; a static
-// tail light, blue car paint, or a red sign in the background stays constant instead of
-// toggling, so this only fires on the actual flashing. Ported from the web app's
+// rapidly toggling red or blue light -- around a tracked vehicle's own roofline (see
+// roofRegion below), regardless of whether the vehicle itself looks like a marked police car.
+// Genuine lightbars/dash/grille lights strobe on and off roughly 1-10 times a second at high
+// color saturation; a static tail light, blue car paint, or a red sign in the background stays
+// constant instead of toggling, so this only fires on the actual flashing. Ported from the web
+// app's
 // utils/lightbarDetector.ts -- same thresholds, same toggle-counting state machine, just
 // sampling pixels from each capture's already-decoded JPEG buffer (see
 // vehicleDetection.ts's DecodedPhoto) instead of a live <video>/canvas frame, since mobile
@@ -24,8 +25,20 @@ const ACTIVE_PIXEL_FRACTION = 0.012;
 
 const trackWindows = new Map<number, TrackWindow>();
 
-function isActiveLightCrop(photo: DecodedPhoto, bbox: [number, number, number, number]): boolean {
+// Narrows the full vehicle box down to roughly where a roof-mounted lightbar (or grille/dash
+// lights, which sit lower but still within the upper half of the vehicle silhouette) actually
+// is, instead of scanning the whole vehicle -- a saturated red/blue patch anywhere else in the
+// box (a tail light, a reflection off the bonnet, brake lights) shouldn't be able to
+// contribute to an emergency-lightbar read. Extends slightly above the detected box top too,
+// since a real lightbar frequently sits a little proud of the vehicle's own visual roofline.
+function roofRegion(bbox: [number, number, number, number]): [number, number, number, number] {
   const [x, y, w, h] = bbox;
+  const topExtension = h * 0.12;
+  return [x, y - topExtension, w, h * 0.45 + topExtension];
+}
+
+function isActiveLightCrop(photo: DecodedPhoto, vehicleBbox: [number, number, number, number]): boolean {
+  const [x, y, w, h] = roofRegion(vehicleBbox);
   if (w < 8 || h < 8) return false;
 
   const left = Math.max(0, Math.round(x));

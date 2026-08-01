@@ -10,6 +10,7 @@ import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDet
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 import { locatePlateRegion, type PlateRegion } from "@/utils/plateLocator";
 import { readPlateText } from "@/services/plateOcr";
+import { useLocation } from "@/context/LocationContext";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
 
@@ -33,6 +34,12 @@ const CAPTURE_INTERVAL_MS_NAVIGATING = 1100;
 // unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
 // forever on one that's obscured, too far, or at a bad angle.
 const MAX_PLATE_ATTEMPTS = 6;
+// On-device ML Kit text recognition (rn-mlkit-ocr) doesn't expose a per-read numeric
+// confidence score at all -- so instead of a fabricated confidence number, a plate only ever
+// gets shown once the SAME text has actually been read at least twice within its last few
+// attempts, a real, direct way to reject a one-off misread before it's ever displayed.
+const PLATE_CANDIDATE_WINDOW = 3;
+const PLATE_CONFIRM_COUNT = 2;
 // Real, confirmed failure mode this guards against: takePictureAsync's promise never settling
 // at all (neither resolving nor rejecting) -- a stalled native camera call would otherwise leave
 // capturingRef permanently true, silently freezing every future capture tick forever with zero
@@ -104,6 +111,13 @@ interface Props {
 export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
+  // Real ego GPS speed for turning a tracked vehicle's closing/receding rate into its own
+  // actual road speed -- see speedTracker.ts's combineWithEgoSpeed. Reuses the SAME
+  // app-wide location watcher LocationProvider already runs (App.tsx) rather than starting a
+  // second GPS subscription just for this screen, so there's nothing extra to tear down here.
+  const { location } = useLocation();
+  const egoSpeedRef = useRef<number | null>(null);
+  egoSpeedRef.current = location?.coords.speed ?? null;
   const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<TrackedBox[]>([]);
@@ -147,6 +161,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const speedTrackerRef = useRef(createSpeedTracker());
   const plateAttemptsRef = useRef(new Map<number, number>());
   const platesReadingRef = useRef(new Set<number>());
+  // Last few raw OCR reads per track id, oldest first (capped to PLATE_CANDIDATE_WINDOW) --
+  // see PLATE_CANDIDATE_WINDOW/PLATE_CONFIRM_COUNT's own comment for why this exists.
+  const plateCandidatesRef = useRef(new Map<number, string[]>());
   // Mirrors `plateTexts` state so captureAndDetect can check it without depending on the
   // state itself -- keeps captureAndDetect referentially stable (empty deps), so the capture
   // interval effect below doesn't tear down and rebuild every time a plate read resolves.
@@ -228,7 +245,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       if (unmountedRef.current) return;
       const detected = await withTimeout(detectVehiclesInPhoto(decoded), DETECT_TIMEOUT_MS, "detectVehiclesInPhoto");
       if (unmountedRef.current) return;
-      const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now());
+      const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now(), egoSpeedRef.current);
       setBoxes(tracked);
 
       const liveIds = speedTrackerRef.current.liveTrackIds();
@@ -252,6 +269,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       // in-progress read on that miss).
       for (const id of plateAttemptsRef.current.keys()) {
         if (!liveIds.has(id)) plateAttemptsRef.current.delete(id);
+      }
+      for (const id of plateCandidatesRef.current.keys()) {
+        if (!liveIds.has(id)) plateCandidatesRef.current.delete(id);
       }
       let pruned = false;
       for (const id of plateTextsRef.current.keys()) {
@@ -280,7 +300,26 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           readPlateText(photo.uri, region)
             .then((text) => {
               if (!text || unmountedRef.current) return;
-              plateTextsRef.current.set(trackId, { text, region });
+              // Confirm before ever showing anything -- see PLATE_CANDIDATE_WINDOW's own
+              // comment. A single successful read (even one that matched the plate-shaped
+              // regex) isn't shown until the same text has come up at least
+              // PLATE_CONFIRM_COUNT times within its last PLATE_CANDIDATE_WINDOW attempts, so
+              // one misread on an otherwise-correctly-read plate can't flicker a wrong string
+              // onto the screen even briefly.
+              const history = plateCandidatesRef.current.get(trackId) ?? [];
+              history.push(text);
+              if (history.length > PLATE_CANDIDATE_WINDOW) history.shift();
+              plateCandidatesRef.current.set(trackId, history);
+
+              const counts = new Map<string, number>();
+              for (const candidate of history) counts.set(candidate, (counts.get(candidate) ?? 0) + 1);
+              let confirmedText: string | null = null;
+              for (const [candidate, count] of counts) {
+                if (count >= PLATE_CONFIRM_COUNT) confirmedText = candidate;
+              }
+              if (!confirmedText) return;
+
+              plateTextsRef.current.set(trackId, { text: confirmedText, region });
               setPlateTexts(new Map(plateTextsRef.current));
             })
             .catch((err) => {
@@ -381,6 +420,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const offsetX = photoSize && containerSize ? (containerSize.width - photoSize.width * scale) / 2 : 0;
   const offsetY = photoSize && containerSize ? (containerSize.height - photoSize.height * scale) / 2 : 0;
 
+  // Tapping a locked box opens this detail panel -- every field below is read straight off
+  // that vehicle's own live tracked state (the same `boxes`/`plateTexts`/`emergencyTrackIds`
+  // the boxes themselves render from), never re-queried or recomputed separately, so it can
+  // never show something different from what's actually on screen.
+  const selectedBox = selectedTrackId !== null ? boxes.find((b) => b.id === selectedTrackId) : undefined;
+  const selectedPlate = selectedTrackId !== null ? plateTexts.get(selectedTrackId) : undefined;
+  const selectedIsEmergency = selectedTrackId !== null && emergencyTrackIds.has(selectedTrackId);
+
   return (
     <View style={styles.container} onLayout={onContainerLayout}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
@@ -392,14 +439,23 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           const isEmergency = emergencyTrackIds.has(box.id);
           const isSelected = selectedTrackId === box.id;
           const plateInfo = plateTexts.get(box.id);
+          // "absolute" -- ego GPS speed was available, so this is a real estimate of the
+          // OTHER vehicle's own road speed (see speedTracker.ts's combineWithEgoSpeed),
+          // exactly what this label is meant to answer. "closing" -- no ego speed to combine
+          // with, so this is only the closing/receding rate between the two vehicles, labeled
+          // with an explicit arrow (never presented as the vehicle's real speed) so it isn't
+          // mistaken for the same thing. Never a fabricated number either way -- null shows
+          // nothing at all.
           const speedLabel =
             box.state === "parked"
               ? "PARKED"
               : box.speedKmh === null
                 ? null
-                : Math.abs(box.speedKmh) < 3
-                  ? "steady"
-                  : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
+                : box.speedKind === "absolute"
+                  ? `${Math.max(0, Math.round(box.speedKmh))} km/h`
+                  : Math.abs(box.speedKmh) < 3
+                    ? "steady"
+                    : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
           const boxWidthPx = w * scale;
           const boxHeightPx = h * scale;
           const lockColor = isEmergency ? "#DC2626" : isSelected ? "#22D3EE" : "#F59E0B";
@@ -423,15 +479,18 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                 <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
                   {isEmergency ? `${box.label} — lights active` : `${box.label} ${Math.round(box.score * 100)}%`}
                 </Text>
-                {/* Anchored top-right, just outside the box edge, separate from the type/
-                    confidence label at top-left -- so it never overlaps the vehicle or the
-                    other label, and updates live every frame the tracker emits a speed. */}
+                {/* Top-center, just outside the box edge -- separate from the type/
+                    confidence label at top-left so it never overlaps, and updates live every
+                    frame the tracker emits a speed (at the screen's own capture cadence, see
+                    CAPTURE_INTERVAL_MS/_NAVIGATING above). */}
                 {speedLabel && (
-                  <Text
-                    style={[styles.speedLabel, box.state === "parked" && styles.speedLabelParked]}
-                  >
-                    {speedLabel}
-                  </Text>
+                  <View style={styles.speedLabelWrap} pointerEvents="none">
+                    <Text
+                      style={[styles.speedLabel, box.state === "parked" && styles.speedLabelParked]}
+                    >
+                      {speedLabel}
+                    </Text>
+                  </View>
                 )}
                 {/* Tap a box to lock visual focus on it when several vehicles are in frame --
                     a this-screen, this-session UI aid only (like tapping to focus a camera).
@@ -495,17 +554,19 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         {status === "running" && !infoDismissed && (
           <>
             <Text style={styles.bannerText}>
-              Detecting vehicles — amber box,
+              Detecting vehicles — amber target-lock box,
               generic "Vehicle"/"Heavy Vehicle". Turns red with "lights active" only once an
-              actual strobing red/blue light is confirmed in view for a few seconds — real
-              detected evidence, not a guess at vehicle type (a marked/unmarked car with no
-              lights on shows no different to any other car, the same way a driver wouldn't
-              notice one either). Speed (top-right of box) is a rough estimate (assumes average
-              car width, no calibration) — not radar-accurate, and shows "PARKED" once a
-              vehicle has been still for a couple of seconds. A plate number (bottom of box,
-              cyan) only ever appears once real on-device text recognition actually reads one
-              from a face-on vehicle — it's never stored or sent anywhere, just shown live
-              while that vehicle stays in view.
+              actual strobing red/blue light is confirmed near the vehicle's own roofline for a
+              few seconds — real detected evidence, not a guess at vehicle type (a
+              marked/unmarked car with no lights on shows no different to any other car, the
+              same way a driver wouldn't notice one either). Speed (top-center of box) shows a
+              real km/h estimate of that vehicle's own road speed once your own GPS speed is
+              available to combine with it (assumes it's ahead of you, same direction); with no
+              GPS fix it falls back to an arrow + closing/receding rate instead, and shows
+              "PARKED" once a vehicle has been still for a couple of seconds. A plate number
+              only appears once the same on-device text read comes back at least twice in a
+              row — it's never stored or sent anywhere, just shown live while that vehicle
+              stays in view. Tap any box for its full details.
             </Text>
             <Pressable onPress={dismissInfo} hitSlop={12} accessibilityLabel="Dismiss">
               <Ionicons name="close" size={20} color="#fff" />
@@ -525,6 +586,43 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           </>
         )}
       </View>
+      )}
+
+      {/* Detail panel for whichever box is tapped (see onSelectBox) -- speed/plate/type/
+          emergency status, all read live off the same tracked state the boxes themselves use.
+          Tapping the same box again (or its own close) clears the selection, same as tapping
+          it once already does for the on-box highlight. */}
+      {selectedBox && (
+        <View style={[styles.detailPanel, { bottom: insets.bottom + spacing.xl + 64 }]}>
+          <View style={styles.detailPanelHeader}>
+            <Text style={styles.detailPanelTitle}>{selectedBox.label}</Text>
+            <Pressable onPress={() => setSelectedTrackId(null)} hitSlop={10} accessibilityLabel="Close vehicle details">
+              <Ionicons name="close" size={18} color="#9CA3AF" />
+            </Pressable>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Speed</Text>
+            <Text style={styles.detailValue}>
+              {selectedBox.state === "parked"
+                ? "Parked"
+                : selectedBox.speedKmh === null
+                  ? "—"
+                  : selectedBox.speedKind === "absolute"
+                    ? `${Math.max(0, Math.round(selectedBox.speedKmh))} km/h`
+                    : `${Math.round(Math.abs(selectedBox.speedKmh))} km/h closing`}
+            </Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Plate</Text>
+            <Text style={styles.detailValue}>{selectedPlate?.text ?? "Not read yet"}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Emergency lights</Text>
+            <Text style={[styles.detailValue, selectedIsEmergency && styles.detailValueAlert]}>
+              {selectedIsEmergency ? "Active" : "None detected"}
+            </Text>
+          </View>
+        </View>
       )}
 
       {/* Only control left at the bottom now that Switch Camera is gone (per explicit request
@@ -623,10 +721,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#DC2626",
     color: "#fff",
   },
-  speedLabel: {
+  speedLabelWrap: {
     position: "absolute",
     top: -22,
+    left: 0,
     right: 0,
+    alignItems: "center",
+  },
+  speedLabel: {
     backgroundColor: "#111827",
     color: "#fff",
     fontSize: 12,
@@ -692,6 +794,47 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 12,
+  },
+  detailPanel: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    backgroundColor: "rgba(17, 24, 39, 0.94)",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    ...shadow.high,
+  },
+  detailPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs,
+    paddingBottom: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.2)",
+  },
+  detailPanelTitle: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 4,
+  },
+  detailLabel: {
+    color: "#9CA3AF",
+    fontSize: 13,
+  },
+  detailValue: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  detailValueAlert: {
+    color: "#F87171",
   },
   closeButton: {
     position: "absolute",
