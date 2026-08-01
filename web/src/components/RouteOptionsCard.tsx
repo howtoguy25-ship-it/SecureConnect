@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import {
   ROUTE_ORDER,
   ROUTE_PROFILES,
@@ -28,14 +28,6 @@ interface Props {
   onHeightChange?: (height: number) => void;
 }
 
-// "Peek" -- picking a route option briefly slides this card partway down off-screen so more of
-// the map (and the red preview line above it) is visible, then slides back up on its own after
-// a few seconds: a good look at the route/how long it'll take without the card fully hiding it,
-// and without needing a manual dismiss. Shortened from 7s to 5s, and tapping anywhere on the
-// card while peeked restores it immediately (see onCardClick below) -- previously the peek slid
-// the Start button itself out of reach with no way back except waiting out the full timer.
-const PEEK_DOWN_MS = 5000;
-
 export function RouteOptionsCard({
   routeOptions,
   selectedRouteKey,
@@ -54,12 +46,6 @@ export function RouteOptionsCard({
     : modeRoute?.routes[0]?.legs[0];
 
   const cardRef = useRef<HTMLDivElement | null>(null);
-  const [peeking, setPeeking] = useState(false);
-  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Skips the very first render's "selection" (the default profile the card mounts with,
-  // never an actual tap) -- only a real change in selectedRouteKey (an actual pick) triggers
-  // the peek.
-  const mountedSelectedRef = useRef(selectedRouteKey);
 
   useEffect(() => {
     const el = cardRef.current;
@@ -74,35 +60,14 @@ export function RouteOptionsCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (mountedSelectedRef.current === selectedRouteKey) return;
-    mountedSelectedRef.current = selectedRouteKey;
-    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    setPeeking(true);
-    peekTimerRef.current = setTimeout(() => setPeeking(false), PEEK_DOWN_MS);
-  }, [selectedRouteKey]);
-
-  useEffect(
-    () => () => {
-      if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    },
-    []
-  );
-
-  // Tapping anywhere on the card while it's peeked restores it immediately, instead of making
-  // the driver wait out the full timer to reach the Start button again.
-  const onCardClick = () => {
-    if (!peeking) return;
-    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    setPeeking(false);
-  };
-
+  // Previously, picking a route option also slid this whole card partway down ("peek", to show
+  // more of the map) and back up a few seconds later. Removed entirely -- that slide-back-up
+  // firing while someone was mid-scroll toward the Start button (exactly when picking a route
+  // makes you want to scroll to it) visually fought the scroll and could read as "I scroll down
+  // and it flings back up." The card's own overflow-y: auto (see RouteOptionsCard.css) is what
+  // actually needs to guarantee Start stays reachable.
   return (
-    <div
-      ref={cardRef}
-      className={`route-options-card${peeking ? " route-options-card-peeking" : ""}`}
-      onClick={onCardClick}
-    >
+    <div ref={cardRef} className="route-options-card">
       <div className="route-options-header">
         <span>Choose a route</span>
         <button className="route-options-clear" onClick={onClear} aria-label="Remove route">

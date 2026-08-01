@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  Animated,
   ScrollView,
   useWindowDimensions,
   type LayoutChangeEvent,
@@ -79,65 +78,26 @@ export function RouteOptionsCard({
   const isDriving = travelMode === "driving";
   const hasResult = isDriving ? !!options : !!modeRoute;
 
-  // "Peek" -- picking a route profile (tap Normal/Fastest/Safest) briefly slides this card
-  // partway down off-screen so more of the map (and the red preview line above it) is visible,
-  // then slides back up on its own after a few seconds -- a good look at the route/how long
-  // it'll take without the card fully hiding it, and without needing a manual dismiss.
-  // Shortened from 7s to 5s, and the peek distance is now capped (was uncapped at 0.55x the
-  // card's own height, which could push the Start button well out of reach on a tall card with
-  // no way back except waiting out the full timer) so the header stays on-screen the whole
-  // time -- tapping it (see restorePeek below) snaps the card back up immediately.
-  const PEEK_DOWN_MS = 5000;
-  const cardHeightRef = useRef(0);
-  const peekTranslateY = useRef(new Animated.Value(0)).current;
-  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Skips the very first render's "selection" (the default profile the card mounts with,
-  // never an actual tap) -- only a real change in `selected` (an actual pick) should trigger
-  // the peek.
-  const mountedSelectedRef = useRef(selected);
-
-  const restorePeek = useCallback(() => {
-    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    Animated.timing(peekTranslateY, { toValue: 0, duration: 220, useNativeDriver: true }).start();
-  }, [peekTranslateY]);
-
-  useEffect(() => {
-    if (mountedSelectedRef.current === selected) return;
-    mountedSelectedRef.current = selected;
-    if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    const peekDistance = Math.min(Math.max(cardHeightRef.current * 0.3, 100), 160);
-    Animated.timing(peekTranslateY, { toValue: peekDistance, duration: 260, useNativeDriver: true }).start();
-    peekTimerRef.current = setTimeout(() => {
-      Animated.timing(peekTranslateY, { toValue: 0, duration: 280, useNativeDriver: true }).start();
-    }, PEEK_DOWN_MS);
-  }, [selected, peekTranslateY]);
-
-  useEffect(
-    () => () => {
-      if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
-    },
-    []
-  );
-
+  // Previously, picking a route profile also slid this whole card partway down ("peek", to
+  // show more of the map) and back up a few seconds later. Removed entirely -- that slide-back-
+  // up animation firing while a driver was mid-scroll toward the Start button (easy to do,
+  // since selecting a route is exactly what makes someone want to scroll down to it) visually
+  // fought the scroll gesture and could read as "I scroll down and it flings back up." The
+  // ScrollView below is what actually needs to guarantee Start stays reachable; the peek was a
+  // nice-to-have that kept causing real reachability bugs across several rounds of fixes, so
+  // it's gone rather than tuned again.
   const onLayout = (e: LayoutChangeEvent) => {
-    cardHeightRef.current = e.nativeEvent.layout.height;
     onHeightChange?.(e.nativeEvent.layout.height);
   };
 
   return (
-    <Animated.View
-      style={[
-        styles.card,
-        { bottom: insets.bottom + spacing.xl, transform: [{ translateY: peekTranslateY }] },
-      ]}
-      onLayout={onLayout}
-    >
-      <Pressable style={styles.header} onPress={restorePeek} accessibilityLabel="Show route options">
+    <View style={[styles.card, { bottom: insets.bottom + spacing.xl }]} onLayout={onLayout}>
+      <View style={styles.header}>
         <Text style={styles.title}>Choose a route</Text>
         <Pressable onPress={onCancel} hitSlop={12} accessibilityLabel="Cancel route selection">
           <Ionicons name="close" size={22} color={colors.textMuted} />
         </Pressable>
-      </Pressable>
+      </View>
 
       {/* Scrollable, and Start now lives INSIDE this ScrollView as its last item (not a fixed
           element after it) -- previously a route pick's "peek" (below) could still translate
@@ -273,7 +233,7 @@ export function RouteOptionsCard({
         </>
       )}
       </ScrollView>
-    </Animated.View>
+    </View>
   );
 }
 

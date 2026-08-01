@@ -259,6 +259,7 @@ export default function App() {
     setMapTheme,
     setShowTrafficLights,
     setShowSpeedCameras,
+    setOsmLayerRadiusKm,
     setShowLiveCameras,
     setVoiceEnabled,
     setVoiceVolume,
@@ -414,6 +415,31 @@ export default function App() {
   const [osmSpeedCameras, setOsmSpeedCameras] = useState<OsmPoint[]>([]);
   const osmFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOsmBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
+
+  // The fetch above (onMapIdle) pulls in whatever the current *viewport* covers, which can be
+  // far from the driver's own position after panning around to look at somewhere else. This
+  // trims what's actually rendered down to the configured radius from the driver's own live
+  // location (settings.osmLayerRadiusKm, 1-200km, same slider pattern as alertRadiusKm), so
+  // "how far this layer shows from me" means what it says regardless of where the map itself is
+  // currently panned to look.
+  const visibleOsmTrafficLights = useMemo(
+    () =>
+      location
+        ? osmTrafficLights.filter(
+            (p) => distanceKm(location.lat, location.lng, p.lat, p.lng) <= settings.osmLayerRadiusKm
+          )
+        : osmTrafficLights,
+    [osmTrafficLights, location?.lat, location?.lng, settings.osmLayerRadiusKm]
+  );
+  const visibleOsmSpeedCameras = useMemo(
+    () =>
+      location
+        ? osmSpeedCameras.filter(
+            (p) => distanceKm(location.lat, location.lng, p.lat, p.lng) <= settings.osmLayerRadiusKm
+          )
+        : osmSpeedCameras,
+    [osmSpeedCameras, location?.lat, location?.lng, settings.osmLayerRadiusKm]
+  );
 
   // Real NSW government live traffic cameras (see services/liveTrafficCameras.ts) -- a small,
   // near-static dataset (~200 cameras), fetched once and cached, not re-queried per pan like
@@ -1719,7 +1745,7 @@ export default function App() {
             icons. Neither type is ever clustered -- always the real individual icon itself, at
             every zoom level, per direct request. */}
         {settings.showTrafficLights &&
-          osmTrafficLights.map((point) => (
+          visibleOsmTrafficLights.map((point) => (
             <Marker
               key={`tl-${point.id}`}
               position={{ lat: point.lat, lng: point.lng }}
@@ -1735,7 +1761,7 @@ export default function App() {
           ))}
 
         {settings.showSpeedCameras &&
-          osmSpeedCameras.map((point) => (
+          visibleOsmSpeedCameras.map((point) => (
             <Marker
               key={`sc-${point.id}`}
               position={{ lat: point.lat, lng: point.lng }}
@@ -1948,6 +1974,17 @@ export default function App() {
                 />
                 <img src={speedCameraIcon(1).url as string} alt="" className="radius-checkbox-icon" />
                 Show speed cameras
+              </label>
+              <label>
+                Traffic light &amp; speed camera radius: {settings.osmLayerRadiusKm} km
+                <input
+                  type="range"
+                  min={1}
+                  max={200}
+                  disabled={!settings.showTrafficLights && !settings.showSpeedCameras}
+                  value={settings.osmLayerRadiusKm}
+                  onChange={(e) => setOsmLayerRadiusKm(Number(e.target.value))}
+                />
               </label>
             </>
           )}

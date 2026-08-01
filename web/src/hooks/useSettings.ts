@@ -28,6 +28,9 @@ export interface WebSettings {
   // layer only renders its own markers when its own switch is on. Both on by default.
   showTrafficLights: boolean;
   showSpeedCameras: boolean;
+  // How far from the driver's own location that layer is fetched/shown, independent of
+  // alertRadiusKm above (community alerts) -- same 1-200km range.
+  osmLayerRadiusKm: number;
   // Real NSW government live traffic camera markers (see services/liveTrafficCameras.ts) --
   // a heavier, opt-in layer, off by default, separate from the lightweight OSM signal/camera
   // points above.
@@ -46,6 +49,7 @@ const DEFAULT_SETTINGS: WebSettings = {
   mapTheme: "normal",
   showTrafficLights: true,
   showSpeedCameras: true,
+  osmLayerRadiusKm: 5,
   showLiveCameras: false,
   voiceEnabled: true,
   voiceVolume: 1,
@@ -79,6 +83,7 @@ export function useSettings() {
       setSettings((s) => ({ ...s, showTrafficLights })),
     setShowSpeedCameras: (showSpeedCameras: boolean) =>
       setSettings((s) => ({ ...s, showSpeedCameras })),
+    setOsmLayerRadiusKm: (osmLayerRadiusKm: number) => setSettings((s) => ({ ...s, osmLayerRadiusKm })),
     setShowLiveCameras: (showLiveCameras: boolean) =>
       setSettings((s) => ({ ...s, showLiveCameras })),
     setVoiceEnabled: (voiceEnabled: boolean) => setSettings((s) => ({ ...s, voiceEnabled })),

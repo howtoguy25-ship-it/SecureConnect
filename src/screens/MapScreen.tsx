@@ -631,14 +631,23 @@ export function MapScreen() {
     [currentLatLng, routeCardHeight]
   );
 
+  // Rough degrees-of-latitude span for a given real km distance (111km per degree of
+  // latitude) -- good enough for sizing an Overpass bounding box, not meant for precise
+  // long-distance navigation math the way distanceKm's real haversine calculation is.
+  const kmToLatDelta = (km: number) => (km * 2) / 111;
+
   // Min zoom before the OSM layer *re-fetches* -- a zoomed-out view spans too wide an area for
-  // a reasonable Overpass request/response size. ~0.03 latitudeDelta is roughly a few-km-wide
-  // view, comparable to web's OSM_LAYER_MIN_ZOOM. Zooming out past this only skips asking for
-  // *new* data -- it must NOT clear osmData, or a toggled-on layer visibly disappears the
-  // moment you zoom out, which is exactly the bug reported ("zooming out the traffic lights or
-  // speed cameras... disappears"). Whatever was already fetched for the last in-range view
-  // stays on screen; it only gets replaced once the user zooms back in and pans to a new area.
-  const OSM_LAYER_MAX_DELTA = 0.03;
+  // a reasonable Overpass request/response size. Scales with the driver's own configured
+  // radius (settings.osmLayerRadiusKm, 1-200km, see Settings' "Traffic light & speed camera
+  // radius" slider) instead of a flat hardcoded value -- a wide radius setting (driving across
+  // a region, wanting cameras spotted well ahead) previously got silently capped at whatever
+  // the old constant allowed regardless of what was actually configured. Zooming out past this
+  // only skips asking for *new* data -- it must NOT clear osmData, or a toggled-on layer
+  // visibly disappears the moment you zoom out, which is exactly the bug reported ("zooming out
+  // the traffic lights or speed cameras... disappears"). Whatever was already fetched for the
+  // last in-range view stays on screen; it only gets replaced once the user zooms back in and
+  // pans to a new area.
+  const OSM_LAYER_MAX_DELTA = Math.max(0.03, kmToLatDelta(settings.osmLayerRadiusKm));
 
   // Loads traffic-light/speed-camera markers around the user's own position the moment a GPS
   // fix exists and either layer is toggled on -- independent of the map ever panning or
@@ -649,6 +658,15 @@ export function MapScreen() {
   // both layers invisible until the user manually zoomed in, even with the setting already on.
   // Reset to false whenever both layers are off, so turning either back on fires this again.
   const osmInitialLoadRef = useRef(false);
+  // Also re-fires the initial load below whenever the radius setting itself changes (not just
+  // the on/off toggles) -- without this, dragging the radius slider after the layer had already
+  // loaded once silently did nothing until the driver also flipped a toggle off and back on.
+  const lastOsmRadiusRef = useRef(settings.osmLayerRadiusKm);
+  useEffect(() => {
+    if (lastOsmRadiusRef.current === settings.osmLayerRadiusKm) return;
+    lastOsmRadiusRef.current = settings.osmLayerRadiusKm;
+    osmInitialLoadRef.current = false;
+  }, [settings.osmLayerRadiusKm]);
   useEffect(() => {
     if (!settings.showTrafficLights && !settings.showSpeedCameras) {
       osmInitialLoadRef.current = false;
@@ -656,7 +674,7 @@ export function MapScreen() {
     }
     if (osmInitialLoadRef.current || !currentLatLng) return;
     osmInitialLoadRef.current = true;
-    const delta = 0.015;
+    const delta = kmToLatDelta(settings.osmLayerRadiusKm);
     const bounds = {
       sw: {
         latitude: currentLatLng.latitude - delta / 2,
@@ -675,7 +693,7 @@ export function MapScreen() {
       .then(setOsmData)
       .catch((err) => console.warn("[map] initial OSM traffic layer fetch failed", err))
       .finally(() => setOsmLoading(false));
-  }, [currentLatLng, settings.showTrafficLights, settings.showSpeedCameras]);
+  }, [currentLatLng, settings.showTrafficLights, settings.showSpeedCameras, settings.osmLayerRadiusKm]);
 
   const onRegionChangeComplete = useCallback(
     (region: Region, details?: { isGesture?: boolean }) => {
@@ -728,7 +746,7 @@ export function MapScreen() {
           .finally(() => setOsmLoading(false));
       }, 1200);
     },
-    [placingAlert, settings.showTrafficLights, settings.showSpeedCameras, followTilt]
+    [placingAlert, settings.showTrafficLights, settings.showSpeedCameras, settings.osmLayerRadiusKm, followTilt]
   );
 
   const onMapPress = useCallback(

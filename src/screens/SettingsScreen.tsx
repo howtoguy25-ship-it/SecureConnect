@@ -87,6 +87,11 @@ export function SettingsScreen() {
     [updateSettings]
   );
 
+  const onOsmRadiusChange = useCallback(
+    (value: number) => updateSettings({ osmLayerRadiusKm: Math.round(value) }),
+    [updateSettings]
+  );
+
   const onSensitivityChange = useCallback(
     (value: number) => {
       updateSettings({ sirenSensitivity: Math.round(value * 20) / 20 });
@@ -237,9 +242,21 @@ export function SettingsScreen() {
             trackColor={{ true: colors.accent, false: colors.border }}
           />
         </Row>
+        <Row label={`Traffic light & speed camera radius — ${settings.osmLayerRadiusKm} km`}>
+          <Slider
+            minimumValue={1}
+            maximumValue={200}
+            step={1}
+            value={settings.osmLayerRadiusKm}
+            onSlidingComplete={onOsmRadiusChange}
+            disabled={!settings.showTrafficLights && !settings.showSpeedCameras}
+            minimumTrackTintColor={colors.accent}
+          />
+        </Row>
         <Text style={styles.helperText}>
           Every known traffic light and fixed speed camera location, mapped by OpenStreetMap's
-          community — shown independently on the map, whether or not "Live alerts" is on.
+          community — shown independently on the map, whether or not "Live alerts" is on, out to
+          however far from your own location the radius above is set (1-200 km).
         </Text>
       </Section>
 

@@ -32,6 +32,9 @@ export interface AppSettings {
   // reports above, which are temporary/mobile and user-submitted.
   showTrafficLights: boolean;
   showSpeedCameras: boolean;
+  // How far from the driver's own location that layer is fetched/shown, independent of
+  // alertRadiusKm above (community alerts) -- same 1-200km range and slider pattern.
+  osmLayerRadiusKm: number; // 1-200km
   // Which map color theme customMapStyle renders -- see utils/mapStyle.ts.
   mapTheme: MapThemeKey;
 }
@@ -45,6 +48,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultVoiceEnabled: true,
   showTrafficLights: true,
   showSpeedCameras: true,
+  osmLayerRadiusKm: 5,
   mapTheme: "normal",
 };
 
