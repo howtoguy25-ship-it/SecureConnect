@@ -214,6 +214,11 @@ export default function ConversationScreen() {
   const [showCallOptions, setShowCallOptions] = useState(false);
   const [isBlockedByMe, setIsBlockedByMe] = useState(false);
   const [isBlockedByThem, setIsBlockedByThem] = useState(false);
+  // Message-request flow: non-null only when I'm the recipient of a still-
+  // pending request for this conversation (see GET /api/conversations/:id).
+  // I can already read everything below — this only gates the input bar.
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [isRequestActionPending, setIsRequestActionPending] = useState(false);
   const [otherUserPhone, setOtherUserPhone] = useState<string | undefined>(undefined);
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -452,6 +457,36 @@ export default function ConversationScreen() {
     },
     onError: (err: any) => {
       Alert.alert("Could Not Unblock", err?.message || "Something went wrong while unblocking this user. Please try again.");
+    },
+  });
+
+  const acceptRequestMutation = useMutation({
+    mutationFn: async () => {
+      if (!pendingRequestId) throw new Error("No pending request");
+      return apiRequest("POST", `/api/message-requests/${pendingRequestId}/accept`, {});
+    },
+    onSuccess: () => {
+      setPendingRequestId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+    },
+    onError: (err: any) => {
+      Alert.alert("Could Not Accept", err?.message || "Something went wrong. Please try again.");
+    },
+    onSettled: () => setIsRequestActionPending(false),
+  });
+
+  const declineRequestMutation = useMutation({
+    mutationFn: async () => {
+      if (!pendingRequestId) throw new Error("No pending request");
+      return apiRequest("POST", `/api/message-requests/${pendingRequestId}/decline`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      navigation.goBack();
+    },
+    onError: (err: any) => {
+      setIsRequestActionPending(false);
+      Alert.alert("Could Not Decline", err?.message || "Something went wrong. Please try again.");
     },
   });
 
@@ -754,6 +789,7 @@ export default function ConversationScreen() {
           setPinnedMessageId(meta?.pinnedMessageId ?? null);
           setConversationTimer(Number(meta?.disappearingTimer) || 0);
           setConversationNumberType(typeof meta?.numberType === 'string' ? meta.numberType : null);
+          setPendingRequestId(typeof meta?.pendingRequestId === 'string' ? meta.pendingRequestId : null);
         }
       } catch {}
     } catch (error) {
@@ -3882,13 +3918,49 @@ export default function ConversationScreen() {
               : "You can't reply to this conversation"}
           </ThemedText>
           {isBlockedByMe ? (
-            <Pressable 
+            <Pressable
               style={[styles.unblockButton, { backgroundColor: theme.primary }]}
               onPress={handleBlockUser}
             >
               <ThemedText type="small" style={{ color: "#fff" }}>Unblock</ThemedText>
             </Pressable>
           ) : null}
+        </View>
+      ) : pendingRequestId ? (
+        <View style={[styles.blockedBanner, { backgroundColor: theme.backgroundRoot, paddingBottom: isKeyboardVisible ? 0 : insets.bottom + Spacing.md, flexDirection: 'column', alignItems: 'stretch' }]}>
+          <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: 'center', marginBottom: Spacing.sm }}>
+            {otherUserName || 'This person'} isn't in your chats yet. Accept to reply, or decline to remove this request.
+          </ThemedText>
+          <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+            <Pressable
+              style={[styles.unblockButton, { flex: 1, backgroundColor: theme.backgroundSecondary, alignItems: 'center' }]}
+              disabled={isRequestActionPending}
+              onPress={() => {
+                setIsRequestActionPending(true);
+                declineRequestMutation.mutate();
+              }}
+            >
+              {declineRequestMutation.isPending ? (
+                <ActivityIndicator size="small" color={theme.text} />
+              ) : (
+                <ThemedText type="small" style={{ color: theme.text, fontWeight: '600' }}>Decline</ThemedText>
+              )}
+            </Pressable>
+            <Pressable
+              style={[styles.unblockButton, { flex: 1, backgroundColor: theme.primary, alignItems: 'center' }]}
+              disabled={isRequestActionPending}
+              onPress={() => {
+                setIsRequestActionPending(true);
+                acceptRequestMutation.mutate();
+              }}
+            >
+              {acceptRequestMutation.isPending ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <ThemedText type="small" style={{ color: "#fff", fontWeight: '600' }}>Accept</ThemedText>
+              )}
+            </Pressable>
+          </View>
         </View>
       ) : (
         <View style={[styles.inputContainer, { backgroundColor: theme.backgroundRoot, paddingBottom: isKeyboardVisible ? 0 : insets.bottom + Spacing.md }]}>

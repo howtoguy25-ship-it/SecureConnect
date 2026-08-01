@@ -44,6 +44,7 @@ interface Conversation {
   unreadCount: number;
   isArchived?: boolean;
   folder?: string;
+  isPendingRequest?: boolean;
 }
 
 type ChatFolder = "all" | "randoms" | "friends" | "family";
@@ -98,6 +99,17 @@ const ConversationItem = memo(({ item, onPress, isTyping, theme }: { item: Conve
               >
                 typing…
               </ThemedText>
+            ) : item.isPendingRequest ? (
+              <>
+                <Feather name="user-plus" size={12} color={theme.primary} style={styles.lockIcon} />
+                <ThemedText
+                  type="small"
+                  style={[styles.preview, { color: theme.primary, fontWeight: "600" }]}
+                  numberOfLines={1}
+                >
+                  Message request
+                </ThemedText>
+              </>
             ) : (
               <>
                 <Feather name="lock" size={12} color={theme.textSecondary} style={styles.lockIcon} />

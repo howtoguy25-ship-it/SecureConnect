@@ -2228,7 +2228,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use numberType from request body, default to 'personal'
       const conversationNumberType = numberType || 'personal';
+      // Message-request flow: only a genuinely brand-new pairing becomes a
+      // request — check existence BEFORE getOrCreateConversation creates it.
+      const alreadyExisted = !!(await storage.findConversationBetween(req.userId!, otherUserId, conversationNumberType));
       const conversation = await storage.getOrCreateConversation(req.userId!, otherUserId, conversationNumberType);
+      if (!alreadyExisted) {
+        await storage.createMessageRequest(req.userId!, otherUserId, undefined, conversation.id);
+      }
       res.json(conversation);
     } catch (error) {
       console.error('Error creating conversation:', error);
@@ -2513,6 +2519,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const isBlocked = await storage.isBlockedByEither(req.userId!, receiverId);
         if (isBlocked) {
           return res.status(403).json({ error: 'Cannot send message. User is blocked.' });
+        }
+      }
+
+      // Message-request flow: the recipient of a still-pending request must
+      // accept before they can reply (they can already read it — this only
+      // blocks sending). The initiator is unaffected and can keep sending.
+      if (conversationId && !isMockConversation(conversationId)) {
+        const pendingRequestId = await storage.getPendingRequestForRecipient(conversationId, req.userId!);
+        if (pendingRequestId) {
+          return res.status(403).json({ error: 'Accept this conversation before replying.', pendingRequestId });
         }
       }
 
@@ -2835,6 +2851,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isParticipant) return res.status(403).json({ error: 'Not a participant' });
       const conv = await storage.getConversationById(conversationId);
       if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+      // Message-request flow: non-null only when the CALLER is the one who
+      // must accept/decline before replying (the sender's own view never
+      // sees this — they're free to keep messaging while it's pending).
+      const pendingRequestId = await storage.getPendingRequestForRecipient(conversationId, req.userId!);
       res.json({
         id: conv.id,
         pinnedMessageId: (conv as any).pinnedMessageId ?? null,
@@ -2844,6 +2864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // route 400s on them by design).
         numberType: (conv as any).numberType ?? 'personal',
         createdAt: conv.createdAt,
+        pendingRequestId,
       });
     } catch (e) {
       console.error('GET /api/conversations/:id error', e);

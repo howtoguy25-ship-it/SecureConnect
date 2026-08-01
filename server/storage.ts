@@ -16,6 +16,7 @@ export interface IStorage {
   markCodeVerified(id: string): Promise<void>;
   
   getConversations(userId: string, numberType?: string): Promise<any[]>;
+  findConversationBetween(userId1: string, userId2: string, numberType?: string): Promise<Conversation | undefined>;
   getOrCreateConversation(userId1: string, userId2: string, numberType?: string): Promise<Conversation>;
   getConversationMessages(conversationId: string, limit?: number, viewerUserId?: string): Promise<Message[]>;
   getConversationById(conversationId: string): Promise<Conversation | undefined>;
@@ -59,9 +60,10 @@ export interface IStorage {
   
   getMessageRequests(userId: string): Promise<any[]>;
   getPendingMessageRequestCount(userId: string): Promise<number>;
-  createMessageRequest(senderId: string, receiverId: string, messagePreview?: string): Promise<MessageRequest>;
+  createMessageRequest(senderId: string, receiverId: string, messagePreview?: string, conversationId?: string): Promise<MessageRequest>;
   acceptMessageRequest(requestId: string, userId: string): Promise<{ conversationId: string } | null>;
   declineMessageRequest(requestId: string, userId: string): Promise<void>;
+  getPendingRequestForRecipient(conversationId: string, receiverUserId: string): Promise<string | null>;
   findUsersByPhoneNumbers(phoneNumbers: string[], excludeUserId: string): Promise<User[]>;
   listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt'>[]>;
   deleteUserAccount(userId: string): Promise<void>;
@@ -238,6 +240,18 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
+    // Step 3: which of these conversations are still a pending message
+    // request *for this user to accept* — flags the "Message request" label
+    // in the chat list instead of a real message preview.
+    const pendingForMe = await db.select({ conversationId: messageRequests.conversationId })
+      .from(messageRequests)
+      .where(and(
+        eq(messageRequests.receiverId, userId),
+        eq(messageRequests.status, "pending"),
+        inArray(messageRequests.conversationId, conversationIds),
+      ));
+    const pendingForMeSet = new Set(pendingForMe.map(r => r.conversationId));
+
     // Combine results
     const results = filteredParticipations.map(p => ({
       id: p.convId,
@@ -247,6 +261,7 @@ export class DatabaseStorage implements IStorage {
       createdAt: p.convCreatedAt,
       otherUser: otherUserMap.get(p.conversationId) || null,
       unreadCount: p.unreadCount || 0,
+      isPendingRequest: pendingForMeSet.has(p.conversationId),
     }));
 
     // Sort by lastMessageAt descending
@@ -255,11 +270,14 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async getOrCreateConversation(userId1: string, userId2: string, numberType: string = 'personal'): Promise<Conversation> {
+  // Read-only lookup half of getOrCreateConversation, split out so callers
+  // that need to know "did this conversation already exist?" (the message-
+  // request gate in POST /api/conversations) can check before creating.
+  async findConversationBetween(userId1: string, userId2: string, numberType: string = 'personal'): Promise<Conversation | undefined> {
     const user1Convs = await db.select()
       .from(conversationParticipants)
       .where(eq(conversationParticipants.userId, userId1));
-    
+
     for (const conv of user1Convs) {
       const [user2Part] = await db.select()
         .from(conversationParticipants)
@@ -267,20 +285,25 @@ export class DatabaseStorage implements IStorage {
           eq(conversationParticipants.conversationId, conv.conversationId),
           eq(conversationParticipants.userId, userId2)
         ));
-      
+
       if (user2Part) {
         const [conversation] = await db.select().from(conversations).where(eq(conversations.id, conv.conversationId));
-        // Only return if the conversation matches the requested numberType
         const convNumberType = conversation?.numberType || 'personal';
         if (convNumberType === numberType) {
           return conversation;
         }
       }
     }
+    return undefined;
+  }
+
+  async getOrCreateConversation(userId1: string, userId2: string, numberType: string = 'personal'): Promise<Conversation> {
+    const existing = await this.findConversationBetween(userId1, userId2, numberType);
+    if (existing) return existing;
 
     // Create new conversation with the specified numberType
     const [newConversation] = await db.insert(conversations).values({ numberType }).returning();
-    
+
     await db.insert(conversationParticipants).values([
       { conversationId: newConversation.id, userId: userId1 },
       { conversationId: newConversation.id, userId: userId2 },
@@ -433,6 +456,11 @@ export class DatabaseStorage implements IStorage {
     if (!existing) return undefined;
     if (existing.receiverId !== receiverUserId) return undefined;
     if (existing.status === "read") return existing;
+
+    // Message-request flow: the recipient can preview a pending request
+    // without the sender learning it was seen — "seen" only starts flowing
+    // once they accept (see getPendingRequestForRecipient).
+    if (await this.getPendingRequestForRecipient(existing.conversationId, receiverUserId)) return existing;
 
     const now = new Date();
     const [updated] = await db.update(messages)
@@ -671,6 +699,9 @@ export class DatabaseStorage implements IStorage {
     conversationId: string,
     userId: string,
   ): Promise<Array<{ id: string; senderId: string; readAt: Date }>> {
+    // Message-request flow: same reasoning as markMessageRead.
+    if (await this.getPendingRequestForRecipient(conversationId, userId)) return [];
+
     const now = new Date();
     const updated = await db.update(messages)
       .set({ status: "read", readAt: now, readBy: userId, deliveredAt: sql`COALESCE(${messages.deliveredAt}, ${now})` })
@@ -989,7 +1020,12 @@ export class DatabaseStorage implements IStorage {
     return Number(result?.count || 0);
   }
 
-  async createMessageRequest(senderId: string, receiverId: string, messagePreview?: string): Promise<MessageRequest> {
+  // messagePreview is intentionally never populated with real message text —
+  // this app's messages are Signal-Protocol E2EE end to end, and a plaintext
+  // preview column would leak content to the server. The linked
+  // conversationId is what lets the recipient actually preview the
+  // (encrypted, client-decrypted) conversation before deciding.
+  async createMessageRequest(senderId: string, receiverId: string, messagePreview?: string, conversationId?: string): Promise<MessageRequest> {
     const [existing] = await db.select()
       .from(messageRequests)
       .where(and(
@@ -997,15 +1033,16 @@ export class DatabaseStorage implements IStorage {
         eq(messageRequests.receiverId, receiverId),
         eq(messageRequests.status, "pending")
       ));
-    
+
     if (existing) {
       return existing;
     }
-    
+
     const [request] = await db.insert(messageRequests).values({
       senderId,
       receiverId,
       messagePreview,
+      conversationId,
     }).returning();
     return request;
   }
@@ -1017,25 +1054,60 @@ export class DatabaseStorage implements IStorage {
         eq(messageRequests.id, requestId),
         eq(messageRequests.receiverId, userId)
       ));
-    
+
     if (!request) return null;
-    
+
     await db.update(messageRequests)
       .set({ status: "accepted" })
       .where(eq(messageRequests.id, requestId));
-    
-    const conversation = await this.getOrCreateConversation(userId, request.senderId);
-    
+
+    const conversation = request.conversationId
+      ? (await this.getConversationById(request.conversationId)) ?? await this.getOrCreateConversation(userId, request.senderId)
+      : await this.getOrCreateConversation(userId, request.senderId);
+
     return { conversationId: conversation.id };
   }
 
   async declineMessageRequest(requestId: string, userId: string): Promise<void> {
-    await db.update(messageRequests)
-      .set({ status: "declined" })
+    const [request] = await db.select()
+      .from(messageRequests)
       .where(and(
         eq(messageRequests.id, requestId),
         eq(messageRequests.receiverId, userId)
       ));
+    if (!request) return;
+
+    await db.update(messageRequests)
+      .set({ status: "declined" })
+      .where(eq(messageRequests.id, requestId));
+
+    // Archive (rather than delete) the conversation for the decliner only —
+    // it disappears from their main chat list but the sender's copy and
+    // messages are untouched, and it's still reachable via Archived if the
+    // decliner changes their mind.
+    if (request.conversationId) {
+      await db.update(conversationParticipants)
+        .set({ isArchived: true })
+        .where(and(
+          eq(conversationParticipants.conversationId, request.conversationId),
+          eq(conversationParticipants.userId, userId),
+        ));
+    }
+  }
+
+  // Is there a still-pending request where `receiverUserId` must accept
+  // before replying / before the sender sees read receipts, for this
+  // conversation? Returns the request id if so, so callers can act on it
+  // (accept/decline UI) without a second lookup.
+  async getPendingRequestForRecipient(conversationId: string, receiverUserId: string): Promise<string | null> {
+    const [request] = await db.select({ id: messageRequests.id })
+      .from(messageRequests)
+      .where(and(
+        eq(messageRequests.conversationId, conversationId),
+        eq(messageRequests.receiverId, receiverUserId),
+        eq(messageRequests.status, "pending"),
+      ));
+    return request?.id ?? null;
   }
 
   async findUsersByPhoneNumbers(phoneNumbers: string[], excludeUserId: string): Promise<User[]> {
