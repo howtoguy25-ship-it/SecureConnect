@@ -248,6 +248,28 @@ export function MapScreen() {
     [location]
   );
 
+  // iOS's real 3D-buildings path -- deliberately NOT the custom Map3DView module above (that
+  // one wraps Google's still-experimental, pre-GA "Maps 3D SDK for iOS", which has a real,
+  // confirmed device-specific crash history on this exact app -- see followTilt's own comment
+  // further down). Instead this tilts the SAME already-running, already-stable classic Google
+  // Maps SDK camera (react-native-maps, zero new native code, the exact mechanism the
+  // chase-cam during navigation already uses every single drive) far enough that its own
+  // native 3D building extrusion kicks in -- literally the same "tilt to see buildings in 3D"
+  // behavior Google Maps' own app has, just triggered from a standalone toggle instead of only
+  // while navigating. Only runs while NOT actively navigating (`!route`), so it can never
+  // fight the chase-cam's own pitch/zoom ownership during a real drive.
+  useEffect(() => {
+    if (isMap3DSupported || !currentLatLng || route) return;
+    if (show3D) {
+      mapRef.current?.animateCamera(
+        { center: currentLatLng, pitch: 65, zoom: 18.5 },
+        { duration: 700 }
+      );
+    } else {
+      mapRef.current?.animateCamera({ pitch: 0 }, { duration: 500 });
+    }
+  }, [show3D, isMap3DSupported, currentLatLng, route]);
+
   // `initialRegion` above is a mount-time-only prop, so it never moves the map once the very
   // first real GPS fix actually lands -- this is that correction, firing exactly once as soon
   // as a real position exists (skipped while navigating since confirmRoute/the chase-cam
@@ -1641,30 +1663,33 @@ export function MapScreen() {
         <Ionicons name="videocam" size={24} color="#FFFFFF" />
       </Pressable>
 
-      {isMap3DSupported && (
-        <Pressable
-          style={({ pressed }) => [
-            styles.fabSecondary,
-            { bottom: insets.bottom + 24 + 140 },
-            show3D && styles.fabActive,
-            pressed && { opacity: pressedOpacity },
-          ]}
-          onPress={() =>
-            setShow3D((v) => {
-              Sentry.logger.info("map: toggling 3D view", { next: !v });
-              return !v;
-            })
-          }
-          accessibilityLabel={show3D ? "Switch to standard map" : "Switch to 3D satellite view"}
-        >
-          <Ionicons name="globe-outline" size={22} color="#FFFFFF" />
-        </Pressable>
-      )}
+      {/* Real 3D buildings toggle -- Android mounts the custom Map3DView module (Google's
+          separate, richer "Maps 3D SDK"); iOS instead tilts the existing stable map camera
+          (see the effect above) rather than touching that same SDK's still-experimental,
+          pre-GA iOS build. Always rendered now on both platforms -- this used to be Android-
+          only (isMap3DSupported-gated) while iOS had no 3D buildings option at all. */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.fabSecondary,
+          { bottom: insets.bottom + 24 + 140 },
+          show3D && styles.fabActive,
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={() =>
+          setShow3D((v) => {
+            Sentry.logger.info("map: toggling 3D view", { next: !v });
+            return !v;
+          })
+        }
+        accessibilityLabel={show3D ? "Switch to standard map" : "Switch to 3D buildings view"}
+      >
+        <Ionicons name="business-outline" size={22} color="#FFFFFF" />
+      </Pressable>
 
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
-          { bottom: insets.bottom + 24 + (isMap3DSupported ? 210 : 140) },
+          { bottom: insets.bottom + 24 + 210 },
           mapType === "hybrid" && styles.fabActive,
           pressed && { opacity: pressedOpacity },
         ]}
@@ -1682,7 +1707,7 @@ export function MapScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
-          { bottom: insets.bottom + 24 + (isMap3DSupported ? 280 : 210) },
+          { bottom: insets.bottom + 24 + 280 },
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={onRecenter}
