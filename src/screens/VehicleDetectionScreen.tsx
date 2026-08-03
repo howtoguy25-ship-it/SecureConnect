@@ -164,8 +164,17 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const { location } = useLocation();
   const egoSpeedRef = useRef<number | null>(null);
   egoSpeedRef.current = location?.coords.speed ?? null;
-  const [status, setStatus] = useState<"loading-model" | "running" | "error">("loading-model");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // No "error" state -- see the model-load effect and captureAndDetect's catch block below.
+  // Every failure mode here now auto-recovers on its own instead of ever stopping and waiting
+  // on a manual tap.
+  const [status, setStatus] = useState<"loading-model" | "running">("loading-model");
+  // >0 once the model has failed to load at least once -- only changes the loading text to be
+  // honest that it's taking a retry or two, never blocks anything or asks for a tap.
+  const [modelLoadAttempt, setModelLoadAttempt] = useState(0);
+  // True only while capture/detect has been failing for a few ticks in a row -- a small,
+  // non-blocking "Reconnecting…" indicator, not a dead end. Clears itself the instant a
+  // capture actually succeeds again (see captureAndDetect's success path below).
+  const [recovering, setRecovering] = useState(false);
   const [boxes, setBoxes] = useState<TrackedBox[]>([]);
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null);
@@ -231,33 +240,42 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     AsyncStorage.setItem(INFO_DISMISSED_KEY, "1").catch(() => {});
   }, []);
 
-  const [retryCount, setRetryCount] = useState(0);
-  const retryLoad = useCallback(() => {
-    consecutiveFailuresRef.current = 0;
-    // A stuck/timed-out capture is exactly the kind of failure Retry needs to actually clear --
-    // without this, a genuinely hung previous capture would leave this permanently true and
-    // silently block every capture tick after "retrying" too, same as before Retry was pressed.
-    capturingRef.current = false;
-    setStatus("loading-model");
-    setErrorMessage(null);
-    setRetryCount((n) => n + 1);
-  }, []);
-
+  // Auto-retries forever with a capped backoff instead of ever dead-ending on a manual "tap
+  // Retry" button -- a transient hiccup (a slow first disk read, a momentary GC pause) resolves
+  // itself within a couple of attempts with zero user action needed; a persistent one just
+  // keeps trying quietly in the background for as long as the screen stays open, which is the
+  // most this screen can honestly do without ever leaving the driver stuck looking at a dead
+  // end. modelLoadAttempt only changes the loading text (see the banner below), never gates
+  // anything.
+  const MODEL_LOAD_RETRY_DELAYS_MS = [1500, 3000, 6000, 10000];
   useEffect(() => {
     let cancelled = false;
-    warmUpModel()
-      .then(() => {
-        if (!cancelled) setStatus("running");
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setErrorMessage(err instanceof Error ? err.message : "Failed to load detection model.");
-        setStatus("error");
-      });
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const attemptLoad = () => {
+      warmUpModel()
+        .then(() => {
+          if (!cancelled) setStatus("running");
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          Sentry.logger.error("vehicle-detection: model load failed, auto-retrying", {
+            attempt,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          attempt += 1;
+          setModelLoadAttempt(attempt);
+          const delay =
+            MODEL_LOAD_RETRY_DELAYS_MS[Math.min(attempt - 1, MODEL_LOAD_RETRY_DELAYS_MS.length - 1)];
+          timer = setTimeout(attemptLoad, delay);
+        });
+    };
+    attemptLoad();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [retryCount]);
+  }, []);
 
   const captureAndDetect = useCallback(async () => {
     if (capturingRef.current || unmountedRef.current || !cameraRef.current) return;
@@ -291,11 +309,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       // Reset only once the whole real pipeline (shutter + decode + model inference) has
       // actually succeeded -- resetting this right after takePhoto (as it used to) meant a
       // camera that keeps shuttering fine while decode/detect silently keeps throwing every
-      // single time could never accumulate MAX_CONSECUTIVE_CAPTURE_FAILURES failures (the very
-      // next successful shutter always zeroed the counter again first), so the error+Retry UI
-      // could never surface -- just a live-looking camera that silently never produces a single
-      // box, forever, with no feedback at all.
+      // single time could never accumulate MAX_CONSECUTIVE_CAPTURE_FAILURES failures, so a
+      // persistent problem could never even get flagged as "reconnecting" below.
       consecutiveFailuresRef.current = 0;
+      setRecovering(false);
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now(), egoSpeedRef.current);
       setBoxes(tracked);
 
@@ -401,15 +418,16 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       if (unmountedRef.current) return;
       consecutiveFailuresRef.current += 1;
       // A single bad frame is normal (a real hiccup, not a real problem) and just gets silently
-      // retried on the next tick -- only surface the error+Retry UI once it's clearly not a
-      // one-off, so the screen never sits indefinitely frozen with zero feedback ("black screen,
-      // doesn't respond") but also doesn't flash an error over one missed frame.
+      // retried on the next tick with no visible change at all. Only once it's clearly not a
+      // one-off does a small, non-blocking "Reconnecting…" indicator appear (see the render
+      // below) -- the capture loop itself never stops or waits on anything here, so there's
+      // nothing for the driver to tap; it clears itself the moment a capture actually succeeds
+      // again.
       if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_CAPTURE_FAILURES) {
-        Sentry.logger.error("vehicle-detection: giving up after repeated capture failures", {
+        Sentry.logger.error("vehicle-detection: repeated capture failures, still retrying", {
           consecutiveFailures: consecutiveFailuresRef.current,
         });
-        setErrorMessage("Vehicle detection stalled -- tap Retry to restart it.");
-        setStatus("error");
+        setRecovering(true);
       }
     } finally {
       capturingRef.current = false;
@@ -648,8 +666,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
             {/* Loading is now just the model file fetch/cache (see vehicleDetection.ts's
                 loadModelSkippingWarmup) -- the heavy warmup computation that used to block this
                 screen was moved to land on the very first detected frame instead, so Close/
-                Switch camera stay responsive here rather than fighting a busy JS thread. */}
-            <Text style={styles.bannerText}>Loading detection model…</Text>
+                Switch camera stay responsive here rather than fighting a busy JS thread. Past
+                the first attempt this is honest that it's retrying, but never asks for a tap --
+                see the auto-retry effect above. */}
+            <Text style={styles.bannerText}>
+              {modelLoadAttempt > 0
+                ? "Still loading the detection model — retrying automatically…"
+                : "Loading detection model…"}
+            </Text>
           </>
         )}
         {status === "running" && !infoDismissed && (
@@ -676,19 +700,19 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
             </Pressable>
           </>
         )}
-        {status === "error" && (
-          <>
-            <Text style={styles.bannerText}>{errorMessage ?? "Something went wrong."}</Text>
-            <Pressable
-              style={({ pressed }) => [styles.retryButton, pressed && { opacity: pressedOpacity }]}
-              onPress={retryLoad}
-              accessibilityLabel="Retry loading detection model"
-            >
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </Pressable>
-          </>
-        )}
       </View>
+      )}
+
+      {/* Small, non-blocking "still working on it" indicator -- never a dead end, never asks
+          for a tap. Only shown once the explainer banner above is out of the way (same top
+          offset -- recovering can only become true while status is "running", so the banner is
+          only still up here if it hasn't been dismissed yet) and clears itself the instant a
+          capture actually succeeds again. */}
+      {recovering && infoDismissed && (
+        <View style={[styles.recoveringPill, { top: insets.top + spacing.md }]}>
+          <ActivityIndicator size="small" color="#fff" />
+          <Text style={styles.recoveringPillText}>Reconnecting to camera…</Text>
+        </View>
       )}
 
       {/* Detail panel for whichever box is tapped (see onSelectBox) -- speed/plate/type/
@@ -890,16 +914,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
   },
-  retryButton: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.sm,
+  recoveringPill: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    backgroundColor: "rgba(17, 24, 39, 0.85)",
+    borderRadius: radius.pill,
     paddingVertical: spacing.xs + 2,
     paddingHorizontal: spacing.md,
   },
-  retryButtonText: {
+  recoveringPillText: {
     color: "#fff",
-    fontWeight: "700",
     fontSize: 12,
+    fontWeight: "600",
   },
   detailPanel: {
     position: "absolute",
