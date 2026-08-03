@@ -52,6 +52,7 @@ function EditorInner({ navigation }: Props) {
     selectedId,
     select,
     addElement,
+    insertElements,
     updateElement,
     removeElement,
     duplicateElement,
@@ -406,30 +407,62 @@ function EditorInner({ navigation }: Props) {
     return { x: (project.canvasSize.width - width) / 2, y };
   };
 
+  // The "insert at top" counterpart to nextStackedPosition: a real reflow, not a free-floating
+  // overlap on top of existing content. Every existing element on the page shifts down by
+  // exactly `shiftDelta` (only y changes -- x/width/height/rotation/locked/zIndex/section
+  // membership on those elements are untouched), and the new content lands where the old top
+  // used to be. Canvas height grows by the same delta so nothing overflows. Returns shiftDelta
+  // (0 when the page was already empty, since top and bottom are identical there) for the
+  // caller to pass straight into insertElements.
+  const topStackedPosition = (width: number, height: number) => {
+    const topY = activeElements.length > 0 ? Math.min(...activeElements.map((el) => el.y)) : 0;
+    const gap = activeElements.length > 0 ? 24 : 32;
+    const shiftDelta = activeElements.length > 0 ? height + gap : 0;
+    if (shiftDelta > 0) {
+      updateProject({ canvasSize: { ...project.canvasSize, height: project.canvasSize.height + shiftDelta } });
+    }
+    return { x: (project.canvasSize.width - width) / 2, y: topY, shiftDelta };
+  };
+
   const CARD_LAYOUT_SIZE: Record<ProductGridCardLayout, { width: number; height: number }> = {
     portrait: { width: 180, height: 220 },
     square: { width: 200, height: 200 },
     horizontal: { width: 340, height: 130 },
   };
 
-  const insertExistingProduct = (product: CatalogProduct, cardLayout: ProductGridCardLayout = 'portrait') => {
+  const insertExistingProduct = (
+    product: CatalogProduct,
+    cardLayout: ProductGridCardLayout = 'portrait',
+    position: 'top' | 'bottom' = 'bottom'
+  ) => {
     const { width, height } = CARD_LAYOUT_SIZE[cardLayout];
-    const { x, y } = nextStackedPosition(width, height);
     const el: ProductElement = {
       id: generateId('el'),
       type: 'product',
       productId: product.id,
-      x,
-      y,
+      x: 0,
+      y: 0,
       width,
       height,
       zIndex: 5,
       ...(cardLayout !== 'portrait' ? { cardLayout } : {}),
     };
-    addElement(el);
+    if (position === 'top') {
+      const { x, y, shiftDelta } = topStackedPosition(width, height);
+      el.x = x;
+      el.y = y;
+      insertElements([el], shiftDelta);
+    } else {
+      const { x, y } = nextStackedPosition(width, height);
+      el.x = x;
+      el.y = y;
+      addElement(el);
+    }
     select(el.id);
     setPanel(null);
-    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+    requestAnimationFrame(() =>
+      position === 'top' ? canvasScrollRef.current?.scrollTo({ y: 0, animated: true }) : canvasScrollRef.current?.scrollToEnd({ animated: true })
+    );
   };
 
   // The "select up to 3 products, then Add" flow from ProductCatalogPickerModal. A single
@@ -443,22 +476,39 @@ function EditorInner({ navigation }: Props) {
   // reads as one real store-shelf block instead of independently-floating cards. `cardLayout`
   // (chosen in ProductCatalogPickerModal) picks the grid shape via buildProductGridLayout and
   // is stamped onto every inserted element so ElementRenderer/siteHtml.ts render it the same way.
-  const insertMultipleProducts = (products: CatalogProduct[], cardLayout: ProductGridCardLayout = 'portrait') => {
+  const insertMultipleProducts = (
+    products: CatalogProduct[],
+    cardLayout: ProductGridCardLayout = 'portrait',
+    position: 'top' | 'bottom' = 'bottom'
+  ) => {
     if (products.length === 0) return;
     if (products.length === 1) {
-      insertExistingProduct(products[0], cardLayout);
+      insertExistingProduct(products[0], cardLayout, position);
       return;
     }
 
     const sectionWidth = project.canvasSize.width - COLUMN_SECTION_MARGIN * 2;
     const built = buildProductGridLayout(products.length, sectionWidth - COLUMN_SECTION_PADDING * 2, cardLayout);
-    const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
-    const gap = activeElements.length > 0 ? 24 : 32;
-    const sectionY = lowestBottom + gap;
     const sectionHeight = built.height + COLUMN_SECTION_PADDING * 2;
-    const requiredHeight = sectionY + sectionHeight + 40;
-    if (requiredHeight > project.canvasSize.height) {
-      updateProject({ canvasSize: { ...project.canvasSize, height: requiredHeight } });
+
+    let sectionY: number;
+    let shiftDelta = 0;
+    if (position === 'top') {
+      const topY = activeElements.length > 0 ? Math.min(...activeElements.map((el) => el.y)) : 0;
+      const gap = activeElements.length > 0 ? 24 : 32;
+      shiftDelta = activeElements.length > 0 ? sectionHeight + gap : 0;
+      sectionY = topY;
+      if (shiftDelta > 0) {
+        updateProject({ canvasSize: { ...project.canvasSize, height: project.canvasSize.height + shiftDelta } });
+      }
+    } else {
+      const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
+      const gap = activeElements.length > 0 ? 24 : 32;
+      sectionY = lowestBottom + gap;
+      const requiredHeight = sectionY + sectionHeight + 40;
+      if (requiredHeight > project.canvasSize.height) {
+        updateProject({ canvasSize: { ...project.canvasSize, height: requiredHeight } });
+      }
     }
 
     const productElements: ProductElement[] = products.map((product, i) => ({
@@ -485,11 +535,17 @@ function EditorInner({ navigation }: Props) {
       height: sectionHeight,
       zIndex: 0,
     };
-    addElement(section);
-    productElements.forEach((el) => addElement(el));
+    if (position === 'top') {
+      insertElements([section, ...productElements], shiftDelta);
+    } else {
+      addElement(section);
+      productElements.forEach((el) => addElement(el));
+    }
     select(section.id);
     setPanel(null);
-    requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
+    requestAnimationFrame(() =>
+      position === 'top' ? canvasScrollRef.current?.scrollTo({ y: 0, animated: true }) : canvasScrollRef.current?.scrollToEnd({ animated: true })
+    );
   };
 
   const createNewProductAndInsert = async () => {

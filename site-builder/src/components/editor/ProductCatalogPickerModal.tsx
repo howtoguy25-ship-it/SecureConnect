@@ -16,6 +16,13 @@ const CARD_LAYOUT_OPTIONS: { value: ProductGridCardLayout; label: string; icon: 
   { value: 'horizontal', label: 'Row', icon: 'reorder-four-outline' },
 ];
 
+type InsertPosition = 'top' | 'bottom';
+
+const POSITION_OPTIONS: { value: InsertPosition; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: 'top', label: 'Top of page', icon: 'arrow-up-circle-outline' },
+  { value: 'bottom', label: 'Bottom of page', icon: 'arrow-down-circle-outline' },
+];
+
 // Browse the account's real Products catalog and insert one onto the current page, or jump
 // into creating a brand new one -- the "insert product" entry point for a manually-built
 // website. Tapping a row opens a real preview (photos + description) before committing to
@@ -35,8 +42,8 @@ export default function ProductCatalogPickerModal({
   visible: boolean;
   onClose: () => void;
   uid: string;
-  onInsert: (product: CatalogProduct, cardLayout?: ProductGridCardLayout) => void;
-  onInsertMultiple?: (products: CatalogProduct[], cardLayout?: ProductGridCardLayout) => void;
+  onInsert: (product: CatalogProduct, cardLayout?: ProductGridCardLayout, position?: InsertPosition) => void;
+  onInsertMultiple?: (products: CatalogProduct[], cardLayout?: ProductGridCardLayout, position?: InsertPosition) => void;
   onCreateNew: () => void;
 }) {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
@@ -45,6 +52,7 @@ export default function ProductCatalogPickerModal({
   const [previewProduct, setPreviewProduct] = useState<CatalogProduct | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [cardLayout, setCardLayout] = useState<ProductGridCardLayout>('portrait');
+  const [position, setPosition] = useState<InsertPosition>('bottom');
 
   const CardLayoutPicker = () => (
     <View style={styles.layoutRow}>
@@ -56,6 +64,21 @@ export default function ProductCatalogPickerModal({
         >
           <Ionicons name={opt.icon} size={16} color={cardLayout === opt.value ? '#FFFFFF' : '#475569'} />
           <Text style={[styles.layoutPillText, cardLayout === opt.value && styles.layoutPillTextActive]}>{opt.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  const PositionPicker = () => (
+    <View style={styles.layoutRow}>
+      {POSITION_OPTIONS.map((opt) => (
+        <Pressable
+          key={opt.value}
+          style={[styles.layoutPill, position === opt.value && styles.layoutPillActive]}
+          onPress={() => setPosition(opt.value)}
+        >
+          <Ionicons name={opt.icon} size={16} color={position === opt.value ? '#FFFFFF' : '#475569'} />
+          <Text style={[styles.layoutPillText, position === opt.value && styles.layoutPillTextActive]}>{opt.label}</Text>
         </Pressable>
       ))}
     </View>
@@ -79,6 +102,7 @@ export default function ProductCatalogPickerModal({
     if (!visible) {
       setSelectedIds([]);
       setCardLayout('portrait');
+      setPosition('bottom');
     }
   }, [visible]);
 
@@ -86,6 +110,7 @@ export default function ProductCatalogPickerModal({
     setPreviewProduct(null);
     setSelectedIds([]);
     setCardLayout('portrait');
+    setPosition('bottom');
     onClose();
   };
 
@@ -103,7 +128,7 @@ export default function ProductCatalogPickerModal({
   const addSelected = () => {
     const selected = products.filter((p) => selectedIds.includes(p.id));
     if (selected.length === 0 || !onInsertMultiple) return;
-    onInsertMultiple(selected, cardLayout);
+    onInsertMultiple(selected, cardLayout, position);
     close();
   };
 
@@ -144,10 +169,12 @@ export default function ProductCatalogPickerModal({
               {previewProduct.description ? <Text style={styles.previewDescription}>{previewProduct.description}</Text> : null}
               <Text style={styles.layoutLabel}>Card style</Text>
               <CardLayoutPicker />
+              <Text style={styles.layoutLabel}>Insert position</Text>
+              <PositionPicker />
               <Pressable
                 style={styles.addBigBtn}
                 onPress={() => {
-                  onInsert(previewProduct, cardLayout);
+                  onInsert(previewProduct, cardLayout, position);
                   setPreviewProduct(null);
                   onClose();
                 }}
@@ -226,6 +253,8 @@ export default function ProductCatalogPickerModal({
               <View style={styles.selectBar}>
                 <Text style={styles.layoutLabel}>Card style</Text>
                 <CardLayoutPicker />
+                <Text style={styles.layoutLabel}>Insert position</Text>
+                <PositionPicker />
                 <Pressable style={styles.addBigBtn} onPress={addSelected}>
                   <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
                   <Text style={styles.addBigBtnText}>

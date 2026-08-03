@@ -26,6 +26,10 @@ interface EditorContextValue {
   selectedId: string | null;
   select: (id: string | null) => void;
   addElement: (el: CanvasElement) => void;
+  // Inserts one or more elements in a single transaction, optionally shifting every existing
+  // element on the page down by `shiftExistingBy` first -- the primitive behind "insert at the
+  // top of the page" (real reflow of everything below, not a free-floating overlap).
+  insertElements: (newElements: CanvasElement[], shiftExistingBy?: number) => void;
   updateElement: (id: string, patch: Partial<CanvasElement>) => void;
   removeElement: (id: string) => void;
   duplicateElement: (id: string) => void;
@@ -238,6 +242,31 @@ export function EditorProvider({
         return next;
       });
       setSelectedId(el.id);
+    },
+    [scheduleSave, applyElementsUpdate, pushHistory]
+  );
+
+  // Atomic "insert above existing content" primitive: shifts every existing element on the
+  // active page down by `shiftExistingBy` (real reflow, not a visual illusion -- every other
+  // element's own y is what moves) and appends `newElements` in the same transaction, so it's
+  // one history entry / one save instead of a shift-then-add race. Nothing but y changes on
+  // the existing elements -- x, width, height, rotation, locked, zIndex, section membership
+  // all stay exactly as they were, and newElements keep whatever zIndex the caller already
+  // assigned them (mirroring addElement's single-element convention would fight the
+  // multi-element product-grid caller's own explicit zIndex:0 + Section wrap).
+  const insertElements = useCallback(
+    (newElements: CanvasElement[], shiftExistingBy = 0) => {
+      setProject((prev) => {
+        if (!prev) return prev;
+        pushHistory(prev);
+        const next = applyElementsUpdate(prev, (elements) => {
+          const shifted = shiftExistingBy > 0 ? elements.map((el) => ({ ...el, y: el.y + shiftExistingBy })) : elements;
+          return [...shifted, ...newElements];
+        });
+        scheduleSave(next);
+        return next;
+      });
+      if (newElements.length > 0) setSelectedId(newElements[newElements.length - 1].id);
     },
     [scheduleSave, applyElementsUpdate, pushHistory]
   );
@@ -574,6 +603,7 @@ export function EditorProvider({
     selectedId,
     select: setSelectedId,
     addElement,
+    insertElements,
     updateElement,
     removeElement,
     duplicateElement,
