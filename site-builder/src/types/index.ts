@@ -311,6 +311,15 @@ export interface ProductElement extends BaseElement {
   nameFontSize?: number;
   priceFontFamily?: string;
   priceFontSize?: number;
+  // undefined/'portrait' = the original tall stacked card (image on top, text below) every
+  // existing project already uses -- unaffected by this field's addition. 'square' is the
+  // same stacked layout at a 1:1 aspect ratio instead of 180:220 (ProductCardView already
+  // adapts responsively to whatever width/height it's given, so no rendering change needed,
+  // only the width/height chosen at insert time). 'horizontal' is a real Shopify-style list
+  // row -- a square-ish image on the left, name/price/stock/buy button filling the rest of
+  // the row to the right, a fraction of the portrait card's height (see ProductCardView's
+  // own 'horizontal' branch and its published-site mirror in siteHtml.ts).
+  cardLayout?: 'portrait' | 'square' | 'horizontal';
 }
 
 // Groups 2+ existing Product elements from the same page under one named, browsable card --

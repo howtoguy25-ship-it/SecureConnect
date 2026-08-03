@@ -724,6 +724,73 @@ function ProductCardView({ element, width, height, locked }: { element: ProductE
 
   const product = resolveProductView(element, catalogProduct);
   const inStock = product.inStock !== false;
+  const badgeText = productBadge(product);
+  const nameStyle = {
+    fontWeight: '700' as const,
+    fontSize: element.nameFontSize ?? (compact ? 11 : 13),
+    color: '#0F172A',
+    ...(nameFont ? { fontFamily: nameFont } : null),
+  };
+  const priceStyle = {
+    fontSize: element.priceFontSize ?? (compact ? 11 : 13),
+    color: '#4338CA',
+    fontWeight: '700' as const,
+    ...(priceFont ? { fontFamily: priceFont } : null),
+  };
+  const stockLine =
+    product.trackInventory
+      ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings left' : 'available'}`
+      : inStock
+        ? 'In stock'
+        : 'Out of stock';
+  const stockColor = !inStock ? '#DC2626' : product.trackInventory ? '#94A3B8' : '#16A34A';
+
+  // A real Shopify-style "list row" card -- a square-ish image on the left, name/price/stock/
+  // buy button filling the rest of the row's real width to the right, a fraction of the tall
+  // portrait card's height. Chosen at insert time (see the product picker's size choice in
+  // EditorScreen.tsx) via element.cardLayout; undefined/'portrait' keeps the original stacked
+  // card exactly as it always rendered, so every existing project is unaffected.
+  if (element.cardLayout === 'horizontal') {
+    const imageSize = Math.min(height, width * 0.4);
+    return (
+      <View style={[styles.productCardShadow, { width, height }]}>
+        <Pressable
+          style={{ flex: 1, flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}
+          onPress={locked ? () => setShowDetail(true) : undefined}
+        >
+          <ProductCardGallery images={product.images} width={imageSize} height={height} compact={compact} />
+          <View style={{ flex: 1, padding: compact ? 8 : 10, justifyContent: 'center' }}>
+            <Text numberOfLines={1} style={{ fontSize: 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
+              {badgeText}
+            </Text>
+            <Text numberOfLines={1} style={[nameStyle, { marginTop: 2 }]}>
+              {product.name || 'Untitled product'}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+              <Text style={priceStyle}>
+                {sym}{product.priceUsd.toFixed(2)}
+              </Text>
+              {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && (
+                <Text style={{ fontSize: 11, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+                  {sym}{product.compareAtPriceUsd.toFixed(2)}
+                </Text>
+              )}
+            </View>
+            <Text numberOfLines={1} style={{ fontSize: 10, color: stockColor, marginTop: 2, fontWeight: inStock ? '400' : '700' }}>
+              {stockLine}
+            </Text>
+            <View style={{ marginTop: 6 }}>
+              <ProductBuyButtons product={product} compact />
+            </View>
+          </View>
+          <Pressable style={styles.productInfoBtn} onPress={() => setShowDetail(true)} hitSlop={8}>
+            <Ionicons name="information" size={13} color="#FFFFFF" />
+          </Pressable>
+          <ProductDetailModal element={showDetail ? element : null} onClose={() => setShowDetail(false)} />
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     // The outer View carries the real drop shadow (matching the published site's own
@@ -750,29 +817,13 @@ function ProductCardView({ element, width, height, locked }: { element: ProductE
       )}
       <View style={{ padding: compact ? 6 : 8, flex: 1 }}>
         <Text numberOfLines={1} style={{ fontSize: compact ? 8 : 9, fontWeight: '700', color: '#4338CA', textTransform: 'uppercase' }}>
-          {productBadge(product)}
+          {badgeText}
         </Text>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontWeight: '700',
-            fontSize: element.nameFontSize ?? (compact ? 11 : 13),
-            color: '#0F172A',
-            marginTop: 1,
-            ...(nameFont ? { fontFamily: nameFont } : null),
-          }}
-        >
+        <Text numberOfLines={1} style={[nameStyle, { marginTop: 1 }]}>
           {product.name || 'Untitled product'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-          <Text
-            style={{
-              fontSize: element.priceFontSize ?? (compact ? 11 : 13),
-              color: '#4338CA',
-              fontWeight: '700',
-              ...(priceFont ? { fontFamily: priceFont } : null),
-            }}
-          >
+          <Text style={priceStyle}>
             {sym}{product.priceUsd.toFixed(2)}
           </Text>
           {product.compareAtPriceUsd != null && product.compareAtPriceUsd > product.priceUsd && !compact && (
@@ -781,17 +832,11 @@ function ProductCardView({ element, width, height, locked }: { element: ProductE
             </Text>
           )}
         </View>
-        {product.trackInventory && !compact ? (
-          <Text numberOfLines={1} style={{ fontSize: 10, color: inStock ? '#94A3B8' : '#DC2626', marginTop: 2, fontWeight: inStock ? '400' : '700' }}>
-            {inStock
-              ? `${product.initialStock ?? 0} ${product.saleType === 'service' ? 'bookings left' : 'available'}`
-              : 'Out of stock'}
+        {!compact && (
+          <Text numberOfLines={1} style={{ fontSize: 10, color: stockColor, marginTop: 2, fontWeight: inStock ? '400' : '700' }}>
+            {stockLine}
           </Text>
-        ) : !compact ? (
-          <Text numberOfLines={1} style={{ fontSize: 10, color: inStock ? '#16A34A' : '#DC2626', marginTop: 2, fontWeight: '700' }}>
-            {inStock ? 'In stock' : 'Out of stock'}
-          </Text>
-        ) : null}
+        )}
         {!compact && <ProductBuyButtons product={product} compact />}
       </View>
 

@@ -184,6 +184,8 @@ export interface ProductElement extends BaseElement {
   nameFontSize?: number;
   priceFontFamily?: string;
   priceFontSize?: number;
+  // Mirrors the client's identical field -- see that file's comment for the full rationale.
+  cardLayout?: 'portrait' | 'square' | 'horizontal';
 }
 
 // Mirrors the client's CollectionElement -- see that file's comment for why productIds

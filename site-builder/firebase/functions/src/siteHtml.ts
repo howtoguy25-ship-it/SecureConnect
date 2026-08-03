@@ -2267,6 +2267,12 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // publishes. Still just scales up the same card, in whatever box the element itself
       // already occupies (see `base` above) -- not a new positioning system.
       const fullBleed = isSingleProductPage;
+      // A real Shopify-style "list row" card -- image on the left, name/price/stock/buy
+      // button filling the rest of the row to the right -- chosen at insert time (see
+      // ElementRenderer.tsx's identical ProductCardView branch and its own comment for the
+      // full rationale). Never applies to the single-product full page (fullBleed), which
+      // always stays the big vertical PDP layout regardless of this element's own setting.
+      const isHorizontal = el.cardLayout === 'horizontal' && !fullBleed;
       const isService = product.saleType === 'service';
       const isDigital = product.saleType === 'digital';
       // A buyer must never land on a real checkout for a half-finished listing -- only
@@ -2287,6 +2293,12 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // the item without an extra step. Tapping any photo still opens the lightbox (below)
       // for a bigger view, starting at whichever photo was showing, not always the first.
       const galleryHeightPct = fullBleed ? '65%' : '55%';
+      // The gallery wrap's own inline width/height drive every image inside it (each `<img>`
+      // is width:100%;height:100% of THIS div, not of the card) -- so swapping this one pair
+      // of dimensions from "full width, a % of card height" to "a % of card width, full
+      // height" is enough to turn the exact same gallery markup into the left-hand image of
+      // a horizontal row, with no change needed to the image/lightbox generation itself.
+      const galleryDimensionStyle = isHorizontal ? `width:38%;height:100%;` : `width:100%;height:${galleryHeightPct};`;
       // Real element ids always contain hyphens (see generateId in utils/id.ts), which makes
       // `${lightboxVar}`/`${galleryVar}` invalid as BARE JS identifiers in an onclick body --
       // `foo-bar.open()` parses as `foo - bar.open()`, a silent no-op, not a method call.
@@ -2296,7 +2308,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       // double-quoted HTML attribute (see the Button case's identical escaping comment).
       const imgTag =
         product.images.length > 0
-          ? `<div id="${galleryWrapId}" style="position:relative;width:100%;height:${galleryHeightPct};overflow:hidden;">
+          ? `<div id="${galleryWrapId}" style="position:relative;${galleryDimensionStyle}overflow:hidden;flex-shrink:0;">
   <div id="${galleryTrackId}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;height:100%;">
     ${product.images
       .map(
@@ -2317,7 +2329,7 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       : ''
   }
 </div>`
-          : `<div style="width:100%;height:${galleryHeightPct};background:#F1F5F9;"></div>`;
+          : `<div style="${galleryDimensionStyle}background:#F1F5F9;flex-shrink:0;"></div>`;
       const galleryScript = hasMultiplePhotos
         ? `<script>(function(){
   var track=document.getElementById(${JSON.stringify(galleryTrackId)});
@@ -2617,12 +2629,16 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
   </div>
 </div>`;
 
-      return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;${fullBleed ? '' : 'border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);'}overflow:${fullBleed ? 'auto' : 'hidden'};display:flex;flex-direction:column;font-family:-apple-system,sans-serif;">
+      return `<div id="el-${el.id}" data-product-name="${escapeAttr(product.name.toLowerCase())}" style="${base}background:#FFFFFF;${fullBleed ? '' : 'border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.1);'}overflow:${fullBleed ? 'auto' : 'hidden'};display:flex;flex-direction:${isHorizontal ? 'row' : 'column'};font-family:-apple-system,sans-serif;">
   ${imgTag}
-  <div style="padding:${fullBleed ? '20px' : '10px'};flex:1;display:flex;flex-direction:column;">
+  <div style="padding:${fullBleed ? '20px' : isHorizontal ? '8px 10px' : '10px'};flex:1;display:flex;flex-direction:column;${isHorizontal ? 'justify-content:center;min-width:0;' : ''}">
     <div style="font-size:${fullBleed ? 12 : 10}px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.02em;">${badge}</div>
-    <div id="${nameId}" style="font-weight:800;font-size:${el.nameFontSize ?? (fullBleed ? 26 : 14)}px;color:#0F172A;margin-top:${fullBleed ? 6 : 2}px;${nameFontCss}">${escapeHtml(product.name)}</div>
-    <div id="${descId}" style="font-size:${fullBleed ? 15 : 12}px;color:#64748B;margin-top:${fullBleed ? 10 : 2}px;${fullBleed ? 'line-height:22px;' : 'max-height:54px;overflow-y:auto;'}">${escapeHtml(product.description)}</div>
+    <div id="${nameId}" style="font-weight:800;font-size:${el.nameFontSize ?? (fullBleed ? 26 : 14)}px;color:#0F172A;margin-top:${fullBleed ? 6 : 2}px;white-space:${isHorizontal ? 'nowrap' : 'normal'};overflow:${isHorizontal ? 'hidden' : 'visible'};text-overflow:${isHorizontal ? 'ellipsis' : 'clip'};${nameFontCss}">${escapeHtml(product.name)}</div>
+    ${
+      isHorizontal
+        ? ''
+        : `<div id="${descId}" style="font-size:${fullBleed ? 15 : 12}px;color:#64748B;margin-top:${fullBleed ? 10 : 2}px;${fullBleed ? 'line-height:22px;' : 'max-height:54px;overflow-y:auto;'}">${escapeHtml(product.description)}</div>`
+    }
     ${variantPicker}
     ${isReady ? `<div id="${stockId}" style="font-size:${fullBleed ? 13 : 11}px;color:#94A3B8;margin-top:${fullBleed ? 8 : 2}px;">Checking availability…</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:${fullBleed ? 14 : 8}px;gap:6px;">
