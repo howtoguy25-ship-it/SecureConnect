@@ -6,8 +6,15 @@ import { productsStore } from '@/storage/productsStore';
 import { sellerAccountStore } from '@/services/store';
 import { currencySymbol } from '@/utils/currency';
 import { CatalogProduct } from '@/types';
+import { ProductGridCardLayout } from '@/data/columnLayouts';
 
 const MAX_MULTI_SELECT = 3;
+
+const CARD_LAYOUT_OPTIONS: { value: ProductGridCardLayout; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: 'portrait', label: 'Tall', icon: 'square-outline' },
+  { value: 'square', label: 'Square', icon: 'stop-outline' },
+  { value: 'horizontal', label: 'Row', icon: 'reorder-four-outline' },
+];
 
 // Browse the account's real Products catalog and insert one onto the current page, or jump
 // into creating a brand new one -- the "insert product" entry point for a manually-built
@@ -28,8 +35,8 @@ export default function ProductCatalogPickerModal({
   visible: boolean;
   onClose: () => void;
   uid: string;
-  onInsert: (product: CatalogProduct) => void;
-  onInsertMultiple?: (products: CatalogProduct[]) => void;
+  onInsert: (product: CatalogProduct, cardLayout?: ProductGridCardLayout) => void;
+  onInsertMultiple?: (products: CatalogProduct[], cardLayout?: ProductGridCardLayout) => void;
   onCreateNew: () => void;
 }) {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
@@ -37,6 +44,22 @@ export default function ProductCatalogPickerModal({
   const [sym, setSym] = useState('$');
   const [previewProduct, setPreviewProduct] = useState<CatalogProduct | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [cardLayout, setCardLayout] = useState<ProductGridCardLayout>('portrait');
+
+  const CardLayoutPicker = () => (
+    <View style={styles.layoutRow}>
+      {CARD_LAYOUT_OPTIONS.map((opt) => (
+        <Pressable
+          key={opt.value}
+          style={[styles.layoutPill, cardLayout === opt.value && styles.layoutPillActive]}
+          onPress={() => setCardLayout(opt.value)}
+        >
+          <Ionicons name={opt.icon} size={16} color={cardLayout === opt.value ? '#FFFFFF' : '#475569'} />
+          <Text style={[styles.layoutPillText, cardLayout === opt.value && styles.layoutPillTextActive]}>{opt.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -53,12 +76,16 @@ export default function ProductCatalogPickerModal({
   }, [uid, visible]);
 
   useEffect(() => {
-    if (!visible) setSelectedIds([]);
+    if (!visible) {
+      setSelectedIds([]);
+      setCardLayout('portrait');
+    }
   }, [visible]);
 
   const close = () => {
     setPreviewProduct(null);
     setSelectedIds([]);
+    setCardLayout('portrait');
     onClose();
   };
 
@@ -76,7 +103,7 @@ export default function ProductCatalogPickerModal({
   const addSelected = () => {
     const selected = products.filter((p) => selectedIds.includes(p.id));
     if (selected.length === 0 || !onInsertMultiple) return;
-    onInsertMultiple(selected);
+    onInsertMultiple(selected, cardLayout);
     close();
   };
 
@@ -115,10 +142,12 @@ export default function ProductCatalogPickerModal({
                   : ''}
               </Text>
               {previewProduct.description ? <Text style={styles.previewDescription}>{previewProduct.description}</Text> : null}
+              <Text style={styles.layoutLabel}>Card style</Text>
+              <CardLayoutPicker />
               <Pressable
                 style={styles.addBigBtn}
                 onPress={() => {
-                  onInsert(previewProduct);
+                  onInsert(previewProduct, cardLayout);
                   setPreviewProduct(null);
                   onClose();
                 }}
@@ -195,6 +224,8 @@ export default function ProductCatalogPickerModal({
             </ScrollView>
             {!!onInsertMultiple && selectedIds.length > 0 && (
               <View style={styles.selectBar}>
+                <Text style={styles.layoutLabel}>Card style</Text>
+                <CardLayoutPicker />
                 <Pressable style={styles.addBigBtn} onPress={addSelected}>
                   <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
                   <Text style={styles.addBigBtnText}>
@@ -240,7 +271,25 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
     backgroundColor: '#F8FAFC',
+    gap: 10,
   },
+  layoutLabel: { fontSize: 12, fontWeight: '700', color: '#64748B', marginTop: 14 },
+  layoutRow: { flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 4 },
+  layoutPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+  },
+  layoutPillActive: { backgroundColor: '#4338CA', borderColor: '#4338CA' },
+  layoutPillText: { fontSize: 13, fontWeight: '700', color: '#475569' },
+  layoutPillTextActive: { color: '#FFFFFF' },
   thumb: { width: 52, height: 52, borderRadius: 10 },
   thumbPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' },
   itemLabel: { fontSize: 15, fontWeight: '700', color: '#0F172A' },

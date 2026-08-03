@@ -91,6 +91,9 @@ export function buildColumnLayout(template: ColumnLayoutTemplate, width: number)
 const PRODUCT_GRID_COLUMNS = 2;
 const PRODUCT_GRID_GAP = 14;
 const PRODUCT_CARD_ASPECT = 220 / 180; // matches the existing single-product default size
+const HORIZONTAL_ROW_HEIGHT = 130; // Shopify-style list row: fixed height, full width, one per row
+
+export type ProductGridCardLayout = 'portrait' | 'square' | 'horizontal';
 
 export interface ProductGridCell {
   x: number;
@@ -99,10 +102,28 @@ export interface ProductGridCell {
   height: number;
 }
 
-export function buildProductGridLayout(count: number, containerWidth: number): { cells: ProductGridCell[]; height: number } {
+// `cardLayout` picks the grid shape, mirroring the same three choices ProductElement.cardLayout
+// offers on the element itself: 'portrait' (default) keeps the existing 2-column tall-card
+// grid, 'square' reuses that same 2-column grid at a 1:1 aspect, and 'horizontal' switches to a
+// real Shopify-style single-column list -- each product its own full-width row -- since a
+// horizontal card only reads correctly at full width, not squeezed into half a row.
+export function buildProductGridLayout(
+  count: number,
+  containerWidth: number,
+  cardLayout: ProductGridCardLayout = 'portrait'
+): { cells: ProductGridCell[]; height: number } {
+  if (cardLayout === 'horizontal') {
+    const cells: ProductGridCell[] = [];
+    for (let i = 0; i < count; i++) {
+      cells.push({ x: 0, y: i * (HORIZONTAL_ROW_HEIGHT + PRODUCT_GRID_GAP), width: containerWidth, height: HORIZONTAL_ROW_HEIGHT });
+    }
+    const height = count * HORIZONTAL_ROW_HEIGHT + (count - 1) * PRODUCT_GRID_GAP;
+    return { cells, height };
+  }
+  const aspect = cardLayout === 'square' ? 1 : PRODUCT_CARD_ASPECT;
   const columns = Math.min(count, PRODUCT_GRID_COLUMNS);
   const cellWidth = (containerWidth - PRODUCT_GRID_GAP * (columns - 1)) / columns;
-  const cellHeight = Math.round(cellWidth * PRODUCT_CARD_ASPECT);
+  const cellHeight = Math.round(cellWidth * aspect);
   const cells: ProductGridCell[] = [];
   for (let i = 0; i < count; i++) {
     const col = i % PRODUCT_GRID_COLUMNS;

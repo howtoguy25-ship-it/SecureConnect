@@ -18,7 +18,7 @@ import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import ProductCatalogPickerModal from '@/components/editor/ProductCatalogPickerModal';
 import ColumnLayoutPickerModal from '@/components/editor/ColumnLayoutPickerModal';
 import CanvasSizePickerModal from '@/components/editor/CanvasSizePickerModal';
-import { ColumnLayoutTemplate, buildColumnLayout, buildProductGridLayout } from '@/data/columnLayouts';
+import { ColumnLayoutTemplate, buildColumnLayout, buildProductGridLayout, ProductGridCardLayout } from '@/data/columnLayouts';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct, SectionElement } from '@/types';
@@ -406,9 +406,26 @@ function EditorInner({ navigation }: Props) {
     return { x: (project.canvasSize.width - width) / 2, y };
   };
 
-  const insertExistingProduct = (product: CatalogProduct) => {
-    const { x, y } = nextStackedPosition(180, 220);
-    const el: ProductElement = { id: generateId('el'), type: 'product', productId: product.id, x, y, width: 180, height: 220, zIndex: 5 };
+  const CARD_LAYOUT_SIZE: Record<ProductGridCardLayout, { width: number; height: number }> = {
+    portrait: { width: 180, height: 220 },
+    square: { width: 200, height: 200 },
+    horizontal: { width: 340, height: 130 },
+  };
+
+  const insertExistingProduct = (product: CatalogProduct, cardLayout: ProductGridCardLayout = 'portrait') => {
+    const { width, height } = CARD_LAYOUT_SIZE[cardLayout];
+    const { x, y } = nextStackedPosition(width, height);
+    const el: ProductElement = {
+      id: generateId('el'),
+      type: 'product',
+      productId: product.id,
+      x,
+      y,
+      width,
+      height,
+      zIndex: 5,
+      ...(cardLayout !== 'portrait' ? { cardLayout } : {}),
+    };
     addElement(el);
     select(el.id);
     setPanel(null);
@@ -423,16 +440,18 @@ function EditorInner({ navigation }: Props) {
   // move/resize/rotate-proof while keeping tap-through alive via ProductCardView's
   // conditional Pressable -- no new gesture code needed, and the existing lock badge still
   // lets a seller unlock/rearrange one later if they want), wrapped in a new Section so it
-  // reads as one real store-shelf block instead of independently-floating cards.
-  const insertMultipleProducts = (products: CatalogProduct[]) => {
+  // reads as one real store-shelf block instead of independently-floating cards. `cardLayout`
+  // (chosen in ProductCatalogPickerModal) picks the grid shape via buildProductGridLayout and
+  // is stamped onto every inserted element so ElementRenderer/siteHtml.ts render it the same way.
+  const insertMultipleProducts = (products: CatalogProduct[], cardLayout: ProductGridCardLayout = 'portrait') => {
     if (products.length === 0) return;
     if (products.length === 1) {
-      insertExistingProduct(products[0]);
+      insertExistingProduct(products[0], cardLayout);
       return;
     }
 
     const sectionWidth = project.canvasSize.width - COLUMN_SECTION_MARGIN * 2;
-    const built = buildProductGridLayout(products.length, sectionWidth - COLUMN_SECTION_PADDING * 2);
+    const built = buildProductGridLayout(products.length, sectionWidth - COLUMN_SECTION_PADDING * 2, cardLayout);
     const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
     const gap = activeElements.length > 0 ? 24 : 32;
     const sectionY = lowestBottom + gap;
@@ -452,6 +471,7 @@ function EditorInner({ navigation }: Props) {
       height: built.cells[i].height,
       zIndex: 0,
       locked: true,
+      ...(cardLayout !== 'portrait' ? { cardLayout } : {}),
     }));
 
     const section: SectionElement = {
