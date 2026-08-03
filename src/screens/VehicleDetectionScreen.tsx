@@ -20,23 +20,25 @@ import { useLocation } from "@/context/LocationContext";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
 
-// Shorter than the original 1.2s -- takePhoto() is a discrete photo shutter (not a continuous
-// frame stream the way a real Frame Processor pipeline would be -- this app deliberately
-// doesn't use vision-camera's Frame Processors, since the on-device model here runs on tfjs
-// (services/vehicleDetection.ts), which isn't something a Frame Processor's restricted
-// worklet runtime can call into without swapping the inference engine itself, a much bigger
-// separate project), so this is the fastest cadence that still leaves enough time for the
-// shutter + JPEG decode + COCO-SSD inference to actually finish before the next capture
-// fires. This makes detection noticeably snappier without claiming to be continuous video. A
-// capture already in flight just makes the next tick a no-op (see capturingRef below) rather
-// than stacking, so this cadence stays safe even on a slower device/frame.
-const CAPTURE_INTERVAL_MS = 700;
+// takePhoto() is a discrete photo shutter (not a continuous frame stream the way a real Frame
+// Processor pipeline would be -- this app deliberately doesn't use vision-camera's Frame
+// Processors, since the on-device model here runs on tfjs (services/vehicleDetection.ts),
+// which isn't something a Frame Processor's restricted worklet runtime can call into without
+// swapping the inference engine itself, a much bigger separate project). A capture already in
+// flight just makes the next tick a no-op (see capturingRef below) rather than stacking, so on
+// a device where one real capture+decode+detect cycle takes longer than this interval, this
+// number doesn't actually change the real cadence at all -- capturingRef already caps it to
+// however long a cycle genuinely takes. Where it DOES matter is a faster device that finishes
+// well under this interval: raised from 700ms after repeated real freeze reports specifically
+// to leave more genuine idle time between captures for touch handling (Close, zoom buttons) to
+// get a turn on the JS thread, at the cost of a slightly less "continuous" feel.
+const CAPTURE_INTERVAL_MS = 900;
 // While actively navigating, the map screen underneath is also live (GPS tracking, guidance,
 // voice) and this screen's own tfjs CPU inference is already the heaviest thing running --
-// a slightly slower cadence here is a real, deliberate trade-off for headroom during exactly
-// the condition that was crashing/black-screening this screen before (see MapScreen's
+// a slower cadence here is a real, deliberate trade-off for headroom during exactly the
+// condition that was crashing/black-screening this screen before (see MapScreen's
 // detectionOpen gating of its own camera-animation effects for the other half of that fix).
-const CAPTURE_INTERVAL_MS_NAVIGATING = 1100;
+const CAPTURE_INTERVAL_MS_NAVIGATING = 1400;
 // Attempts (each tied to one capture pass, ~1.2s apart) before giving up on a persistently
 // unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
 // forever on one that's obscured, too far, or at a bad angle.
@@ -130,15 +132,16 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   // A phone's default/max photo resolution is often 12MP+ (4032x3024 or bigger) -- the
   // detection model only ever looks at a downsized 300x300 tensor, so capturing at full
   // resolution was pure waste: a bigger native JPEG to encode, a bigger file to write/delete
-  // every ~0.7-1.1s, a bigger buffer to decode, more pixels for tf.tensor3d to allocate.
-  // Trimmed further from an earlier 1280x720 down to 960x540 -- the SSD model's own forward
-  // pass cost is fixed either way (it always resizes its input down to 300x300 internally
-  // regardless of what's fed in), but the JPEG decode + tensor allocation/copy this app does on
-  // every single capture scales directly with pixel count, and that step runs on the same JS
-  // thread as touch handling -- a real, direct source of the "freezes while detecting" symptom.
-  // 960x540 is still comfortably more detail than the model ever uses (over 10x the pixels of
-  // its own 300x300 input) while cutting that per-frame decode/copy cost by close to half.
-  const format = useCameraFormat(device, [{ photoResolution: { width: 960, height: 540 } }]);
+  // every ~0.7-1.1s, a bigger buffer to decode, more pixels for tf.tensor3d to allocate. Cut
+  // again from 960x540 down to 640x360 after repeated real freeze reports -- the SSD model's
+  // own forward pass cost is fixed either way (it always resizes its input down to 300x300
+  // internally regardless of what's fed in), but the JPEG decode + tensor allocation/copy this
+  // app does on every single capture scales directly with pixel count, and that step runs on
+  // the same JS thread as touch handling -- a real, direct, now twice-cut source of the
+  // "freezes while detecting" symptom. 640x360 still only ever gets downscaled by the model
+  // (never upscaled -- both dimensions stay above 300px), so this doesn't introduce upscaling
+  // artifacts, just less spare detail beyond what 300x300 needs.
+  const format = useCameraFormat(device, [{ photoResolution: { width: 640, height: 360 } }]);
   // Real camera zoom -- vision-camera's `zoom` prop drives the actual native capture session
   // (AVCaptureDevice/CameraX), not just the on-screen preview, so takePhoto() genuinely
   // captures the zoomed-in frame. That directly helps detection on a distant vehicle: more of
@@ -441,11 +444,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   useEffect(() => {
     if (status !== "running") return;
     const intervalMs = isNavigating ? CAPTURE_INTERVAL_MS_NAVIGATING : CAPTURE_INTERVAL_MS;
-    // Fires the very first capture immediately instead of waiting a full interval (700-1100ms)
-    // for setInterval's own first tick -- the model is already loaded and ready the moment
-    // status flips to "running", so there's no real reason for the driver to sit staring at a
-    // live-but-idle camera for an extra beat before the first real capture even starts.
-    captureAndDetect();
+    // Deliberately does NOT fire the first capture immediately -- the very first real capture
+    // is also the single heaviest one, since coco-ssd's one-time graph warmup (skipped during
+    // loading specifically so this screen appears instantly, see vehicleDetection.ts) lands on
+    // whichever capture happens to run first. Firing that immediately, right at the exact
+    // moment the screen becomes interactive, means the heaviest possible CPU burst hits at the
+    // most visible moment -- exactly when it reads as "frozen, doesn't load" instead of
+    // "detecting." Letting setInterval's own first tick handle it gives the camera session and
+    // UI a real beat to settle first.
     intervalRef.current = setInterval(captureAndDetect, intervalMs);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
