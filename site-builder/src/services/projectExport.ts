@@ -22,7 +22,9 @@ function pageFileName(slug: string): string {
   return slug ? `${slug}.html` : 'index.html';
 }
 
-function safeFileBaseName(name: string): string {
+// Exported for reuse by imageExport.ts (the Logo/Social "Download Image" flow) -- same
+// filesystem-safe naming rule applies to any project-derived download, not just ZIPs.
+export function safeFileBaseName(name: string): string {
   return (name || 'site').trim().replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'site';
 }
 
@@ -50,7 +52,9 @@ async function saveZipToCache(zip: JSZip, zipFilename: string): Promise<string> 
   return file.uri;
 }
 
-function downloadBlobOnWeb(blob: Blob, filename: string): void {
+// Exported for reuse by imageExport.ts -- the same "trigger a real browser download" trick
+// applies to any generated file on web, not just ZIPs.
+export function downloadBlobOnWeb(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

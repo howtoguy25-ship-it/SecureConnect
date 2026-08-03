@@ -29,6 +29,9 @@ import GeneratingOverlay from '@/components/GeneratingOverlay';
 import { labelForElement } from '@/utils/elementLabel';
 import { CartProvider, useCart } from '@/context/CartContext';
 import { useSellerCurrencySymbol } from '@/hooks/useSellerCurrencySymbol';
+import CanvasExportView from '@/components/canvas/CanvasExportView';
+import { downloadCanvasImage } from '@/services/imageExport';
+import { downloadProjectZip } from '@/services/projectExport';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
@@ -109,6 +112,13 @@ function EditorInner({ navigation }: Props) {
   // Canva-style prebuilt video/social export size picker -- only meaningful for pages whose
   // whole canvas IS the exported media (Video/Social), not a scrollable website page.
   const [sizePickerOpen, setSizePickerOpen] = useState(false);
+  // A hidden, full-resolution, chrome-free copy of the canvas (see CanvasExportView) that
+  // captureRef screenshots into a real PNG for the Logo "Download Image" button -- a Logo
+  // page's own on-screen canvas is scaled to fit the viewport and has selection handles/lock
+  // badges layered on top, neither of which belongs in the actual downloaded image.
+  const exportViewRef = useRef<View>(null);
+  const [downloadingImage, setDownloadingImage] = useState(false);
+  const [downloadingSite, setDownloadingSite] = useState(false);
   // Disables the canvas ScrollView's own scrolling while an element is being dragged or
   // resized -- on web, the ScrollView's native scroll can otherwise still respond to the
   // same touch underneath an active element drag, which is what made moving or resizing a
@@ -178,6 +188,39 @@ function EditorInner({ navigation }: Props) {
       </View>
     );
   }
+
+  const handleDownloadImage = async () => {
+    setDownloadingImage(true);
+    try {
+      await downloadCanvasImage(exportViewRef, project.name);
+    } catch (err: any) {
+      showAlert('Could not download image', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setDownloadingImage(false);
+    }
+  };
+
+  // Website/Video/Social pages download as a real file of their actual published HTML (see
+  // projectExport.ts) rather than a flat image -- that only exists once the page has actually
+  // been published (publishSlug is what getPublishedSiteExport reads back), so an unpublished
+  // page gets a clear nudge to publish first instead of a confusing "not found" error.
+  const handleDownloadSite = async () => {
+    if (!project.publishSlug) {
+      showAlert('Publish first', 'Publish your site to enable downloading it as a real file.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Publish', onPress: () => navigation.navigate('Publish', { projectId: project.id }) },
+      ]);
+      return;
+    }
+    setDownloadingSite(true);
+    try {
+      await downloadProjectZip(project);
+    } catch (err: any) {
+      showAlert('Could not download', err?.message ?? 'Try again in a moment.');
+    } finally {
+      setDownloadingSite(false);
+    }
+  };
 
   // AIBuildProgressScreen replaces itself with this screen the instant the generation
   // session's Firestore doc flips to 'completed' -- but the actual finished project doc
@@ -898,6 +941,23 @@ function EditorInner({ navigation }: Props) {
                 </Pressable>
               )}
               {project.pageType === 'website' && <CartHeaderButton onPress={() => setCartOpen(true)} color={theme.text} />}
+              {project.pageType === 'logo' ? (
+                <Pressable onPress={handleDownloadImage} disabled={downloadingImage} hitSlop={8}>
+                  {downloadingImage ? (
+                    <ActivityIndicator size="small" color={theme.text} />
+                  ) : (
+                    <Ionicons name="image-outline" size={22} color={theme.text} />
+                  )}
+                </Pressable>
+              ) : (
+                <Pressable onPress={handleDownloadSite} disabled={downloadingSite} hitSlop={8}>
+                  {downloadingSite ? (
+                    <ActivityIndicator size="small" color={theme.text} />
+                  ) : (
+                    <Ionicons name="download-outline" size={22} color={theme.text} />
+                  )}
+                </Pressable>
+              )}
             </>
           )}
           {isGenerating ? (
@@ -1232,6 +1292,12 @@ function EditorInner({ navigation }: Props) {
         onClose={() => setSizePickerOpen(false)}
         onSelect={(canvasSize) => updateProject({ canvasSize })}
       />
+
+      {project.pageType === 'logo' && (
+        <View style={{ position: 'absolute', left: -100000, top: 0 }} pointerEvents="none">
+          <CanvasExportView ref={exportViewRef} project={project} />
+        </View>
+      )}
     </SafeAreaView>
     </CartProvider>
   );
