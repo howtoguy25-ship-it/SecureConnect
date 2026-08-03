@@ -186,15 +186,30 @@ function stripMarkdown(text: string): string {
 }
 
 function estimateTextHeight(text: string, fontSize: number): number {
-  // ~0.62 (rather than 0.55) accounts for word-wrap leaving a ragged right edge unused,
-  // and bold/mixed-width system fonts running wider than a flat monospace-style estimate.
-  const charsPerLine = Math.max(1, Math.floor(CONTENT_WIDTH / (fontSize * 0.62)));
+  // Calibrated against real rendered line counts (a 0.62 char-width factor was reserving
+  // noticeably more lines -- and therefore height -- than real text ever actually wraps to,
+  // leaving a large dead gap before whatever followed). 0.56 plus a lighter final buffer
+  // still keeps a real one-line safety margin (better a hair of extra whitespace than text
+  // clipping into the next element) without the previous double-stacked overestimate.
+  const charsPerLine = Math.max(1, Math.floor(CONTENT_WIDTH / (fontSize * 0.56)));
   const totalLines = text
     .split('\n')
     .reduce((sum, paragraph) => sum + Math.max(1, Math.ceil(paragraph.length / charsPerLine)), 0);
-  // +25% line-height buffer (instead of a flat +8px) so the margin scales with how much
-  // text there actually is, not just a fixed nudge that a 10-line paragraph blows past.
-  return Math.ceil(totalLines * (fontSize * 1.4) * 1.25) + 12;
+  return Math.ceil(totalLines * (fontSize * 1.35) * 1.1) + 8;
+}
+
+// A button sized only for a generic short label ("Shop Now") visibly wraps or clips once a
+// real AI-written or user-typed label runs longer ("Schedule a Consultation") -- ellipsis is
+// the last-resort safety net (see ElementRenderer.tsx/siteHtml.ts), but a real width that
+// actually fits the label is what makes a button look intentionally designed instead of
+// broken. ~0.56 chars-per-em mirrors estimateTextHeight's own calibrated single-line ratio;
+// clamped to a sensible minimum (a one-word label shouldn't shrink to a tiny nub) and the
+// full available content width (a button should never run wider than the page itself).
+function estimateButtonWidth(label: string, fontSize = 15): number {
+  const charWidth = fontSize * 0.56;
+  const textWidth = label.length * charWidth;
+  const horizontalPadding = 48; // 24px each side, real breathing room around the label
+  return Math.min(CONTENT_WIDTH, Math.max(140, Math.ceil(textWidth + horizontalPadding)));
 }
 
 export interface SectionImage {
@@ -249,6 +264,16 @@ const NAV_TAB_GAP = 8;
 // shrinking tabs indefinitely to fit every section.
 const MAX_NAV_TABS = 4;
 
+// A compact nav pill's real natural width from its own label -- separate from
+// estimateButtonWidth (whose 140px floor is calibrated for a standalone hero/cta button, not
+// a tight tab bar where 3-4 short labels need to share one row).
+function estimateTabWidth(label: string, fontSize = 13): number {
+  const charWidth = fontSize * 0.56;
+  const textWidth = label.length * charWidth;
+  const horizontalPadding = 28;
+  return Math.max(60, Math.ceil(textWidth + horizontalPadding));
+}
+
 // A real, working "prebuilt tabs" nav bar for Professional/Go All Out builds (see
 // startGeneration's complexity param) -- a Section background plus one real Button per
 // tab, each with scrollToY set to that section's actual on-page position. Returns an empty
@@ -257,7 +282,19 @@ function buildNavBar(sectionStarts: { label: string; y: number }[], accentColor:
   const tabs = sectionStarts.slice(1, 1 + MAX_NAV_TABS); // skip the hero -- already visible
   if (tabs.length < 2) return [];
 
-  const tabWidth = Math.floor((CONTENT_WIDTH - NAV_TAB_GAP * (tabs.length - 1)) / tabs.length);
+  // Each tab gets its own real width from its own label -- a short "FAQ" tab no longer
+  // steals as much room as a longer "Our Services" tab just because an even split ignores
+  // content length, and scaling every tab down proportionally (rather than a flat divide)
+  // when they don't all fit at their natural width guarantees the whole bar fits the canvas
+  // exactly while still keeping longer labels visibly wider than short ones. Ellipsis (see
+  // ElementRenderer.tsx/siteHtml.ts) is still the last-resort safety net either way.
+  const naturalWidths = tabs.map((tab) => estimateTabWidth(tab.label));
+  const totalGap = NAV_TAB_GAP * (tabs.length - 1);
+  const availableForTabs = CONTENT_WIDTH - totalGap;
+  const totalNatural = naturalWidths.reduce((sum, w) => sum + w, 0);
+  const scale = totalNatural > availableForTabs ? availableForTabs / totalNatural : 1;
+  const tabWidths = naturalWidths.map((w) => Math.round(w * scale));
+
   const bar: SectionElement = {
     id: nextId('el'),
     type: 'section',
@@ -274,13 +311,14 @@ function buildNavBar(sectionStarts: { label: string; y: number }[], accentColor:
   // border/colored-text look was indistinguishable from a plain unstyled outline button,
   // which is exactly the "very cheap" nav bar look this replaces.
   const tabHeight = NAV_BAR_HEIGHT - 16;
-  const buttons: ButtonElement[] = tabs.map((tab, i) =>
-    buttonEl({
+  let cursorX = MARGIN;
+  const buttons: ButtonElement[] = tabs.map((tab, i) => {
+    const btn = buttonEl({
       label: tab.label,
       y: 8,
       height: tabHeight,
-      x: MARGIN + i * (tabWidth + NAV_TAB_GAP),
-      width: tabWidth,
+      x: cursorX,
+      width: tabWidths[i],
       backgroundColor: accentColor || textColor,
       textColor: '#FFFFFF',
       borderRadius: Math.round(tabHeight / 2),
@@ -288,8 +326,10 @@ function buildNavBar(sectionStarts: { label: string; y: number }[], accentColor:
       // Shifted by NAV_BAR_HEIGHT below (once the bar itself pushes every section down) --
       // set to a placeholder here and corrected by the caller once that shift is known.
       scrollToY: tab.y,
-    })
-  );
+    });
+    cursorX += tabWidths[i] + NAV_TAB_GAP;
+    return btn;
+  });
   bar.childIds = buttons.map((b) => b.id);
   return [bar, ...buttons];
 }
@@ -660,8 +700,9 @@ export function layoutSitePlan(
       }
 
       if (buttonLabel && (section.kind === 'hero' || section.kind === 'cta')) {
-        const buttonX = section.kind === 'cta' ? (CANVAS_WIDTH - 160) / 2 : MARGIN;
-        elements.push(buttonEl({ label: buttonLabel, y, x: buttonX, backgroundColor: plan.accentColor }));
+        const buttonWidth = estimateButtonWidth(buttonLabel);
+        const buttonX = section.kind === 'cta' ? (CANVAS_WIDTH - buttonWidth) / 2 : MARGIN;
+        elements.push(buttonEl({ label: buttonLabel, y, x: buttonX, width: buttonWidth, backgroundColor: plan.accentColor }));
         y += 48 + 16;
       }
     }

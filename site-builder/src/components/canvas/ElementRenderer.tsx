@@ -1026,18 +1026,29 @@ export default function ElementRenderer({
         borderColor: element.borderColor ?? 'transparent',
         alignItems: 'center' as const,
         justifyContent: 'center' as const,
+        paddingHorizontal: 12,
       };
+      // A label longer than the button's own width must never wrap -- a wrapped second line
+      // has nowhere to go inside a fixed-height button and either overflows past the rounded
+      // corners or gets clipped mid-character, both of which read as a broken/buggy button.
+      // Single line + tail ellipsis keeps every button looking intentional regardless of how
+      // long a real label (AI-written or user-typed) turns out to be.
+      const buttonTextStyle = { color: element.textColor, fontWeight: '600' as const };
       if (element.backgroundGradient) {
         const { start, end } = gradientStartEnd(element.backgroundGradient.angle);
         return (
           <LinearGradient colors={element.backgroundGradient.colors} start={start} end={end} style={buttonInnerStyle}>
-            <Text style={{ color: element.textColor, fontWeight: '600' }}>{element.label}</Text>
+            <Text style={buttonTextStyle} numberOfLines={1} ellipsizeMode="tail">
+              {element.label}
+            </Text>
           </LinearGradient>
         );
       }
       return (
         <View style={{ ...buttonInnerStyle, backgroundColor: element.backgroundColor }}>
-          <Text style={{ color: element.textColor, fontWeight: '600' }}>{element.label}</Text>
+          <Text style={buttonTextStyle} numberOfLines={1} ellipsizeMode="tail">
+            {element.label}
+          </Text>
         </View>
       );
     }

@@ -2081,11 +2081,15 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       return renderShape(el);
     case 'button': {
       const buttonBackground = el.backgroundGradient ? cssGradient(el.backgroundGradient) : escapeAttr(el.backgroundColor);
+      // A label longer than the button's own width must never wrap onto a second line (see
+      // ElementRenderer.tsx's identical fix) -- white-space:nowrap + overflow:hidden +
+      // text-overflow:ellipsis keeps every button a clean single line regardless of label
+      // length, matching the editor exactly instead of overflowing past the rounded corners.
       const buttonStyle = `${base}background:${buttonBackground};color:${escapeAttr(
         el.textColor
       )};border-radius:${el.borderRadius}px;${
         el.borderWidth ? `border:${el.borderWidth}px solid ${escapeAttr(el.borderColor ?? '#000000')};` : ''
-      }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;`;
+      }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;padding:0 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       // Opens the real cart drawer -- the exact same siteSparkCart.togglePanel() the header's
       // own cart icon calls (see renderHeaderBarHtml) -- for a seller who wants an extra
       // "Cart" button somewhere else on the page (e.g. a storefront theme's own nav bar).
