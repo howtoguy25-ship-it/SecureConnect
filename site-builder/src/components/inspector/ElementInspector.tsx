@@ -1069,6 +1069,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                   ['stopwatch', 'Stopwatch'],
                   ['calculator', 'Calculator'],
                   ['unitconverter', 'Unit Converter'],
+                  ['accordion', 'Service List'],
                 ] as [WidgetKind, string][]
               ).map(([kind, label]) => (
                 <Pressable
@@ -1186,6 +1187,67 @@ export default function ElementInspector({ element, allElements, onChange, onDel
               <Text style={styles.helperText}>
                 A real working length/weight/temperature/volume converter. No setup needed here.
               </Text>
+            )}
+
+            {element.kind === 'accordion' && (
+              <>
+                <Text style={styles.fieldLabel}>Columns</Text>
+                <View style={styles.rowButtons}>
+                  {([1, 2] as const).map((cols) => (
+                    <Pressable
+                      key={cols}
+                      style={[styles.toggleBtn, (element.accordionColumns ?? 1) === cols && styles.toggleBtnActive]}
+                      onPress={() => onChange({ accordionColumns: cols } as any)}
+                    >
+                      <Text style={styles.toggleBtnText}>{cols === 1 ? '1 Column' : '2 Columns'}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={styles.fieldLabel}>Items ({(element.accordionItems ?? []).length})</Text>
+                {(element.accordionItems ?? []).length === 0 && (
+                  <Text style={styles.helperText}>No items yet — add one below.</Text>
+                )}
+                {(element.accordionItems ?? []).map((item, i) => (
+                  <View key={i} style={styles.gameQuestionCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <TextInput
+                        style={[styles.textInput, { flex: 1 }]}
+                        value={item.label}
+                        onChangeText={(label) =>
+                          onChange({ accordionItems: (element.accordionItems ?? []).map((x, j) => (j === i ? { ...x, label } : x)) } as any)
+                        }
+                        placeholder={`Item ${i + 1} title`}
+                      />
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() => onChange({ accordionItems: (element.accordionItems ?? []).filter((_, j) => j !== i) } as any)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={[styles.textInput, { marginTop: 6, minHeight: 60, textAlignVertical: 'top' }]}
+                      value={item.description}
+                      onChangeText={(description) =>
+                        onChange({ accordionItems: (element.accordionItems ?? []).map((x, j) => (j === i ? { ...x, description } : x)) } as any)
+                      }
+                      placeholder="What this includes..."
+                      multiline
+                    />
+                  </View>
+                ))}
+                <Pressable
+                  style={styles.uploadBtn}
+                  onPress={() =>
+                    onChange({ accordionItems: [...(element.accordionItems ?? []), { label: '', description: '' }] } as any)
+                  }
+                >
+                  <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.uploadBtnText}>Add item</Text>
+                </Pressable>
+                <Text style={styles.helperText}>Visitors tap an item on your published site to expand it and read its description.</Text>
+              </>
             )}
           </>
         )}

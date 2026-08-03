@@ -393,11 +393,16 @@ export interface GameElement extends BaseElement {
 
 // Every kind is a real, always-live/interactive utility -- never a static image standing in
 // for one -- matching GameElement's one-type-covers-every-kind convention.
-export type WidgetKind = 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter';
+export type WidgetKind = 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter' | 'accordion';
 
 export interface WidgetTimezone {
   label: string; // user-facing name, e.g. "New York" or "Tokyo Office"
   ianaTimezone: string; // a real IANA zone id, e.g. "America/New_York" -- never invented
+}
+
+export interface WidgetAccordionItem {
+  label: string;
+  description: string;
 }
 
 // `timezones` is only meaningful for kind 'clock' (one entry is a simple local clock, 2+ is
@@ -414,6 +419,15 @@ export interface WidgetElement extends BaseElement {
   style: 'analog' | 'digital';
   countdownTargetIso: string;
   countdownLabel: string;
+  // Only for kind 'accordion': a real "Our Services"/"Why Choose Us"-style list -- each item
+  // collapsed by default, tap its header to expand and reveal the description, laid out in
+  // real columns (see accordionColumns) instead of one flat paragraph of bullet text.
+  accordionItems?: WidgetAccordionItem[];
+  // Only for kind 'accordion': how many side-by-side columns to lay items out in (1 or 2).
+  accordionColumns?: 1 | 2;
+  // Only for kind 'accordion': the site's own real accent color, so the chevron/expanded
+  // state visually matches the site's actual brand color instead of a fixed generic hue.
+  accordionAccentColor?: string;
 }
 
 // A real, AI-generated interactive mini-app for whatever a user asks for that doesn't fit

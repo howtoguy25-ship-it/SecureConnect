@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet } from 'react-native';
+import { View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { WidgetElement, WidgetKind } from '@/types';
@@ -18,6 +18,10 @@ export const WIDGET_THEME: Record<WidgetKind, { accent: string; soft: string; gr
   stopwatch: { accent: '#0D9488', soft: '#CCFBF1', gradient: ['#F0FDFA', '#CCFBF1'], icon: 'stopwatch-outline' },
   calculator: { accent: '#7C3AED', soft: '#EDE9FE', gradient: ['#F5F3FF', '#EDE9FE'], icon: 'calculator-outline' },
   unitconverter: { accent: '#0284C7', soft: '#E0F2FE', gradient: ['#F0F9FF', '#E0F2FE'], icon: 'swap-horizontal-outline' },
+  // Never actually used to paint a gradient card (see WidgetView's kind==='accordion' branch,
+  // which renders a plain white card using the site's own real accordionAccentColor instead)
+  // -- present only so this lookup table stays a total function over every WidgetKind.
+  accordion: { accent: '#0F172A', soft: '#F1F5F9', gradient: ['#FFFFFF', '#FFFFFF'], icon: 'list-outline' },
 };
 
 function formatDigital(date: Date, tz: string): string {
@@ -527,9 +531,69 @@ function UnitConverterWidget({ compact }: { compact: boolean }) {
   );
 }
 
+// A real "Our Services"/"Why Choose Us"-style list -- each item collapsed by default, tap
+// its header to expand and reveal the description. Laid out as a real, always-scrollable
+// (fixed outer height, never overflows onto whatever sits below it on the page) list of
+// cards, 1 or 2 per row, so expanding an item never shifts the rest of the page -- mirrors
+// the same behavior as renderAccordionWidgetHtml in firebase/functions/src/siteHtml.ts.
+function AccordionWidget({ element, width, height }: { element: WidgetElement; width: number; height: number }) {
+  const [openIndices, setOpenIndices] = useState<Set<number>>(new Set());
+  const items = element.accordionItems ?? [];
+  const columns = element.accordionColumns === 2 ? 2 : 1;
+  const accent = element.accordionAccentColor?.trim() || '#0F172A';
+  const gap = 10;
+  const cardWidth = columns === 2 ? (width - gap) / 2 : width;
+
+  const toggle = (i: number) =>
+    setOpenIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
+  return (
+    <ScrollView style={{ width, height }} contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap }} showsVerticalScrollIndicator={false}>
+      {items.map((item, i) => {
+        const open = openIndices.has(i);
+        return (
+          <Pressable
+            key={i}
+            onPress={() => toggle(i)}
+            style={{
+              width: cardWidth,
+              borderWidth: 1,
+              borderColor: '#E2E8F0',
+              borderRadius: 12,
+              padding: 12,
+              backgroundColor: '#FFFFFF',
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: '#0F172A' }} numberOfLines={2}>
+                {item.label}
+              </Text>
+              <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={accent} style={{ marginLeft: 8 }} />
+            </View>
+            {open && !!item.description && (
+              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 6, lineHeight: 17 }}>{item.description}</Text>
+            )}
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 export default function WidgetView({ element, width, height }: { element: WidgetElement; width: number; height: number }) {
   const compact = width < 220 || height < 140;
   const theme = WIDGET_THEME[element.kind] ?? WIDGET_THEME.clock;
+
+  // A real branded list, not a small utility card -- skips the colorful gradient-card
+  // treatment every other widget kind gets (see AccordionWidget's own comment).
+  if (element.kind === 'accordion') {
+    return <AccordionWidget element={element} width={width} height={height} />;
+  }
 
   return (
     <View

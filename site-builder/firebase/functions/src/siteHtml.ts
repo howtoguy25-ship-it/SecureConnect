@@ -1484,6 +1484,10 @@ const WIDGET_THEME: Record<WidgetElement['kind'], { accent: string; soft: string
   stopwatch: { accent: '#0D9488', soft: '#CCFBF1', gradientFrom: '#F0FDFA', gradientTo: '#CCFBF1', emoji: '⏱️' },
   calculator: { accent: '#7C3AED', soft: '#EDE9FE', gradientFrom: '#F5F3FF', gradientTo: '#EDE9FE', emoji: '🧮' },
   unitconverter: { accent: '#0284C7', soft: '#E0F2FE', gradientFrom: '#F0F9FF', gradientTo: '#E0F2FE', emoji: '🔄' },
+  // Never actually used to paint a gradient card (see renderAccordionWidgetHtml, which
+  // renders a plain white card using the site's own real accordionAccentColor instead) --
+  // present only so this lookup table stays a total function over every WidgetKind.
+  accordion: { accent: '#0F172A', soft: '#F1F5F9', gradientFrom: '#FFFFFF', gradientTo: '#FFFFFF', emoji: '📋' },
 };
 
 function widgetCardStyle(kind: WidgetElement['kind']): string {
@@ -2000,11 +2004,59 @@ function renderCustomWidgetHtml(el: CustomWidgetElement, base: string): string {
 </div>`;
 }
 
+// A real "Our Services"/"Why Choose Us"-style list -- each item collapsed by default, a
+// real click toggles it open to reveal the description, laid out in 1 or 2 real columns.
+// The outer wrapper's height never changes (it's the same fixed `base` box every other
+// element gets) -- it scrolls internally (overflow-y:auto) so expanding an item can never
+// shift or overlap whatever sits below it on the published page. Mirrors AccordionWidget in
+// WidgetView.tsx (the editor's equivalent).
+function renderAccordionWidgetHtml(el: WidgetElement, base: string): string {
+  const items = el.accordionItems ?? [];
+  const columns = el.accordionColumns === 2 ? 2 : 1;
+  const accent = el.accordionAccentColor?.trim() || '#0F172A';
+  const cardWidth = columns === 2 ? 'calc(50% - 5px)' : '100%';
+
+  const itemsHtml = items
+    .map(
+      (item, i) => `<div data-idx="${i}" style="width:${cardWidth};border:1px solid #E2E8F0;border-radius:12px;padding:12px;background:#FFFFFF;box-sizing:border-box;cursor:pointer;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <div style="font-size:14px;font-weight:700;color:#0F172A;">${escapeHtml(item.label)}</div>
+      <div data-chevron style="color:${escapeAttr(accent)};font-size:12px;transition:transform 0.15s;flex-shrink:0;">▼</div>
+    </div>
+    <div data-desc style="display:none;font-size:12px;color:#64748B;margin-top:6px;line-height:17px;">${escapeHtml(item.description)}</div>
+  </div>`
+    )
+    .join('');
+
+  const wrapId = `accordion-${el.id}`;
+  const script = `<script>(function(){
+  var cards = document.querySelectorAll('#${wrapId} > div');
+  for (var i = 0; i < cards.length; i++) {
+    (function(card){
+      card.addEventListener('click', function(){
+        var desc = card.querySelector('[data-desc]');
+        var chevron = card.querySelector('[data-chevron]');
+        var open = desc.style.display === 'block';
+        desc.style.display = open ? 'none' : 'block';
+        chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+      });
+    })(cards[i]);
+  }
+})();</script>`;
+
+  return `<div id="el-${el.id}" style="${base}overflow-y:auto;box-sizing:border-box;">
+  ${widgetTitleHtml(el.title, 'accordion')}
+  <div id="${wrapId}" style="display:flex;flex-wrap:wrap;gap:10px;">${itemsHtml}</div>
+</div>
+${script}`;
+}
+
 function renderWidgetHtml(el: WidgetElement, base: string): string {
   if (el.kind === 'countdown') return renderCountdownWidgetHtml(el, base);
   if (el.kind === 'stopwatch') return renderStopwatchWidgetHtml(el, base);
   if (el.kind === 'calculator') return renderCalculatorWidgetHtml(el, base);
   if (el.kind === 'unitconverter') return renderUnitConverterWidgetHtml(el, base);
+  if (el.kind === 'accordion') return renderAccordionWidgetHtml(el, base);
   return renderClockWidgetHtml(el, base);
 }
 

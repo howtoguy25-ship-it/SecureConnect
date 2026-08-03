@@ -242,11 +242,16 @@ export interface GameElement extends BaseElement {
 
 // Every kind is a real, always-live/interactive utility, never a static picture standing
 // in for one -- same flat-interface convention as GameElement covering every game kind.
-export type WidgetKind = 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter';
+export type WidgetKind = 'clock' | 'countdown' | 'stopwatch' | 'calculator' | 'unitconverter' | 'accordion';
 
 export interface WidgetTimezone {
   label: string; // user-facing name, e.g. "New York" or "Tokyo Office"
   ianaTimezone: string; // a real IANA zone id, e.g. "America/New_York" -- never invented
+}
+
+export interface WidgetAccordionItem {
+  label: string;
+  description: string;
 }
 
 // Mirrors the client's WidgetElement. `timezones` is only meaningful for kind 'clock' (one
@@ -255,7 +260,8 @@ export interface WidgetTimezone {
 // only for kind 'countdown' -- a real ISO timestamp it counts down to live, client-side.
 // 'stopwatch'/'calculator'/'unitconverter' need no extra fields -- purely interactive, built
 // entirely client-side -- see renderWidgetHtml in siteHtml.ts for the published-site
-// implementation of every kind.
+// implementation of every kind. `accordionItems`/`accordionColumns`/`accordionAccentColor`
+// are only for kind 'accordion' -- see the client's identical fields for the full rationale.
 export interface WidgetElement extends BaseElement {
   type: 'widget';
   kind: WidgetKind;
@@ -264,6 +270,9 @@ export interface WidgetElement extends BaseElement {
   style: 'analog' | 'digital';
   countdownTargetIso: string;
   countdownLabel: string;
+  accordionItems?: WidgetAccordionItem[];
+  accordionColumns?: 1 | 2;
+  accordionAccentColor?: string;
 }
 
 // A real, AI-generated interactive mini-app for whatever a user asks for that doesn't fit

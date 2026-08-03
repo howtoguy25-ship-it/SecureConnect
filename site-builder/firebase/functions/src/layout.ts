@@ -1,4 +1,4 @@
-import { CanvasElement, ButtonElement, CatalogProduct, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement, SectionElement, ShapeElement, IconElement } from './types';
+import { CanvasElement, ButtonElement, CatalogProduct, ImageElement, TextElement, VideoEmbedElement, GameElement, ProductElement, WidgetElement, CustomWidgetElement, SectionElement } from './types';
 import { SitePlan, SitePlanSection } from './openai';
 
 const CANVAS_WIDTH = 390;
@@ -90,25 +90,6 @@ function gameEl(partial: Partial<GameElement> & Pick<GameElement, 'y' | 'height'
     memorySymbols: [],
     clickerLabel: 'Tap!',
     clickerTarget: 20,
-    ...partial,
-  };
-}
-
-function shapeEl(partial: Partial<ShapeElement> & Pick<ShapeElement, 'y' | 'height' | 'x' | 'width' | 'shapeKind' | 'color'>): ShapeElement {
-  return {
-    id: nextId('el'),
-    type: 'shape',
-    zIndex: 1,
-    ...partial,
-  };
-}
-
-function iconEl(partial: Partial<IconElement> & Pick<IconElement, 'y' | 'height' | 'x' | 'width' | 'iconName' | 'color'>): IconElement {
-  return {
-    id: nextId('el'),
-    type: 'icon',
-    iconSet: 'Ionicons',
-    zIndex: 2,
     ...partial,
   };
 }
@@ -625,43 +606,44 @@ export function layoutSitePlan(
       y += headlineHeight + 6;
 
       // A real "Why Choose Us"/"Our Services"-style list (see openai.ts's featureItems
-      // field) renders as actual individual rows -- an icon badge + a bold title + a real
-      // description -- instead of the AI cramming "•" bullet lines into one plain body
-      // paragraph, which is the exact "very plain, not stylish" look this replaces. Falls
+      // field) renders as a real interactive accordion -- collapsed rows in real columns,
+      // tap one to expand and reveal its description -- instead of the AI cramming "•"
+      // bullet lines into one plain body paragraph, which is the exact "very plain, not
+      // stylish" look this replaces (see WidgetElement's 'accordion' kind for the real
+      // tap-to-expand behavior on both the editor canvas and the published site). Falls
       // back to the plain body paragraph below whenever the model left featureItems empty
       // (a short prose "About us" section, or an older plan generated before this field
       // existed), so nothing regresses for those cases.
       if (section.featureItems && section.featureItems.length > 0) {
-        const ICON_SIZE = 40;
-        const ROW_GAP = 20;
-        const textX = MARGIN + ICON_SIZE + 14;
-        const textWidth = CONTENT_WIDTH - ICON_SIZE - 14;
-        section.featureItems.forEach((item) => {
-          const itemLabel = stripMarkdown(item.label);
-          const itemDescription = item.description ? stripMarkdown(item.description) : '';
-          const titleHeight = estimateTextHeight(itemLabel, 16);
-          const descHeight = itemDescription ? estimateTextHeight(itemDescription, 14) : 0;
-          const rowHeight = Math.max(ICON_SIZE, titleHeight + (descHeight ? descHeight + 4 : 0));
-          const iconY = y + (rowHeight - ICON_SIZE) / 2;
-          elements.push(shapeEl({ x: MARGIN, y: iconY, width: ICON_SIZE, height: ICON_SIZE, shapeKind: 'circle', color: plan.accentColor }));
-          elements.push(
-            iconEl({
-              x: MARGIN + (ICON_SIZE - 20) / 2,
-              y: iconY + (ICON_SIZE - 20) / 2,
-              width: 20,
-              height: 20,
-              iconName: 'checkmark',
-              color: '#FFFFFF',
-            })
-          );
-          elements.push(textEl({ text: itemLabel, x: textX, width: textWidth, y, fontSize: 16, fontWeight: 'bold', color: plan.textColor, height: titleHeight }));
-          if (itemDescription) {
-            elements.push(
-              textEl({ text: itemDescription, x: textX, width: textWidth, y: y + titleHeight + 4, fontSize: 14, color: '#64748B', height: descHeight })
-            );
-          }
-          y += rowHeight + ROW_GAP;
-        });
+        const items = section.featureItems.map((item) => ({
+          label: stripMarkdown(item.label),
+          description: item.description ? stripMarkdown(item.description) : '',
+        }));
+        // 2 columns once there are enough items for a grid to read as one instead of a
+        // cramped pair -- a lone 2-3 item list stays a single, easy-to-scan column.
+        const columns: 1 | 2 = items.length >= 4 ? 2 : 1;
+        const rows = Math.ceil(items.length / columns);
+        // Collapsed-row height estimate (title + padding) times how many rows fit on
+        // screen at once -- the accordion scrolls internally for the rest (see
+        // renderAccordionWidgetHtml's own comment), so this never has to be exact, just a
+        // reasonable amount of the section visible without scrolling on first view.
+        const collapsedRowHeight = 52;
+        const visibleRows = Math.min(rows, 4);
+        const accordionHeight = visibleRows * (collapsedRowHeight + 10);
+        elements.push(
+          widgetEl({
+            y,
+            height: accordionHeight,
+            title: '',
+            x: MARGIN,
+            width: CONTENT_WIDTH,
+            kind: 'accordion',
+            accordionItems: items,
+            accordionColumns: columns,
+            accordionAccentColor: plan.accentColor,
+          })
+        );
+        y += accordionHeight + 16;
       } else if (body) {
         const bodyHeight = estimateTextHeight(body, 15);
         elements.push(
