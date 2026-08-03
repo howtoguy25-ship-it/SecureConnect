@@ -1504,6 +1504,19 @@ function widgetTitleHtml(title: string, kind: WidgetElement['kind']): string {
 </div>`;
 }
 
+// Darkens a "#RRGGBB" accent color for a gradient's second stop -- WIDGET_THEME only defines
+// one accent color per kind, so this derives a matching deeper shade instead of needing a
+// second color threaded through everywhere a gradient tile is built. Mirrors the editor's
+// identical helper in WidgetView.tsx.
+function shadeHexColor(hex: string, percent: number): string {
+  const num = parseInt(hex.replace('#', ''), 16);
+  const amt = Math.round(2.55 * percent);
+  const r = Math.max(0, Math.min(255, (num >> 16) + amt));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amt));
+  const b = Math.max(0, Math.min(255, (num & 0x0000ff) + amt));
+  return `#${(0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1)}`;
+}
+
 // A real, always-live utility -- ticks every second in the visitor's own browser via
 // setInterval + Intl.DateTimeFormat (correct per-timezone/DST handling for free, no manual
 // offset math), never a static image of a clock face. Purely client-side, no backend
@@ -1516,18 +1529,47 @@ function renderClockWidgetHtml(el: WidgetElement, base: string): string {
 
   if (el.style === 'analog') {
     const size = timezones.length > 1 ? 64 : 84;
-    const hourLen = size * 0.26;
-    const minLen = size * 0.36;
-    const secLen = size * 0.4;
+    const hourLen = size * 0.24;
+    const minLen = size * 0.34;
+    const secLen = size * 0.38;
+
+    // 12 real tick marks (major/thicker at the 12-3-6-9 positions, matching the numerals
+    // below) plus the 4 cardinal numerals -- static, so these are plain rotated divs computed
+    // once at generation time, not driven by the tick script below. Turns a bare
+    // circle-with-hands into a real classroom-style wall clock face.
+    const ticksHtml = Array.from({ length: 12 })
+      .map((_, i) => {
+        const degrees = i * 30;
+        const major = i % 3 === 0;
+        const length = major ? size * 0.09 : size * 0.05;
+        const thickness = major ? 2.5 : 1.5;
+        const color = major ? '#334155' : '#94A3B8';
+        return `<div style="position:absolute;width:${size}px;height:${size}px;top:0;left:0;transform:rotate(${degrees}deg);"><div style="position:absolute;left:${size / 2 - thickness / 2}px;top:2px;width:${thickness}px;height:${length}px;border-radius:${thickness / 2}px;background:${color};"></div></div>`;
+      })
+      .join('');
+    const numeralsHtml = [
+      { label: '12', degrees: 0 },
+      { label: '3', degrees: 90 },
+      { label: '6', degrees: 180 },
+      { label: '9', degrees: 270 },
+    ]
+      .map(
+        (n) =>
+          `<div style="position:absolute;width:${size}px;height:${size}px;top:0;left:0;transform:rotate(${n.degrees}deg);"><div style="position:absolute;left:0;right:0;top:${size * 0.08}px;text-align:center;transform:rotate(${-n.degrees}deg);font-size:${size * 0.13}px;font-weight:800;color:${accent};">${n.label}</div></div>`
+      )
+      .join('');
+
     const facesHtml = timezones
       .map((tz, i) => {
         const faceId = `clock-face-${el.id}-${i}`;
         return `<div style="display:flex;flex-direction:column;align-items:center;">
-  <div style="position:relative;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:2px solid ${accent};background:#fff;">
+  <div style="position:relative;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:3px solid ${accent};background:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.18);">
+    ${ticksHtml}
+    ${numeralsHtml}
     <div id="${faceId}-hour" style="position:absolute;left:${size / 2 - 1.5}px;top:${size / 2 - hourLen}px;width:3px;height:${hourLen}px;background:${accent};border-radius:2px;transform-origin:1.5px ${hourLen}px;"></div>
     <div id="${faceId}-min" style="position:absolute;left:${size / 2 - 1}px;top:${size / 2 - minLen}px;width:2px;height:${minLen}px;background:${accent};border-radius:2px;transform-origin:1px ${minLen}px;"></div>
     <div id="${faceId}-sec" style="position:absolute;left:${size / 2 - 0.5}px;top:${size / 2 - secLen}px;width:1px;height:${secLen}px;background:#DC2626;transform-origin:0.5px ${secLen}px;"></div>
-    <div style="position:absolute;left:${size / 2 - 3}px;top:${size / 2 - 3}px;width:6px;height:6px;border-radius:3px;background:${accent};"></div>
+    <div style="position:absolute;left:${size / 2 - 3.5}px;top:${size / 2 - 3.5}px;width:7px;height:7px;border-radius:3.5px;background:${accent};border:1px solid #fff;"></div>
   </div>
   <div style="font-size:10px;color:#64748B;font-weight:600;margin-top:4px;">${escapeHtml(tz.label)}</div>
 </div>`;
@@ -1566,11 +1608,16 @@ function renderClockWidgetHtml(el: WidgetElement, base: string): string {
 ${script}`;
   }
 
+  const accentDark = shadeHexColor(accent, -25);
   const digitalRows = timezones
     .map(
       (tz, i) => `<div style="text-align:center;">
-  <div style="font-size:11px;color:#64748B;font-weight:600;">${escapeHtml(tz.label)}</div>
-  <div id="clock-readout-${el.id}-${i}" style="font-size:18px;color:${accent};font-weight:800;">--:--:--</div>
+  <div style="font-size:11px;color:#64748B;font-weight:700;margin-bottom:3px;">${escapeHtml(tz.label)}</div>
+  <div style="display:inline-block;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+    <div style="background:linear-gradient(135deg, ${accent}, ${accentDark});padding:8px 14px;">
+      <div id="clock-readout-${el.id}-${i}" style="font-size:18px;color:#fff;font-weight:800;letter-spacing:0.5px;">--:--:--</div>
+    </div>
+  </div>
 </div>`
     )
     .join('');

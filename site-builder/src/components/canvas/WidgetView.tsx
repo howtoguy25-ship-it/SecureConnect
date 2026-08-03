@@ -71,6 +71,48 @@ function ClockHand({ faceSize, length, thickness, color, degrees }: { faceSize: 
   );
 }
 
+// Same center-pivot rotate trick as ClockHand, but for a fixed tick mark near the rim instead
+// of a moving hand -- 12 of these (major/thicker at the 12-3-6-9 positions, matching where the
+// numerals sit) is what turns a bare circle-with-hands into a real classroom-style clock face.
+function ClockTick({ faceSize, degrees, major }: { faceSize: number; degrees: number; major: boolean }) {
+  const length = major ? faceSize * 0.09 : faceSize * 0.05;
+  const thickness = major ? 2.5 : 1.5;
+  return (
+    <View style={{ position: 'absolute', width: faceSize, height: faceSize, top: 0, left: 0, transform: [{ rotate: `${degrees}deg` }] }}>
+      <View
+        style={{
+          position: 'absolute',
+          left: faceSize / 2 - thickness / 2,
+          top: 2,
+          width: thickness,
+          height: length,
+          borderRadius: thickness / 2,
+          backgroundColor: major ? '#334155' : '#94A3B8',
+        }}
+      />
+    </View>
+  );
+}
+
+const CLOCK_NUMERALS: { label: string; degrees: number }[] = [
+  { label: '12', degrees: 0 },
+  { label: '3', degrees: 90 },
+  { label: '6', degrees: 180 },
+  { label: '9', degrees: 270 },
+];
+
+// Rotates a container to the numeral's clock position, then counter-rotates the label back
+// upright inside it -- the numeral itself never spins, only its position around the rim does.
+function ClockNumeral({ faceSize, label, degrees, color }: { faceSize: number; label: string; degrees: number; color: string }) {
+  return (
+    <View style={{ position: 'absolute', width: faceSize, height: faceSize, top: 0, left: 0, transform: [{ rotate: `${degrees}deg` }] }}>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: faceSize * 0.08, alignItems: 'center', transform: [{ rotate: `${-degrees}deg` }] }}>
+        <Text style={{ fontSize: faceSize * 0.13, fontWeight: '800', color }}>{label}</Text>
+      </View>
+    </View>
+  );
+}
+
 export function AnalogClockFace({ tz, size, accent }: { tz: string; size: number; accent: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -79,13 +121,57 @@ export function AnalogClockFace({ tz, size, accent }: { tz: string; size: number
   }, []);
   const { hour, minute, second } = getHandDegrees(now, tz);
   return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: accent, backgroundColor: '#FFFFFF' }}>
-      <ClockHand faceSize={size} length={size * 0.26} thickness={3} color={accent} degrees={hour} />
-      <ClockHand faceSize={size} length={size * 0.36} thickness={2} color={accent} degrees={minute} />
-      <ClockHand faceSize={size} length={size * 0.4} thickness={1} color="#DC2626" degrees={second} />
-      <View style={{ position: 'absolute', width: 6, height: 6, borderRadius: 3, backgroundColor: accent, left: size / 2 - 3, top: size / 2 - 3 }} />
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 3,
+        borderColor: accent,
+        backgroundColor: '#FFFFFF',
+        shadowColor: accent,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 5,
+        elevation: 3,
+      }}
+    >
+      {Array.from({ length: 12 }).map((_, i) => (
+        <ClockTick key={i} faceSize={size} degrees={i * 30} major={i % 3 === 0} />
+      ))}
+      {CLOCK_NUMERALS.map((n) => (
+        <ClockNumeral key={n.label} faceSize={size} label={n.label} degrees={n.degrees} color={accent} />
+      ))}
+      <ClockHand faceSize={size} length={size * 0.24} thickness={3} color={accent} degrees={hour} />
+      <ClockHand faceSize={size} length={size * 0.34} thickness={2} color={accent} degrees={minute} />
+      <ClockHand faceSize={size} length={size * 0.38} thickness={1} color="#DC2626" degrees={second} />
+      <View
+        style={{
+          position: 'absolute',
+          width: 7,
+          height: 7,
+          borderRadius: 3.5,
+          backgroundColor: accent,
+          left: size / 2 - 3.5,
+          top: size / 2 - 3.5,
+          borderWidth: 1,
+          borderColor: '#FFFFFF',
+        }}
+      />
     </View>
   );
+}
+
+// Darkens a "#RRGGBB" accent color for a gradient's second stop -- every widget kind only
+// defines one accent color (WIDGET_THEME), so this derives a matching deeper shade instead of
+// needing a second color threaded through everywhere a gradient tile is built.
+function shadeColor(hex: string, percent: number): string {
+  const num = parseInt(hex.replace('#', ''), 16);
+  const amt = Math.round(2.55 * percent);
+  const r = Math.max(0, Math.min(255, (num >> 16) + amt));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amt));
+  const b = Math.max(0, Math.min(255, (num & 0x0000ff) + amt));
+  return `#${(0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1)}`;
 }
 
 export function DigitalClockFace({ label, tz, compact, accent }: { label: string; tz: string; compact: boolean; accent: string }) {
@@ -96,10 +182,31 @@ export function DigitalClockFace({ label, tz, compact, accent }: { label: string
   }, []);
   return (
     <View style={{ alignItems: 'center' }}>
-      <Text style={{ fontSize: compact ? 9 : 11, color: '#64748B', fontWeight: '600' }} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text style={{ fontSize: compact ? 14 : 18, color: accent, fontWeight: '800' }}>{formatDigital(now, tz)}</Text>
+      {!!label && (
+        <Text style={{ fontSize: compact ? 9 : 11, color: '#64748B', fontWeight: '700', marginBottom: 3 }} numberOfLines={1}>
+          {label}
+        </Text>
+      )}
+      <View
+        style={{
+          borderRadius: 12,
+          overflow: 'hidden',
+          shadowColor: accent,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.35,
+          shadowRadius: 5,
+          elevation: 3,
+        }}
+      >
+        <LinearGradient
+          colors={[accent, shadeColor(accent, -25)]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{ paddingHorizontal: compact ? 10 : 14, paddingVertical: compact ? 6 : 8 }}
+        >
+          <Text style={{ fontSize: compact ? 13 : 17, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 }}>{formatDigital(now, tz)}</Text>
+        </LinearGradient>
+      </View>
     </View>
   );
 }

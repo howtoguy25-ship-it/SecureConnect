@@ -1109,15 +1109,7 @@ export default function ElementInspector({ element, allElements, onChange, onDel
                         {element.style === 'analog' ? (
                           <AnalogClockFace tz={tz.ianaTimezone} size={56} accent={WIDGET_THEME.clock.accent} />
                         ) : (
-                          <View
-                            style={{
-                              width: 72,
-                              paddingVertical: 8,
-                              borderRadius: 10,
-                              backgroundColor: WIDGET_THEME.clock.soft,
-                              alignItems: 'center',
-                            }}
-                          >
+                          <View style={{ width: 76, alignItems: 'center' }}>
                             <DigitalClockFace label="" tz={tz.ianaTimezone} compact accent={WIDGET_THEME.clock.accent} />
                           </View>
                         )}
