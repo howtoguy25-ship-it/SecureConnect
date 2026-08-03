@@ -803,9 +803,7 @@ export function MapScreen() {
   // Traffic-light nodes cluster into a single badge wherever they're too dense to render as
   // individual pins without lagging the map -- a real intersection cluster (several nodes,
   // one per approach/crossing) can put 10-20+ within a couple hundred meters, and a whole
-  // suburb's worth within the radius setting can be several hundred. Speed cameras are left
-  // unclustered -- they're genuinely sparse (a handful per suburb at most), so there was never
-  // a marker-count problem to solve there, and every one stays individually tappable.
+  // suburb's worth within the radius setting can be several hundred.
   // Cell size scales with the current zoom (osmZoomDelta) so clusters split apart into their
   // real individual pins as the driver zooms in, floored so it never over-clusters at max zoom.
   const trafficLightClusters = useMemo(() => {
@@ -816,6 +814,28 @@ export function MapScreen() {
   }, [osmData?.trafficLights, osmZoomDelta]);
 
   const onTrafficLightClusterPress = useCallback((lat: number, lng: number) => {
+    mapRef.current?.animateToRegion(
+      { latitude: lat, longitude: lng, latitudeDelta: osmZoomDelta / 4, longitudeDelta: osmZoomDelta / 4 },
+      350
+    );
+  }, [osmZoomDelta]);
+
+  // Speed cameras used to render one native <Marker> per point unconditionally, on the
+  // assumption they're "genuinely sparse (a handful per suburb at most)". Real confirmed
+  // report from a wide "Traffic light & speed camera radius" setting (up to 200km, see
+  // Settings): zoomed out over a whole region, that's a handful per suburb TIMES dozens of
+  // suburbs in view at once -- hundreds of individual native marker views is exactly the kind
+  // of render-count map lag the traffic-light clustering above already exists to prevent, so
+  // speed cameras get the same treatment now instead of being the one layer still exempt from
+  // it once a wide radius makes them dense too.
+  const speedCameraClusters = useMemo(() => {
+    const points = osmData?.speedCameras ?? [];
+    if (points.length === 0) return [];
+    const cellSizeDegrees = Math.max(osmZoomDelta / 30, 0.0012);
+    return clusterPoints(points, cellSizeDegrees);
+  }, [osmData?.speedCameras, osmZoomDelta]);
+
+  const onSpeedCameraClusterPress = useCallback((lat: number, lng: number) => {
     mapRef.current?.animateToRegion(
       { latitude: lat, longitude: lng, latitudeDelta: osmZoomDelta / 4, longitudeDelta: osmZoomDelta / 4 },
       350
@@ -1394,22 +1414,39 @@ export function MapScreen() {
             )
           )}
         {settings.showSpeedCameras &&
-          osmData?.speedCameras.map((p) => (
-            <Marker
-              key={`sc-${p.id}`}
-              coordinate={{ latitude: p.lat, longitude: p.lng }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
-              onPress={(e) => {
-                e.stopPropagation();
-                onOsmMarkerPress("speed_camera", { latitude: p.lat, longitude: p.lng });
-              }}
-            >
-              <View style={styles.osmIconBadgeSpeedCamera}>
-                <MaterialCommunityIcons name={SPEED_CAMERA_MARKER.icon} size={SPEED_CAMERA_MARKER.glyphSize} color="#FFFFFF" />
-              </View>
-            </Marker>
-          ))}
+          speedCameraClusters.map((c) =>
+            c.count === 1 ? (
+              <Marker
+                key={`sc-${c.points[0].id}`}
+                coordinate={{ latitude: c.lat, longitude: c.lng }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onOsmMarkerPress("speed_camera", { latitude: c.lat, longitude: c.lng });
+                }}
+              >
+                <View style={styles.osmIconBadgeSpeedCamera}>
+                  <MaterialCommunityIcons name={SPEED_CAMERA_MARKER.icon} size={SPEED_CAMERA_MARKER.glyphSize} color="#FFFFFF" />
+                </View>
+              </Marker>
+            ) : (
+              <Marker
+                key={`scc-${c.key}`}
+                coordinate={{ latitude: c.lat, longitude: c.lng }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onSpeedCameraClusterPress(c.lat, c.lng);
+                }}
+              >
+                <View style={styles.osmClusterBadgeSpeedCamera}>
+                  <Text style={styles.osmClusterBadgeText}>{c.count}</Text>
+                </View>
+              </Marker>
+            )
+          )}
       </MapView>
       )}
 
@@ -1991,6 +2028,17 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     paddingHorizontal: 6,
     backgroundColor: TRAFFIC_LIGHT_MARKER.color,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  osmClusterBadgeSpeedCamera: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 6,
+    backgroundColor: SPEED_CAMERA_MARKER.color,
     borderWidth: 2,
     borderColor: "#FFFFFF",
     alignItems: "center",

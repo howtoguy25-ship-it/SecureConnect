@@ -56,7 +56,18 @@ class PlatformReactNative implements tf.Platform {
 // to the known-working CPU-only path (matching every build before this one) without touching
 // anything else, the same DIAGNOSTIC_DISABLE_* pattern already used elsewhere in this app for
 // exactly this kind of "can't fully verify without a real device" risk.
-const GPU_BACKEND_ENABLED = true;
+//
+// Flipped off after a real-device report matching exactly the failure mode this switch exists
+// for: the camera preview stays live (permission/device/session all fine) but not a single
+// vehicle ever gets a box, on vehicles close enough and clear enough that a healthy CPU
+// backend detects easily -- and with zero error/Retry banner ever surfacing either, meaning
+// detectVehiclesInPhoto is resolving "successfully" every time with predictions that just never
+// clear the confidence threshold. That's consistent with the GPU (rn-webgl) backend silently
+// producing wrong/degenerate output on this device rather than throwing -- a real risk this
+// backend was already flagged as unable to verify without a physical device. CPU-only is the
+// safe, previously-confirmed-working path until GPU correctness can actually be verified on a
+// real device rather than just "did it fail to initialize."
+const GPU_BACKEND_ENABLED = false;
 
 async function selectBackend(): Promise<void> {
   if (GPU_BACKEND_ENABLED) {

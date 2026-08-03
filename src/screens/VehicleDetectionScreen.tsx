@@ -278,7 +278,6 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       );
       if (!photoFile || unmountedRef.current) return;
       const photo = { uri: toFileUri(photoFile.path), width: photoFile.width, height: photoFile.height };
-      consecutiveFailuresRef.current = 0;
       Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
       setPhotoSize({ width: photo.width, height: photo.height });
       const decoded = await withTimeout(
@@ -289,6 +288,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       if (unmountedRef.current) return;
       const detected = await withTimeout(detectVehiclesInPhoto(decoded), DETECT_TIMEOUT_MS, "detectVehiclesInPhoto");
       if (unmountedRef.current) return;
+      // Reset only once the whole real pipeline (shutter + decode + model inference) has
+      // actually succeeded -- resetting this right after takePhoto (as it used to) meant a
+      // camera that keeps shuttering fine while decode/detect silently keeps throwing every
+      // single time could never accumulate MAX_CONSECUTIVE_CAPTURE_FAILURES failures (the very
+      // next successful shutter always zeroed the counter again first), so the error+Retry UI
+      // could never surface -- just a live-looking camera that silently never produces a single
+      // box, forever, with no feedback at all.
+      consecutiveFailuresRef.current = 0;
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now(), egoSpeedRef.current);
       setBoxes(tracked);
 
