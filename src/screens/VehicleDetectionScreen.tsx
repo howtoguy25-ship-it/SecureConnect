@@ -648,7 +648,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
 
       {/* Only control left at the bottom now that Switch Camera is gone (per explicit request
           -- it also removed the whole facing-switch-mid-capture crash risk category with it).
-          Centered and a bit larger since it's the sole action here. */}
+          A transparent circular X (not a solid white pill) so it reads as a real camera-
+          overlay exit control rather than a floating opaque button competing with the actual
+          vehicle boxes for attention. */}
       <Pressable
         style={({ pressed }) => [
           styles.closeButton,
@@ -657,8 +659,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         ]}
         onPress={onClose}
         accessibilityLabel="Close vehicle detection"
+        hitSlop={12}
       >
-        <Text style={styles.closeButtonText}>Close</Text>
+        <Ionicons name="close" size={26} color="#FFFFFF" />
       </Pressable>
     </View>
   );
@@ -860,14 +863,11 @@ const styles = StyleSheet.create({
   closeButton: {
     position: "absolute",
     alignSelf: "center",
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: radius.pill,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-  },
-  closeButtonText: {
-    color: "#111827",
-    fontWeight: "700",
-    fontSize: 15,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(17, 24, 39, 0.45)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

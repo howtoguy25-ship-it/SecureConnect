@@ -193,14 +193,18 @@ export function MapScreen() {
   // instant they ask for the feature. warmUpModel() caches its result in a module-level promise
   // (see vehicleDetection.ts's modelPromise), so if this finishes before AI Detection is opened,
   // opening it is instant; if it's still in flight, the detection screen just awaits the same
-  // promise instead of starting a second load. A short delay so this doesn't compete with the
-  // map's own initial render/GPS fix for CPU/GPU time right at cold-launch. Errors are swallowed
+  // promise instead of starting a second load. Was a 2.5s delay (to yield to the map's own
+  // initial render/GPS fix at cold-launch) -- shortened to 300ms per explicit request that
+  // opening AI Detection actually feel instant: the model is fully bundled in the app binary
+  // (no network dependency to worry about competing for bandwidth with anything else at
+  // launch), so there's very little real reason to keep the driver waiting on this beyond a
+  // single frame's worth of head start for the map's own first paint. Errors are swallowed
   // here on purpose -- a failed background preload isn't user-facing; VehicleDetectionScreen's
   // own retry UI handles a real failure if the driver actually opens the feature.
   useEffect(() => {
     const timer = setTimeout(() => {
       warmUpModel().catch(() => {});
-    }, 2500);
+    }, 300);
     return () => clearTimeout(timer);
   }, []);
   // Real photorealistic 3D satellite (Android only for now, see modules/map3d) -- Stage 1:
