@@ -56,6 +56,13 @@ export interface SitePlanSection {
   // visitor can play against a simple computer opponent") -- resolved into real generated
   // HTML/CSS/JS afterward (see generateCustomWidgetCode), never fabricated here.
   customDescription: string;
+  // Only for kind 'features' or 'about' when this section is naturally a real list (a
+  // "Why Choose Us" section, "Our Services", a benefits list, etc.) rather than one flowing
+  // paragraph: 3-6 real, distinct items, each its own short title + one-sentence
+  // description -- rendered as real individual cards (see layout.ts) instead of one plain
+  // paragraph of bullet-point text glued into body. Empty array when the section reads
+  // better as prose (e.g. a short "About us" story) or for any other kind.
+  featureItems: { label: string; description: string }[];
 }
 
 export interface SitePlan {
@@ -212,6 +219,22 @@ const SITE_PLAN_SCHEMA = {
               description:
                 'Only for kind "custom": a specific, concrete restatement of exactly what real interactive thing to build, used only when nothing else above fits (not a product, game, widget, or video) -- e.g. "a BMI calculator with a metric/imperial toggle" or "an interactive chess board playable against a simple computer opponent". Empty string otherwise.',
             },
+            featureItems: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 6,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  label: { type: 'string' },
+                  description: { type: 'string' },
+                },
+                required: ['label', 'description'],
+              },
+              description:
+                'Only for kind "features" or "about" when this section is a real list (e.g. "Why Choose Us", "Our Services", a benefits list): 3-6 real, distinct items, each a short title (label) and a one-sentence description -- rendered as real individual cards. Empty array when the section is better as flowing prose, or for any other kind.',
+            },
           },
           required: [
             'kind',
@@ -234,6 +257,7 @@ const SITE_PLAN_SCHEMA = {
             'widgetCountdownTargetIso',
             'widgetCountdownLabel',
             'customDescription',
+            'featureItems',
           ],
         },
       },
@@ -287,11 +311,13 @@ function buildSystemPrompt(
     'If the user\'s prompt names a specific brand, product, company, or person the site is for, use that exact name verbatim as siteName (and throughout the copy) -- never substitute a different invented brand name when the user already gave you a real one to use.',
     'Treat every specific section, feature, or piece of content the user names (e.g. "a pricing table", "customer testimonials", "an FAQ", "a contact section", "our team", "a gallery") as a real requirement, not a suggestion -- include one genuinely written section per named item, using that real content (actual prices/plans, real-sounding FAQ questions and answers, etc.), never a generic placeholder section instead of the specific thing they asked for. If the user was specific enough to imply more sections than the complexity tier\'s target count, cover everything they explicitly named rather than silently dropping items to stay under that count -- it is better to run slightly over than to ship a build missing something the user paid for and asked for by name.',
     'Never reuse the same headline/body copy pattern across sections just to fill the section count -- if you cannot write something genuinely new and specific for a section, it is better to write fewer, stronger sections than to pad with repetitive filler.',
+    'For a "features"/"about" section that is naturally a real list -- "Our Services", "Why Choose Us", a benefits list, a list of specialties -- write it as featureItems: 3-6 real, distinct items, each with a short title (label) and a genuinely specific one-sentence description, instead of cramming bullet points into one paragraph of body text. This renders as real individual cards, not a wall of text. Leave featureItems empty and write body as normal flowing prose for a section that reads better as a short story or explanation (e.g. a brief "About us" section) rather than a list.',
     complexityNote,
     'If the user asks for real video content -- news updates, highlights, tutorials, or anything else where an actual existing video (not a generated image) is the point -- include one section with kind "video" and a specific, real videoSearchQuery for it (e.g. a request for a basketball page with news/videos should search for something like real, current-sounding NBA highlights or news coverage, not just the word "basketball"). This is resolved against a real video search after you respond, so write a query that would actually find something relevant, not a placeholder.',
     'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content; "simon" (sequence-memory), "flappy" (physics-based side-scroller), "tetris" (falling-block puzzle), "targetrange3d" (real 3D shooting range), and "basketball" (real 3D physics game -- flick/swipe the ball toward the hoop, with real gravity, spin, and rim/backboard bounce) are real arcade games that also need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
     'The single most important rule for every section: if the user describes something that is inherently REAL, functional, purchasable, or interactive -- an item or service for sale, a live clock/timer, a game, a real video -- you must build the real thing, never a decorative picture standing in for it. A generated image is only appropriate for backgrounds, branding, atmosphere, or illustrating an abstract idea (e.g. "a hero image conveying trust") -- never as a substitute for something the user asked to actually work. When in doubt between a plain image section and a richer real element (product/game/widget/video), always pick the richer one that actually does the thing.',
     'If the user asks to sell/buy a physical or digital item, or book a service -- anything with a price -- include one section per distinct item with kind "product": a real name/description/price, 2-4 concrete productImagePrompts (different real angles/contexts of the same item, never different items), and the right productSaleType. This becomes a real sellable listing with live stock and a real checkout, not a picture of the item.',
+    'CRITICAL: any request to let customers schedule an appointment, book a service, request a quote, reserve a slot, or pay for a real-life service (a repair call-out, a consultation, a table, a haircut, a cleaning job, anything a business would normally take a booking for) must ALWAYS become a kind "product" section with productSaleType "service" -- NEVER a kind "widget" (especially never widgetKind "calculator", which only does plain arithmetic and has no real booking or payment behind it) and NEVER a kind "custom" bespoke form (which is a static decorative form with no real backend). The "product" kind with productSaleType "service" is the ONLY one of these that becomes a real, working booking flow -- a real date/time/notes picker and a real Stripe checkout that actually charges the customer and pays the business (minus this platform\'s small fee), which is exactly what a service business needs. Reserve widgetKind "calculator" strictly for a genuinely generic, free-standing calculation tool unrelated to booking or paying for anything (e.g. a BMI or tip calculator).',
     ...(existingProductNames.length > 0
       ? [
           `The user already has these real products saved in their own product catalog: ${existingProductNames.map((n) => `"${n}"`).join(', ')}. If the user's prompt asks to add, include, feature, or sell one of these (by its exact name or anything close to it -- a partial name, a typo, different capitalization), set that section's productName to the EXACT name from this list, copied verbatim -- this imports the user's real existing product (its real photos, price, and stock) into the build instead of inventing a new one. Leave productDescription/productPriceUsd/productImagePrompts as empty/zero/empty-array for a matched product -- its real data already exists and must not be overwritten. Only write a new name with real productDescription/productPriceUsd/productImagePrompts when the user is describing an item that is NOT already in this list.`,
