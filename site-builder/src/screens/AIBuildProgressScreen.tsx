@@ -146,6 +146,25 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
   const pausesLeft = MAX_PAUSES - session.pausesUsed;
   const isRunning = session.status === 'starting' || session.status === 'generating' || session.status === 'paused';
   const displayMinutes = isRunning ? (nowTick - session.createdAt) / 60000 : session.minutesElapsed;
+  // Real live "time left" projection: the server tracks totalWorkUnits (count of
+  // images/videos/product-photo-sets/custom-widgets this build needs) and completedWorkUnits
+  // (bumped each time one finishes) -- elapsed-so-far divided by units-completed-so-far gives
+  // a real per-unit rate, projected across whatever units remain. This is a genuine estimate
+  // that tightens as the build progresses, not a static guess based on section count alone.
+  const hasWorkUnits =
+    isRunning && typeof session.totalWorkUnits === 'number' && session.totalWorkUnits > 0 && typeof session.completedWorkUnits === 'number';
+  const remainingUnits = hasWorkUnits ? Math.max(0, session.totalWorkUnits! - session.completedWorkUnits!) : 0;
+  const estRemainingMinutes =
+    hasWorkUnits && session.completedWorkUnits! > 0 && remainingUnits > 0
+      ? ((nowTick - session.createdAt) / session.completedWorkUnits!) * remainingUnits / 60000
+      : null;
+  const estRemainingLabel = !hasWorkUnits
+    ? null
+    : remainingUnits === 0
+      ? 'almost done'
+      : estRemainingMinutes != null
+        ? `~${estRemainingMinutes < 1 ? '<1' : estRemainingMinutes.toFixed(1)}m`
+        : null;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -197,6 +216,12 @@ export default function AIBuildProgressScreen({ navigation, route }: Props) {
                 <Text style={styles.metricValue}>{pausesLeft}</Text>
                 <Text style={styles.metricLabel}>pauses left</Text>
               </View>
+              {estRemainingLabel && (
+                <View style={styles.metric}>
+                  <Text style={styles.metricValue}>{estRemainingLabel}</Text>
+                  <Text style={styles.metricLabel}>time left</Text>
+                </View>
+              )}
             </View>
           </View>
 

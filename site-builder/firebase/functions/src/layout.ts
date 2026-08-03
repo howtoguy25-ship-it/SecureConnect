@@ -305,7 +305,28 @@ export function layoutSitePlan(
   const productImagesFor = (section: SitePlanSection) => sectionProductImages.find((s) => s.section === section)?.urls ?? [];
   const customWidgetFor = (section: SitePlanSection) => sectionCustomWidgets.find((s) => s.section === section) ?? null;
 
+  // Detect runs of 2+ CONSECUTIVE 'product' kind sections -- the AI's own instructions already
+  // say "one section per distinct item" for products (see openai.ts's buildSystemPrompt), so a
+  // multi-item store naturally produces several product sections back to back. Laying those
+  // out as N full-width 340px cards stacked one under another (the original single-product
+  // path, kept below for a lone product) reads as a cheap, disconnected list -- a real store
+  // groups them into an actual grid, matching the manual editor's own insertMultipleProducts
+  // (EditorScreen.tsx) grid-insert behavior exactly: real 2-column math, wrapped in a Section,
+  // each card locked so it reads as a fixed store shelf instead of independently-floating
+  // cards. A lone product section (no adjacent product sections) keeps the original full-width
+  // single-card layout unchanged -- that's still the right presentation for one hero item.
+  const productRunLength = new Map<number, number>();
+  const productRunSkip = new Set<number>();
+  for (let i = 0; i < plan.sections.length; i++) {
+    if (plan.sections[i].kind !== 'product' || productRunSkip.has(i) || productRunLength.has(i)) continue;
+    let runEnd = i;
+    while (runEnd + 1 < plan.sections.length && plan.sections[runEnd + 1].kind === 'product') runEnd++;
+    productRunLength.set(i, runEnd - i + 1);
+    for (let j = i + 1; j <= runEnd; j++) productRunSkip.add(j);
+  }
+
   plan.sections.forEach((section, index) => {
+    if (productRunSkip.has(index)) return;
     sectionStarts.push({ label: shortSectionLabel(section), y });
     const isHero = index === 0 && section.kind === 'hero';
     const image = imageFor(section);
@@ -366,32 +387,86 @@ export function layoutSitePlan(
     }
 
     if (section.kind === 'product') {
-      const urls = productImagesFor(section);
-      const name = stripMarkdown(section.productName || headline);
-      const description = section.productDescription ? stripMarkdown(section.productDescription) : '';
-      // Room for an inline swipeable gallery plus name/description/price/qty/buy button --
-      // taller than a plain image section since a real product card needs more vertical
-      // space than a decorative picture would.
-      const productHeight = 340;
-      const el = productEl({ y, height: productHeight });
-      elements.push(el);
-      productContents[el.productId] = {
-        name,
-        description,
-        priceUsd: section.productPriceUsd || 0,
-        compareAtPriceUsd: null,
-        costUsd: null,
-        images: urls,
-        trackInventory: false,
-        initialStock: null,
-        inStock: true,
-        saleType: section.productSaleType || 'product',
-        fulfillment: 'pickup',
-        serviceDurationMinutes: null,
-        variantOptions: [],
-        variants: [],
-      };
-      y += productHeight + 16;
+      const runLength = productRunLength.get(index) ?? 1;
+      if (runLength >= 2) {
+        const runSections = plan.sections.slice(index, index + runLength);
+        const gridGap = 14;
+        const columns = 2;
+        const cellWidth = (CONTENT_WIDTH - gridGap * (columns - 1)) / columns;
+        const cellHeight = Math.round(cellWidth * (220 / 180));
+        const rows = Math.ceil(runLength / columns);
+        const gridHeight = rows * cellHeight + (rows - 1) * gridGap;
+        const gridY = y;
+        const productEls: ProductElement[] = runSections.map((runSection, i) => {
+          const col = i % columns;
+          const row = Math.floor(i / columns);
+          const el = productEl({
+            y: gridY + row * (cellHeight + gridGap),
+            height: cellHeight,
+            x: MARGIN + col * (cellWidth + gridGap),
+            width: cellWidth,
+            locked: true,
+          });
+          productContents[el.productId] = {
+            name: stripMarkdown(runSection.productName || stripMarkdown(runSection.headline)),
+            description: runSection.productDescription ? stripMarkdown(runSection.productDescription) : '',
+            priceUsd: runSection.productPriceUsd || 0,
+            compareAtPriceUsd: null,
+            costUsd: null,
+            images: productImagesFor(runSection),
+            trackInventory: false,
+            initialStock: null,
+            inStock: true,
+            saleType: runSection.productSaleType || 'product',
+            fulfillment: 'pickup',
+            serviceDurationMinutes: null,
+            variantOptions: [],
+            variants: [],
+          };
+          return el;
+        });
+        const gridSection: SectionElement = {
+          id: nextId('el'),
+          type: 'section',
+          backgroundColor: '#FFFFFF',
+          childIds: productEls.map((p) => p.id),
+          x: MARGIN,
+          y: gridY,
+          width: CONTENT_WIDTH,
+          height: gridHeight,
+          zIndex: 0,
+        };
+        elements.push(gridSection);
+        productEls.forEach((el) => elements.push(el));
+        y += gridHeight + 16;
+      } else {
+        const urls = productImagesFor(section);
+        const name = stripMarkdown(section.productName || headline);
+        const description = section.productDescription ? stripMarkdown(section.productDescription) : '';
+        // Room for an inline swipeable gallery plus name/description/price/qty/buy button --
+        // taller than a plain image section since a real product card needs more vertical
+        // space than a decorative picture would.
+        const productHeight = 340;
+        const el = productEl({ y, height: productHeight });
+        elements.push(el);
+        productContents[el.productId] = {
+          name,
+          description,
+          priceUsd: section.productPriceUsd || 0,
+          compareAtPriceUsd: null,
+          costUsd: null,
+          images: urls,
+          trackInventory: false,
+          initialStock: null,
+          inStock: true,
+          saleType: section.productSaleType || 'product',
+          fulfillment: 'pickup',
+          serviceDurationMinutes: null,
+          variantOptions: [],
+          variants: [],
+        };
+        y += productHeight + 16;
+      }
     }
 
     if (section.kind === 'widget' && section.widgetKind === 'clock') {

@@ -2034,6 +2034,13 @@ function renderElement(el: CanvasElement, slug: string, productStockUrl: string,
       )};border-radius:${el.borderRadius}px;${
         el.borderWidth ? `border:${el.borderWidth}px solid ${escapeAttr(el.borderColor ?? '#000000')};` : ''
       }display:flex;align-items:center;justify-content:center;font-weight:700;text-decoration:none;box-sizing:border-box;`;
+      // Opens the real cart drawer -- the exact same siteSparkCart.togglePanel() the header's
+      // own cart icon calls (see renderHeaderBarHtml) -- for a seller who wants an extra
+      // "Cart" button somewhere else on the page (e.g. a storefront theme's own nav bar).
+      // Checked first since it's mutually exclusive with scrollToY/link/linkTargetElementId.
+      if (el.openCart) {
+        return `<a href="#" onclick="window.siteSparkCart&amp;&amp;window.siteSparkCart.togglePanel();return false;" style="${buttonStyle}">${escapeHtml(el.label)}</a>`;
+      }
       // A real same-page smooth-scroll target (see ButtonElement.scrollToY's comment) --
       // used by the AI builder's "prebuilt tabs" nav bar (layout.ts's buildNavBar). Plain
       // window.scrollTo with a known pixel offset, not a DOM-id anchor, since most sections

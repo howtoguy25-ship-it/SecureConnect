@@ -1023,6 +1023,7 @@ function EditorInner({ navigation }: Props) {
                 isLastPage={!pages || pages[pages.length - 1]?.id === activePageId}
                 onExtend={extendCanvas}
                 onScrollToY={(y) => canvasScrollRef.current?.scrollTo({ y: Math.max(0, y - 40), animated: true })}
+                onOpenCart={() => setCartOpen(true)}
                 scale={fitScale}
               />
             </View>

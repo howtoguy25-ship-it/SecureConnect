@@ -46,6 +46,10 @@ interface Props {
   // scrolls the real canvas ScrollView to that Y, matching the same window.scrollTo the
   // published site does for the same button (see siteHtml.ts's button case).
   onScrollToY?: (y: number) => void;
+  // Handles a locked button's openCart -- opens the same real cart drawer the header's own
+  // cart icon opens (see EditorScreen's CartHeaderButton/setCartOpen), matching the
+  // published site's siteSparkCart.togglePanel() for the same button (siteHtml.ts).
+  onOpenCart?: () => void;
   // How much smaller than real size the whole canvas is currently being rendered (see
   // EditorScreen's fitScale) -- a visual-only CSS transform, so every PanResponder below that
   // maps a raw finger-movement delta (reported in real screen pixels) onto this element's own
@@ -169,6 +173,7 @@ export default function DraggableElement({
   onNavigateToElement,
   onOpenLink,
   onScrollToY,
+  onOpenCart,
   scale = 1,
 }: Props) {
   const elementLocked = !!element.locked;
@@ -486,14 +491,15 @@ export default function DraggableElement({
               : { fontSize: 15, color: '#0F172A', textAlign: 'center', fontWeight: '600' },
           ]}
         />
-      ) : locked && element.type === 'button' && (element.link || element.linkTargetElementId || element.scrollToY != null) ? (
+      ) : locked && element.type === 'button' && (element.link || element.linkTargetElementId || element.scrollToY != null || element.openCart) ? (
         // Only mounted while locked -- the outer moveResponder above already goes inert once
         // locked (onStartShouldSetPanResponder returns false), so there's no responder to
         // compete with for the tap, unlike trying to add this to the unlocked/editable case.
         <Pressable
           style={{ width: '100%', height: '100%' }}
           onPress={() => {
-            if (element.scrollToY != null) onScrollToY?.(element.scrollToY);
+            if (element.openCart) onOpenCart?.();
+            else if (element.scrollToY != null) onScrollToY?.(element.scrollToY);
             else if (element.linkTargetElementId) onNavigateToElement?.(element.linkTargetElementId);
             else if (element.link) onOpenLink?.(element.link);
           }}

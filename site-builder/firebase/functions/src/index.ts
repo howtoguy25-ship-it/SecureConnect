@@ -527,6 +527,20 @@ export const startGeneration = onCall(
       const sectionsNeedingCustomWidget = plan.sections.filter((s: SitePlanSection) => s.kind === 'custom' && s.customDescription?.trim());
       const sectionCustomWidgets: SectionCustomWidget[] = [];
 
+      // Real progress, not a guess -- the actual count of generation tasks this build needs
+      // (known now that the plan exists) lets the client project a real remaining-time
+      // estimate (elapsed so far ÷ units done × units left) instead of only ever showing an
+      // elapsed-time counter with no sense of how much is left. completedWorkUnits ticks up
+      // by one each time one of the four Promise.all groups below actually finishes its item.
+      const totalWorkUnits =
+        sectionsNeedingImages.length + sectionsNeedingVideo.length + sectionsNeedingProductImages.length + sectionsNeedingCustomWidget.length;
+      let completedWorkUnits = 0;
+      await sessionRef.update({ totalWorkUnits, completedWorkUnits: 0, updatedAt: Date.now() });
+      const bumpProgress = async () => {
+        completedWorkUnits += 1;
+        await sessionRef.update({ completedWorkUnits, updatedAt: Date.now() });
+      };
+
       // Each image is its own slow OpenAI call (often 10-30s) -- generating them one at a
       // time in sequence was the single biggest reason a build could take minutes. Firing
       // them all off together cuts total image time down to roughly the slowest single
@@ -564,6 +578,7 @@ export const startGeneration = onCall(
             console.error(`Image generation failed for section "${section.kind}"`, err);
           }
           await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
+          await bumpProgress();
         }),
         ...sectionsNeedingVideo.map(async (section: SitePlanSection) => {
           try {
@@ -576,6 +591,7 @@ export const startGeneration = onCall(
             sectionVideos.push({ section, videoId: null, title: null });
           }
           await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
+          await bumpProgress();
         }),
         ...sectionsNeedingProductImages.map(async (section: SitePlanSection) => {
           // All of one product's angle-shots generate in parallel too (nested inside the
@@ -602,6 +618,7 @@ export const startGeneration = onCall(
           ).filter((u): u is string => !!u);
           sectionProductImages.push({ section, urls });
           await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
+          await bumpProgress();
         }),
         ...sectionsNeedingCustomWidget.map(async (section: SitePlanSection) => {
           try {
@@ -647,6 +664,7 @@ export const startGeneration = onCall(
             sectionCustomWidgets.push({ section, code: null });
           }
           await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
+          await bumpProgress();
         }),
       ]);
 

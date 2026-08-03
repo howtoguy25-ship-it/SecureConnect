@@ -128,6 +128,12 @@ export interface ButtonElement extends BaseElement {
   // product/widget/collection cards do), so a real id-based anchor wouldn't work for them.
   // Mutually exclusive with link/linkTargetElementId -- setting one clears the others.
   scrollToY?: number | null;
+  // Opens the real cart drawer/panel (the same one the header's cart icon already opens --
+  // CartHeaderButton in EditorScreen.tsx / renderHeaderBarHtml's cart icon in siteHtml.ts) --
+  // for a seller who wants an extra "Cart" button somewhere else on the page (e.g. a
+  // storefront theme's own nav bar) instead of relying only on the header icon.
+  // Mutually exclusive with link/linkTargetElementId/scrollToY -- setting one clears the others.
+  openCart?: boolean | null;
 }
 
 export interface IconElement extends BaseElement {
@@ -624,6 +630,15 @@ export interface GenerationSession {
   errorMessage: string | null;
   createdAt: number;
   updatedAt: number;
+  // Real progress against real work, not a guess -- totalWorkUnits is the actual count of
+  // images/videos/product-photo-sets/custom-widgets this specific build needs to generate
+  // (known right after the site plan is written), and completedWorkUnits ticks up by one
+  // each time one of those actually finishes. Together with createdAt they let the client
+  // project a real "time remaining" estimate (elapsed-so-far ÷ units done × units left)
+  // instead of only ever showing an elapsed-time counter with no sense of how much is left.
+  // Both undefined until the plan lands; totalWorkUnits can be 0 for an all-text build.
+  totalWorkUnits?: number;
+  completedWorkUnits?: number;
 }
 
 // 'active': no known payment problem. 'past_due': the most recent subscription renewal

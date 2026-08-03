@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, Animated } from 'react-native';
 import { Project, CanvasElement } from '@/types';
 import { projectsStore } from '@/storage/projectsStore';
 import ElementRenderer from '@/components/canvas/ElementRenderer';
@@ -29,12 +29,43 @@ function scaleElement(el: CanvasElement, scale: number): CanvasElement {
   return scaled;
 }
 
+// Wraps one positioned element so its *first* appearance on screen fades in and gets a brief
+// highlight ring -- makes each text/image/product/section visibly "land" one by one as the
+// build streams in, instead of the whole canvas flat-repainting every time pushPreview() writes
+// a new elements array. `isNew` is computed once per element id by the parent (via seenIdsRef)
+// and passed in as the initial render value, so a React re-render of an already-seen element
+// (e.g. a sibling finishing generation) never replays the animation.
+function RevealingElement({ isNew, children }: { isNew: boolean; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(isNew ? 0 : 1)).current;
+  const ringOpacity = useRef(new Animated.Value(isNew ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (!isNew) return;
+    Animated.timing(opacity, { toValue: 1, duration: 280, useNativeDriver: true }).start();
+    Animated.timing(ringOpacity, { toValue: 0, duration: 900, delay: 150, useNativeDriver: true }).start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <Animated.View style={{ opacity, width: '100%', height: '100%' }}>
+      {children}
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.revealRing, { opacity: ringOpacity }]} />
+    </Animated.View>
+  );
+}
+
 // Read-only, scaled-down live render of the project doc the AI builder writes to
 // incrementally (see previewProjectId on GenerationSession) -- reuses the same
 // ElementRenderer the real editor uses, so what shows here is a real preview of what's
 // actually been generated so far, not a mocked-up animation standing in for progress.
 export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight }: Props) {
   const [project, setProject] = useState<Project | null>(null);
+  // Tracks which element ids have already been rendered at least once, so RevealingElement
+  // only plays its fade-in/highlight the first time an id appears -- a stable React key means
+  // the same component instance is reused across re-renders, so mutating this ref inline
+  // during the render pass (rather than in an effect) is what lets `isNew` be correct on the
+  // very first render each id ever gets, before any effect has had a chance to run.
+  const seenIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const unsubscribe = projectsStore.subscribe(uid, projectId, setProject);
@@ -45,13 +76,13 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
   // Default to a portrait 9:16-ish shape before the project doc (and its real canvasSize)
   // has loaded, so the frame doesn't flash as a stretched-out landscape box for a beat.
   const canvasSize = project?.canvasSize ?? { width: 390, height: 693 };
-  const bezel = 10;
+  const bezel = 14;
   const screenMaxWidth = maxWidth - bezel * 2;
   const screenMaxHeight = maxHeight - bezel * 2;
   // Scale by width alone (never by the page's total height) -- a real generated site is a
   // tall scrolling page, often several times taller than one screen. Fitting the *whole*
   // page into maxHeight (the old behavior) forced the width ratio down to match, squashing
-  // the frame into a tall narrow "bottle" instead of a phone. A real phone shows the page at
+  // the frame into a tall narrow "bottle" instead of a device. A real device shows the page at
   // one true width-based zoom and lets the rest scroll off the bottom of the visible screen
   // -- so here the screen height is just a fixed viewport and anything below it is clipped
   // by overflow:hidden, exactly like scrolling would reveal it on an actual device.
@@ -60,8 +91,8 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
   const screenHeight = screenMaxHeight;
 
   return (
-    <View style={[styles.phoneBezel, { width: screenWidth + bezel * 2, height: screenHeight + bezel * 2, padding: bezel }]}>
-      <View style={styles.notch} />
+    <View style={[styles.tabletBezel, { width: screenWidth + bezel * 2, height: screenHeight + bezel * 2, padding: bezel }]}>
+      <View style={styles.camera} />
       <View
         style={[
           styles.screen,
@@ -74,6 +105,8 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
             .sort((a, b) => a.zIndex - b.zIndex)
             .map((el) => {
               const scaledEl = scaleElement(el, scale);
+              const isNew = !seenIdsRef.current.has(el.id);
+              seenIdsRef.current.add(el.id);
               return (
                 <View
                   key={el.id}
@@ -86,9 +119,11 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
                     overflow: 'hidden',
                   }}
                 >
-                  <ElementErrorBoundary>
-                    <ElementRenderer element={scaledEl} allElements={project!.elements} />
-                  </ElementErrorBoundary>
+                  <RevealingElement isNew={isNew}>
+                    <ElementErrorBoundary>
+                      <ElementRenderer element={scaledEl} allElements={project!.elements} />
+                    </ElementErrorBoundary>
+                  </RevealingElement>
                 </View>
               );
             })}
@@ -98,9 +133,9 @@ export default function LivePreviewCanvas({ uid, projectId, maxWidth, maxHeight 
 }
 
 const styles = StyleSheet.create({
-  phoneBezel: {
-    borderRadius: 34,
-    backgroundColor: '#111827',
+  tabletBezel: {
+    borderRadius: 18,
+    backgroundColor: '#1F2937',
     alignSelf: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -109,18 +144,24 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 4,
   },
-  notch: {
+  camera: {
     position: 'absolute',
-    top: 10,
-    width: 70,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#111827',
+    top: 5,
+    alignSelf: 'center',
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#4B5563',
     zIndex: 2,
   },
   screen: {
-    borderRadius: 24,
+    borderRadius: 8,
     overflow: 'hidden',
+  },
+  revealRing: {
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#6366F1',
   },
   placeholderDot: {
     width: 8,

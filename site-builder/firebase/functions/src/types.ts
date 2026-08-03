@@ -22,6 +22,10 @@ interface BaseElement {
   width: number;
   height: number;
   zIndex: number;
+  // Mirrors the client's identical field -- when true, stays put in the canvas (no
+  // drag/resize/rotate), still tappable. Used by layout.ts's AI-generated product grid so
+  // each card reads as a fixed store shelf rather than an independently-floating card.
+  locked?: boolean;
   rotation?: number; // degrees clockwise from upright -- see the client BaseElement's comment
 }
 
@@ -60,6 +64,8 @@ export interface ButtonElement extends BaseElement {
   // Mirrors src/types/index.ts's identical field -- see that comment for why this is a raw
   // Y coordinate rather than an element id.
   scrollToY?: number | null;
+  // Mirrors src/types/index.ts's identical field -- opens the real cart drawer/panel.
+  openCart?: boolean | null;
 }
 
 export interface IconElement extends BaseElement {
@@ -494,6 +500,9 @@ export interface GenerationSession {
   errorMessage: string | null;
   createdAt: number;
   updatedAt: number;
+  // Mirrors the client's identical fields -- see that file's comment for the full rationale.
+  totalWorkUnits?: number;
+  completedWorkUnits?: number;
 }
 
 export type PlanId = 'free' | 'beginner' | 'middle' | 'advanced';

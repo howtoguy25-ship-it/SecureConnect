@@ -694,11 +694,15 @@ export const THEMES: Theme[] = [
     seedElements: [
       shapeEl({ id: 'seed-nav', y: 0, color: '#F3EFE7', height: 54 }),
       textEl({ id: 'seed-brand', text: 'ATELIER', x: 20, width: 160, y: 16, fontSize: 16, color: '#1A1A1A', height: 24 }),
-      buttonEl({ id: 'seed-nav-btn', label: 'Cart', x: 296, width: 74, y: 10, height: 34, backgroundColor: '#1A1A1A', textColor: '#FDFBF7', borderRadius: 8 }),
+      // A real tap-to-open cart -- opens the same drawer the header's own cart icon does
+      // (EditorScreen's CartHeaderButton / siteHtml.ts's renderHeaderBarHtml cart icon).
+      buttonEl({ id: 'seed-nav-btn', label: 'Cart', openCart: true, x: 296, width: 74, y: 10, height: 34, backgroundColor: '#1A1A1A', textColor: '#FDFBF7', borderRadius: 8 }),
 
       textEl({ id: 'seed-h1', text: 'New Arrivals, Curated Weekly', y: 64, fontSize: 28, color: '#1A1A1A', height: 44 }),
       textEl({ id: 'seed-sub', text: "Small-batch pieces, thoughtfully made -- shop before they're gone.", y: 112, fontSize: 15, color: '#6B5F49', fontWeight: 'normal', height: 40 }),
-      buttonEl({ id: 'seed-btn', label: 'Shop Now', y: 164, backgroundColor: '#1A1A1A', textColor: '#FDFBF7' }),
+      // Real tap-to-scroll straight to the product grid below (works whether the seller
+      // renames this label or not -- scrollToY targets the Y position, not the button text).
+      buttonEl({ id: 'seed-btn', label: 'Shop Now', scrollToY: 430, y: 164, backgroundColor: '#1A1A1A', textColor: '#FDFBF7' }),
 
       textEl({ id: 'seed-about-eyebrow', text: 'SHOP THE EDIT', x: 24, width: 200, y: 240, fontSize: 11, color: '#B08D57', height: 20 }),
       textEl({
@@ -750,7 +754,7 @@ export const THEMES: Theme[] = [
 
       shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#F3EFE7', height: 120 }),
       textEl({ id: 'seed-footer-text', text: 'Free shipping over $150', x: 24, width: 342, y: 740, fontSize: 14, color: '#1A1A1A', align: 'center', fontWeight: 'normal', height: 24 }),
-      buttonEl({ id: 'seed-footer-btn', label: 'Shop All', x: 115, width: 160, y: 772, backgroundColor: '#1A1A1A', textColor: '#FDFBF7' }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Shop All', scrollToY: 430, x: 115, width: 160, y: 772, backgroundColor: '#1A1A1A', textColor: '#FDFBF7' }),
     ],
   },
   {
@@ -768,11 +772,11 @@ export const THEMES: Theme[] = [
     seedElements: [
       shapeEl({ id: 'seed-nav', y: 0, color: '#0F172A', height: 54 }),
       textEl({ id: 'seed-brand', text: 'MRKT', x: 20, width: 160, y: 16, fontSize: 16, color: '#FFFFFF', height: 24 }),
-      buttonEl({ id: 'seed-nav-btn', label: 'Cart (0)', x: 270, width: 100, y: 10, height: 34, backgroundColor: '#E11D48', textColor: '#FFFFFF', borderRadius: 8 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Cart (0)', openCart: true, x: 270, width: 100, y: 10, height: 34, backgroundColor: '#E11D48', textColor: '#FFFFFF', borderRadius: 8 }),
 
       textEl({ id: 'seed-h1', text: 'Drop 004 Is Live', y: 64, fontSize: 30, color: '#0F172A', height: 44 }),
       textEl({ id: 'seed-sub', text: 'Bold basics, limited runs, fast shipping.', y: 112, fontSize: 15, color: '#475569', fontWeight: 'normal', height: 40 }),
-      buttonEl({ id: 'seed-btn', label: 'Shop the Drop', y: 164, backgroundColor: '#E11D48' }),
+      buttonEl({ id: 'seed-btn', label: 'Shop the Drop', scrollToY: 430, y: 164, backgroundColor: '#E11D48' }),
 
       textEl({ id: 'seed-about-eyebrow', text: 'BESTSELLERS', x: 24, width: 200, y: 240, fontSize: 11, color: '#E11D48', height: 20 }),
       textEl({
@@ -820,7 +824,7 @@ export const THEMES: Theme[] = [
 
       shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#0F172A', height: 120 }),
       textEl({ id: 'seed-footer-text', text: 'New drops every month', x: 24, width: 342, y: 740, fontSize: 14, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 24 }),
-      buttonEl({ id: 'seed-footer-btn', label: 'Shop All', x: 115, width: 160, y: 772, backgroundColor: '#E11D48', textColor: '#FFFFFF' }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Shop All', scrollToY: 430, x: 115, width: 160, y: 772, backgroundColor: '#E11D48', textColor: '#FFFFFF' }),
     ],
   },
   {
