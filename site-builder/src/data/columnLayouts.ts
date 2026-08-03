@@ -80,3 +80,41 @@ export function buildColumnLayout(template: ColumnLayoutTemplate, width: number)
   }
   return { elements, width, height: Math.max(0, y - ROW_GAP) };
 }
+
+// Real grid math for placing 2+ products together, instead of the free x/y stacking every
+// other insert uses -- a professional store shows products in fixed rows/columns, not
+// independently-floating cards. Fixed at 2 columns to match the app's one existing
+// product-grid precedent (CollectionDetailModal's "2 products per row" convention), rather
+// than inventing a different column count for exactly-3-selected; a 3rd product simply wraps
+// to its own row. Returns real x/y/width/height for each product, relative to a (0,0) origin
+// (offset by the caller, same convention buildColumnLayout already uses).
+const PRODUCT_GRID_COLUMNS = 2;
+const PRODUCT_GRID_GAP = 14;
+const PRODUCT_CARD_ASPECT = 220 / 180; // matches the existing single-product default size
+
+export interface ProductGridCell {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function buildProductGridLayout(count: number, containerWidth: number): { cells: ProductGridCell[]; height: number } {
+  const columns = Math.min(count, PRODUCT_GRID_COLUMNS);
+  const cellWidth = (containerWidth - PRODUCT_GRID_GAP * (columns - 1)) / columns;
+  const cellHeight = Math.round(cellWidth * PRODUCT_CARD_ASPECT);
+  const cells: ProductGridCell[] = [];
+  for (let i = 0; i < count; i++) {
+    const col = i % PRODUCT_GRID_COLUMNS;
+    const row = Math.floor(i / PRODUCT_GRID_COLUMNS);
+    cells.push({
+      x: col * (cellWidth + PRODUCT_GRID_GAP),
+      y: row * (cellHeight + PRODUCT_GRID_GAP),
+      width: cellWidth,
+      height: cellHeight,
+    });
+  }
+  const rows = Math.ceil(count / PRODUCT_GRID_COLUMNS);
+  const height = rows * cellHeight + (rows - 1) * PRODUCT_GRID_GAP;
+  return { cells, height };
+}

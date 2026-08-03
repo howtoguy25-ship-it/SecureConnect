@@ -23,6 +23,19 @@ module.exports = ({ config }) => ({
   slug: 'sitespark',
   scheme: 'sitespark',
   version: '0.1.0',
+  // OTA updates (expo-updates): runtimeVersion is pinned to the app version so a JS-only
+  // update published via `eas update` only ever reaches installs built from a matching
+  // native version -- any build with a native-dependency change gets a new app version (and
+  // thus a new runtime version), so it can never accidentally load a JS bundle that expects
+  // native code it doesn't have. checkAutomatically:'ON_LOAD' means every app launch checks
+  // for and applies a pending update in the background, no manual "check for updates" button
+  // needed -- see App.tsx for the actual check/fetch/reload call.
+  runtimeVersion: { policy: 'appVersion' },
+  updates: {
+    url: 'https://u.expo.dev/bebfca66-0b8b-43c9-98da-bdde6cd12cc8',
+    fallbackToCacheTimeout: 0,
+    checkAutomatically: 'ON_LOAD',
+  },
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
@@ -60,6 +73,7 @@ module.exports = ({ config }) => ({
   plugins: [
     'expo-font',
     'expo-asset',
+    'expo-updates',
     [
       'expo-image-picker',
       {

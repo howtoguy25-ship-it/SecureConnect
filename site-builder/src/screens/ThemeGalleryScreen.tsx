@@ -37,7 +37,7 @@ const TIER_LABEL: Record<ThemeTier, string> = {
 
 // Every category actually used by a real theme, in a fixed, sensible order -- 'All' is
 // prepended separately so it always leads the filter row.
-const ALL_CATEGORIES: ThemeCategory[] = ['Business', 'Portfolio', 'Retail', 'Restaurant', 'Fitness', 'Real Estate', 'Fashion', 'Tech', 'Media', 'Other'];
+const ALL_CATEGORIES: ThemeCategory[] = ['Business', 'Portfolio', 'Retail', 'Storefront', 'Restaurant', 'Fitness', 'Real Estate', 'Fashion', 'Tech', 'Media', 'Other'];
 
 export default function ThemeGalleryScreen({ navigation, route }: Props) {
   const { pageType, customSize } = route.params;

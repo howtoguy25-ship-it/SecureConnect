@@ -726,14 +726,22 @@ function ProductCardView({ element, width, height, locked }: { element: ProductE
   const inStock = product.inStock !== false;
 
   return (
-    // A locked element can't be dragged (DraggableElement disarms its move responder), but a
-    // shopper -- or a seller previewing a locked page -- can still tap it to see what it is.
-    // While unlocked, this Pressable is a plain View (no onPress) so it never competes with
-    // drag-select, matching the info-button/buy-buttons below, which already work either way.
-    <Pressable
-      style={{ width, height, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}
-      onPress={locked ? () => setShowDetail(true) : undefined}
-    >
+    // The outer View carries the real drop shadow (matching the published site's own
+    // `box-shadow:0 1px 8px rgba(0,0,0,0.1)` in siteHtml.ts -- the editor card used to be a
+    // flat 1px border with no shadow at all, reading as visibly cheaper/fuzzier than the real
+    // published card). A shadow and `overflow:'hidden'` can't both live on the same RN View
+    // (the clip cuts the shadow off too), so the inner Pressable keeps the rounded-corner
+    // image clipping and the shadow moves one level up.
+    <View style={[styles.productCardShadow, { width, height }]}>
+      {/* A locked element can't be dragged (DraggableElement disarms its move responder), but
+          a shopper -- or a seller previewing a locked page -- can still tap it to see what it
+          is. While unlocked, this Pressable has no onPress so it never competes with
+          drag-select, matching the info-button/buy-buttons below, which already work either
+          way. */}
+      <Pressable
+        style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' }}
+        onPress={locked ? () => setShowDetail(true) : undefined}
+      >
       {showImage && <ProductCardGallery images={product.images} width={width} height={imageHeight} compact={compact} />}
       {!inStock && (
         <View style={styles.outOfStockBadge}>
@@ -792,7 +800,8 @@ function ProductCardView({ element, width, height, locked }: { element: ProductE
       </Pressable>
 
       <ProductDetailModal element={showDetail ? element : null} onClose={() => setShowDetail(false)} />
-    </Pressable>
+      </Pressable>
+    </View>
   );
 }
 
@@ -1152,6 +1161,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   videoCaptionText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  // Matches the published site's real `box-shadow:0 1px 8px rgba(0,0,0,0.1)` (siteHtml.ts) --
+  // ProductCardView used to be a flat 1px border with no shadow at all, reading as visibly
+  // cheaper/fuzzier than the real published card.
+  productCardShadow: {
+    borderRadius: 10,
+    shadowColor: '#000000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
   productInfoBtn: {
     position: 'absolute',
     top: 6,

@@ -672,6 +672,157 @@ export const THEMES: Theme[] = [
       buttonEl({ id: 'seed-footer-btn', label: 'Schedule a Visit', x: 105, width: 180, y: 772, backgroundColor: '#8A7A5C' }),
     ],
   },
+  // Professional storefront layout quality (nav/hero/trust-badges/footer chrome), not a live
+  // Shopify connection -- a brand-new project has no catalog products to seed real
+  // ProductElements with yet (same reason every other theme's "product gallery" below is a
+  // placeholder mockup, not real products), so the seller drops in their own real products
+  // afterward using the multi-select catalog picker's new grid-insert behavior
+  // (insertMultipleProducts in EditorScreen.tsx), which places them in a real locked 2-column
+  // grid matching this layout's own product-mockup spacing.
+  {
+    id: 'storefront-boutique',
+    name: 'Boutique Storefront',
+    tier: 'luxury',
+    pageType: 'website',
+    category: 'Storefront',
+    price: 189,
+    description: 'A full premium storefront already built: nav, hero, shop-the-edit product grid, trust badges, and testimonial — warm cream and bronze.',
+    swatch: ['#FDFBF7', '#B08D57'],
+    background: '#FDFBF7',
+    accent: '#B08D57',
+    textColor: '#1A1A1A',
+    seedElements: [
+      shapeEl({ id: 'seed-nav', y: 0, color: '#F3EFE7', height: 54 }),
+      textEl({ id: 'seed-brand', text: 'ATELIER', x: 20, width: 160, y: 16, fontSize: 16, color: '#1A1A1A', height: 24 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Cart', x: 296, width: 74, y: 10, height: 34, backgroundColor: '#1A1A1A', textColor: '#FDFBF7', borderRadius: 8 }),
+
+      textEl({ id: 'seed-h1', text: 'New Arrivals, Curated Weekly', y: 64, fontSize: 28, color: '#1A1A1A', height: 44 }),
+      textEl({ id: 'seed-sub', text: "Small-batch pieces, thoughtfully made -- shop before they're gone.", y: 112, fontSize: 15, color: '#6B5F49', fontWeight: 'normal', height: 40 }),
+      buttonEl({ id: 'seed-btn', label: 'Shop Now', y: 164, backgroundColor: '#1A1A1A', textColor: '#FDFBF7' }),
+
+      textEl({ id: 'seed-about-eyebrow', text: 'SHOP THE EDIT', x: 24, width: 200, y: 240, fontSize: 11, color: '#B08D57', height: 20 }),
+      textEl({
+        id: 'seed-about-body',
+        text: "Three new pieces every Friday, each produced in a limited run. Once they're gone, they're gone.",
+        x: 24,
+        width: 342,
+        y: 264,
+        fontSize: 14,
+        color: '#4B4438',
+        fontWeight: 'normal',
+        height: 64,
+      }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 352, iconName: 'pricetag-outline', color: '#B08D57' }),
+      textEl({ id: 'seed-feat1-label', text: 'Fair Pricing', x: 20, width: 110, y: 390, fontSize: 12, color: '#1A1A1A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 352, iconName: 'ribbon-outline', color: '#B08D57' }),
+      textEl({ id: 'seed-feat2-label', text: 'Quality Checked', x: 140, width: 110, y: 390, fontSize: 12, color: '#1A1A1A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 352, iconName: 'checkmark-circle-outline', color: '#B08D57' }),
+      textEl({ id: 'seed-feat3-label', text: 'Secure Checkout', x: 260, width: 110, y: 390, fontSize: 12, color: '#1A1A1A', align: 'center', fontWeight: 'normal', height: 32 }),
+
+      // A mockup of what the real product grid (insertMultipleProducts's new locked 2-column
+      // layout) will look like once the seller drops their own products in -- same 3-across
+      // spacing every other theme's gallery uses, with a name+price line under each so it
+      // reads as products, not abstract decoration.
+      shapeEl({ id: 'seed-product1', x: 20, width: 110, y: 450, color: '#F3EFE7', height: 100, shapeKind: 'rounded-rectangle' }),
+      textEl({ id: 'seed-product1-name', text: 'Linen Shirt', x: 20, width: 110, y: 552, fontSize: 9, color: '#1A1A1A', fontWeight: 'normal', align: 'center', height: 12 }),
+      textEl({ id: 'seed-product1-price', text: '$128', x: 20, width: 110, y: 564, fontSize: 9, color: '#B08D57', fontWeight: 'bold', align: 'center', height: 12 }),
+      shapeEl({ id: 'seed-product2', x: 140, width: 110, y: 450, color: '#EAE2D2', height: 100, shapeKind: 'rounded-rectangle' }),
+      textEl({ id: 'seed-product2-name', text: 'Wool Coat', x: 140, width: 110, y: 552, fontSize: 9, color: '#1A1A1A', fontWeight: 'normal', align: 'center', height: 12 }),
+      textEl({ id: 'seed-product2-price', text: '$340', x: 140, width: 110, y: 564, fontSize: 9, color: '#B08D57', fontWeight: 'bold', align: 'center', height: 12 }),
+      shapeEl({ id: 'seed-product3', x: 260, width: 110, y: 450, color: '#F3EFE7', height: 100, shapeKind: 'rounded-rectangle' }),
+      textEl({ id: 'seed-product3-name', text: 'Silk Scarf', x: 260, width: 110, y: 552, fontSize: 9, color: '#1A1A1A', fontWeight: 'normal', align: 'center', height: 12 }),
+      textEl({ id: 'seed-product3-price', text: '$86', x: 260, width: 110, y: 564, fontSize: 9, color: '#B08D57', fontWeight: 'bold', align: 'center', height: 12 }),
+
+      textEl({
+        id: 'seed-quote',
+        text: '"Every piece feels intentional."',
+        x: 24,
+        width: 342,
+        y: 580,
+        fontSize: 15,
+        color: '#1A1A1A',
+        fontWeight: 'normal',
+        align: 'center',
+        height: 56,
+      }),
+      textEl({ id: 'seed-quote-attr', text: '— R. Bennett, Customer', x: 24, width: 342, y: 640, fontSize: 12, color: '#B08D57', fontWeight: 'normal', align: 'center', height: 20 }),
+
+      shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#F3EFE7', height: 120 }),
+      textEl({ id: 'seed-footer-text', text: 'Free shipping over $150', x: 24, width: 342, y: 740, fontSize: 14, color: '#1A1A1A', align: 'center', fontWeight: 'normal', height: 24 }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Shop All', x: 115, width: 160, y: 772, backgroundColor: '#1A1A1A', textColor: '#FDFBF7' }),
+    ],
+  },
+  {
+    id: 'storefront-modern',
+    name: 'Modern Storefront',
+    tier: 'luxury',
+    pageType: 'website',
+    category: 'Storefront',
+    price: 189,
+    description: 'A full premium storefront already built: nav, hero, bestseller product grid, trust badges, and testimonial — bold black, white, and rose.',
+    swatch: ['#0F172A', '#E11D48'],
+    background: '#FFFFFF',
+    accent: '#E11D48',
+    textColor: '#0F172A',
+    seedElements: [
+      shapeEl({ id: 'seed-nav', y: 0, color: '#0F172A', height: 54 }),
+      textEl({ id: 'seed-brand', text: 'MRKT', x: 20, width: 160, y: 16, fontSize: 16, color: '#FFFFFF', height: 24 }),
+      buttonEl({ id: 'seed-nav-btn', label: 'Cart (0)', x: 270, width: 100, y: 10, height: 34, backgroundColor: '#E11D48', textColor: '#FFFFFF', borderRadius: 8 }),
+
+      textEl({ id: 'seed-h1', text: 'Drop 004 Is Live', y: 64, fontSize: 30, color: '#0F172A', height: 44 }),
+      textEl({ id: 'seed-sub', text: 'Bold basics, limited runs, fast shipping.', y: 112, fontSize: 15, color: '#475569', fontWeight: 'normal', height: 40 }),
+      buttonEl({ id: 'seed-btn', label: 'Shop the Drop', y: 164, backgroundColor: '#E11D48' }),
+
+      textEl({ id: 'seed-about-eyebrow', text: 'BESTSELLERS', x: 24, width: 200, y: 240, fontSize: 11, color: '#E11D48', height: 20 }),
+      textEl({
+        id: 'seed-about-body',
+        text: "The pieces everyone's wearing right now -- restocked, but not for long.",
+        x: 24,
+        width: 342,
+        y: 264,
+        fontSize: 14,
+        color: '#334155',
+        fontWeight: 'normal',
+        height: 64,
+      }),
+
+      iconEl({ id: 'seed-feat1-icon', x: 44, y: 352, iconName: 'flash-outline', color: '#E11D48' }),
+      textEl({ id: 'seed-feat1-label', text: 'Fast Shipping', x: 20, width: 110, y: 390, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat2-icon', x: 164, y: 352, iconName: 'checkmark-circle-outline', color: '#E11D48' }),
+      textEl({ id: 'seed-feat2-label', text: 'Secure Checkout', x: 140, width: 110, y: 390, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+      iconEl({ id: 'seed-feat3-icon', x: 284, y: 352, iconName: 'star-outline', color: '#E11D48' }),
+      textEl({ id: 'seed-feat3-label', text: '5-Star Rated', x: 260, width: 110, y: 390, fontSize: 12, color: '#0F172A', align: 'center', fontWeight: 'normal', height: 32 }),
+
+      shapeEl({ id: 'seed-product1', x: 20, width: 110, y: 450, color: '#F1F5F9', height: 100, shapeKind: 'rounded-rectangle' }),
+      textEl({ id: 'seed-product1-name', text: 'Oversized Tee', x: 20, width: 110, y: 552, fontSize: 9, color: '#0F172A', fontWeight: 'normal', align: 'center', height: 12 }),
+      textEl({ id: 'seed-product1-price', text: '$48', x: 20, width: 110, y: 564, fontSize: 9, color: '#E11D48', fontWeight: 'bold', align: 'center', height: 12 }),
+      shapeEl({ id: 'seed-product2', x: 140, width: 110, y: 450, color: '#E2E8F0', height: 100, shapeKind: 'rounded-rectangle' }),
+      textEl({ id: 'seed-product2-name', text: 'Cargo Pant', x: 140, width: 110, y: 552, fontSize: 9, color: '#0F172A', fontWeight: 'normal', align: 'center', height: 12 }),
+      textEl({ id: 'seed-product2-price', text: '$86', x: 140, width: 110, y: 564, fontSize: 9, color: '#E11D48', fontWeight: 'bold', align: 'center', height: 12 }),
+      shapeEl({ id: 'seed-product3', x: 260, width: 110, y: 450, color: '#F1F5F9', height: 100, shapeKind: 'rounded-rectangle' }),
+      textEl({ id: 'seed-product3-name', text: 'Bucket Hat', x: 260, width: 110, y: 552, fontSize: 9, color: '#0F172A', fontWeight: 'normal', align: 'center', height: 12 }),
+      textEl({ id: 'seed-product3-price', text: '$32', x: 260, width: 110, y: 564, fontSize: 9, color: '#E11D48', fontWeight: 'bold', align: 'center', height: 12 }),
+
+      textEl({
+        id: 'seed-quote',
+        text: '"Ordered Monday, wore it Friday."',
+        x: 24,
+        width: 342,
+        y: 580,
+        fontSize: 15,
+        color: '#0F172A',
+        fontWeight: 'normal',
+        align: 'center',
+        height: 56,
+      }),
+      textEl({ id: 'seed-quote-attr', text: '— J. Alvarado, Customer', x: 24, width: 342, y: 640, fontSize: 12, color: '#E11D48', fontWeight: 'normal', align: 'center', height: 20 }),
+
+      shapeEl({ id: 'seed-footer', x: 0, width: 390, y: 712, color: '#0F172A', height: 120 }),
+      textEl({ id: 'seed-footer-text', text: 'New drops every month', x: 24, width: 342, y: 740, fontSize: 14, color: '#FFFFFF', align: 'center', fontWeight: 'normal', height: 24 }),
+      buttonEl({ id: 'seed-footer-btn', label: 'Shop All', x: 115, width: 160, y: 772, backgroundColor: '#E11D48', textColor: '#FFFFFF' }),
+    ],
+  },
   {
     id: 'crazy-neon',
     name: 'Neon Overdrive',

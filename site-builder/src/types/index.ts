@@ -8,6 +8,7 @@ export type ThemeCategory =
   | 'Business'
   | 'Portfolio'
   | 'Retail'
+  | 'Storefront'
   | 'Restaurant'
   | 'Fitness'
   | 'Real Estate'

@@ -18,7 +18,7 @@ import MenuPoliciesModal from '@/components/editor/MenuPoliciesModal';
 import ProductCatalogPickerModal from '@/components/editor/ProductCatalogPickerModal';
 import ColumnLayoutPickerModal from '@/components/editor/ColumnLayoutPickerModal';
 import CanvasSizePickerModal from '@/components/editor/CanvasSizePickerModal';
-import { ColumnLayoutTemplate, buildColumnLayout } from '@/data/columnLayouts';
+import { ColumnLayoutTemplate, buildColumnLayout, buildProductGridLayout } from '@/data/columnLayouts';
 import { LibraryItem } from '@/data/elementsLibrary';
 import { generateId } from '@/utils/id';
 import { CanvasElement, TextElement, ImageElement, SlideshowElement, VideoElement, ProductElement, CollectionElement, GameElement, WidgetElement, CustomWidgetElement, CatalogProduct, SectionElement } from '@/types';
@@ -372,40 +372,59 @@ function EditorInner({ navigation }: Props) {
     requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
   };
 
-  // The "select up to 3 products, then Add" flow from ProductCatalogPickerModal -- computes
-  // every new product's stacked position up front against one running bottom-edge tracker
-  // (seeded from the current activeElements, then advanced locally per product added in this
-  // same batch) instead of calling insertExistingProduct 3 times in a row, which would have
-  // each call re-read the same still-stale activeElements/canvasSize (React hasn't
-  // re-rendered between synchronous calls yet) and stack all 3 products on top of each other
-  // at the exact same spot.
+  // The "select up to 3 products, then Add" flow from ProductCatalogPickerModal. A single
+  // selected product is placed exactly like insertExistingProduct (free single-hero
+  // placement -- a grid doesn't mean anything for just one item). Two or more get real grid
+  // math (buildProductGridLayout) instead of free-floating/stacked placement, each one
+  // **locked** by default (DraggableElement.tsx already makes a locked element fully
+  // move/resize/rotate-proof while keeping tap-through alive via ProductCardView's
+  // conditional Pressable -- no new gesture code needed, and the existing lock badge still
+  // lets a seller unlock/rearrange one later if they want), wrapped in a new Section so it
+  // reads as one real store-shelf block instead of independently-floating cards.
   const insertMultipleProducts = (products: CatalogProduct[]) => {
     if (products.length === 0) return;
-    const width = 180;
-    const height = 220;
-    let bottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
-    let canvasHeightNeeded = project.canvasSize.height;
-    const newElements: ProductElement[] = products.map((product, i) => {
-      const gap = i === 0 && activeElements.length > 0 ? 24 : i === 0 ? 32 : 24;
-      const y = bottom + gap;
-      bottom = y + height;
-      canvasHeightNeeded = Math.max(canvasHeightNeeded, bottom + 40);
-      return {
-        id: generateId('el'),
-        type: 'product',
-        productId: product.id,
-        x: (project.canvasSize.width - width) / 2,
-        y,
-        width,
-        height,
-        zIndex: 5,
-      };
-    });
-    if (canvasHeightNeeded > project.canvasSize.height) {
-      updateProject({ canvasSize: { ...project.canvasSize, height: canvasHeightNeeded } });
+    if (products.length === 1) {
+      insertExistingProduct(products[0]);
+      return;
     }
-    newElements.forEach((el) => addElement(el));
-    select(newElements[newElements.length - 1].id);
+
+    const sectionWidth = project.canvasSize.width - COLUMN_SECTION_MARGIN * 2;
+    const built = buildProductGridLayout(products.length, sectionWidth - COLUMN_SECTION_PADDING * 2);
+    const lowestBottom = activeElements.reduce((max, el) => Math.max(max, el.y + el.height), 0);
+    const gap = activeElements.length > 0 ? 24 : 32;
+    const sectionY = lowestBottom + gap;
+    const sectionHeight = built.height + COLUMN_SECTION_PADDING * 2;
+    const requiredHeight = sectionY + sectionHeight + 40;
+    if (requiredHeight > project.canvasSize.height) {
+      updateProject({ canvasSize: { ...project.canvasSize, height: requiredHeight } });
+    }
+
+    const productElements: ProductElement[] = products.map((product, i) => ({
+      id: generateId('el'),
+      type: 'product',
+      productId: product.id,
+      x: COLUMN_SECTION_MARGIN + COLUMN_SECTION_PADDING + built.cells[i].x,
+      y: sectionY + COLUMN_SECTION_PADDING + built.cells[i].y,
+      width: built.cells[i].width,
+      height: built.cells[i].height,
+      zIndex: 0,
+      locked: true,
+    }));
+
+    const section: SectionElement = {
+      id: generateId('el'),
+      type: 'section',
+      backgroundColor: project.backgroundColor,
+      childIds: productElements.map((p) => p.id),
+      x: COLUMN_SECTION_MARGIN,
+      y: sectionY,
+      width: sectionWidth,
+      height: sectionHeight,
+      zIndex: 0,
+    };
+    addElement(section);
+    productElements.forEach((el) => addElement(el));
+    select(section.id);
     setPanel(null);
     requestAnimationFrame(() => canvasScrollRef.current?.scrollToEnd({ animated: true }));
   };

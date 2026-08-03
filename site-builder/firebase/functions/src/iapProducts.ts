@@ -25,7 +25,7 @@ export const CREDIT_PACK_PRODUCT_IDS: Record<string, number> = {
 // Mirrors app/src/data/themes.ts's theme ids per tier -- buying one tier's product
 // unlocks every theme currently in that tier.
 export const THEME_IDS_BY_PRODUCT: Record<string, string[]> = {
-  'com.sitespark.app.theme.luxury': ['luxury-noir', 'luxury-coastal'],
+  'com.sitespark.app.theme.luxury': ['luxury-noir', 'luxury-coastal', 'storefront-boutique', 'storefront-modern'],
   'com.sitespark.app.theme.luxurycrazy': ['crazy-neon', 'crazy-editorial'],
 };
 
