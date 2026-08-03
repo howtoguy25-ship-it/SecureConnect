@@ -41,7 +41,14 @@ export async function readPlateText(photoUri: string, region: PlateRegion): Prom
       const candidate = bestPlateCandidate(block.text);
       if (candidate) return candidate;
     }
-    return null;
+    // A real plate's characters sometimes come back from ML Kit as more than one block/line
+    // (a visual gap around a state name or a design element can split the read) -- no single
+    // block matches on its own in that case, even though the full plate WAS actually read
+    // correctly. result.text is ML Kit's own concatenation of every block/line it found on the
+    // crop, so this combines everything actually recognized into one string before giving up,
+    // rather than showing nothing (or, worse, only half the plate) when the characters were
+    // just split across separate reads.
+    return bestPlateCandidate(result.text);
   } finally {
     // This crop is a brand-new temp file ImageManipulator wrote to disk on every single OCR
     // attempt (up to MAX_PLATE_ATTEMPTS times per vehicle, for every vehicle in frame, every

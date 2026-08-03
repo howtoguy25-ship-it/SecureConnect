@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission, type PhotoFile } from "react-native-vision-camera";
+import {
+  Camera,
+  useCameraDevice,
+  useCameraFormat,
+  useCameraPermission,
+  type PhotoFile,
+} from "react-native-vision-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -121,6 +127,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
+  // A phone's default/max photo resolution is often 12MP+ (4032x3024 or bigger) -- the
+  // detection model only ever looks at a downsized 300x300 tensor, so capturing at full
+  // resolution was pure waste: a bigger native JPEG to encode, a bigger file to write/delete
+  // every ~0.7-1.1s, a bigger buffer to decode, more pixels for tf.tensor3d to allocate. 1280x720
+  // is comfortably more detail than the model uses while being a small fraction of the native
+  // max -- a real, direct reduction in per-capture CPU/memory/storage load, not just a
+  // relabeling of the same work.
+  const format = useCameraFormat(device, [{ photoResolution: { width: 1280, height: 720 } }]);
   // Real ego GPS speed for turning a tracked vehicle's closing/receding rate into its own
   // actual road speed -- see speedTracker.ts's combineWithEgoSpeed. Reuses the SAME
   // app-wide location watcher LocationProvider already runs (App.tsx) rather than starting a
@@ -448,6 +462,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={device}
+        format={format}
         isActive={true}
         photo={true}
         photoQualityBalance="speed"
@@ -469,7 +484,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           // nothing at all.
           const speedLabel =
             box.state === "parked"
-              ? "PARKED"
+              ? "0 km/h"
               : box.speedKmh === null
                 ? null
                 : box.speedKind === "absolute"
@@ -584,7 +599,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
               real km/h estimate of that vehicle's own road speed once your own GPS speed is
               available to combine with it (assumes it's ahead of you, same direction); with no
               GPS fix it falls back to an arrow + closing/receding rate instead, and shows
-              "PARKED" once a vehicle has been still for a couple of seconds. A plate number
+              "0 km/h" once a vehicle has been still for a couple of seconds. A plate number
               only appears once the same on-device text read comes back at least twice in a
               row — it's never stored or sent anywhere, just shown live while that vehicle
               stays in view. Tap any box for its full details.
@@ -625,7 +640,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
             <Text style={styles.detailLabel}>Speed</Text>
             <Text style={styles.detailValue}>
               {selectedBox.state === "parked"
-                ? "Parked"
+                ? "0 km/h"
                 : selectedBox.speedKmh === null
                   ? "—"
                   : selectedBox.speedKind === "absolute"
