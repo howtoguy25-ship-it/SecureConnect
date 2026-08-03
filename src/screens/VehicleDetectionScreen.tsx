@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Animated, LayoutChangeEvent } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
 import {
   Camera,
   useCameraDevice,
@@ -90,36 +90,6 @@ function TargetCorners({ width, height, color }: { width: number; height: number
   );
 }
 
-const SCAN_FRAME_SIZE = 180;
-
-// Real, honest "actively scanning" reticle -- shown the instant the camera is live and ready
-// (status "running"), before any vehicle has actually been found yet, so the screen never
-// looks inert or frozen while it's genuinely working. Never claims a vehicle is there: it's
-// the same corner-bracket visual language as a real target lock, just centered and pulsing
-// rather than boxing anything specific, and disappears the moment a real box exists.
-function ScanningFrame() {
-  const pulse = useRef(new Animated.Value(0.35)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.35, duration: 900, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [pulse]);
-
-  return (
-    <View style={styles.scanningWrap} pointerEvents="none">
-      <Animated.View style={[styles.scanningFrame, { opacity: pulse }]}>
-        <TargetCorners width={SCAN_FRAME_SIZE} height={SCAN_FRAME_SIZE} color="#F59E0B" />
-      </Animated.View>
-      <Animated.Text style={[styles.scanningLabel, { opacity: pulse }]}>Scanning for vehicles…</Animated.Text>
-    </View>
-  );
-}
-
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -160,11 +130,15 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   // A phone's default/max photo resolution is often 12MP+ (4032x3024 or bigger) -- the
   // detection model only ever looks at a downsized 300x300 tensor, so capturing at full
   // resolution was pure waste: a bigger native JPEG to encode, a bigger file to write/delete
-  // every ~0.7-1.1s, a bigger buffer to decode, more pixels for tf.tensor3d to allocate. 1280x720
-  // is comfortably more detail than the model uses while being a small fraction of the native
-  // max -- a real, direct reduction in per-capture CPU/memory/storage load, not just a
-  // relabeling of the same work.
-  const format = useCameraFormat(device, [{ photoResolution: { width: 1280, height: 720 } }]);
+  // every ~0.7-1.1s, a bigger buffer to decode, more pixels for tf.tensor3d to allocate.
+  // Trimmed further from an earlier 1280x720 down to 960x540 -- the SSD model's own forward
+  // pass cost is fixed either way (it always resizes its input down to 300x300 internally
+  // regardless of what's fed in), but the JPEG decode + tensor allocation/copy this app does on
+  // every single capture scales directly with pixel count, and that step runs on the same JS
+  // thread as touch handling -- a real, direct source of the "freezes while detecting" symptom.
+  // 960x540 is still comfortably more detail than the model ever uses (over 10x the pixels of
+  // its own 300x300 input) while cutting that per-frame decode/copy cost by close to half.
+  const format = useCameraFormat(device, [{ photoResolution: { width: 960, height: 540 } }]);
   // Real camera zoom -- vision-camera's `zoom` prop drives the actual native capture session
   // (AVCaptureDevice/CameraX), not just the on-screen preview, so takePhoto() genuinely
   // captures the zoomed-in frame. That directly helps detection on a distant vehicle: more of
@@ -586,9 +560,6 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         </Pressable>
       </View>
 
-      {/* Immediately visible the moment the camera is live -- see ScanningFrame's own comment.
-          Gone the instant there's a real box to show instead. */}
-      {status === "running" && boxes.length === 0 && <ScanningFrame />}
 
       {photoSize &&
         containerSize &&
@@ -843,26 +814,6 @@ const styles = StyleSheet.create({
   closeLink: {
     color: "#9CA3AF",
     marginTop: 8,
-  },
-  scanningWrap: {
-    ...StyleSheet.absoluteFill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scanningFrame: {
-    width: SCAN_FRAME_SIZE,
-    height: SCAN_FRAME_SIZE,
-  },
-  scanningLabel: {
-    marginTop: spacing.md,
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
-    backgroundColor: "rgba(17, 24, 39, 0.55)",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-    overflow: "hidden",
   },
   box: {
     position: "absolute",
