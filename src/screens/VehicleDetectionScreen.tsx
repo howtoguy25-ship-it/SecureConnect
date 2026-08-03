@@ -135,6 +135,28 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   // max -- a real, direct reduction in per-capture CPU/memory/storage load, not just a
   // relabeling of the same work.
   const format = useCameraFormat(device, [{ photoResolution: { width: 1280, height: 720 } }]);
+  // Real camera zoom -- vision-camera's `zoom` prop drives the actual native capture session
+  // (AVCaptureDevice/CameraX), not just the on-screen preview, so takePhoto() genuinely
+  // captures the zoomed-in frame. That directly helps detection on a distant vehicle: more of
+  // the frame's pixels land on it instead of the model trying to work with a tiny cluster of
+  // pixels lost in a wide field of view. Capped below device.maxZoom (some devices report up
+  // to 128x, which is unusable digital zoom that just produces a blurry, undetectable frame)
+  // and starts at the device's own neutralZoom (1x on a single-camera device; the wide-angle
+  // "normal" zoom on a multi-camera one -- never starts on the ultra-wide fish-eye lens, which
+  // would distort vehicles and hurt detection, not help it).
+  const MAX_USABLE_ZOOM = 8;
+  const [zoomFactor, setZoomFactor] = useState(1);
+  useEffect(() => {
+    if (device) setZoomFactor(device.neutralZoom);
+  }, [device]);
+  const minZoomFactor = device?.minZoom ?? 1;
+  const maxZoomFactor = device ? Math.min(device.maxZoom, MAX_USABLE_ZOOM) : 1;
+  const zoomIn = useCallback(() => {
+    setZoomFactor((z) => Math.min(maxZoomFactor, Math.round((z + 0.5) * 10) / 10));
+  }, [maxZoomFactor]);
+  const zoomOut = useCallback(() => {
+    setZoomFactor((z) => Math.max(minZoomFactor, Math.round((z - 0.5) * 10) / 10));
+  }, [minZoomFactor]);
   // Real ego GPS speed for turning a tracked vehicle's closing/receding rate into its own
   // actual road speed -- see speedTracker.ts's combineWithEgoSpeed. Reuses the SAME
   // app-wide location watcher LocationProvider already runs (App.tsx) rather than starting a
@@ -466,7 +488,43 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         isActive={true}
         photo={true}
         photoQualityBalance="speed"
+        zoom={zoomFactor}
       />
+
+      {/* Real zoom -- changes the actual native capture session (see zoomFactor's own
+          comment above), so this isn't just a cosmetic preview crop: takePhoto() genuinely
+          captures the zoomed-in frame, giving the detector more real pixels on a distant
+          vehicle. Disabled (dimmed) at each end instead of silently no-op'ing so it's clear
+          when you've hit the device's real min/max. */}
+      <View style={[styles.zoomControls, { top: insets.top + spacing.md + 140 }]}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.zoomButton,
+            zoomFactor >= maxZoomFactor && styles.zoomButtonDisabled,
+            pressed && zoomFactor < maxZoomFactor && { opacity: pressedOpacity },
+          ]}
+          onPress={zoomIn}
+          disabled={zoomFactor >= maxZoomFactor}
+          accessibilityLabel="Zoom in"
+          hitSlop={8}
+        >
+          <Ionicons name="add" size={20} color="#FFFFFF" />
+        </Pressable>
+        <Text style={styles.zoomLabel}>{zoomFactor.toFixed(1)}x</Text>
+        <Pressable
+          style={({ pressed }) => [
+            styles.zoomButton,
+            zoomFactor <= minZoomFactor && styles.zoomButtonDisabled,
+            pressed && zoomFactor > minZoomFactor && { opacity: pressedOpacity },
+          ]}
+          onPress={zoomOut}
+          disabled={zoomFactor <= minZoomFactor}
+          accessibilityLabel="Zoom out"
+          hitSlop={8}
+        >
+          <Ionicons name="remove" size={20} color="#FFFFFF" />
+        </Pressable>
+      </View>
 
       {photoSize &&
         containerSize &&
@@ -602,7 +660,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
               "0 km/h" once a vehicle has been still for a couple of seconds. A plate number
               only appears once the same on-device text read comes back at least twice in a
               row — it's never stored or sent anywhere, just shown live while that vehicle
-              stays in view. Tap any box for its full details.
+              stays in view. Tap any box for its full details. Use +/- on the right to zoom in
+              on a distant vehicle — this zooms the real camera capture, not just the preview,
+              so it can genuinely help detect something too far away to register at 1x.
             </Text>
             <Pressable onPress={dismissInfo} hitSlop={12} accessibilityLabel="Dismiss">
               <Ionicons name="close" size={20} color="#fff" />
@@ -884,5 +944,32 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(17, 24, 39, 0.45)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  zoomControls: {
+    position: "absolute",
+    right: spacing.md,
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  zoomButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(17, 24, 39, 0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomButtonDisabled: {
+    opacity: 0.35,
+  },
+  zoomLabel: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+    backgroundColor: "rgba(17, 24, 39, 0.55)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    overflow: "hidden",
   },
 });

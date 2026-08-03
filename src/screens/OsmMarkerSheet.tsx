@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useMemo, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, Image, ActivityIndicator } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -40,8 +40,32 @@ export const OsmMarkerSheet = forwardRef<BottomSheet, Props>(function OsmMarkerS
   // Street View imagery *at that exact coordinate* is the closest genuinely real answer to
   // "show me where this is" (vs. just a generic icon on the map), pulling from Google's actual
   // street-level photography rather than anything mocked/placeholder.
-  const streetViewUrl = location
-    ? `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${location.latitude},${location.longitude}&fov=80&key=${env.googlePlacesApiKey}`
+  //
+  // The single panorama Google has at a given coordinate is sometimes obstructed in the shot
+  // itself -- most commonly a large vehicle (a truck, a bus, occasionally Google's own capture
+  // car) parked or passing right in front of the lens at the moment that panorama was
+  // photographed. There's no way to detect that automatically without running the image
+  // through a vision model ourselves, so instead this offers a real, honest manual escape
+  // hatch: "Try another angle" first re-crops the SAME panorama from a different heading (a
+  // genuinely different photo if the obstruction didn't wrap the whole horizon), and if that's
+  // been tried already, probes the Street View Metadata API (a free, imageless lookup) at a
+  // few nearby real-world offsets for a DIFFERENT panorama entirely -- an actual different
+  // capture instant from Google, not a re-request of the same blocked shot.
+  const NEARBY_OFFSET_DEG = 0.00035; // ~35-40m -- close enough to still be "this spot"
+  const [altLocation, setAltLocation] = useState<LatLng | null>(null);
+  const [headingIndex, setHeadingIndex] = useState(0); // 0 = default heading, 1-4 = 0/90/180/270
+  const [findingAngle, setFindingAngle] = useState(false);
+
+  // Fresh marker tapped -- drop any angle/nearby-pano search from the previous one.
+  useEffect(() => {
+    setAltLocation(null);
+    setHeadingIndex(0);
+  }, [location?.latitude, location?.longitude]);
+
+  const baseLocation = altLocation ?? location;
+  const headingParam = headingIndex > 0 ? `&heading=${(headingIndex - 1) * 90}` : "";
+  const streetViewUrl = baseLocation
+    ? `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${baseLocation.latitude},${baseLocation.longitude}&fov=80${headingParam}&key=${env.googlePlacesApiKey}`
     : null;
 
   // Google's Street View Static API returns a real HTTP error body (not a placeholder image)
@@ -54,6 +78,45 @@ export const OsmMarkerSheet = forwardRef<BottomSheet, Props>(function OsmMarkerS
   useEffect(() => {
     setImageStatus("loading");
   }, [streetViewUrl]);
+
+  const fetchPanoId = useCallback(async (loc: LatLng): Promise<string | null> => {
+    try {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/streetview/metadata?location=${loc.latitude},${loc.longitude}&key=${env.googlePlacesApiKey}`
+      );
+      const json = await res.json();
+      return json.status === "OK" && json.pano_id ? String(json.pano_id) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const tryAnotherAngle = useCallback(async () => {
+    if (!location || findingAngle) return;
+    setFindingAngle(true);
+    try {
+      const currentPanoId = await fetchPanoId(baseLocation ?? location);
+      const offsets: LatLng[] = [
+        { latitude: location.latitude + NEARBY_OFFSET_DEG, longitude: location.longitude },
+        { latitude: location.latitude - NEARBY_OFFSET_DEG, longitude: location.longitude },
+        { latitude: location.latitude, longitude: location.longitude + NEARBY_OFFSET_DEG },
+        { latitude: location.latitude, longitude: location.longitude - NEARBY_OFFSET_DEG },
+      ];
+      for (const candidate of offsets) {
+        const candidatePanoId = await fetchPanoId(candidate);
+        if (candidatePanoId && candidatePanoId !== currentPanoId) {
+          setAltLocation(candidate);
+          setHeadingIndex(0);
+          return;
+        }
+      }
+      // No distinct nearby capture found -- fall back to a different crop angle of the same
+      // panorama. Still a real, different photo whenever the obstruction wasn't all-around.
+      setHeadingIndex((i) => (i + 1) % 5);
+    } finally {
+      setFindingAngle(false);
+    }
+  }, [location, baseLocation, findingAngle, fetchPanoId]);
 
   return (
     <BottomSheet
@@ -105,10 +168,34 @@ export const OsmMarkerSheet = forwardRef<BottomSheet, Props>(function OsmMarkerS
                     <Text style={styles.imageErrorText}>Street View image unavailable right now</Text>
                   </View>
                 )}
+                {/* Real fix for a shot blocked by a passing vehicle at capture time -- see
+                    tryAnotherAngle's own comment. Not shown while the image itself is still
+                    loading/erroring so it never sits on top of that state's own UI. */}
+                {imageStatus === "loaded" && (
+                  <Pressable
+                    onPress={tryAnotherAngle}
+                    disabled={findingAngle}
+                    hitSlop={10}
+                    style={({ pressed }) => [
+                      styles.angleButton,
+                      pressed && !findingAngle && { opacity: pressedOpacity },
+                    ]}
+                    accessibilityLabel="Try another angle if this image is blocked"
+                  >
+                    {findingAngle ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="sync" size={16} color="#FFFFFF" />
+                    )}
+                  </Pressable>
+                )}
               </View>
             )}
             <Text style={styles.caption}>
-              Real Google Street View imagery of this spot -- location from OpenStreetMap community data.
+              Real Google Street View imagery of this spot -- location from OpenStreetMap
+              community data. If the shot is blocked (e.g. by a passing truck), tap{" "}
+              <Ionicons name="sync" size={11} color={colors.textMuted} /> on the photo to try a
+              different real angle or a nearby capture.
             </Text>
           </>
         )}
@@ -189,6 +276,17 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: "center",
     paddingHorizontal: spacing.lg,
+  },
+  angleButton: {
+    position: "absolute",
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(17, 24, 39, 0.6)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   caption: {
     fontSize: 12,
