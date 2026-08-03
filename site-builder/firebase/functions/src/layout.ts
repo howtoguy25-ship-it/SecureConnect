@@ -106,6 +106,22 @@ function productEl(partial: Partial<ProductElement> & Pick<ProductElement, 'y' |
   };
 }
 
+// Matches a product-kind section's name against the user's own real catalog (see
+// buildSystemPrompt's existingProductNames instruction, which asks the model to copy an
+// existing product's name back verbatim when the user asked to add/feature it by name) --
+// case-insensitive, and bidirectional-substring so "Blue Hoodie" still matches a section
+// named "Blue Hoodie - Large" and vice versa, mirroring the same loose match convention
+// assistantExecuteAction already uses for editProduct/insertProductOnPage. Returns undefined
+// (no match) whenever the AI wrote a genuinely new item name, which is the common case.
+export function matchExistingProduct(name: string, existingCatalog: CatalogProduct[]): CatalogProduct | undefined {
+  const needle = name.trim().toLowerCase();
+  if (!needle) return undefined;
+  return existingCatalog.find((p) => {
+    const hay = p.name.trim().toLowerCase();
+    return hay.length > 0 && (hay.includes(needle) || needle.includes(hay));
+  });
+}
+
 // Real content for an AI-generated product section -- a ProductElement only ever stores a
 // productId now (see the type's own comment), so the caller (index.ts's pushPreview) needs
 // this alongside the elements to actually create/update the matching users/{uid}/products
@@ -291,7 +307,14 @@ export function layoutSitePlan(
   // scrolling hero banner), the one image fills nearly this entire real frame, the way an
   // actual logo/post graphic should. Undefined/omitted for a website build, which keeps
   // sizing itself from estimatedCanvasHeight as before.
-  singleCompositionCanvasHeight?: number
+  singleCompositionCanvasHeight?: number,
+  // The user's own real product catalog (users/{uid}/products) -- when a product-kind
+  // section's name matches one of these (see matchExistingProduct), the resulting
+  // ProductElement points at that REAL existing product id instead of a freshly-generated
+  // one, and productContents is left untouched for it so the real catalog doc (its actual
+  // photos/price/stock/variants) is imported into the build rather than overwritten with
+  // AI-guessed placeholder data.
+  existingCatalog: CatalogProduct[] = []
 ): SitePlanLayout {
   idCounter = 0;
   const elements: CanvasElement[] = [];
@@ -400,29 +423,38 @@ export function layoutSitePlan(
         const productEls: ProductElement[] = runSections.map((runSection, i) => {
           const col = i % columns;
           const row = Math.floor(i / columns);
+          const name = stripMarkdown(runSection.productName || stripMarkdown(runSection.headline));
+          const existingMatch = matchExistingProduct(runSection.productName || name, existingCatalog);
           const el = productEl({
             y: gridY + row * (cellHeight + gridGap),
             height: cellHeight,
             x: MARGIN + col * (cellWidth + gridGap),
             width: cellWidth,
             locked: true,
+            ...(existingMatch ? { productId: existingMatch.id } : {}),
           });
-          productContents[el.productId] = {
-            name: stripMarkdown(runSection.productName || stripMarkdown(runSection.headline)),
-            description: runSection.productDescription ? stripMarkdown(runSection.productDescription) : '',
-            priceUsd: runSection.productPriceUsd || 0,
-            compareAtPriceUsd: null,
-            costUsd: null,
-            images: productImagesFor(runSection),
-            trackInventory: false,
-            initialStock: null,
-            inStock: true,
-            saleType: runSection.productSaleType || 'product',
-            fulfillment: 'pickup',
-            serviceDurationMinutes: null,
-            variantOptions: [],
-            variants: [],
-          };
+          // A matched product is the user's own real catalog item -- its real
+          // photos/price/stock/variants must be imported as-is, never overwritten with
+          // AI-guessed placeholder content, so productContents deliberately stays untouched
+          // for it (see pushPreview's comment on why a plain overwrite is normally fine).
+          if (!existingMatch) {
+            productContents[el.productId] = {
+              name,
+              description: runSection.productDescription ? stripMarkdown(runSection.productDescription) : '',
+              priceUsd: runSection.productPriceUsd || 0,
+              compareAtPriceUsd: null,
+              costUsd: null,
+              images: productImagesFor(runSection),
+              trackInventory: false,
+              initialStock: null,
+              inStock: true,
+              saleType: runSection.productSaleType || 'product',
+              fulfillment: 'pickup',
+              serviceDurationMinutes: null,
+              variantOptions: [],
+              variants: [],
+            };
+          }
           return el;
         });
         const gridSection: SectionElement = {
@@ -443,28 +475,32 @@ export function layoutSitePlan(
         const urls = productImagesFor(section);
         const name = stripMarkdown(section.productName || headline);
         const description = section.productDescription ? stripMarkdown(section.productDescription) : '';
+        const existingMatch = matchExistingProduct(section.productName || name, existingCatalog);
         // Room for an inline swipeable gallery plus name/description/price/qty/buy button --
         // taller than a plain image section since a real product card needs more vertical
         // space than a decorative picture would.
         const productHeight = 340;
-        const el = productEl({ y, height: productHeight });
+        const el = productEl({ y, height: productHeight, ...(existingMatch ? { productId: existingMatch.id } : {}) });
         elements.push(el);
-        productContents[el.productId] = {
-          name,
-          description,
-          priceUsd: section.productPriceUsd || 0,
-          compareAtPriceUsd: null,
-          costUsd: null,
-          images: urls,
-          trackInventory: false,
-          initialStock: null,
-          inStock: true,
-          saleType: section.productSaleType || 'product',
-          fulfillment: 'pickup',
-          serviceDurationMinutes: null,
-          variantOptions: [],
-          variants: [],
-        };
+        // Same "never overwrite a real catalog match" rule as the grid branch above.
+        if (!existingMatch) {
+          productContents[el.productId] = {
+            name,
+            description,
+            priceUsd: section.productPriceUsd || 0,
+            compareAtPriceUsd: null,
+            costUsd: null,
+            images: urls,
+            trackInventory: false,
+            initialStock: null,
+            inStock: true,
+            saleType: section.productSaleType || 'product',
+            fulfillment: 'pickup',
+            serviceDurationMinutes: null,
+            variantOptions: [],
+            variants: [],
+          };
+        }
         y += productHeight + 16;
       }
     }

@@ -245,7 +245,8 @@ const SITE_PLAN_SCHEMA = {
 function buildSystemPrompt(
   complexity: 'simple' | 'standard' | 'crazy',
   todayIso: string,
-  pageType: 'website' | 'video' | 'social' | 'logo' = 'website'
+  pageType: 'website' | 'video' | 'social' | 'logo' = 'website',
+  existingProductNames: string[] = []
 ): string {
   // The single biggest fidelity bug this builder had: pageType used to never reach this
   // prompt at all, so a request for a Logo/Video/Social page still always produced the same
@@ -291,6 +292,11 @@ function buildSystemPrompt(
     'If the user asks for a game, quiz, trivia, or something fun/interactive to play, include exactly one section with kind "game" and pick the best-fitting gameKind: "trivia" for real, genuinely testable questions about the site\'s own topic (write 3-6 real questions, not placeholders); "memory" for a themed matching game (write 4-8 short emoji/words matching the topic); "clicker" for a playful tap-to-win button (write a short themed label); "tictactoe"/"connect4"/"rps" (rock-paper-scissors) are real 2-player games and need no extra content; "simon" (sequence-memory), "flappy" (physics-based side-scroller), "tetris" (falling-block puzzle), "targetrange3d" (real 3D shooting range), and "basketball" (real 3D physics game -- flick/swipe the ball toward the hoop, with real gravity, spin, and rim/backboard bounce) are real arcade games that also need no extra content. This becomes a real, working, playable mini-game on the published page, not a picture of one -- the 2-player kinds even let visitors play a real opponent online, not just each other on one device.',
     'The single most important rule for every section: if the user describes something that is inherently REAL, functional, purchasable, or interactive -- an item or service for sale, a live clock/timer, a game, a real video -- you must build the real thing, never a decorative picture standing in for it. A generated image is only appropriate for backgrounds, branding, atmosphere, or illustrating an abstract idea (e.g. "a hero image conveying trust") -- never as a substitute for something the user asked to actually work. When in doubt between a plain image section and a richer real element (product/game/widget/video), always pick the richer one that actually does the thing.',
     'If the user asks to sell/buy a physical or digital item, or book a service -- anything with a price -- include one section per distinct item with kind "product": a real name/description/price, 2-4 concrete productImagePrompts (different real angles/contexts of the same item, never different items), and the right productSaleType. This becomes a real sellable listing with live stock and a real checkout, not a picture of the item.',
+    ...(existingProductNames.length > 0
+      ? [
+          `The user already has these real products saved in their own product catalog: ${existingProductNames.map((n) => `"${n}"`).join(', ')}. If the user's prompt asks to add, include, feature, or sell one of these (by its exact name or anything close to it -- a partial name, a typo, different capitalization), set that section's productName to the EXACT name from this list, copied verbatim -- this imports the user's real existing product (its real photos, price, and stock) into the build instead of inventing a new one. Leave productDescription/productPriceUsd/productImagePrompts as empty/zero/empty-array for a matched product -- its real data already exists and must not be overwritten. Only write a new name with real productDescription/productPriceUsd/productImagePrompts when the user is describing an item that is NOT already in this list.`,
+        ]
+      : []),
     `Today's real date is ${todayIso}. Use this as ground truth for any date math -- e.g. a "countdown" widget's target date must be computed from this real date, never guessed or left in the past.`,
     'If the user asks for a clock, world clock, or similar always-current time display, include one section with kind "widget", widgetKind "clock", and widgetTimezones -- one entry for a simple clock, multiple real IANA timezones (e.g. real zone ids for New York, London, Tokyo) for a "world clock". This becomes a real, ticking, always-current clock on the published site, never a static image of a clock face.',
     'If the user asks for a countdown to a real event/date (a launch, a deadline, a holiday, an anniversary), include one section with kind "widget", widgetKind "countdown", a real future widgetCountdownTargetIso computed from today\'s real date above, and a short widgetCountdownLabel. If the user asks for a stopwatch, lap timer, or "time how long something takes" tool, use widgetKind "stopwatch". If the user asks for a calculator, use widgetKind "calculator". If the user asks to convert units (length, weight, temperature, volume, distance), use widgetKind "unitconverter". Each becomes a real, fully working interactive tool on the published site -- never a static image or description of one.',
@@ -311,7 +317,8 @@ export async function generateSitePlan(
   complexity: 'simple' | 'standard' | 'crazy',
   extraInstruction?: string,
   referenceImages?: string[],
-  pageType: 'website' | 'video' | 'social' | 'logo' = 'website'
+  pageType: 'website' | 'video' | 'social' | 'logo' = 'website',
+  existingProductNames: string[] = []
 ): Promise<SitePlan> {
   const userText = extraInstruction ? `${prompt}\n\nAdditional instruction from the user mid-build: ${extraInstruction}` : prompt;
 
@@ -330,7 +337,7 @@ export async function generateSitePlan(
   const completion = await client.chat.completions.create({
     model,
     messages: [
-      { role: 'system', content: buildSystemPrompt(complexity, new Date().toISOString(), pageType) },
+      { role: 'system', content: buildSystemPrompt(complexity, new Date().toISOString(), pageType, existingProductNames) },
       { role: 'user', content: userContent },
     ],
     response_format: { type: 'json_schema', json_schema: SITE_PLAN_SCHEMA },

@@ -34,7 +34,7 @@ import {
 } from './types';
 import { computeBuildCost, FREE_SIGNUP_CREDITS, BACKGROUND_EDIT_CREDIT_COST, CUSTOM_WIDGET_CREDIT_COST, MODEL_FOR_PLAN, WEB_PLAN_PRICES, WEB_CREDIT_PACKS } from './pricing';
 import { createOpenAIClient, generateSitePlan, generateImage, editImageBackground as editImageBackgroundWithAI, answerBuildQuestion, generateClarifyingQuestions, generateCustomWidgetCode, SitePlan, SitePlanSection } from './openai';
-import { layoutSitePlan, estimatedCanvasHeight, FIXED_PAGE_CANVAS_HEIGHT, SectionImage, SectionVideo, SectionProductImages, SectionCustomWidget } from './layout';
+import { layoutSitePlan, estimatedCanvasHeight, FIXED_PAGE_CANVAS_HEIGHT, matchExistingProduct, SectionImage, SectionVideo, SectionProductImages, SectionCustomWidget } from './layout';
 import { searchYouTubeVideo } from './youtube';
 import { chatWithAssistant, AssistantChatMessage, AssistantActionType } from './assistant';
 import { isValidCurrency } from './currency';
@@ -424,6 +424,13 @@ export const startGeneration = onCall(
     const client = createOpenAIClient(openaiApiKey.value());
     const model = MODEL_FOR_PLAN[((await userRef.get()).data() as UserAccount).plan];
 
+    // The user's own real product catalog (see ProductsScreen/ProductEditScreen) -- fetched
+    // once up front so a build can import a real existing product by name (see
+    // buildSystemPrompt's existingProductNames instruction and layout.ts's
+    // matchExistingProduct) instead of always inventing a brand-new one from scratch.
+    const existingCatalog: CatalogProduct[] = (await userRef.collection('products').get()).docs.map((d) => d.data() as CatalogProduct);
+    const existingProductNames = existingCatalog.map((p) => p.name);
+
     // Writes the site plan assembled so far to the project doc the client is already
     // subscribed to (via previewProjectId) -- called after the plan lands and again after
     // every generated image, so the AI build progress screen's live preview panel shows
@@ -446,7 +453,8 @@ export const startGeneration = onCall(
         productImages,
         customWidgets,
         pageType === 'website' && complexity !== 'simple',
-        fixedFrameHeight
+        fixedFrameHeight,
+        existingCatalog
       );
       // A ProductElement only ever stores a productId (see the type's own comment) -- an
       // AI-generated product section needs a real catalog doc created for it too, exactly
@@ -498,7 +506,7 @@ export const startGeneration = onCall(
 
     try {
       await sessionRef.update({ status: 'generating', statusMessage: 'Writing your site\'s content...', updatedAt: Date.now() });
-      let plan = await generateSitePlan(client, model, prompt, complexity, undefined, referenceImages, pageType);
+      let plan = await generateSitePlan(client, model, prompt, complexity, undefined, referenceImages, pageType, existingProductNames);
       await pushPreview(plan, []);
 
       let pausesUsed = 0;
@@ -506,7 +514,7 @@ export const startGeneration = onCall(
       if (injected1) {
         pausesUsed += 1;
         await sessionRef.update({ statusMessage: 'Reworking your content with your changes...', updatedAt: Date.now() });
-        plan = await generateSitePlan(client, model, prompt, complexity, injected1, referenceImages, pageType);
+        plan = await generateSitePlan(client, model, prompt, complexity, injected1, referenceImages, pageType, existingProductNames);
         await pushPreview(plan, []);
       }
 
@@ -517,8 +525,14 @@ export const startGeneration = onCall(
       const sectionsNeedingVideo = plan.sections.filter((s: SitePlanSection) => s.kind === 'video' && s.videoSearchQuery?.trim());
       const sectionVideos: SectionVideo[] = [];
       // Real product photos -- 2-4 high-quality angle shots of the same item, not one
-      // decorative hero image, so a "product" section becomes a real sellable listing.
-      const sectionsNeedingProductImages = plan.sections.filter((s: SitePlanSection) => s.kind === 'product' && s.productImagePrompts?.length);
+      // decorative hero image, so a "product" section becomes a real sellable listing. A
+      // section whose productName matches the user's own real catalog (see
+      // existingProductNames/matchExistingProduct) is excluded here -- that product already
+      // has real photos, so generating new ones would waste credits and, worse, overwrite
+      // the real listing's imagery with AI-guessed stand-ins once layout.ts imports it.
+      const sectionsNeedingProductImages = plan.sections.filter(
+        (s: SitePlanSection) => s.kind === 'product' && s.productImagePrompts?.length && !matchExistingProduct(s.productName, existingCatalog)
+      );
       const sectionProductImages: SectionProductImages[] = [];
       // "custom" sections describe a real bespoke interactive widget (game/tool/calculator)
       // the AI writes real HTML/CSS/JS for -- any {{IMAGE_n}} placeholders in that code get
@@ -673,7 +687,7 @@ export const startGeneration = onCall(
         await sessionRef.update({ statusMessage: 'Applying your last change...', updatedAt: Date.now() });
         // Second pause only adjusts copy at this point (images/videos are already resolved)
         // -- keeps the second pause fast rather than re-running that work too.
-        plan = await generateSitePlan(client, model, prompt, complexity, injected2, undefined, pageType);
+        plan = await generateSitePlan(client, model, prompt, complexity, injected2, undefined, pageType, existingProductNames);
         await pushPreview(plan, sectionImages, sectionVideos, sectionProductImages, sectionCustomWidgets);
       }
 
