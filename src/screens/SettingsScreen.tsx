@@ -1,8 +1,9 @@
-import React, { useCallback } from "react";
-import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable } from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable, Modal } from "react-native";
 import Slider from "@react-native-community/slider";
 import Constants from "expo-constants";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { usePowerState } from "expo-battery";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSettings } from "@/context/SettingsContext";
@@ -118,6 +119,18 @@ export function SettingsScreen() {
     (theme: MapThemeKey) => updateSettings({ mapTheme: theme }),
     [updateSettings]
   );
+
+  // Real, live battery reading (not a static disclaimer) -- AI Vehicle Detection runs a real
+  // camera + on-device AI analysis several times a second, which is genuinely one of the
+  // heaviest things this app does. Both iOS and Android automatically slow the processor down
+  // once battery gets low (and more aggressively in Low Power/Battery Saver mode) to save
+  // power, which directly explains detection feeling slower/laggier on a low battery -- the
+  // phone doing exactly what it's designed to do, not a bug. batteryLevel is -1 when the
+  // platform can't report it (e.g. iOS simulator) -- treated as "unknown", never shown as 0%.
+  const { batteryLevel, lowPowerMode } = usePowerState();
+  const batteryPercent = batteryLevel >= 0 ? Math.round(batteryLevel * 100) : null;
+  const batteryLow = batteryPercent !== null && batteryPercent < 50;
+  const [batteryInfoOpen, setBatteryInfoOpen] = useState(false);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -259,6 +272,71 @@ export function SettingsScreen() {
           however far from your own location the radius above is set (1-200 km).
         </Text>
       </Section>
+
+      <Section title="AI Vehicle Detection">
+        <Pressable
+          onPress={() => setBatteryInfoOpen(true)}
+          style={({ pressed }) => [
+            batteryLow ? styles.warningBox : styles.infoBox,
+            pressed && { opacity: pressedOpacity },
+          ]}
+          accessibilityLabel="Why battery level matters for AI Vehicle Detection"
+        >
+          <MaterialCommunityIcons
+            name={batteryLow ? "battery-alert" : "battery-heart-variant"}
+            size={18}
+            color={batteryLow ? colors.warning : colors.textMuted}
+          />
+          <Text style={batteryLow ? styles.warningText : styles.infoText}>
+            {batteryPercent !== null
+              ? `Battery is at ${batteryPercent}%${lowPowerMode ? " (Low Power Mode on)" : ""} — AI Vehicle Detection works best above 50%.`
+              : "AI Vehicle Detection works best with your battery above 50%."}
+          </Text>
+          <MaterialCommunityIcons name="chevron-right" size={18} color={colors.textMuted} />
+        </Pressable>
+      </Section>
+
+      <Modal
+        visible={batteryInfoOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBatteryInfoOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setBatteryInfoOpen(false)}>
+          {/* Swallows the tap so pressing inside the card doesn't fall through to the
+              backdrop's own onPress and close the modal immediately. */}
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Why battery matters here</Text>
+              <Pressable
+                onPress={() => setBatteryInfoOpen(false)}
+                hitSlop={12}
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <Text style={styles.modalBody}>
+              AI Vehicle Detection runs a real, live camera feed through on-device AI several
+              times a second — genuinely one of the heaviest things this app does. Both iOS and
+              Android automatically slow the phone's processor down once battery gets low (and
+              more aggressively in Low Power/Battery Saver mode) to save power. That same
+              slowdown affects any app doing heavy real-time processing, not just this one.
+            </Text>
+            <Text style={styles.modalBody}>
+              For the smoothest experience, keep your phone above 50% battery (or plugged in)
+              and Low Power Mode off while using it. Below that, detection still works — it may
+              just run slower, which is your phone protecting its battery, not a malfunction.
+            </Text>
+            {batteryPercent !== null && (
+              <Text style={styles.modalMeta}>
+                Your battery right now: {batteryPercent}%
+                {lowPowerMode ? " — Low Power Mode is on" : ""}
+              </Text>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Section title="Public transit">
         <View style={styles.warningBox}>
@@ -422,6 +500,59 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#92400E",
     lineHeight: 18,
+  },
+  infoBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "500",
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    gap: spacing.md,
+    ...shadow.high,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  modalTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  modalBody: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+  },
+  modalMeta: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.text,
   },
   signInButton: {
     backgroundColor: colors.accent,
