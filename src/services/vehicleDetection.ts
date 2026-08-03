@@ -181,17 +181,47 @@ export async function decodePhotoForDetection(uri: string): Promise<DecodedPhoto
     useTArray: true,
     formatAsRGBA: false,
   });
+  // Real, confirmed-possible failure mode: formatAsRGBA: false isn't honored for every JPEG
+  // variant a real phone camera can produce (chroma subsampling mode, in particular), and
+  // jpeg-js just returns whatever it actually decoded regardless of what was asked for. Left
+  // unchecked, that mismatched byte length would either throw deep inside tf.tensor3d's own
+  // shape validation (a much less diagnosable error than this one) or, worse, get silently
+  // reinterpreted against the wrong shape -- garbage pixel data the model can genuinely never
+  // detect anything real in, with no thrown error to ever surface as feedback. Caught here with
+  // a clear, specific message instead, and treated as a real capture failure (retried on the
+  // next tick, same as any other) rather than quietly feeding the model nonsense.
+  const expectedLength = width * height * 3;
+  if (data.length !== expectedLength) {
+    Sentry.logger.error("vehicleDetection: decoded pixel data size mismatch", {
+      width,
+      height,
+      expectedLength,
+      actualLength: data.length,
+    });
+    throw new Error(
+      `Decoded photo has ${data.length} bytes, expected ${expectedLength} for ${width}x${height} RGB`
+    );
+  }
   return { width, height, data };
 }
 
 /** Runs detection on an already-decoded photo (see decodePhotoForDetection) and returns
  *  generic vehicle-class boxes. */
+// coco-ssd's own default (0.5) was tuned for general-purpose accuracy across all 90 COCO
+// classes on a clean, close, well-lit reference photo -- real-world dashcam-style conditions
+// (a vehicle at a real driving distance, partial occlusion by foliage/other cars, shooting
+// through glass/a window screen, glare) push a real, present vehicle's score below that more
+// often than not on this app's smallest/fastest base model (lite_mobilenet_v2). Lowered to a
+// still-reasonable 0.35 -- a real, direct trade of a few more false positives for meaningfully
+// fewer real vehicles going completely undetected, which is the failure mode actually reported.
+const MIN_DETECTION_SCORE = 0.35;
+
 export async function detectVehiclesInPhoto(photo: DecodedPhoto): Promise<VehicleBox[]> {
   const model = await loadModel();
   const imageTensor = tf.tensor3d(photo.data, [photo.height, photo.width, 3], "int32");
 
   try {
-    const predictions = await model.detect(imageTensor);
+    const predictions = await model.detect(imageTensor, 20, MIN_DETECTION_SCORE);
     return predictions
       .filter((p) => VEHICLE_CLASSES.has(p.class))
       .map((p) => ({

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, LayoutChangeEvent } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Animated, LayoutChangeEvent } from "react-native";
 import {
   Camera,
   useCameraDevice,
@@ -86,6 +86,36 @@ function TargetCorners({ width, height, color }: { width: number; height: number
       <View style={[styles.corner, styles.cornerTR, { width: len, height: len, borderColor: color }]} />
       <View style={[styles.corner, styles.cornerBL, { width: len, height: len, borderColor: color }]} />
       <View style={[styles.corner, styles.cornerBR, { width: len, height: len, borderColor: color }]} />
+    </View>
+  );
+}
+
+const SCAN_FRAME_SIZE = 180;
+
+// Real, honest "actively scanning" reticle -- shown the instant the camera is live and ready
+// (status "running"), before any vehicle has actually been found yet, so the screen never
+// looks inert or frozen while it's genuinely working. Never claims a vehicle is there: it's
+// the same corner-bracket visual language as a real target lock, just centered and pulsing
+// rather than boxing anything specific, and disappears the moment a real box exists.
+function ScanningFrame() {
+  const pulse = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.35, duration: 900, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  return (
+    <View style={styles.scanningWrap} pointerEvents="none">
+      <Animated.View style={[styles.scanningFrame, { opacity: pulse }]}>
+        <TargetCorners width={SCAN_FRAME_SIZE} height={SCAN_FRAME_SIZE} color="#F59E0B" />
+      </Animated.View>
+      <Animated.Text style={[styles.scanningLabel, { opacity: pulse }]}>Scanning for vehicles…</Animated.Text>
     </View>
   );
 }
@@ -437,6 +467,11 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   useEffect(() => {
     if (status !== "running") return;
     const intervalMs = isNavigating ? CAPTURE_INTERVAL_MS_NAVIGATING : CAPTURE_INTERVAL_MS;
+    // Fires the very first capture immediately instead of waiting a full interval (700-1100ms)
+    // for setInterval's own first tick -- the model is already loaded and ready the moment
+    // status flips to "running", so there's no real reason for the driver to sit staring at a
+    // live-but-idle camera for an extra beat before the first real capture even starts.
+    captureAndDetect();
     intervalRef.current = setInterval(captureAndDetect, intervalMs);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -550,6 +585,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           <Ionicons name="remove" size={20} color="#FFFFFF" />
         </Pressable>
       </View>
+
+      {/* Immediately visible the moment the camera is live -- see ScanningFrame's own comment.
+          Gone the instant there's a real box to show instead. */}
+      {status === "running" && boxes.length === 0 && <ScanningFrame />}
 
       {photoSize &&
         containerSize &&
@@ -804,6 +843,26 @@ const styles = StyleSheet.create({
   closeLink: {
     color: "#9CA3AF",
     marginTop: 8,
+  },
+  scanningWrap: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scanningFrame: {
+    width: SCAN_FRAME_SIZE,
+    height: SCAN_FRAME_SIZE,
+  },
+  scanningLabel: {
+    marginTop: spacing.md,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+    backgroundColor: "rgba(17, 24, 39, 0.55)",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    overflow: "hidden",
   },
   box: {
     position: "absolute",
