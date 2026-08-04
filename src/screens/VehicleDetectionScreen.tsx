@@ -384,14 +384,45 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       if (now - lastFrameProcessedMs.value < FRAME_PROCESSOR_THROTTLE_MS) return;
       lastFrameProcessedMs.value = now;
 
-      // Resized/converted to exactly what this model expects (300x300 RGB uint8) entirely on
-      // the camera's own worklet thread -- see vision-camera-resize-plugin's own docs for why
-      // this (GPU-accelerated resize + YUV->RGB conversion) is dramatically cheaper here than
-      // doing the equivalent in JS ever was.
+      // frame.width/frame.height are the RAW camera sensor buffer's dimensions (confirmed from
+      // react-native-vision-camera's own native source -- CVPixelBufferGetWidth/Height on the
+      // untouched buffer), which for the back camera are landscape (e.g. 1280x720) even while
+      // the phone is held upright in portrait -- takePhoto()'s own PhotoFile.width/height don't
+      // have this quirk (photos get reported already upright), which is exactly why this bug
+      // never showed up in the old capture-loop path, only here. frame.orientation says how
+      // many degrees the raw buffer needs to be rotated to appear upright (see its own real
+      // type doc). Left unhandled, the model was being fed a sideways frame and its normalized
+      // box coordinates were being multiplied straight against the sideways frame.width/height
+      // -- the real, confirmed cause of the oversized/mispositioned boxes, the multiple ghost
+      // "steady" tracks (a box that's wrong-shaped and jumps around frame to frame can't stay
+      // matched to the same track), the bogus non-zero speed on a parked car (that same jumping
+      // read as fake motion), and the missing plate detection (locatePlateRegion estimating a
+      // crop off the wrong box). Rotating here to upright before the model ever sees pixels
+      // fixes the root cause once, instead of patching each downstream symptom separately.
+      let rotation: "0deg" | "90deg" | "180deg" | "270deg" = "0deg";
+      let uprightWidth = frame.width;
+      let uprightHeight = frame.height;
+      if (frame.orientation === "portrait-upside-down") {
+        rotation = "180deg";
+      } else if (frame.orientation === "landscape-right") {
+        rotation = "90deg";
+        uprightWidth = frame.height;
+        uprightHeight = frame.width;
+      } else if (frame.orientation === "landscape-left") {
+        rotation = "270deg";
+        uprightWidth = frame.height;
+        uprightHeight = frame.width;
+      }
+
+      // Resized/rotated/converted to exactly what this model expects (300x300 RGB uint8,
+      // upright) entirely on the camera's own worklet thread -- see vision-camera-resize-
+      // plugin's own docs for why this (GPU-accelerated resize + YUV->RGB conversion) is
+      // dramatically cheaper here than doing the equivalent in JS ever was.
       const resized = resize(frame, {
         scale: { width: TFLITE_INPUT_SIZE, height: TFLITE_INPUT_SIZE },
         pixelFormat: "rgb",
         dataType: "uint8",
+        rotation,
       });
 
       // unbox() re-materializes the real TfliteModel HybridObject inside this worklet's own
@@ -406,7 +437,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       // [1] class ids, [2] scores, [3] a single-element detection count. See
       // assets/models/tflite_ssd_mobilenet_v1/labelmap.txt for the full class list; this model
       // was converted with the background class already excluded from its outputs, so labelmap
-      // line N (1-indexed) corresponds to output class id N-1.
+      // line N (1-indexed) corresponds to output class id N-1. Since the frame fed to the model
+      // was already rotated upright above, these normalized coordinates are already in that
+      // same upright space -- scale against uprightWidth/uprightHeight, not the raw sideways
+      // frame.width/frame.height.
       const boxesArr = new Float32Array(outputs[0]);
       const classesArr = new Float32Array(outputs[1]);
       const scoresArr = new Float32Array(outputs[2]);
@@ -428,16 +462,16 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         const xmin = boxesArr[i * 4 + 1];
         const ymax = boxesArr[i * 4 + 2];
         const xmax = boxesArr[i * 4 + 3];
-        const w = (xmax - xmin) * frame.width;
-        const h = (ymax - ymin) * frame.height;
+        const w = (xmax - xmin) * uprightWidth;
+        const h = (ymax - ymin) * uprightHeight;
         if (w <= 0 || h <= 0) continue;
-        detections.push({ label, score, bbox: [xmin * frame.width, ymin * frame.height, w, h] });
+        detections.push({ label, score, bbox: [xmin * uprightWidth, ymin * uprightHeight, w, h] });
       }
 
-      // Only the parsed, tiny result array (plus frame dimensions) crosses back to JS here --
-      // never the raw frame or the raw output tensors, per the explicit Phase 2 spec this
-      // rewrite followed.
-      onDetections(detections, frame.width, frame.height);
+      // Only the parsed, tiny result array (plus the upright frame dimensions the boxes are
+      // relative to) crosses back to JS here -- never the raw frame or the raw output tensors,
+      // per the explicit Phase 2 spec this rewrite followed.
+      onDetections(detections, uprightWidth, uprightHeight);
     },
     [resize, onDetections]
   );
