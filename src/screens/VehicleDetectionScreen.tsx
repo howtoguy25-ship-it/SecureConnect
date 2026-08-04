@@ -126,6 +126,10 @@ interface Props {
 }
 
 export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props) {
+  // Diagnostic timing only (see the Sentry "perf:" breadcrumbs throughout this file) -- not
+  // used for any real logic. Marks when this component first rendered, so onInitialized below
+  // can report how long the native camera session genuinely took to come up.
+  const mountTimeRef = useRef(Date.now());
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
@@ -235,7 +239,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const [infoDismissed, setInfoDismissed] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    const tStart = Date.now();
     AsyncStorage.getItem(INFO_DISMISSED_KEY).then((value) => {
+      Sentry.logger.info("perf: vehicleDetectionScreen.infoDismissedRead", { ms: Date.now() - tStart });
       if (!cancelled && value === "1") setInfoDismissed(true);
     });
     return () => {
@@ -287,8 +293,13 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const captureAndDetect = useCallback(async () => {
     if (capturingRef.current || unmountedRef.current || !cameraRef.current) return;
     capturingRef.current = true;
+    // Diagnostic timing only, per explicit instruction: instrument every real step of this
+    // cycle and report actual numbers before touching detection logic/timing/resolution
+    // again. Every tCycleStart-relative delta below is logged as a Sentry "perf:" breadcrumb
+    // (visible in Sentry's issue/breadcrumb view for a real session, including TestFlight --
+    // console.time wouldn't be, since there's no attached debugger on a TestFlight install).
+    const tCycleStart = Date.now();
     try {
-      Sentry.logger.info("vehicle-detection: calling takePhoto");
       // vision-camera's takePhoto() is a real, lower-overhead native capture than expo-
       // camera's takePictureAsync() was -- no explicit quality knob here (that's the
       // <Camera>'s own photoQualityBalance="speed" prop below instead), and orientation is
@@ -301,17 +312,26 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         CAPTURE_TIMEOUT_MS,
         "takePhoto"
       );
+      const tCaptured = Date.now();
       if (!photoFile || unmountedRef.current) return;
       const photo = { uri: toFileUri(photoFile.path), width: photoFile.width, height: photoFile.height };
-      Sentry.logger.info("vehicle-detection: photo captured", { width: photo.width, height: photo.height });
+      Sentry.logger.info("perf: vehicleDetectionScreen.takePhoto", {
+        ms: tCaptured - tCycleStart,
+        width: photo.width,
+        height: photo.height,
+      });
       setPhotoSize({ width: photo.width, height: photo.height });
       const decoded = await withTimeout(
         decodePhotoForDetection(photo.uri),
         DECODE_TIMEOUT_MS,
         "decodePhotoForDetection"
       );
+      const tDecoded = Date.now();
+      Sentry.logger.info("perf: vehicleDetectionScreen.decode", { ms: tDecoded - tCaptured });
       if (unmountedRef.current) return;
       const detected = await withTimeout(detectVehiclesInPhoto(decoded), DETECT_TIMEOUT_MS, "detectVehiclesInPhoto");
+      const tDetected = Date.now();
+      Sentry.logger.info("perf: vehicleDetectionScreen.detect", { ms: tDetected - tDecoded });
       if (unmountedRef.current) return;
       // Reset only once the whole real pipeline (shutter + decode + model inference) has
       // actually succeeded -- resetting this right after takePhoto (as it used to) meant a
@@ -322,6 +342,17 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       setRecovering(false);
       const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now(), egoSpeedRef.current);
       setBoxes(tracked);
+      // Measures the synchronous call-site cost of tracker.update + queuing the setState calls
+      // below -- NOT the actual React commit/re-render, which happens asynchronously on React's
+      // own schedule and isn't directly measurable from here without a native perf module. A
+      // large number here would mean the tracker math itself is slow; a small number here with
+      // a real freeze still happening points at the render/commit itself, or at React batching
+      // this update behind the next heavy synchronous block (this same function's own next
+      // iteration) rather than getting a chance to paint in between.
+      const tTrackerUpdate = Date.now();
+      Sentry.logger.info("perf: vehicleDetectionScreen.trackerUpdateAndSetBoxes", {
+        ms: tTrackerUpdate - tDetected,
+      });
 
       const liveIds = speedTrackerRef.current.liveTrackIds();
       setSelectedTrackId((prev) => (prev !== null && !liveIds.has(prev) ? null : prev));
@@ -337,6 +368,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       }
       setEmergencyTrackIds(nextEmergencyIds);
       pruneLightbarTracks(liveIds);
+      Sentry.logger.info("perf: vehicleDetectionScreen.lightbarCheck", {
+        ms: Date.now() - tTrackerUpdate,
+        vehicleCount: tracked.length,
+      });
 
       // Prune cached plate state for any track id the tracker has fully dropped (not just
       // ones missing from this frame's `tracked` -- a track survives a short grace period on
@@ -371,9 +406,20 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         plateAttemptsRef.current.set(box.id, attempts + 1);
         platesReadingRef.current.add(box.id);
         const trackId = box.id;
+        const tPlateStart = Date.now();
         plateReadPromises.push(
           readPlateText(photo.uri, region)
             .then((text) => {
+              // Runs concurrently with the next capture cycle (never awaited inline), but its
+              // own crop+OCR work still lands on the JS thread when this .then() fires -- for
+              // multiple vehicles in frame, these can stack up between capture cycles. Real
+              // number to check: is this ever running for more than one vehicle at a time, and
+              // does that overlap with a reported freeze.
+              Sentry.logger.info("perf: vehicleDetectionScreen.plateOcr", {
+                ms: Date.now() - tPlateStart,
+                trackId,
+                found: !!text,
+              });
               if (!text || unmountedRef.current) return;
               // Confirm before ever showing anything -- see PLATE_CANDIDATE_WINDOW's own
               // comment. A single successful read (even one that matched the plate-shaped
@@ -418,6 +464,13 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         try {
           new File(capturedUri).delete();
         } catch {}
+      });
+      // The real number to compare against the capture interval (900ms/1400ms) -- if this
+      // regularly exceeds the interval, capturingRef's own guard means the real-world cadence
+      // is already however long this is, regardless of what the interval constant says.
+      Sentry.logger.info("perf: vehicleDetectionScreen.totalCycle", {
+        ms: Date.now() - tCycleStart,
+        vehicleCount: tracked.length,
       });
     } catch (err) {
       console.warn("[vehicle-detection] capture/detect failed", err);
@@ -529,6 +582,17 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         photo={true}
         photoQualityBalance="speed"
         zoom={zoomFactor}
+        onInitialized={() =>
+          Sentry.logger.info("perf: vehicleDetectionScreen.cameraInitialized", {
+            ms: Date.now() - mountTimeRef.current,
+          })
+        }
+        onError={(error) =>
+          Sentry.logger.error("vehicle-detection: camera runtime error", {
+            code: error.code,
+            message: error.message,
+          })
+        }
       />
 
       {/* Real zoom -- changes the actual native capture session (see zoomFactor's own

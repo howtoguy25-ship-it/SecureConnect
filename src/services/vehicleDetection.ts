@@ -94,6 +94,7 @@ export interface DecodedPhoto {
 // camera responsive right away, not fighting a blocked JS thread) -- is a straightforward win
 // for how this feature is actually used.
 async function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
+  const tStart = Date.now();
   Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup start");
   const objectDetection = new cocoSsd.ObjectDetection(COCO_SSD_BASE);
 
@@ -103,10 +104,11 @@ async function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
     // network involved, so this resolves in however long it takes to read ~18MB off local
     // disk (effectively instant), not however long the user's connection to Google's CDN
     // happens to take on any given launch.
+    const tBundledStart = Date.now();
     model = await tf.loadGraphModel(
       bundledModelIO(bundledCocoSsdModelJson, bundledCocoSsdWeights, "graph-model")
     );
-    Sentry.logger.info("vehicleDetection: loaded from bundled app assets, no network used");
+    Sentry.logger.info("perf: vehicleDetection.bundledModelLoad", { ms: Date.now() - tBundledStart });
   } catch (err) {
     // Defensive fallback only -- the bundled assets are always present in a real build (they're
     // require()'d above, so Metro can't produce a build missing them), but this keeps the
@@ -116,14 +118,16 @@ async function loadModelSkippingWarmup(): Promise<cocoSsd.ObjectDetection> {
       error: String(err),
     });
     console.warn("[vehicleDetection] bundled model load failed, falling back to network", err);
+    const tNetworkStart = Date.now();
     model = await tf.loadGraphModel(cachedModelIO(COCO_SSD_MODEL_URL, "ssdlite_mobilenet_v2"));
+    Sentry.logger.info("perf: vehicleDetection.networkModelLoad", { ms: Date.now() - tNetworkStart });
   }
 
   // ObjectDetection.model is only "private" in its .d.ts -- a real, plain instance property
   // at runtime, which is exactly what coco-ssd's own load() sets it to internally. Only
   // reaching around the type here to skip the warmup call load() would otherwise also do.
   (objectDetection as unknown as { model: tf.GraphModel }).model = model;
-  Sentry.logger.info("vehicleDetection: loadModelSkippingWarmup done, graph model assigned");
+  Sentry.logger.info("perf: vehicleDetection.loadModelSkippingWarmupTotal", { ms: Date.now() - tStart });
   return objectDetection;
 }
 
@@ -133,10 +137,10 @@ let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
 
 function loadModel(): Promise<cocoSsd.ObjectDetection> {
   if (!modelPromise) {
-    Sentry.logger.info("vehicleDetection: loadModel -- ensureTfReady start");
+    const tReadyStart = Date.now();
     modelPromise = ensureTfReady()
       .then(() => {
-        Sentry.logger.info("vehicleDetection: ensureTfReady done");
+        Sentry.logger.info("perf: vehicleDetection.ensureTfReady", { ms: Date.now() - tReadyStart });
         return loadModelSkippingWarmup();
       })
       .catch((err) => {
@@ -152,7 +156,7 @@ function loadModel(): Promise<cocoSsd.ObjectDetection> {
 }
 
 export async function warmUpModel(): Promise<void> {
-  Sentry.logger.info("vehicleDetection: warmUpModel called");
+  const tStart = Date.now();
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => {
@@ -166,7 +170,7 @@ export async function warmUpModel(): Promise<void> {
   });
   try {
     await Promise.race([loadModel(), timeout]);
-    Sentry.logger.info("vehicleDetection: warmUpModel resolved");
+    Sentry.logger.info("perf: vehicleDetection.warmUpModelTotal", { ms: Date.now() - tStart });
   } finally {
     clearTimeout(timeoutHandle!);
   }
@@ -176,11 +180,15 @@ export async function warmUpModel(): Promise<void> {
  *  @tensorflow/tfjs-react-native's decodeJpeg -- jpeg-js is a plain, actively-maintained
  *  pure-JS decoder with no native/platform dependency of its own. */
 export async function decodePhotoForDetection(uri: string): Promise<DecodedPhoto> {
+  const tReadStart = Date.now();
   const buffer = await new File(uri).arrayBuffer();
+  const tDecodeStart = Date.now();
+  Sentry.logger.info("perf: vehicleDetection.fileRead", { ms: tDecodeStart - tReadStart });
   const { width, height, data } = jpeg.decode(new Uint8Array(buffer), {
     useTArray: true,
     formatAsRGBA: false,
   });
+  Sentry.logger.info("perf: vehicleDetection.jpegDecode", { ms: Date.now() - tDecodeStart });
   // Real, confirmed-possible failure mode: formatAsRGBA: false isn't honored for every JPEG
   // variant a real phone camera can produce (chroma subsampling mode, in particular), and
   // jpeg-js just returns whatever it actually decoded regardless of what was asked for. Left
@@ -217,11 +225,28 @@ export async function decodePhotoForDetection(uri: string): Promise<DecodedPhoto
 const MIN_DETECTION_SCORE = 0.35;
 
 export async function detectVehiclesInPhoto(photo: DecodedPhoto): Promise<VehicleBox[]> {
+  const tLoadStart = Date.now();
   const model = await loadModel();
+  const tLoadMs = Date.now() - tLoadStart;
+  // Only logged when non-trivial -- loadModel() resolves near-instantly on every call after
+  // the very first (it's just returning the already-cached modelPromise), so a real number
+  // here on anything but the first-ever capture is itself a signal something's wrong (the
+  // module-level cache not actually holding, e.g.).
+  if (tLoadMs > 5) Sentry.logger.info("perf: vehicleDetection.loadModelAwait", { ms: tLoadMs });
+
+  const tTensorStart = Date.now();
   const imageTensor = tf.tensor3d(photo.data, [photo.height, photo.width, 3], "int32");
+  Sentry.logger.info("perf: vehicleDetection.tensorConstruct", { ms: Date.now() - tTensorStart });
 
   try {
+    const tInferStart = Date.now();
     const predictions = await model.detect(imageTensor, 20, MIN_DETECTION_SCORE);
+    // This is the real number to look at first -- the actual SSD-MobileNet forward pass on
+    // this app's CPU (or GPU, see tfPlatform.ts) backend, independent of everything else in
+    // the capture cycle (shutter, decode, React state/render). If this alone is multiple
+    // seconds, no amount of resolution/timing tuning elsewhere can fix the freeze -- the
+    // model itself needs to move off the JS thread (Phase 2), not run faster on it.
+    Sentry.logger.info("perf: vehicleDetection.modelInference", { ms: Date.now() - tInferStart });
     return predictions
       .filter((p) => VEHICLE_CLASSES.has(p.class))
       .map((p) => ({
