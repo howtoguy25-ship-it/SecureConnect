@@ -6,14 +6,13 @@ interface Props {
 }
 
 /** A real, static road-sign readout -- not text overlaid on the map, a standalone badge
- *  matching how a physical speed-limit sign (or Apple/Google Maps' own speed-limit badge)
- *  presents the number. Fixed white/black colors regardless of the app's own map theme, same
- *  as the web app's equivalent (web/src/components/SpeedLimitSign.tsx) -- a real sign doesn't
- *  recolor itself either. */
+ *  matching the real-world speed-limit sign convention (white circle, thick red ring, bold
+ *  black number, no extra label text -- the same shape every real speed limit sign on the
+ *  actual road uses). Fixed colors regardless of the app's own map theme -- a real sign
+ *  doesn't recolor itself either. */
 export function SpeedLimitSign({ kmh }: Props) {
   return (
     <View style={styles.sign} accessibilityLabel={`Speed limit ${kmh} kilometers per hour`}>
-      <Text style={styles.label}>LIMIT</Text>
       <Text style={styles.value}>{kmh}</Text>
     </View>
   );
@@ -23,10 +22,10 @@ const styles = StyleSheet.create({
   sign: {
     width: 64,
     height: 64,
-    borderRadius: 10,
+    borderRadius: 32,
     backgroundColor: "#FFFFFF",
-    borderWidth: 4,
-    borderColor: "#111827",
+    borderWidth: 6,
+    borderColor: "#DC2626",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
@@ -35,17 +34,11 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
   },
-  label: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-    color: "#111827",
-  },
   value: {
-    fontSize: 22,
-    fontWeight: "800",
-    lineHeight: 24,
-    marginTop: 2,
-    color: "#111827",
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 26,
+    color: "#000000",
   },
 });
+
