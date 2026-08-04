@@ -148,40 +148,46 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
-  // A phone's default/max photo resolution is often 12MP+ (4032x3024 or bigger) -- neither the
-  // Frame Processor path (downscaled to 300x300 by the resize plugin) nor the side-loop photo
-  // capture need anywhere near that. videoResolution is set to the same value as
-  // photoResolution deliberately -- box coordinates from the Frame Processor are in that video
-  // frame's own pixel space, and captureForPlateAndLightbar (below) needs to map them into
-  // whatever the side-loop's own takePhoto() actually returns; requesting matching resolutions
-  // keeps that mapping close to 1:1 even though it's rescaled explicitly either way (device
+  // Raised from 640x360 -- that resolution was chosen back when detection itself ran a JPEG
+  // decode + tfjs inference cycle on the JS thread every capture (see vehicleDetection.ts's
+  // history), where every extra pixel was directly a slower, more freeze-prone cycle. Now that
+  // detection runs through the Frame Processor (see frameProcessor below), the resize plugin
+  // downsamples straight from the native camera buffer to the model's 300x300 input entirely
+  // off the JS thread, so the source resolution barely affects detection cost at all -- what it
+  // DOES affect is how much real detail is actually in the frame a driver zooms into (see
+  // zoomFactor below) or a plate crop reads from, which was the real, confirmed complaint at
+  // 640x360: a "zoomed in" image with nothing more to see. 1280x720 gives meaningfully sharper
+  // detail for both without reintroducing the old freeze risk, since only the much lighter,
+  // occasional side capture loop (plate OCR/lightbar, not detection) still touches a JS-side
+  // JPEG decode at this resolution. videoResolution matches photoResolution so the Frame
+  // Processor's own frame coordinates and the side loop's takePhoto() stay close to the same
+  // pixel space (captureForPlateAndLightbar still rescales explicitly either way, since device
   // format negotiation doesn't guarantee an exact match).
   const format = useCameraFormat(device, [
-    { photoResolution: { width: 640, height: 360 } },
-    { videoResolution: { width: 640, height: 360 } },
+    { photoResolution: { width: 1280, height: 720 } },
+    { videoResolution: { width: 1280, height: 720 } },
   ]);
   // Real camera zoom -- vision-camera's `zoom` prop drives the actual native capture session
   // (AVCaptureDevice/CameraX), not just the on-screen preview, so both takePhoto() and the Frame
-  // Processor's own video stream genuinely see the zoomed-in frame. That directly helps
-  // detection on a distant vehicle: more of the frame's pixels land on it instead of the model
-  // trying to work with a tiny cluster of pixels lost in a wide field of view. Capped below
-  // device.maxZoom (some devices report up to 128x, which is unusable digital zoom that just
-  // produces a blurry, undetectable frame) and starts at the device's own neutralZoom (1x on a
-  // single-camera device; the wide-angle "normal" zoom on a multi-camera one -- never starts on
-  // the ultra-wide fish-eye lens, which would distort vehicles and hurt detection, not help it).
-  const MAX_USABLE_ZOOM = 8;
-  const [zoomFactor, setZoomFactor] = useState(1);
+  // Processor's own video stream genuinely see the zoomed-in frame. Simplified to a single
+  // normal/5x toggle (previously a +/- fine control) per explicit request -- two clear, known-
+  // good states instead of a range that could land somewhere between them with no real benefit.
+  // 5x is capped to the device's own maxZoom for devices that can't reach it (rare, but a real
+  // possible value on some older/budget hardware) -- never higher, since digital zoom well past
+  // what the sensor can really resolve just produces a blurrier, less detectable frame, the
+  // opposite of the point. Starts at the device's own neutralZoom (1x on a single-camera device;
+  // the wide-angle "normal" zoom on a multi-camera one -- never the ultra-wide fish-eye lens,
+  // which would distort vehicles and hurt detection, not help it).
+  const ZOOM_5X = 5;
+  const [is5xZoom, setIs5xZoom] = useState(false);
+  const [normalZoomFactor, setNormalZoomFactor] = useState(1);
   useEffect(() => {
-    if (device) setZoomFactor(device.neutralZoom);
+    if (device) setNormalZoomFactor(device.neutralZoom);
   }, [device]);
-  const minZoomFactor = device?.minZoom ?? 1;
-  const maxZoomFactor = device ? Math.min(device.maxZoom, MAX_USABLE_ZOOM) : 1;
-  const zoomIn = useCallback(() => {
-    setZoomFactor((z) => Math.min(maxZoomFactor, Math.round((z + 0.5) * 10) / 10));
-  }, [maxZoomFactor]);
-  const zoomOut = useCallback(() => {
-    setZoomFactor((z) => Math.max(minZoomFactor, Math.round((z - 0.5) * 10) / 10));
-  }, [minZoomFactor]);
+  const zoomFactor = is5xZoom ? Math.min(ZOOM_5X, device?.maxZoom ?? ZOOM_5X) : normalZoomFactor;
+  const toggleZoom = useCallback(() => {
+    setIs5xZoom((v) => !v);
+  }, []);
   // Real ego GPS speed for turning a tracked vehicle's closing/receding rate into its own
   // actual road speed -- see speedTracker.ts's combineWithEgoSpeed. Reuses the SAME
   // app-wide location watcher LocationProvider already runs (App.tsx) rather than starting a
@@ -674,40 +680,24 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         }
       />
 
-      {/* Real zoom -- changes the actual native capture session (see zoomFactor's own
-          comment above), so this isn't just a cosmetic preview crop: both the Frame Processor
-          and takePhoto() genuinely see the zoomed-in frame, giving the detector more real
-          pixels on a distant vehicle. Disabled (dimmed) at each end instead of silently no-op'ing
-          so it's clear when you've hit the device's real min/max. */}
-      <View style={[styles.zoomControls, { top: insets.top + spacing.md + 140 }]}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.zoomButton,
-            zoomFactor >= maxZoomFactor && styles.zoomButtonDisabled,
-            pressed && zoomFactor < maxZoomFactor && { opacity: pressedOpacity },
-          ]}
-          onPress={zoomIn}
-          disabled={zoomFactor >= maxZoomFactor}
-          accessibilityLabel="Zoom in"
-          hitSlop={8}
-        >
-          <Ionicons name="add" size={20} color="#FFFFFF" />
-        </Pressable>
-        <Text style={styles.zoomLabel}>{zoomFactor.toFixed(1)}x</Text>
-        <Pressable
-          style={({ pressed }) => [
-            styles.zoomButton,
-            zoomFactor <= minZoomFactor && styles.zoomButtonDisabled,
-            pressed && zoomFactor > minZoomFactor && { opacity: pressedOpacity },
-          ]}
-          onPress={zoomOut}
-          disabled={zoomFactor <= minZoomFactor}
-          accessibilityLabel="Zoom out"
-          hitSlop={8}
-        >
-          <Ionicons name="remove" size={20} color="#FFFFFF" />
-        </Pressable>
-      </View>
+      {/* Real zoom -- changes the actual native capture session (see zoomFactor's own comment
+          above), so this isn't just a cosmetic preview crop: both the Frame Processor and
+          takePhoto() genuinely see the zoomed-in frame, giving the detector more real pixels on
+          a distant vehicle. A single normal/5x toggle, not a fine +/- control -- two clear,
+          always-good states rather than a range that could land somewhere in between with no
+          real benefit. */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.zoomToggle,
+          { top: insets.top + spacing.md + 140 },
+          pressed && { opacity: pressedOpacity },
+        ]}
+        onPress={toggleZoom}
+        accessibilityLabel={is5xZoom ? "Switch to normal view" : "Switch to 5x zoom view"}
+        hitSlop={8}
+      >
+        <Text style={styles.zoomToggleText}>{is5xZoom ? "5x" : "1x"}</Text>
+      </Pressable>
 
 
       {photoSize &&
@@ -848,9 +838,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
               "0 km/h" once a vehicle has been still for a couple of seconds. A plate number
               only appears once the same on-device text read comes back at least twice in a
               row — it's never stored or sent anywhere, just shown live while that vehicle
-              stays in view. Tap any box for its full details. Use +/- on the right to zoom in
-              on a distant vehicle — this zooms the real camera capture, not just the preview,
-              so it can genuinely help detect something too far away to register at 1x.
+              stays in view. Tap any box for its full details. Use the 1x/5x button on the right
+              to zoom in on a distant vehicle — this zooms the real camera capture, not just the
+              preview, so it can genuinely help detect something too far away to register at 1x.
             </Text>
             <Pressable onPress={dismissInfo} hitSlop={12} accessibilityLabel="Dismiss">
               <Ionicons name="close" size={20} color="#fff" />
@@ -1139,31 +1129,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  zoomControls: {
+  zoomToggle: {
     position: "absolute",
     right: spacing.md,
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  zoomButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "rgba(17, 24, 39, 0.55)",
     alignItems: "center",
     justifyContent: "center",
   },
-  zoomButtonDisabled: {
-    opacity: 0.35,
-  },
-  zoomLabel: {
+  zoomToggleText: {
     color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
-    backgroundColor: "rgba(17, 24, 39, 0.55)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    overflow: "hidden",
+    fontSize: 14,
+    fontWeight: "800",
   },
 });
