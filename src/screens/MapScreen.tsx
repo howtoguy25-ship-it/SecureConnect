@@ -250,38 +250,6 @@ export function MapScreen() {
     [location]
   );
 
-  // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
-  // maxspeed tags (see osmTrafficData.ts's fetchSpeedLimitNear) -- mirrors the web app's own
-  // implementation (web/src/App.tsx). Refetched only after moving ~50m so a live GPS track
-  // doesn't hammer the Overpass API every tick, and skipped entirely while a fetch is already
-  // in flight.
-  const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
-  const lastSpeedLimitFetchRef = useRef<LatLng | null>(null);
-  const speedLimitFetchInFlightRef = useRef(false);
-  useEffect(() => {
-    if (!route || !currentLatLng) return;
-    const last = lastSpeedLimitFetchRef.current;
-    if (last && distanceKm(last.latitude, last.longitude, currentLatLng.latitude, currentLatLng.longitude) < 0.05) {
-      return;
-    }
-    if (speedLimitFetchInFlightRef.current) return;
-
-    lastSpeedLimitFetchRef.current = currentLatLng;
-    speedLimitFetchInFlightRef.current = true;
-    fetchSpeedLimitNear(currentLatLng.latitude, currentLatLng.longitude)
-      .then((result) => setSpeedLimitKmh(result?.kmh ?? null))
-      .catch(() => setSpeedLimitKmh(null))
-      .finally(() => {
-        speedLimitFetchInFlightRef.current = false;
-      });
-  }, [route, currentLatLng]);
-  useEffect(() => {
-    if (!route) {
-      setSpeedLimitKmh(null);
-      lastSpeedLimitFetchRef.current = null;
-    }
-  }, [route]);
-
   // iOS's real 3D-buildings path -- deliberately NOT the custom Map3DView module above (that
   // one wraps Google's still-experimental, pre-GA "Maps 3D SDK for iOS", which has a real,
   // confirmed device-specific crash history on this exact app -- see followTilt's own comment
@@ -353,6 +321,46 @@ export function MapScreen() {
     location?.coords.heading != null && location.coords.heading >= 0
       ? location.coords.heading
       : derivedHeadingRef.current;
+
+  // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
+  // maxspeed tags (see osmTrafficData.ts's fetchSpeedLimitNear) -- mirrors the web app's own
+  // implementation (web/src/App.tsx). Refetched after moving ~50m (a live GPS track shouldn't
+  // hammer the Overpass API every tick) OR the instant the active turn-by-turn step changes --
+  // a step change means the driver just turned onto a different road, the single most reliable
+  // "the speed limit may have just changed" signal already available, and waiting on the
+  // distance threshold alone could leave the old road's number showing for a few seconds right
+  // after a turn. fetchSpeedLimitNear also gets the driver's live heading now, so it can prefer
+  // the road that's actually being driven on over a merely-closer crossing street right at an
+  // intersection (see its own comment). Skipped entirely while a fetch is already in flight.
+  const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
+  const lastSpeedLimitFetchRef = useRef<LatLng | null>(null);
+  const lastSpeedLimitStepIndexRef = useRef<number | null>(null);
+  const speedLimitFetchInFlightRef = useRef(false);
+  useEffect(() => {
+    if (!route || !currentLatLng) return;
+    const stepChanged = lastSpeedLimitStepIndexRef.current !== activeStepIndex;
+    const last = lastSpeedLimitFetchRef.current;
+    const movedFar =
+      !last || distanceKm(last.latitude, last.longitude, currentLatLng.latitude, currentLatLng.longitude) >= 0.05;
+    if (!stepChanged && !movedFar) return;
+    if (speedLimitFetchInFlightRef.current) return;
+
+    lastSpeedLimitFetchRef.current = currentLatLng;
+    lastSpeedLimitStepIndexRef.current = activeStepIndex;
+    speedLimitFetchInFlightRef.current = true;
+    fetchSpeedLimitNear(currentLatLng.latitude, currentLatLng.longitude, heading)
+      .then((result) => setSpeedLimitKmh(result?.kmh ?? null))
+      .catch(() => setSpeedLimitKmh(null))
+      .finally(() => {
+        speedLimitFetchInFlightRef.current = false;
+      });
+  }, [route, currentLatLng, activeStepIndex, heading]);
+  useEffect(() => {
+    if (!route) {
+      setSpeedLimitKmh(null);
+      lastSpeedLimitFetchRef.current = null;
+    }
+  }, [route]);
 
   // Live device compass heading -- deliberately separate from `heading` above, which is the
   // direction of TRAVEL (GPS course/derived bearing) and is what the puck arrow + chase-cam
@@ -1686,7 +1694,13 @@ export function MapScreen() {
       <View
         style={[
           styles.topRightControls,
-          { top: insets.top + spacing.md + (route ? instructionCardHeight + spacing.md : 0) },
+          {
+            top: insets.top + spacing.md + (route ? instructionCardHeight + spacing.md : 0),
+            // Hugs the true edge a little tighter while navigating specifically -- this column
+            // sits directly over the live route line/road labels then, and every extra pixel
+            // out toward the edge is a pixel of map the driver can actually see underneath it.
+            right: route ? spacing.xs : spacing.sm,
+          },
         ]}
       >
         {/* A real, clearly-labeled "Recenter" pill once the user has panned away (manual drag
@@ -1721,17 +1735,6 @@ export function MapScreen() {
             whenever not navigating, looking like a broken "voice search" button glued to the
             search input instead of a separate control. */}
         {route && <MuteButton />}
-        {/* Real mid-trip add-a-stop -- see onStopSelectedDuringNav above. */}
-        {route && !addingStopDuringNav && (
-          <Pressable
-            style={({ pressed }) => [styles.settingsButton, pressed && { opacity: pressedOpacity }]}
-            onPress={() => setAddingStopDuringNav(true)}
-            hitSlop={8}
-            accessibilityLabel="Add a stop on the way"
-          >
-            <Ionicons name="add-circle-outline" size={20} color={colors.text} />
-          </Pressable>
-        )}
         {/* Overpass (OSM) traffic-light/speed-camera lookups can genuinely take a few
             seconds -- a visible spinner while one is in flight replaces what used to look
             like the layer being permanently stuck with no feedback at all. */}
@@ -1754,25 +1757,32 @@ export function MapScreen() {
           picker card is up (pendingDestination) -- previously these stayed rendered at their
           normal position underneath whichever card was showing, and the FAB right above that
           card's top edge visibly collided with it (the satellite/camera buttons overlapping
-          "Fastest"/"Safest" rows) instead of being cleanly covered or cleanly visible. */}
+          "Fastest"/"Safest" rows) instead of being cleanly covered or cleanly visible. Shrunk
+          while actively navigating specifically -- this whole stack sits directly over the live
+          route/map then, and every button here already has a same-purpose control in the nav
+          card or topRightControls too, so smaller (not gone) is enough to give the road back
+          without losing the controls entirely. Full size on the plain home map, where nothing
+          else competes for that space. */}
       {!anySheetOpen && !placingAlert && !pendingDestination && (
         <>
       <Pressable
         style={({ pressed }) => [
           styles.fab,
+          route && styles.fabCompact,
           { bottom: insets.bottom + 24 },
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={openAlertTypePicker}
         accessibilityLabel="Report an alert"
       >
-        <Ionicons name="add" size={28} color="#FFFFFF" />
+        <Ionicons name="add" size={route ? 22 : 28} color="#FFFFFF" />
       </Pressable>
 
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
-          { bottom: insets.bottom + 24 + 70 },
+          route && styles.fabSecondaryCompact,
+          { bottom: insets.bottom + 24 + (route ? 54 : 70) },
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={() => {
@@ -1781,7 +1791,7 @@ export function MapScreen() {
         }}
         accessibilityLabel="Live vehicle detection"
       >
-        <Ionicons name="videocam" size={24} color="#FFFFFF" />
+        <Ionicons name="videocam" size={route ? 18 : 24} color="#FFFFFF" />
       </Pressable>
 
       {/* Real 3D buildings toggle -- Android mounts the custom Map3DView module (Google's
@@ -1792,7 +1802,8 @@ export function MapScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
-          { bottom: insets.bottom + 24 + 140 },
+          route && styles.fabSecondaryCompact,
+          { bottom: insets.bottom + 24 + (route ? 108 : 140) },
           show3D && styles.fabActive,
           pressed && { opacity: pressedOpacity },
         ]}
@@ -1804,20 +1815,21 @@ export function MapScreen() {
         }
         accessibilityLabel={show3D ? "Switch to standard map" : "Switch to 3D buildings view"}
       >
-        <Ionicons name="business-outline" size={22} color="#FFFFFF" />
+        <Ionicons name="business-outline" size={route ? 17 : 22} color="#FFFFFF" />
       </Pressable>
 
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
-          { bottom: insets.bottom + 24 + 210 },
+          route && styles.fabSecondaryCompact,
+          { bottom: insets.bottom + 24 + (route ? 162 : 210) },
           mapType === "hybrid" && styles.fabActive,
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={() => setMapType((v) => (v === "standard" ? "hybrid" : "standard"))}
         accessibilityLabel={mapType === "hybrid" ? "Switch to standard map" : "Switch to satellite map"}
       >
-        <Ionicons name="map-outline" size={22} color="#FFFFFF" />
+        <Ionicons name="map-outline" size={route ? 17 : 22} color="#FFFFFF" />
       </Pressable>
 
       {/* Permanent recenter button -- always in this stack, on top of the satellite and "+"
@@ -1828,13 +1840,14 @@ export function MapScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
-          { bottom: insets.bottom + 24 + 280 },
+          route && styles.fabSecondaryCompact,
+          { bottom: insets.bottom + 24 + (route ? 216 : 280) },
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={onRecenter}
         accessibilityLabel="Recenter on my location"
       >
-        <Ionicons name="locate" size={22} color="#FFFFFF" />
+        <Ionicons name="locate" size={route ? 17 : 22} color="#FFFFFF" />
       </Pressable>
         </>
       )}
@@ -2244,6 +2257,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...shadow.medium,
   },
+  // Smaller footprint for the same button while actively navigating -- see the render call
+  // site's own comment for why (every one of these already has a same-purpose control
+  // elsewhere on screen during navigation, so shrinking is enough).
+  fabCompact: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  },
   fabSecondary: {
     position: "absolute",
     right: spacing.xl,
@@ -2254,6 +2275,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.medium,
+  },
+  fabSecondaryCompact: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   fabActive: {
     backgroundColor: colors.accent,

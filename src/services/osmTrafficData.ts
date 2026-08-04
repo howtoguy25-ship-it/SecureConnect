@@ -207,13 +207,50 @@ interface OverpassGeomResponse {
   elements: OverpassGeomElement[];
 }
 
-/** Finds the real, OSM-tagged posted speed limit for whichever road is closest to the given
- *  point (normally the driver's live GPS fix), or null if no tagged road is close enough / no
- *  nearby road has an explicit maxspeed. Same "real, community-mapped, not an official feed"
- *  caveat as the traffic-light/speed-camera layer above -- and the same multi-mirror fetch
- *  pattern (see OVERPASS_ENDPOINTS) so one slow/overloaded Overpass instance doesn't block the
- *  reading from updating as the driver moves onto a new road. */
-export async function fetchSpeedLimitNear(lat: number, lng: number): Promise<SpeedLimitResult | null> {
+function bearingDeg(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const y = Math.sin(toRad(bLng - aLng)) * Math.cos(toRad(bLat));
+  const x =
+    Math.cos(toRad(aLat)) * Math.sin(toRad(bLat)) -
+    Math.sin(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.cos(toRad(bLng - aLng));
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// Smallest angle (0-180) between two bearings, ignoring which end of the road segment is
+// "forward" -- an OSM way isn't reliably digitized in the driver's direction of travel, so
+// only how parallel- vs. perpendicular- the segment is to the direction the driver is actually
+// heading matters here, not which of the two ends it points toward.
+function bearingDiffDeg(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  const undirected = diff > 180 ? 360 - diff : diff;
+  return undirected > 90 ? 180 - undirected : undirected;
+}
+
+// At an intersection, more than one tagged road can be within MAX_ROAD_MATCH_KM of the
+// driver's GPS fix at the same instant -- the crossing street's own centerline can easily be a
+// few meters closer than the road actually being driven on. This is real, confirmed-plausible
+// wrong-road-at-an-intersection behaviour a pure nearest-segment match can't tell apart. Caps
+// how much a heading mismatch can outweigh raw distance (30m worth) -- enough to flip a close
+// call at an intersection without letting it override a genuinely much-closer road when heading
+// isn't a reliable signal (e.g. stationary, or the very first fix after a cold start).
+const HEADING_MISMATCH_PENALTY_KM = 0.03;
+
+/** Finds the real, OSM-tagged posted speed limit for whichever road the driver is actually on,
+ *  or null if no tagged road is close enough / no nearby road has an explicit maxspeed. Prefers
+ *  a candidate road whose own direction roughly matches `headingDeg` (the driver's live
+ *  direction of travel, when known) over a merely-closer one, so a crossing street at an
+ *  intersection doesn't win just because its centerline happens to be a few meters nearer at
+ *  that exact instant -- see bearingDiffDeg/HEADING_MISMATCH_PENALTY_KM above. Same "real,
+ *  community-mapped, not an official feed" caveat as the traffic-light/speed-camera layer above
+ *  -- and the same multi-mirror fetch pattern (see OVERPASS_ENDPOINTS) so one slow/overloaded
+ *  Overpass instance doesn't block the reading from updating as the driver moves onto a new
+ *  road. */
+export async function fetchSpeedLimitNear(
+  lat: number,
+  lng: number,
+  headingDeg?: number | null
+): Promise<SpeedLimitResult | null> {
   const query = `[out:json][timeout:15];way["highway"]["maxspeed"](around:120,${lat},${lng});out geom;`;
   const body = `data=${encodeURIComponent(query)}`;
 
@@ -243,22 +280,33 @@ export async function fetchSpeedLimitNear(lat: number, lng: number): Promise<Spe
     controller.abort();
   }
 
-  let best: { distanceKm: number; kmh: number; roadName: string | null } | null = null;
+  let best: { score: number; kmh: number; roadName: string | null } | null = null;
   for (const way of data.elements) {
     if (way.type !== "way" || !way.geometry || !way.tags?.maxspeed) continue;
     const kmh = parseMaxSpeedKmh(way.tags.maxspeed);
     if (kmh === null) continue;
 
     let minDist = Infinity;
+    let closestSegmentBearing = 0;
     for (let i = 0; i < way.geometry.length - 1; i++) {
       const a = way.geometry[i];
       const b = way.geometry[i + 1];
       const d = pointToSegmentDistanceKm(lat, lng, a.lat, a.lon, b.lat, b.lon);
-      if (d < minDist) minDist = d;
+      if (d < minDist) {
+        minDist = d;
+        closestSegmentBearing = bearingDeg(a.lat, a.lon, b.lat, b.lon);
+      }
     }
+    if (minDist >= MAX_ROAD_MATCH_KM) continue;
 
-    if (minDist < MAX_ROAD_MATCH_KM && (!best || minDist < best.distanceKm)) {
-      best = { distanceKm: minDist, kmh, roadName: way.tags.name ?? null };
+    const headingPenaltyKm =
+      headingDeg != null
+        ? (bearingDiffDeg(closestSegmentBearing, headingDeg) / 90) * HEADING_MISMATCH_PENALTY_KM
+        : 0;
+    const score = minDist + headingPenaltyKm;
+
+    if (!best || score < best.score) {
+      best = { score, kmh, roadName: way.tags.name ?? null };
     }
   }
 

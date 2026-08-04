@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Pressable, Animated, type LayoutChangeEvent } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -99,6 +99,14 @@ export function NavigationInstructionCard({
     ]).start();
   }, [step, translateY, opacity]);
 
+  // Real collapse toggle -- tapping the chevron drops this down to just the icon + a single
+  // line of instruction text, hiding the actions row and End navigation button entirely, so a
+  // driver who wants to see more of the actual route/map underneath can do that without losing
+  // turn guidance altogether (the collapsed bar still shows the live next-turn instruction).
+  // Defaults open (matches the card's previous always-expanded behavior) -- this is an
+  // opt-in "give me more screen" action, not a new default.
+  const [collapsed, setCollapsed] = useState(false);
+
   if (!step) return null;
   const icon = (step.maneuver && MANEUVER_ICONS[step.maneuver]) || "arrow-up";
 
@@ -107,27 +115,40 @@ export function NavigationInstructionCard({
   };
 
   return (
-    <View style={[styles.card, { top: insets.top + spacing.md }]} onLayout={onLayout}>
+    <View
+      style={[styles.card, collapsed && styles.cardCollapsed, { top: insets.top + spacing.md }]}
+      onLayout={onLayout}
+    >
       <View style={styles.headerRow}>
         <Pressable
           style={({ pressed }) => [styles.tapArea, pressed && { opacity: pressedOpacity }]}
-          onPress={onExpandDirections}
-          accessibilityLabel="Show full route directions"
+          onPress={collapsed ? () => setCollapsed(false) : onExpandDirections}
+          accessibilityLabel={collapsed ? "Expand navigation card" : "Show full route directions"}
         >
           <Animated.View style={[styles.animatedContent, { transform: [{ translateY }], opacity }]}>
-            <View style={styles.iconWrap}>
-              <Ionicons name={icon} size={30} color="#FFFFFF" />
+            <View style={[styles.iconWrap, collapsed && styles.iconWrapCollapsed]}>
+              <Ionicons name={icon} size={collapsed ? 22 : 30} color="#FFFFFF" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.instruction} numberOfLines={2}>
+              <Text style={styles.instruction} numberOfLines={collapsed ? 1 : 2}>
                 {step.instruction}
               </Text>
-              <Text style={styles.meta}>
-                {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
-                {distanceRemainingText} left
-              </Text>
+              {!collapsed && (
+                <Text style={styles.meta}>
+                  {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
+                  {distanceRemainingText} left
+                </Text>
+              )}
             </View>
           </Animated.View>
+        </Pressable>
+        <Pressable
+          onPress={() => setCollapsed((v) => !v)}
+          hitSlop={12}
+          style={({ pressed }) => [styles.exitButton, pressed && { opacity: pressedOpacity }]}
+          accessibilityLabel={collapsed ? "Expand navigation card" : "Collapse navigation card"}
+        >
+          <Ionicons name={collapsed ? "chevron-down" : "chevron-up"} size={20} color={colors.text} />
         </Pressable>
         <Pressable
           onPress={onExit}
@@ -139,27 +160,31 @@ export function NavigationInstructionCard({
         </Pressable>
       </View>
 
-      {/* Real actions -- same handlers MapScreen's own scattered add-stop/report/detection
-          entry points already use, just surfaced together here too, matching the app's
-          original nav card layout. */}
-      <View style={styles.actionsRow}>
-        <NavAction
-          icon={hasStop ? "close-circle-outline" : "add-circle-outline"}
-          label={hasStop ? "Remove Stop" : "Add Stop"}
-          onPress={hasStop ? onRemoveStop : onAddStop}
-        />
-        <NavAction icon="share-outline" label="Share ETA" onPress={onShareEta} />
-        <NavAction icon="warning-outline" label="Report" onPress={onReportAlert} />
-        <NavAction icon="videocam-outline" label="AI Detection" onPress={onOpenDetection} />
-      </View>
+      {!collapsed && (
+        <>
+          {/* Real actions -- same handlers MapScreen's own scattered add-stop/report/detection
+              entry points already use, just surfaced together here too, matching the app's
+              original nav card layout. */}
+          <View style={styles.actionsRow}>
+            <NavAction
+              icon={hasStop ? "close-circle-outline" : "add-circle-outline"}
+              label={hasStop ? "Remove Stop" : "Add Stop"}
+              onPress={hasStop ? onRemoveStop : onAddStop}
+            />
+            <NavAction icon="share-outline" label="Share ETA" onPress={onShareEta} />
+            <NavAction icon="warning-outline" label="Report" onPress={onReportAlert} />
+            <NavAction icon="videocam-outline" label="AI Detection" onPress={onOpenDetection} />
+          </View>
 
-      <Pressable
-        onPress={onExit}
-        style={({ pressed }) => [styles.endNavButton, pressed && { opacity: pressedOpacity }]}
-        accessibilityLabel="End navigation"
-      >
-        <Text style={styles.endNavButtonText}>End navigation</Text>
-      </Pressable>
+          <Pressable
+            onPress={onExit}
+            style={({ pressed }) => [styles.endNavButton, pressed && { opacity: pressedOpacity }]}
+            accessibilityLabel="End navigation"
+          >
+            <Text style={styles.endNavButtonText}>End navigation</Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }
@@ -194,14 +219,20 @@ const styles = StyleSheet.create({
     right: spacing.md,
     backgroundColor: colors.dark,
     borderRadius: radius.xl,
-    padding: spacing.lg - 2,
-    gap: spacing.md,
+    padding: spacing.lg - 4,
+    gap: spacing.sm + 2,
     ...shadow.medium,
+  },
+  // Collapsed state shrinks padding further -- with the actions row/End navigation button
+  // both gone (see the render call site), the card is just the header row's own height plus
+  // this trimmed padding, real screen space back for the map/route underneath.
+  cardCollapsed: {
+    padding: spacing.sm + 2,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: spacing.sm + 2,
   },
   tapArea: {
     flex: 1,
@@ -209,19 +240,24 @@ const styles = StyleSheet.create({
   animatedContent: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: spacing.sm + 2,
   },
   iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
+  iconWrapCollapsed: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
   instruction: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "800",
     letterSpacing: 0.2,
   },
