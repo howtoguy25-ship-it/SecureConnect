@@ -10,7 +10,7 @@ import MapView, {
 } from "react-native-maps";
 import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
 import * as Location from "expo-location";
-import { warmUpModel } from "@/services/vehicleDetection";
+import { loadBoxedTFLiteModel } from "@/services/tfliteVehicleModel";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
@@ -186,25 +186,26 @@ export function MapScreen() {
   }, []);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
-  // Starts loading the vehicle-detection model in the background the moment the map screen is
-  // up, instead of only starting when the driver actually taps "AI Detection" -- the model load
-  // itself (parsing an 18MB graph, plus GPU shader compile if the WebGL backend is available) is
-  // genuine, real computation that takes real time no matter when it runs; this just moves that
-  // wait to happen silently while the driver is looking at the map, not as a blocking screen the
-  // instant they ask for the feature. warmUpModel() caches its result in a module-level promise
-  // (see vehicleDetection.ts's modelPromise), so if this finishes before AI Detection is opened,
-  // opening it is instant; if it's still in flight, the detection screen just awaits the same
-  // promise instead of starting a second load. Was a 2.5s delay (to yield to the map's own
-  // initial render/GPS fix at cold-launch) -- shortened to 300ms per explicit request that
-  // opening AI Detection actually feel instant: the model is fully bundled in the app binary
-  // (no network dependency to worry about competing for bandwidth with anything else at
-  // launch), so there's very little real reason to keep the driver waiting on this beyond a
-  // single frame's worth of head start for the map's own first paint. Errors are swallowed
-  // here on purpose -- a failed background preload isn't user-facing; VehicleDetectionScreen's
-  // own retry UI handles a real failure if the driver actually opens the feature.
+  // Starts loading the vehicle-detection model (the native TFLite model a Frame Processor calls
+  // into -- see tfliteVehicleModel.ts) in the background the moment the map screen is up,
+  // instead of only starting when the driver actually taps "AI Detection" -- the model load
+  // itself is genuine, real computation that takes real time no matter when it runs; this just
+  // moves that wait to happen silently while the driver is looking at the map, not as a
+  // blocking screen the instant they ask for the feature. loadBoxedTFLiteModel() caches its
+  // result in a module-level promise, so if this finishes before AI Detection is opened, opening
+  // it is instant; if it's still in flight, the detection screen just awaits the same promise
+  // instead of starting a second load. 300ms delay to yield to the map's own initial
+  // render/GPS fix at cold-launch, per the same "opening AI Detection should feel instant" ask
+  // that originally set this up for the older tfjs model this replaced: the model is fully
+  // bundled in the app binary (no network dependency to worry about competing for bandwidth with
+  // anything else at launch), so there's very little real reason to keep the driver waiting on
+  // this beyond a single frame's worth of head start for the map's own first paint. Errors are
+  // swallowed here on purpose -- a failed background preload isn't user-facing;
+  // VehicleDetectionScreen's own retry UI handles a real failure if the driver actually opens
+  // the feature.
   useEffect(() => {
     const timer = setTimeout(() => {
-      warmUpModel().catch(() => {});
+      loadBoxedTFLiteModel().catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
   }, []);

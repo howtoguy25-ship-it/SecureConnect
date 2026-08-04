@@ -116,18 +116,12 @@ module.exports = {
       ],
       // Switched from expo-camera to react-native-vision-camera for Live Vehicle Detection --
       // expo-camera's takePictureAsync() (a full native shutter + JPEG encode + file write on
-      // every single capture, every ~0.7-1.1s, for as long as that screen stays open) was the
-      // real, confirmed cause of the detection screen freezing/becoming unresponsive (Close
-      // button not registering taps) and occasionally crashing outright during real, sustained
-      // use -- vision-camera's capture pipeline is built specifically for this "repeated
-      // capture while doing heavy per-frame work" pattern and is substantially lower-overhead
-      // per shot. Frame processors are explicitly left off (enableFrameProcessors: false) --
-      // this app's on-device model runs on tfjs (services/vehicleDetection.ts), which isn't
-      // something a Frame Processor's restricted worklet runtime can call into without a much
-      // larger separate rewrite (swapping the inference engine itself to something
-      // worklet/native-callable, e.g. a real TFLite model) -- so this keeps the same
-      // interval-driven discrete-photo-capture architecture as before, just backed by a real,
-      // more robust camera session and a genuinely faster capture call.
+      // every single capture) was the original cause of the detection screen freezing. The
+      // JS-thread-bound tfjs capture/decode/infer cycle that replaced it turned out to be its
+      // own freeze source (confirmed via Sentry perf instrumentation), so detection now runs
+      // through a real Frame Processor calling a native TFLite model (react-native-fast-tflite)
+      // synchronously on the camera's own worklet thread -- only box coordinates/labels/scores
+      // cross back to JS. enableFrameProcessors is on for this.
       [
         "react-native-vision-camera",
         {
@@ -136,7 +130,7 @@ module.exports = {
           enableMicrophonePermission: false,
           enableLocation: false,
           enableCodeScanner: false,
-          enableFrameProcessors: false,
+          enableFrameProcessors: true,
         },
       ],
       // On-device (Google ML Kit) text recognition for the plate-number display in Live

@@ -5,13 +5,19 @@ import {
   useCameraDevice,
   useCameraFormat,
   useCameraPermission,
+  useFrameProcessor,
   type PhotoFile,
 } from "react-native-vision-camera";
+import { useResizePlugin } from "vision-camera-resize-plugin";
+import { useSharedValue, useRunOnJS } from "react-native-worklets-core";
+import type { BoxedHybridObject } from "react-native-nitro-modules";
+import type { TensorflowModel } from "react-native-fast-tflite";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { File } from "expo-file-system";
-import { detectVehiclesInPhoto, decodePhotoForDetection, warmUpModel } from "@/services/vehicleDetection";
+import { decodePhotoForDetection } from "@/services/vehicleDetection";
+import { loadBoxedTFLiteModel, TFLITE_INPUT_SIZE } from "@/services/tfliteVehicleModel";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
 import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 import { locatePlateRegion, type PlateRegion } from "@/utils/plateLocator";
@@ -20,28 +26,27 @@ import { useLocation } from "@/context/LocationContext";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { Sentry } from "@/services/sentry";
 
-// takePhoto() is a discrete photo shutter (not a continuous frame stream the way a real Frame
-// Processor pipeline would be -- this app deliberately doesn't use vision-camera's Frame
-// Processors, since the on-device model here runs on tfjs (services/vehicleDetection.ts),
-// which isn't something a Frame Processor's restricted worklet runtime can call into without
-// swapping the inference engine itself, a much bigger separate project). A capture already in
-// flight just makes the next tick a no-op (see capturingRef below) rather than stacking, so on
-// a device where one real capture+decode+detect cycle takes longer than this interval, this
-// number doesn't actually change the real cadence at all -- capturingRef already caps it to
-// however long a cycle genuinely takes. Where it DOES matter is a faster device that finishes
-// well under this interval: raised from 700ms after repeated real freeze reports specifically
-// to leave more genuine idle time between captures for touch handling (Close, zoom buttons) to
-// get a turn on the JS thread, at the cost of a slightly less "continuous" feel.
-const CAPTURE_INTERVAL_MS = 900;
-// While actively navigating, the map screen underneath is also live (GPS tracking, guidance,
-// voice) and this screen's own tfjs CPU inference is already the heaviest thing running --
-// a slower cadence here is a real, deliberate trade-off for headroom during exactly the
-// condition that was crashing/black-screening this screen before (see MapScreen's
-// detectionOpen gating of its own camera-animation effects for the other half of that fix).
-const CAPTURE_INTERVAL_MS_NAVIGATING = 1400;
-// Attempts (each tied to one capture pass, ~1.2s apart) before giving up on a persistently
-// unreadable plate for a given track -- caps total OCR work per vehicle instead of retrying
-// forever on one that's obscured, too far, or at a bad angle.
+// PHASE 2 (see the diagnostic protocol this followed): primary vehicle detection now runs
+// through a real Frame Processor calling a native TFLite model (react-native-fast-tflite)
+// synchronously via runSync() on the camera's own worklet thread (react-native-worklets-core),
+// not the JS thread -- confirmed via Phase 1's Sentry perf instrumentation that the previous
+// tfjs-on-JS-thread capture/decode/infer cycle (still used below only for plate OCR/lightbar
+// crops, at a much slower cadence) was the real, architectural cause of the recurring freeze,
+// not any of the resolution/timing values that had been tuned around it before. Only detection
+// results (box coordinates, label, score) cross back to JS -- never raw frames.
+const MIN_DETECTION_SCORE = 0.35;
+// This model's own fixed TFLite_Detection_PostProcess output size (see
+// assets/models/tflite_ssd_mobilenet_v1) -- it never returns more than this many candidate
+// detections per frame, regardless of how many are actually above MIN_DETECTION_SCORE.
+const MAX_MODEL_DETECTIONS = 10;
+// Frame Processor throttle -- unlike the old JS-thread cadence, this no longer has to leave
+// headroom for touch handling (it's not competing with the JS thread at all), so it can run
+// much more often; capped mainly for battery/thermal, not responsiveness.
+const FRAME_PROCESSOR_THROTTLE_MS = 300;
+
+// Attempts (each tied to one side-capture pass) before giving up on a persistently unreadable
+// plate for a given track -- caps total OCR work per vehicle instead of retrying forever on one
+// that's obscured, too far, or at a bad angle.
 const MAX_PLATE_ATTEMPTS = 6;
 // On-device ML Kit text recognition (rn-mlkit-ocr) doesn't expose a per-read numeric
 // confidence score at all -- so instead of a fabricated confidence number, a plate only ever
@@ -49,31 +54,41 @@ const MAX_PLATE_ATTEMPTS = 6;
 // attempts, a real, direct way to reject a one-off misread before it's ever displayed.
 const PLATE_CANDIDATE_WINDOW = 3;
 const PLATE_CONFIRM_COUNT = 2;
+// The slower, JS-thread side loop that still exists purely for plate OCR crops and lightbar
+// sampling (neither is something a Frame Processor worklet can call into -- rn-mlkit-ocr's
+// recognizeText is a Promise-based native module call, and the lightbar sampler works off a
+// full decoded JPEG, not a worklet-visible frame buffer). Only ever runs when there's actually
+// a tracked vehicle to check (see captureForPlateAndLightbar's early-out below), and does no
+// detection work of its own, so it's considerably lighter than the old full capture/decode/
+// detect cycle even at a similar cadence.
+const SIDE_CAPTURE_INTERVAL_MS = 900;
+const SIDE_CAPTURE_INTERVAL_MS_NAVIGATING = 1400;
 // Real, confirmed failure mode this guards against: takePictureAsync's promise never settling
 // at all (neither resolving nor rejecting) -- a stalled native camera call would otherwise leave
-// capturingRef permanently true, silently freezing every future capture tick forever with zero
-// user-visible feedback ("black screen, doesn't respond"). Racing it against a plain timer
-// means the app's own logic always gets control back, whether or not the native call ever does.
-const CAPTURE_TIMEOUT_MS = 6000;
+// sideCapturingRef permanently true, silently freezing this side loop forever with zero
+// user-visible feedback. Racing it against a plain timer means the app's own logic always gets
+// control back, whether or not the native call ever does.
+const SIDE_CAPTURE_TIMEOUT_MS = 6000;
 // Same protection for the JPEG decode step -- pure JS, no native camera hardware involved, so
-// a much shorter bound than detection is enough.
-const DECODE_TIMEOUT_MS = 5000;
-// Longer than the other two -- deliberately: loadModelSkippingWarmup (vehicleDetection.ts)
-// defers coco-ssd's one-time warmup inference onto whichever frame happens to be the *first*
-// one actually run through detectVehiclesInPhoto, specifically so the loading screen itself
-// doesn't have to wait for it. That means this one call can legitimately take much longer than
-// a normal frame on a slow/CPU-only device -- a short timeout here would misfire on totally
-// healthy first-frame behavior, not a real hang.
-const DETECT_TIMEOUT_MS = 15000;
-// Consecutive capture failures (timeouts or thrown errors) before giving up and surfacing the
-// existing error+Retry UI instead of quietly retrying forever -- one bad frame shouldn't error
-// out immediately (real, temporary hiccups happen), but a real, ongoing problem should always
-// end up somewhere the user can see and act on, never an indefinitely stuck screen.
+// a much shorter bound than the capture itself is enough.
+const SIDE_DECODE_TIMEOUT_MS = 5000;
+// Consecutive side-loop failures (timeouts or thrown errors) before giving up and surfacing the
+// existing "Reconnecting…" indicator instead of quietly retrying forever -- one bad frame
+// shouldn't error out immediately (real, temporary hiccups happen), but a real, ongoing problem
+// should always end up somewhere the user can see, never a silently stuck screen. Detection
+// itself (the Frame Processor) has no equivalent failure mode surfaced here -- a stalled model
+// call just means no new boxes for a while, not a thrown error to catch.
 const MAX_CONSECUTIVE_CAPTURE_FAILURES = 4;
 // Remembers that the driver already closed the "how detection works" explainer -- previously
 // this banner had no dismiss control at all on mobile (unlike the web app's equivalent, which
 // does), so it stayed pinned across the whole detection view every single time it was opened.
 const INFO_DISMISSED_KEY = "@trackline/aiDetectionInfoDismissed";
+
+interface RawDetection {
+  label: "Vehicle" | "Heavy Vehicle";
+  score: number;
+  bbox: [number, number, number, number];
+}
 
 // Four corner brackets instead of a plain solid rectangle -- reads as a real targeting
 // lock (the same visual language as a camera's autofocus/tracking reticle) rather than a
@@ -118,10 +133,10 @@ function toFileUri(path: string): string {
 
 interface Props {
   onClose: () => void;
-  // True whenever a route is active in the background -- used to ease off capture cadence (see
-  // CAPTURE_INTERVAL_MS_NAVIGATING). This screen used to also draw a route overlay while
-  // navigating, removed per explicit request: it covered too much of the frame to actually
-  // point a camera at nearby vehicles through, which is the entire point of this screen.
+  // True whenever a route is active in the background -- used to ease off the side capture
+  // cadence (see SIDE_CAPTURE_INTERVAL_MS_NAVIGATING). This screen used to also draw a route
+  // overlay while navigating, removed per explicit request: it covered too much of the frame to
+  // actually point a camera at nearby vehicles through, which is the entire point of this screen.
   isNavigating?: boolean;
 }
 
@@ -133,28 +148,27 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
-  // A phone's default/max photo resolution is often 12MP+ (4032x3024 or bigger) -- the
-  // detection model only ever looks at a downsized 300x300 tensor, so capturing at full
-  // resolution was pure waste: a bigger native JPEG to encode, a bigger file to write/delete
-  // every ~0.7-1.1s, a bigger buffer to decode, more pixels for tf.tensor3d to allocate. Cut
-  // again from 960x540 down to 640x360 after repeated real freeze reports -- the SSD model's
-  // own forward pass cost is fixed either way (it always resizes its input down to 300x300
-  // internally regardless of what's fed in), but the JPEG decode + tensor allocation/copy this
-  // app does on every single capture scales directly with pixel count, and that step runs on
-  // the same JS thread as touch handling -- a real, direct, now twice-cut source of the
-  // "freezes while detecting" symptom. 640x360 still only ever gets downscaled by the model
-  // (never upscaled -- both dimensions stay above 300px), so this doesn't introduce upscaling
-  // artifacts, just less spare detail beyond what 300x300 needs.
-  const format = useCameraFormat(device, [{ photoResolution: { width: 640, height: 360 } }]);
+  // A phone's default/max photo resolution is often 12MP+ (4032x3024 or bigger) -- neither the
+  // Frame Processor path (downscaled to 300x300 by the resize plugin) nor the side-loop photo
+  // capture need anywhere near that. videoResolution is set to the same value as
+  // photoResolution deliberately -- box coordinates from the Frame Processor are in that video
+  // frame's own pixel space, and captureForPlateAndLightbar (below) needs to map them into
+  // whatever the side-loop's own takePhoto() actually returns; requesting matching resolutions
+  // keeps that mapping close to 1:1 even though it's rescaled explicitly either way (device
+  // format negotiation doesn't guarantee an exact match).
+  const format = useCameraFormat(device, [
+    { photoResolution: { width: 640, height: 360 } },
+    { videoResolution: { width: 640, height: 360 } },
+  ]);
   // Real camera zoom -- vision-camera's `zoom` prop drives the actual native capture session
-  // (AVCaptureDevice/CameraX), not just the on-screen preview, so takePhoto() genuinely
-  // captures the zoomed-in frame. That directly helps detection on a distant vehicle: more of
-  // the frame's pixels land on it instead of the model trying to work with a tiny cluster of
-  // pixels lost in a wide field of view. Capped below device.maxZoom (some devices report up
-  // to 128x, which is unusable digital zoom that just produces a blurry, undetectable frame)
-  // and starts at the device's own neutralZoom (1x on a single-camera device; the wide-angle
-  // "normal" zoom on a multi-camera one -- never starts on the ultra-wide fish-eye lens, which
-  // would distort vehicles and hurt detection, not help it).
+  // (AVCaptureDevice/CameraX), not just the on-screen preview, so both takePhoto() and the Frame
+  // Processor's own video stream genuinely see the zoomed-in frame. That directly helps
+  // detection on a distant vehicle: more of the frame's pixels land on it instead of the model
+  // trying to work with a tiny cluster of pixels lost in a wide field of view. Capped below
+  // device.maxZoom (some devices report up to 128x, which is unusable digital zoom that just
+  // produces a blurry, undetectable frame) and starts at the device's own neutralZoom (1x on a
+  // single-camera device; the wide-angle "normal" zoom on a multi-camera one -- never starts on
+  // the ultra-wide fish-eye lens, which would distort vehicles and hurt detection, not help it).
   const MAX_USABLE_ZOOM = 8;
   const [zoomFactor, setZoomFactor] = useState(1);
   useEffect(() => {
@@ -175,18 +189,22 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const { location } = useLocation();
   const egoSpeedRef = useRef<number | null>(null);
   egoSpeedRef.current = location?.coords.speed ?? null;
-  // No "error" state -- see the model-load effect and captureAndDetect's catch block below.
-  // Every failure mode here now auto-recovers on its own instead of ever stopping and waiting
-  // on a manual tap.
+  // No "error" state -- see the model-load effect and the two capture paths' catch blocks
+  // below. Every failure mode here now auto-recovers on its own instead of ever stopping and
+  // waiting on a manual tap.
   const [status, setStatus] = useState<"loading-model" | "running">("loading-model");
   // >0 once the model has failed to load at least once -- only changes the loading text to be
   // honest that it's taking a retry or two, never blocks anything or asks for a tap.
   const [modelLoadAttempt, setModelLoadAttempt] = useState(0);
-  // True only while capture/detect has been failing for a few ticks in a row -- a small,
-  // non-blocking "Reconnecting…" indicator, not a dead end. Clears itself the instant a
-  // capture actually succeeds again (see captureAndDetect's success path below).
+  // True only while the plate/lightbar side loop has been failing for a few ticks in a row -- a
+  // small, non-blocking "Reconnecting…" indicator, not a dead end. Clears itself the instant a
+  // side capture actually succeeds again.
   const [recovering, setRecovering] = useState(false);
   const [boxes, setBoxes] = useState<TrackedBox[]>([]);
+  // The coordinate space `boxes` (and thus the plate/emergency overlays) are expressed in --
+  // the Frame Processor's own video frame dimensions, set from onDetections below. Named
+  // `photoSize` (not `frameSize`) to keep the render-side scale/offset math below unchanged
+  // from before this rewrite -- it's still just "the pixel space the boxes are in."
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null);
   // Plate text (plus the real estimated region it was actually cropped from -- see
@@ -212,12 +230,12 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   }, []);
 
   const cameraRef = useRef<Camera>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const capturingRef = useRef(false);
-  // Set the instant this screen unmounts (now a real unmount -- see MapScreen.tsx's Modal
-  // fix -- not just hidden behind a still-visible-but-invisible modal). Checked after every
-  // await in captureAndDetect below so an in-flight capture/detect/state-update chain can't
-  // keep running (or touch a torn-down native camera session) after the screen is gone.
+  const sideIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sideCapturingRef = useRef(false);
+  // Set the instant this screen unmounts (a real unmount -- see MapScreen.tsx's Modal fix --
+  // not just hidden behind a still-visible-but-invisible modal). Checked after every await in
+  // the side capture loop below so an in-flight capture/decode/OCR chain can't keep running (or
+  // touch a torn-down native camera session) after the screen is gone.
   const unmountedRef = useRef(false);
   useEffect(() => {
     return () => {
@@ -225,14 +243,22 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     };
   }, []);
   const speedTrackerRef = useRef(createSpeedTracker());
+  // Mirrors `boxes` state so the side capture loop (a stable, empty-deps useCallback) can read
+  // the latest tracked vehicles without depending on the state itself -- same reasoning as
+  // plateTextsRef below.
+  const boxesRef = useRef<TrackedBox[]>([]);
+  // Mirrors `photoSize` state for the same reason -- the side loop needs the Frame Processor's
+  // own frame dimensions to rescale tracked bboxes into whatever its own takePhoto() capture
+  // actually returns (see captureForPlateAndLightbar).
+  const frameSizeRef = useRef<{ width: number; height: number } | null>(null);
   const plateAttemptsRef = useRef(new Map<number, number>());
   const platesReadingRef = useRef(new Set<number>());
   // Last few raw OCR reads per track id, oldest first (capped to PLATE_CANDIDATE_WINDOW) --
   // see PLATE_CANDIDATE_WINDOW/PLATE_CONFIRM_COUNT's own comment for why this exists.
   const plateCandidatesRef = useRef(new Map<number, string[]>());
-  // Mirrors `plateTexts` state so captureAndDetect can check it without depending on the
-  // state itself -- keeps captureAndDetect referentially stable (empty deps), so the capture
-  // interval effect below doesn't tear down and rebuild every time a plate read resolves.
+  // Mirrors `plateTexts` state so the side loop can check/update it without depending on the
+  // state itself -- keeps it referentially stable (empty deps), so the capture interval effect
+  // below doesn't tear down and rebuild every time a plate read resolves.
   const plateTextsRef = useRef(new Map<number, { text: string; region: PlateRegion }>());
   const consecutiveFailuresRef = useRef(0);
 
@@ -253,6 +279,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     AsyncStorage.setItem(INFO_DISMISSED_KEY, "1").catch(() => {});
   }, []);
 
+  // Holds the boxed TFLite model (see tfliteVehicleModel.ts) once loaded, readable from inside
+  // the Frame Processor worklet below. A `useSharedValue` from react-native-worklets-core
+  // specifically -- not a plain useRef -- because a worklet's closure only safely captures
+  // primitives (by copy) or SharedValues/HostObjects/HostFunctions (by reference); a plain ref
+  // object doesn't fall into either category and isn't guaranteed to reflect updates correctly
+  // from inside the separate worklet Runtime.
+  const boxedModelShared = useSharedValue<BoxedHybridObject<TensorflowModel> | null>(null);
+
   // Auto-retries forever with a capped backoff instead of ever dead-ending on a manual "tap
   // Retry" button -- a transient hiccup (a slow first disk read, a momentary GC pause) resolves
   // itself within a couple of attempts with zero user action needed; a persistent one just
@@ -266,13 +300,15 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const attemptLoad = () => {
-      warmUpModel()
-        .then(() => {
-          if (!cancelled) setStatus("running");
+      loadBoxedTFLiteModel()
+        .then((boxed) => {
+          if (cancelled) return;
+          boxedModelShared.value = boxed;
+          setStatus("running");
         })
         .catch((err) => {
           if (cancelled) return;
-          Sentry.logger.error("vehicle-detection: model load failed, auto-retrying", {
+          Sentry.logger.error("vehicle-detection: tflite model load failed, auto-retrying", {
             attempt,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -288,94 +324,29 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const captureAndDetect = useCallback(async () => {
-    if (capturingRef.current || unmountedRef.current || !cameraRef.current) return;
-    capturingRef.current = true;
-    // Diagnostic timing only, per explicit instruction: instrument every real step of this
-    // cycle and report actual numbers before touching detection logic/timing/resolution
-    // again. Every tCycleStart-relative delta below is logged as a Sentry "perf:" breadcrumb
-    // (visible in Sentry's issue/breadcrumb view for a real session, including TestFlight --
-    // console.time wouldn't be, since there's no attached debugger on a TestFlight install).
-    const tCycleStart = Date.now();
-    try {
-      // vision-camera's takePhoto() is a real, lower-overhead native capture than expo-
-      // camera's takePictureAsync() was -- no explicit quality knob here (that's the
-      // <Camera>'s own photoQualityBalance="speed" prop below instead), and orientation is
-      // handled correctly by default (no skipProcessing-style footgun to worry about).
-      // enableShutterSound: false since this fires repeatedly every ~0.7-1.1s for as long as
-      // the screen is open -- a real camera shutter click on every one of those would be a
-      // real, confirmed annoyance, not a bug fix.
-      const photoFile: PhotoFile = await withTimeout(
-        cameraRef.current.takePhoto({ enableShutterSound: false }),
-        CAPTURE_TIMEOUT_MS,
-        "takePhoto"
-      );
-      const tCaptured = Date.now();
-      if (!photoFile || unmountedRef.current) return;
-      const photo = { uri: toFileUri(photoFile.path), width: photoFile.width, height: photoFile.height };
-      Sentry.logger.info("perf: vehicleDetectionScreen.takePhoto", {
-        ms: tCaptured - tCycleStart,
-        width: photo.width,
-        height: photo.height,
-      });
-      setPhotoSize({ width: photo.width, height: photo.height });
-      const decoded = await withTimeout(
-        decodePhotoForDetection(photo.uri),
-        DECODE_TIMEOUT_MS,
-        "decodePhotoForDetection"
-      );
-      const tDecoded = Date.now();
-      Sentry.logger.info("perf: vehicleDetectionScreen.decode", { ms: tDecoded - tCaptured });
+  // Runs on the JS thread once the Frame Processor worklet below bridges a frame's detections
+  // back -- the same tracker/state-update logic the old captureAndDetect used to do inline,
+  // just fed by the Frame Processor instead of a JS-thread tfjs call. Deliberately does NOT do
+  // plate OCR or lightbar sampling here -- see captureForPlateAndLightbar's own comment for why
+  // those stay on the separate, slower side loop.
+  const onDetections = useRunOnJS(
+    (detections: RawDetection[], frameWidth: number, frameHeight: number) => {
       if (unmountedRef.current) return;
-      const detected = await withTimeout(detectVehiclesInPhoto(decoded), DETECT_TIMEOUT_MS, "detectVehiclesInPhoto");
-      const tDetected = Date.now();
-      Sentry.logger.info("perf: vehicleDetectionScreen.detect", { ms: tDetected - tDecoded });
-      if (unmountedRef.current) return;
-      // Reset only once the whole real pipeline (shutter + decode + model inference) has
-      // actually succeeded -- resetting this right after takePhoto (as it used to) meant a
-      // camera that keeps shuttering fine while decode/detect silently keeps throwing every
-      // single time could never accumulate MAX_CONSECUTIVE_CAPTURE_FAILURES failures, so a
-      // persistent problem could never even get flagged as "reconnecting" below.
-      consecutiveFailuresRef.current = 0;
-      setRecovering(false);
-      const tracked = speedTrackerRef.current.update(detected, photo.width, Date.now(), egoSpeedRef.current);
+      setPhotoSize({ width: frameWidth, height: frameHeight });
+      frameSizeRef.current = { width: frameWidth, height: frameHeight };
+      const tracked = speedTrackerRef.current.update(detections, frameWidth, Date.now(), egoSpeedRef.current);
+      boxesRef.current = tracked;
       setBoxes(tracked);
-      // Measures the synchronous call-site cost of tracker.update + queuing the setState calls
-      // below -- NOT the actual React commit/re-render, which happens asynchronously on React's
-      // own schedule and isn't directly measurable from here without a native perf module. A
-      // large number here would mean the tracker math itself is slow; a small number here with
-      // a real freeze still happening points at the render/commit itself, or at React batching
-      // this update behind the next heavy synchronous block (this same function's own next
-      // iteration) rather than getting a chance to paint in between.
-      const tTrackerUpdate = Date.now();
-      Sentry.logger.info("perf: vehicleDetectionScreen.trackerUpdateAndSetBoxes", {
-        ms: tTrackerUpdate - tDetected,
-      });
 
       const liveIds = speedTrackerRef.current.liveTrackIds();
       setSelectedTrackId((prev) => (prev !== null && !liveIds.has(prev) ? null : prev));
 
-      // Real, evidence-based emergency-lightbar check (actively strobing red/blue light),
-      // not a guess at vehicle type -- see lightbarDetector.ts.
-      const nowMs = Date.now();
-      const nextEmergencyIds = new Set<number>();
-      for (const box of tracked) {
-        if (sampleLightbarActivity(decoded, box.id, box.bbox, nowMs)) {
-          nextEmergencyIds.add(box.id);
-        }
-      }
-      setEmergencyTrackIds(nextEmergencyIds);
-      pruneLightbarTracks(liveIds);
-      Sentry.logger.info("perf: vehicleDetectionScreen.lightbarCheck", {
-        ms: Date.now() - tTrackerUpdate,
-        vehicleCount: tracked.length,
-      });
-
-      // Prune cached plate state for any track id the tracker has fully dropped (not just
-      // ones missing from this frame's `tracked` -- a track survives a short grace period on
-      // a single missed detection, and pruning off `tracked` alone would wipe a legitimately
+      // Prune cached plate state for any track id the tracker has fully dropped (not just ones
+      // missing from this frame's `tracked` -- a track survives a short grace period on a
+      // single missed detection, and pruning off `tracked` alone would wipe a legitimately
       // in-progress read on that miss).
       for (const id of plateAttemptsRef.current.keys()) {
         if (!liveIds.has(id)) plateAttemptsRef.current.delete(id);
@@ -391,35 +362,149 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         }
       }
       if (pruned) setPlateTexts(new Map(plateTextsRef.current));
+    },
+    []
+  );
 
-      // Collected so the captured photo file (below) is only deleted once every plate-read
-      // that still needs to read bytes off it has actually finished -- readPlateText crops
-      // straight from photo.uri, so deleting it any earlier would race that read.
+  const { resize } = useResizePlugin();
+  const lastFrameProcessedMs = useSharedValue(0);
+
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      "worklet";
+      const boxed = boxedModelShared.value;
+      if (!boxed) return;
+      const now = Date.now();
+      if (now - lastFrameProcessedMs.value < FRAME_PROCESSOR_THROTTLE_MS) return;
+      lastFrameProcessedMs.value = now;
+
+      // Resized/converted to exactly what this model expects (300x300 RGB uint8) entirely on
+      // the camera's own worklet thread -- see vision-camera-resize-plugin's own docs for why
+      // this (GPU-accelerated resize + YUV->RGB conversion) is dramatically cheaper here than
+      // doing the equivalent in JS ever was.
+      const resized = resize(frame, {
+        scale: { width: TFLITE_INPUT_SIZE, height: TFLITE_INPUT_SIZE },
+        pixelFormat: "rgb",
+        dataType: "uint8",
+      });
+
+      // unbox() re-materializes the real TfliteModel HybridObject inside this worklet's own
+      // Runtime -- see tfliteVehicleModel.ts's own comment on why box()/unbox() is needed here
+      // at all. runSync() is the actual native forward pass, blocking this worklet (never the
+      // JS thread) for however long real on-device inference takes.
+      const model = boxed.unbox();
+      const outputs = model.runSync([resized.buffer as ArrayBuffer]);
+
+      // This model's standard TFLite_Detection_PostProcess output: 4 tensors, all float32
+      // regardless of the quantized input -- [0] normalized [ymin,xmin,ymax,xmax] boxes,
+      // [1] class ids, [2] scores, [3] a single-element detection count. See
+      // assets/models/tflite_ssd_mobilenet_v1/labelmap.txt for the full class list; this model
+      // was converted with the background class already excluded from its outputs, so labelmap
+      // line N (1-indexed) corresponds to output class id N-1.
+      const boxesArr = new Float32Array(outputs[0]);
+      const classesArr = new Float32Array(outputs[1]);
+      const scoresArr = new Float32Array(outputs[2]);
+      const countArr = new Float32Array(outputs[3]);
+      const count = Math.min(Math.round(countArr[0] ?? 0), MAX_MODEL_DETECTIONS);
+
+      const detections: RawDetection[] = [];
+      for (let i = 0; i < count; i++) {
+        const score = scoresArr[i];
+        if (score < MIN_DETECTION_SCORE) continue;
+        const classId = Math.round(classesArr[i]);
+        // car=3, motorcycle=4, bus=6, truck=8 -- see labelmap.txt.
+        let label: "Vehicle" | "Heavy Vehicle" | null = null;
+        if (classId === 3 || classId === 4) label = "Vehicle";
+        else if (classId === 6 || classId === 8) label = "Heavy Vehicle";
+        if (!label) continue;
+
+        const ymin = boxesArr[i * 4 + 0];
+        const xmin = boxesArr[i * 4 + 1];
+        const ymax = boxesArr[i * 4 + 2];
+        const xmax = boxesArr[i * 4 + 3];
+        const w = (xmax - xmin) * frame.width;
+        const h = (ymax - ymin) * frame.height;
+        if (w <= 0 || h <= 0) continue;
+        detections.push({ label, score, bbox: [xmin * frame.width, ymin * frame.height, w, h] });
+      }
+
+      // Only the parsed, tiny result array (plus frame dimensions) crosses back to JS here --
+      // never the raw frame or the raw output tensors, per the explicit Phase 2 spec this
+      // rewrite followed.
+      onDetections(detections, frame.width, frame.height);
+    },
+    [resize, onDetections]
+  );
+
+  // Real, evidence-based emergency-lightbar check (actively strobing red/blue light) and
+  // on-device plate OCR -- both still run here, on the JS thread, at a slower cadence than
+  // detection itself now uses. Neither is something a Frame Processor worklet can call into:
+  // rn-mlkit-ocr's recognizeText is a Promise-based native module call (not worklet-callable),
+  // and the lightbar sampler (lightbarDetector.ts) works off a fully decoded JPEG buffer, not a
+  // worklet-visible frame. Only ever fires when there's an actual tracked vehicle to check
+  // (boxesRef.current, fed by the Frame Processor's own onDetections above) -- with nothing in
+  // frame there's nothing to crop or sample, so this skips the shutter entirely rather than
+  // burning capture/decode work on an empty scene every tick.
+  const captureForPlateAndLightbar = useCallback(async () => {
+    if (sideCapturingRef.current || unmountedRef.current || !cameraRef.current) return;
+    if (boxesRef.current.length === 0) return;
+    sideCapturingRef.current = true;
+    const tCycleStart = Date.now();
+    try {
+      const photoFile: PhotoFile = await withTimeout(
+        cameraRef.current.takePhoto({ enableShutterSound: false }),
+        SIDE_CAPTURE_TIMEOUT_MS,
+        "takePhoto"
+      );
+      if (!photoFile || unmountedRef.current) return;
+      const photo = { uri: toFileUri(photoFile.path), width: photoFile.width, height: photoFile.height };
+      const decoded = await withTimeout(
+        decodePhotoForDetection(photo.uri),
+        SIDE_DECODE_TIMEOUT_MS,
+        "decodePhotoForDetection"
+      );
+      if (unmountedRef.current) return;
+      consecutiveFailuresRef.current = 0;
+      setRecovering(false);
+
+      // The Frame Processor detects against its own video frame dimensions (frameSizeRef),
+      // which won't generally match this side capture's own photo dimensions exactly even
+      // though both request the same target resolution (device format negotiation doesn't
+      // guarantee an exact match) -- rescale each tracked box into this photo's own pixel space
+      // before cropping/sampling, rather than assuming the two coordinate spaces line up.
+      const frameSize = frameSizeRef.current;
+      const scaleX = frameSize && frameSize.width > 0 ? photo.width / frameSize.width : 1;
+      const scaleY = frameSize && frameSize.height > 0 ? photo.height / frameSize.height : 1;
+
+      const nowMs = Date.now();
+      const liveIds = speedTrackerRef.current.liveTrackIds();
+      const nextEmergencyIds = new Set<number>();
       const plateReadPromises: Promise<void>[] = [];
-      for (const box of tracked) {
+
+      for (const box of boxesRef.current) {
+        const rescaledBbox: [number, number, number, number] = [
+          box.bbox[0] * scaleX,
+          box.bbox[1] * scaleY,
+          box.bbox[2] * scaleX,
+          box.bbox[3] * scaleY,
+        ];
+
+        if (sampleLightbarActivity(decoded, box.id, rescaledBbox, nowMs)) {
+          nextEmergencyIds.add(box.id);
+        }
+
         if (plateTextsRef.current.has(box.id) || platesReadingRef.current.has(box.id)) continue;
         const attempts = plateAttemptsRef.current.get(box.id) ?? 0;
         if (attempts >= MAX_PLATE_ATTEMPTS) continue;
-        const region = locatePlateRegion(box.bbox);
+        const region = locatePlateRegion(rescaledBbox);
         if (!region) continue;
 
         plateAttemptsRef.current.set(box.id, attempts + 1);
         platesReadingRef.current.add(box.id);
         const trackId = box.id;
-        const tPlateStart = Date.now();
         plateReadPromises.push(
           readPlateText(photo.uri, region)
             .then((text) => {
-              // Runs concurrently with the next capture cycle (never awaited inline), but its
-              // own crop+OCR work still lands on the JS thread when this .then() fires -- for
-              // multiple vehicles in frame, these can stack up between capture cycles. Real
-              // number to check: is this ever running for more than one vehicle at a time, and
-              // does that overlap with a reported freeze.
-              Sentry.logger.info("perf: vehicleDetectionScreen.plateOcr", {
-                ms: Date.now() - tPlateStart,
-                trackId,
-                found: !!text,
-              });
               if (!text || unmountedRef.current) return;
               // Confirm before ever showing anything -- see PLATE_CANDIDATE_WINDOW's own
               // comment. A single successful read (even one that matched the plate-shaped
@@ -435,8 +520,8 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
               const counts = new Map<string, number>();
               for (const candidate of history) counts.set(candidate, (counts.get(candidate) ?? 0) + 1);
               let confirmedText: string | null = null;
-              for (const [candidate, count] of counts) {
-                if (count >= PLATE_CONFIRM_COUNT) confirmedText = candidate;
+              for (const [candidate, c] of counts) {
+                if (c >= PLATE_CONFIRM_COUNT) confirmedText = candidate;
               }
               if (!confirmedText) return;
 
@@ -451,65 +536,55 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         );
       }
 
-      // Every capture (every ~0.7-1.1s) writes a brand-new temp JPEG that isn't reliably
-      // cleaned up on its own -- vision-camera's own docs are explicit that a captured photo
-      // "might get deleted once the app closes," not before, same as expo-camera's captures
-      // before it. Left alone, a normal multi-minute driving session leaked hundreds of files
-      // onto disk, a real, confirmed contributor to this screen eventually crashing under
-      // storage/memory pressure. Deleted once decode + every plate crop that reads from it
-      // this tick have actually finished (best-effort -- a failed cleanup here is silently
-      // swallowed, never surfaced as a detection failure).
+      setEmergencyTrackIds(nextEmergencyIds);
+      pruneLightbarTracks(liveIds);
+
+      // Every capture writes a brand-new temp JPEG that isn't reliably cleaned up on its own --
+      // vision-camera's own docs are explicit that a captured photo "might get deleted once the
+      // app closes," not before. Deleted once every plate crop that reads from it this tick has
+      // actually finished (best-effort -- a failed cleanup here is silently swallowed, never
+      // surfaced as a detection failure).
       const capturedUri = photo.uri;
       Promise.allSettled(plateReadPromises).finally(() => {
         try {
           new File(capturedUri).delete();
         } catch {}
       });
-      // The real number to compare against the capture interval (900ms/1400ms) -- if this
-      // regularly exceeds the interval, capturingRef's own guard means the real-world cadence
-      // is already however long this is, regardless of what the interval constant says.
-      Sentry.logger.info("perf: vehicleDetectionScreen.totalCycle", {
+      Sentry.logger.info("perf: vehicleDetectionScreen.sideCaptureCycle", {
         ms: Date.now() - tCycleStart,
-        vehicleCount: tracked.length,
+        vehicleCount: boxesRef.current.length,
       });
     } catch (err) {
-      console.warn("[vehicle-detection] capture/detect failed", err);
-      Sentry.logger.error("vehicle-detection: capture/detect failed", { error: String(err) });
+      console.warn("[vehicle-detection] plate/lightbar capture failed", err);
+      Sentry.logger.error("vehicle-detection: plate/lightbar capture failed", { error: String(err) });
       if (unmountedRef.current) return;
       consecutiveFailuresRef.current += 1;
       // A single bad frame is normal (a real hiccup, not a real problem) and just gets silently
       // retried on the next tick with no visible change at all. Only once it's clearly not a
       // one-off does a small, non-blocking "Reconnecting…" indicator appear (see the render
-      // below) -- the capture loop itself never stops or waits on anything here, so there's
-      // nothing for the driver to tap; it clears itself the moment a capture actually succeeds
-      // again.
+      // below) -- this loop never stops or waits on anything here, so there's nothing for the
+      // driver to tap; it clears itself the instant a capture actually succeeds again. Vehicle
+      // detection itself keeps running regardless -- it's the Frame Processor's own separate
+      // pipeline, unaffected by this loop's failures.
       if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_CAPTURE_FAILURES) {
-        Sentry.logger.error("vehicle-detection: repeated capture failures, still retrying", {
+        Sentry.logger.error("vehicle-detection: repeated side-capture failures, still retrying", {
           consecutiveFailures: consecutiveFailuresRef.current,
         });
         setRecovering(true);
       }
     } finally {
-      capturingRef.current = false;
+      sideCapturingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
     if (status !== "running") return;
-    const intervalMs = isNavigating ? CAPTURE_INTERVAL_MS_NAVIGATING : CAPTURE_INTERVAL_MS;
-    // Deliberately does NOT fire the first capture immediately -- the very first real capture
-    // is also the single heaviest one, since coco-ssd's one-time graph warmup (skipped during
-    // loading specifically so this screen appears instantly, see vehicleDetection.ts) lands on
-    // whichever capture happens to run first. Firing that immediately, right at the exact
-    // moment the screen becomes interactive, means the heaviest possible CPU burst hits at the
-    // most visible moment -- exactly when it reads as "frozen, doesn't load" instead of
-    // "detecting." Letting setInterval's own first tick handle it gives the camera session and
-    // UI a real beat to settle first.
-    intervalRef.current = setInterval(captureAndDetect, intervalMs);
+    const intervalMs = isNavigating ? SIDE_CAPTURE_INTERVAL_MS_NAVIGATING : SIDE_CAPTURE_INTERVAL_MS;
+    sideIntervalRef.current = setInterval(captureForPlateAndLightbar, intervalMs);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (sideIntervalRef.current) clearInterval(sideIntervalRef.current);
     };
-  }, [status, captureAndDetect, isNavigating]);
+  }, [status, captureForPlateAndLightbar, isNavigating]);
 
   const onContainerLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -572,7 +647,9 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       {/* isActive stays true for as long as this component is mounted -- the Modal fix in
           MapScreen.tsx already guarantees a real unmount (camera session torn down along with
           everything else) on Close, so there's no separate "pause the session" state needed
-          here. */}
+          here. pixelFormat="yuv" is the efficient native default for Frame Processors --
+          vision-camera-resize-plugin (used inside frameProcessor above) handles the
+          YUV->RGB conversion this model needs entirely on its own thread. */}
       <Camera
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -581,6 +658,8 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         isActive={true}
         photo={true}
         photoQualityBalance="speed"
+        pixelFormat="yuv"
+        frameProcessor={frameProcessor}
         zoom={zoomFactor}
         onInitialized={() =>
           Sentry.logger.info("perf: vehicleDetectionScreen.cameraInitialized", {
@@ -596,10 +675,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       />
 
       {/* Real zoom -- changes the actual native capture session (see zoomFactor's own
-          comment above), so this isn't just a cosmetic preview crop: takePhoto() genuinely
-          captures the zoomed-in frame, giving the detector more real pixels on a distant
-          vehicle. Disabled (dimmed) at each end instead of silently no-op'ing so it's clear
-          when you've hit the device's real min/max. */}
+          comment above), so this isn't just a cosmetic preview crop: both the Frame Processor
+          and takePhoto() genuinely see the zoomed-in frame, giving the detector more real
+          pixels on a distant vehicle. Disabled (dimmed) at each end instead of silently no-op'ing
+          so it's clear when you've hit the device's real min/max. */}
       <View style={[styles.zoomControls, { top: insets.top + spacing.md + 140 }]}>
         <Pressable
           style={({ pressed }) => [
@@ -680,8 +759,8 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                 </Text>
                 {/* Top-center, just outside the box edge -- separate from the type/
                     confidence label at top-left so it never overlaps, and updates live every
-                    frame the tracker emits a speed (at the screen's own capture cadence, see
-                    CAPTURE_INTERVAL_MS/_NAVIGATING above). */}
+                    frame the tracker emits a speed (at the Frame Processor's own detection
+                    cadence, see FRAME_PROCESSOR_THROTTLE_MS above). */}
                 {speedLabel && (
                   <View style={styles.speedLabelWrap} pointerEvents="none">
                     <Text
@@ -743,12 +822,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         {status === "loading-model" && (
           <>
             <ActivityIndicator color="#fff" />
-            {/* Loading is now just the model file fetch/cache (see vehicleDetection.ts's
-                loadModelSkippingWarmup) -- the heavy warmup computation that used to block this
-                screen was moved to land on the very first detected frame instead, so Close/
-                Switch camera stay responsive here rather than fighting a busy JS thread. Past
-                the first attempt this is honest that it's retrying, but never asks for a tap --
-                see the auto-retry effect above. */}
+            {/* Loading is now the native TFLite model parse (react-native-fast-tflite) --
+                fast (a bundled ~4MB file, no network fetch, no separate warmup pass the way
+                the old tfjs model needed). Past the first attempt this is honest that it's
+                retrying, but never asks for a tap -- see the auto-retry effect above. */}
             <Text style={styles.bannerText}>
               {modelLoadAttempt > 0
                 ? "Still loading the detection model — retrying automatically…"
@@ -787,7 +864,8 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
           for a tap. Only shown once the explainer banner above is out of the way (same top
           offset -- recovering can only become true while status is "running", so the banner is
           only still up here if it hasn't been dismissed yet) and clears itself the instant a
-          capture actually succeeds again. */}
+          side capture actually succeeds again. Vehicle detection itself is unaffected by this --
+          it's the Frame Processor's own separate pipeline. */}
       {recovering && infoDismissed && (
         <View style={[styles.recoveringPill, { top: insets.top + spacing.md }]}>
           <ActivityIndicator size="small" color="#fff" />
