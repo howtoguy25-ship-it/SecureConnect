@@ -66,7 +66,8 @@ import {
   confirmAlert,
 } from "@/services/alerts";
 import { sirenDetection } from "@/services/sirenDetection";
-import { fetchOsmTrafficData, type OsmTrafficData } from "@/services/osmTrafficData";
+import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmTrafficData } from "@/services/osmTrafficData";
+import { SpeedLimitSign } from "@/components/SpeedLimitSign";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import { VehicleDetectionErrorBoundary } from "@/components/VehicleDetectionErrorBoundary";
 import type { AlertDoc, AlertType } from "@/types/alert";
@@ -247,6 +248,38 @@ export function MapScreen() {
         : null,
     [location]
   );
+
+  // Real posted speed limit for the road the driver is currently on, from OpenStreetMap's
+  // maxspeed tags (see osmTrafficData.ts's fetchSpeedLimitNear) -- mirrors the web app's own
+  // implementation (web/src/App.tsx). Refetched only after moving ~50m so a live GPS track
+  // doesn't hammer the Overpass API every tick, and skipped entirely while a fetch is already
+  // in flight.
+  const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
+  const lastSpeedLimitFetchRef = useRef<LatLng | null>(null);
+  const speedLimitFetchInFlightRef = useRef(false);
+  useEffect(() => {
+    if (!route || !currentLatLng) return;
+    const last = lastSpeedLimitFetchRef.current;
+    if (last && distanceKm(last.latitude, last.longitude, currentLatLng.latitude, currentLatLng.longitude) < 0.05) {
+      return;
+    }
+    if (speedLimitFetchInFlightRef.current) return;
+
+    lastSpeedLimitFetchRef.current = currentLatLng;
+    speedLimitFetchInFlightRef.current = true;
+    fetchSpeedLimitNear(currentLatLng.latitude, currentLatLng.longitude)
+      .then((result) => setSpeedLimitKmh(result?.kmh ?? null))
+      .catch(() => setSpeedLimitKmh(null))
+      .finally(() => {
+        speedLimitFetchInFlightRef.current = false;
+      });
+  }, [route, currentLatLng]);
+  useEffect(() => {
+    if (!route) {
+      setSpeedLimitKmh(null);
+      lastSpeedLimitFetchRef.current = null;
+    }
+  }, [route]);
 
   // iOS's real 3D-buildings path -- deliberately NOT the custom Map3DView module above (that
   // one wraps Google's still-experimental, pre-GA "Maps 3D SDK for iOS", which has a real,
@@ -1549,6 +1582,16 @@ export function MapScreen() {
         />
       )}
 
+      {/* Real, OSM-tagged posted speed limit for the road currently under the driver -- see
+          the throttled fetch effect above. Mid-left, not a corner -- every corner during
+          navigation is already spoken for (nav card up top, zoom/FAB stack at the bottom),
+          same placement reasoning as the web app's own version. */}
+      {route && speedLimitKmh !== null && (
+        <View style={styles.speedLimitSignWrap} pointerEvents="none">
+          <SpeedLimitSign kmh={speedLimitKmh} />
+        </View>
+      )}
+
       {/* Off-route auto-reroute is silent otherwise -- a fresh route fetch (a real network
           call) can take a moment, and with zero feedback that gap could easily read as the app
           having frozen or missed the miss entirely, right when trust in the nav matters most. */}
@@ -2048,6 +2091,12 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "800",
+  },
+  speedLimitSignWrap: {
+    position: "absolute",
+    left: spacing.md,
+    top: "50%",
+    marginTop: -32,
   },
   topRightControls: {
     position: "absolute",
