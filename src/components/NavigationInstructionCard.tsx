@@ -32,9 +32,19 @@ interface Props {
   onExit: () => void;
   onShareEta: () => void;
   // Opens the full turn-by-turn directions list -- the whole icon+text area is tappable for
-  // this (a bigger, easier target than a small dedicated button would be), while share/exit
-  // keep their own separate buttons so they're never accidentally triggered by the same tap.
+  // this (a bigger, easier target than a small dedicated button would be), while the actions
+  // row/exit keep their own separate buttons so they're never accidentally triggered by the
+  // same tap.
   onExpandDirections: () => void;
+  // Real mid-trip add-a-stop -- same handlers MapScreen's own add-stop search bar and stop
+  // state already use; this just gives them a second, more discoverable entry point matching
+  // the old nav card layout, not new logic. hasStop toggles the label/icon to "Remove Stop"
+  // once a mid-trip stop is actually active.
+  onAddStop: () => void;
+  onRemoveStop: () => void;
+  hasStop: boolean;
+  onReportAlert: () => void;
+  onOpenDetection: () => void;
   // Reports the card's real rendered height (instruction text can wrap to 2 lines, meta text
   // can wrap too) so callers positioning other controls below it -- see MapScreen's
   // topRightControls -- can react to the actual height instead of guessing a fixed number.
@@ -52,6 +62,11 @@ export function NavigationInstructionCard({
   onExit,
   onShareEta,
   onExpandDirections,
+  onAddStop,
+  onRemoveStop,
+  hasStop,
+  onReportAlert,
+  onOpenDetection,
   onHeightChange,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -93,43 +108,82 @@ export function NavigationInstructionCard({
 
   return (
     <View style={[styles.card, { top: insets.top + spacing.md }]} onLayout={onLayout}>
-      <Pressable
-        style={({ pressed }) => [styles.tapArea, pressed && { opacity: pressedOpacity }]}
-        onPress={onExpandDirections}
-        accessibilityLabel="Show full route directions"
-      >
-        <Animated.View style={[styles.animatedContent, { transform: [{ translateY }], opacity }]}>
-          <View style={styles.iconWrap}>
-            <Ionicons name={icon} size={30} color="#FFFFFF" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.instruction} numberOfLines={2}>
-              {step.instruction}
-            </Text>
-            <Text style={styles.meta}>
-              {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
-              {distanceRemainingText} left
-            </Text>
-          </View>
-        </Animated.View>
-      </Pressable>
-      <Pressable
-        onPress={onShareEta}
-        hitSlop={12}
-        style={({ pressed }) => [styles.shareButton, pressed && { opacity: pressedOpacity }]}
-        accessibilityLabel="Share ETA"
-      >
-        <Ionicons name="share-outline" size={18} color={colors.text} />
-      </Pressable>
+      <View style={styles.headerRow}>
+        <Pressable
+          style={({ pressed }) => [styles.tapArea, pressed && { opacity: pressedOpacity }]}
+          onPress={onExpandDirections}
+          accessibilityLabel="Show full route directions"
+        >
+          <Animated.View style={[styles.animatedContent, { transform: [{ translateY }], opacity }]}>
+            <View style={styles.iconWrap}>
+              <Ionicons name={icon} size={30} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.instruction} numberOfLines={2}>
+                {step.instruction}
+              </Text>
+              <Text style={styles.meta}>
+                {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
+                {distanceRemainingText} left
+              </Text>
+            </View>
+          </Animated.View>
+        </Pressable>
+        <Pressable
+          onPress={onExit}
+          hitSlop={12}
+          style={({ pressed }) => [styles.exitButton, pressed && { opacity: pressedOpacity }]}
+          accessibilityLabel="Exit navigation"
+        >
+          <Ionicons name="close" size={20} color={colors.text} />
+        </Pressable>
+      </View>
+
+      {/* Real actions -- same handlers MapScreen's own scattered add-stop/report/detection
+          entry points already use, just surfaced together here too, matching the app's
+          original nav card layout. */}
+      <View style={styles.actionsRow}>
+        <NavAction
+          icon={hasStop ? "close-circle-outline" : "add-circle-outline"}
+          label={hasStop ? "Remove Stop" : "Add Stop"}
+          onPress={hasStop ? onRemoveStop : onAddStop}
+        />
+        <NavAction icon="share-outline" label="Share ETA" onPress={onShareEta} />
+        <NavAction icon="warning-outline" label="Report" onPress={onReportAlert} />
+        <NavAction icon="videocam-outline" label="AI Detection" onPress={onOpenDetection} />
+      </View>
+
       <Pressable
         onPress={onExit}
-        hitSlop={12}
-        style={({ pressed }) => [styles.exitButton, pressed && { opacity: pressedOpacity }]}
-        accessibilityLabel="Exit navigation"
+        style={({ pressed }) => [styles.endNavButton, pressed && { opacity: pressedOpacity }]}
+        accessibilityLabel="End navigation"
       >
-        <Ionicons name="close" size={20} color={colors.text} />
+        <Text style={styles.endNavButtonText}>End navigation</Text>
       </Pressable>
     </View>
+  );
+}
+
+function NavAction({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.navAction, pressed && { opacity: pressedOpacity }]}
+      accessibilityLabel={label}
+    >
+      <Ionicons name={icon} size={20} color="#FFFFFF" />
+      <Text style={styles.navActionLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -141,10 +195,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.dark,
     borderRadius: radius.xl,
     padding: spacing.lg - 2,
+    gap: spacing.md,
+    ...shadow.medium,
+  },
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    ...shadow.medium,
   },
   tapArea: {
     flex: 1,
@@ -173,14 +230,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  shareButton: {
-    width: 32,
-    height: 32,
-    borderRadius: radius.pill,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   exitButton: {
     width: 32,
     height: 32,
@@ -188,5 +237,34 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  navAction: {
+    flex: 1,
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: spacing.xs + 2,
+    marginHorizontal: 2,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  navActionLabel: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  endNavButton: {
+    backgroundColor: colors.danger,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md - 2,
+    alignItems: "center",
+  },
+  endNavButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 15,
   },
 });

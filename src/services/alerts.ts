@@ -47,10 +47,14 @@ function toAlertDoc(id: string, data: any): AlertDoc {
 export async function reportAlert(
   type: AlertType,
   location: { latitude: number; longitude: number },
-  uid: string
+  uid: string,
+  // Real per-user override (Settings' "Alert lifetime") -- null/undefined keeps the existing
+  // per-type default (ALERT_TTL_MS), same behavior as before this setting existed.
+  customTtlMs?: number | null
 ): Promise<string> {
   const now = Date.now();
   const geohash = encodeGeohash(location.latitude, location.longitude, 9);
+  const ttlMs = customTtlMs ?? ALERT_TTL_MS[type];
 
   const ref = await addDoc(collection(db, ALERTS_COLLECTION), {
     type,
@@ -59,7 +63,7 @@ export async function reportAlert(
     geohash,
     createdBy: uid,
     createdAt: serverTimestamp(),
-    expiresAt: Timestamp.fromMillis(now + ALERT_TTL_MS[type]),
+    expiresAt: Timestamp.fromMillis(now + ttlMs),
     confirmCount: 0,
     hiddenBy: [],
   });

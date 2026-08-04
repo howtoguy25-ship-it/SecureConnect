@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable, Modal } from "react-native";
+import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable, Modal, TextInput } from "react-native";
 import Slider from "@react-native-community/slider";
 import Constants from "expo-constants";
 import { usePowerState } from "expo-battery";
@@ -23,6 +23,28 @@ function sensitivityLabel(value: number): string {
   if (value <= 0.4) return "Low";
   if (value <= 0.7) return "Medium";
   return "High";
+}
+
+// Real, applied durations -- selecting one of these (or a custom hour/minute value below)
+// writes straight into settings.alertExpiryMs, which services/alerts.ts's reportAlert then
+// uses as the real Firestore expiresAt for any alert this device reports, replacing the app's
+// own per-type default (types/alert.ts's ALERT_TTL_MS) for as long as it's set. "Default"
+// (null) reverts to that original per-type behavior.
+const EXPIRY_PRESETS: { label: string; ms: number | null }[] = [
+  { label: "Default", ms: null },
+  { label: "12 hours", ms: 12 * 60 * 60 * 1000 },
+  { label: "1 day", ms: 24 * 60 * 60 * 1000 },
+  { label: "3 days", ms: 3 * 24 * 60 * 60 * 1000 },
+  { label: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
+];
+
+function formatExpiryMs(ms: number): string {
+  const totalMinutes = Math.round(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
 }
 
 // Small background/highway-accent pair per theme, just for the picker swatches below -- the
@@ -77,6 +99,26 @@ export function SettingsScreen() {
     },
     [updateSettings, settings.visibleAlertTypes]
   );
+
+  const onExpiryPresetSelect = useCallback(
+    (ms: number | null) => {
+      setCustomExpiryOpen(false);
+      updateSettings({ alertExpiryMs: ms });
+    },
+    [updateSettings]
+  );
+
+  const [customExpiryOpen, setCustomExpiryOpen] = useState(false);
+  const [customHoursText, setCustomHoursText] = useState("");
+  const [customMinutesText, setCustomMinutesText] = useState("");
+  const onApplyCustomExpiry = useCallback(() => {
+    const hours = Math.max(0, parseInt(customHoursText, 10) || 0);
+    const minutes = Math.max(0, Math.min(59, parseInt(customMinutesText, 10) || 0));
+    const ms = (hours * 60 + minutes) * 60 * 1000;
+    if (ms <= 0) return;
+    updateSettings({ alertExpiryMs: ms });
+    setCustomExpiryOpen(false);
+  }, [customHoursText, customMinutesText, updateSettings]);
 
   const onShowTrafficLightsToggle = useCallback(
     (value: boolean) => updateSettings({ showTrafficLights: value }),
@@ -199,6 +241,77 @@ export function SettingsScreen() {
             </View>
           ))}
         </View>
+
+        {/* Real, applied override for how long an alert THIS device reports stays live before
+            it auto-expires and disappears for everyone -- see EXPIRY_PRESETS' own comment. */}
+        <Text style={styles.rowLabel}>
+          Alert lifetime —{" "}
+          {settings.alertExpiryMs === null ? "Default" : formatExpiryMs(settings.alertExpiryMs)}
+        </Text>
+        <Text style={styles.helperText}>
+          How long an alert or incident YOU report stays visible before it auto-disappears for
+          everyone. "Default" uses this app's own per-type timing (45 min for police/emergency
+          vehicle, 2 hours for hazards/crashes/traffic lights, 24 hours for speed cameras).
+        </Text>
+        <View style={styles.expiryChipRow}>
+          {EXPIRY_PRESETS.map((preset) => {
+            const isSelected = settings.alertExpiryMs === preset.ms;
+            return (
+              <Pressable
+                key={preset.label}
+                onPress={() => onExpiryPresetSelect(preset.ms)}
+                style={({ pressed }) => [
+                  styles.expiryChip,
+                  isSelected && styles.expiryChipSelected,
+                  pressed && { opacity: pressedOpacity },
+                ]}
+              >
+                <Text style={[styles.expiryChipText, isSelected && styles.expiryChipTextSelected]}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <Pressable
+            onPress={() => setCustomExpiryOpen((v) => !v)}
+            style={({ pressed }) => [
+              styles.expiryChip,
+              customExpiryOpen && styles.expiryChipSelected,
+              pressed && { opacity: pressedOpacity },
+            ]}
+          >
+            <Text style={[styles.expiryChipText, customExpiryOpen && styles.expiryChipTextSelected]}>
+              Custom
+            </Text>
+          </Pressable>
+        </View>
+
+        {customExpiryOpen && (
+          <View style={styles.customExpiryRow}>
+            <TextInput
+              value={customHoursText}
+              onChangeText={setCustomHoursText}
+              placeholder="Hours"
+              placeholderTextColor={colors.textFaint}
+              keyboardType="number-pad"
+              style={styles.customExpiryInput}
+            />
+            <TextInput
+              value={customMinutesText}
+              onChangeText={setCustomMinutesText}
+              placeholder="Minutes"
+              placeholderTextColor={colors.textFaint}
+              keyboardType="number-pad"
+              style={styles.customExpiryInput}
+            />
+            <Pressable
+              onPress={onApplyCustomExpiry}
+              style={({ pressed }) => [styles.customExpiryApply, pressed && { opacity: pressedOpacity }]}
+            >
+              <Text style={styles.customExpiryApplyText}>Apply</Text>
+            </Pressable>
+          </View>
+        )}
       </Section>
 
       <Section title="Map appearance">
@@ -629,6 +742,57 @@ const styles = StyleSheet.create({
   alertTypeLabel: {
     fontSize: 14,
     color: colors.text,
+  },
+  expiryChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs + 2,
+  },
+  expiryChip: {
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  expiryChipSelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  expiryChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  expiryChipTextSelected: {
+    color: "#FFFFFF",
+  },
+  customExpiryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  customExpiryInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm - 2,
+    paddingHorizontal: spacing.sm + 2,
+    fontSize: 14,
+    color: colors.text,
+  },
+  customExpiryApply: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  customExpiryApplyText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
   },
   about: {
     alignItems: "center",

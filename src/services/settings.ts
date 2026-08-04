@@ -37,6 +37,12 @@ export interface AppSettings {
   osmLayerRadiusKm: number; // 1-200km
   // Which map color theme customMapStyle renders -- see utils/mapStyle.ts.
   mapTheme: MapThemeKey;
+  // Real override for how long an alert THIS device reports stays live before it auto-expires
+  // and disappears for everyone -- null means "use the app's own per-type defaults"
+  // (types/alert.ts's ALERT_TTL_MS: 45min for police/emergency vehicle, 2h for hazard/crash/
+  // traffic light, 24h for camera), matching behavior before this setting existed. Set in
+  // milliseconds so services/alerts.ts's reportAlert can use it directly without reconverting.
+  alertExpiryMs: number | null;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -50,6 +56,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showSpeedCameras: true,
   osmLayerRadiusKm: 5,
   mapTheme: "normal",
+  alertExpiryMs: null,
 };
 
 const STORAGE_KEY = "@trackline/settings";

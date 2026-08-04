@@ -625,6 +625,8 @@ export function MapScreen() {
   userRef.current = user;
   const autoShareDetectionsRef = useRef(settings.autoShareDetections);
   autoShareDetectionsRef.current = settings.autoShareDetections;
+  const alertExpiryMsRef = useRef(settings.alertExpiryMs);
+  alertExpiryMsRef.current = settings.alertExpiryMs;
 
   useEffect(() => {
     sirenDetection.start();
@@ -637,7 +639,7 @@ export function MapScreen() {
       const currentUser = userRef.current;
       if (autoShareDetectionsRef.current && latLng && currentUser) {
         try {
-          await reportAlert("emergency_vehicle", latLng, currentUser.uid);
+          await reportAlert("emergency_vehicle", latLng, currentUser.uid, alertExpiryMsRef.current);
         } catch (err) {
           console.warn("[siren] auto-share detection failed", err);
         }
@@ -1009,6 +1011,33 @@ export function MapScreen() {
     [currentLatLng, destinationLatLng, travelMode, selectedProfile]
   );
 
+  // Real removal of a mid-trip stop -- clears stopLocation and recomputes the route straight
+  // to the original destination, the same real fetch this screen already does for adding one,
+  // just without the waypoint.
+  const removeStopDuringNav = useCallback(async () => {
+    if (!currentLatLng || !destinationLatLng) return;
+    setStopLocation(null);
+    setRerouting(true);
+    try {
+      const fresh =
+        travelMode === "driving"
+          ? (await getRouteOptions(currentLatLng, destinationLatLng))[selectedProfile]
+          : await getDirectionsForMode(currentLatLng, destinationLatLng, travelMode);
+      guidanceRef.current = createGuidanceState();
+      setActiveStepIndex(0);
+      setRoute(fresh);
+      mapRef.current?.fitToCoordinates(fresh.polyline, {
+        edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
+        animated: true,
+      });
+    } catch (err) {
+      console.warn("[map] remove stop during nav failed", err);
+      Sentry.logger.error("map: remove stop during nav failed", { error: String(err) });
+    } finally {
+      setRerouting(false);
+    }
+  }, [currentLatLng, destinationLatLng, travelMode, selectedProfile]);
+
   const onSelectTravelMode = useCallback(
     (mode: TravelMode) => {
       setTravelMode(mode);
@@ -1139,11 +1168,11 @@ export function MapScreen() {
     const type = pendingAlertTypeRef.current;
     const location = alertPlacementLatLng;
     if (!type || !location || !user) return;
-    await reportAlert(type, location, user.uid);
+    await reportAlert(type, location, user.uid, settings.alertExpiryMs);
     pendingAlertTypeRef.current = null;
     setPlacingAlert(false);
     setAlertPlacementLatLng(null);
-  }, [alertPlacementLatLng, user]);
+  }, [alertPlacementLatLng, user, settings.alertExpiryMs]);
 
   const cancelAlertPlacement = useCallback(() => {
     pendingAlertTypeRef.current = null;
@@ -1392,19 +1421,22 @@ export function MapScreen() {
         {/* Highlighted arrival spot -- the exact picked destination (not wherever the
             polyline decoder's last point happens to land), so it's obvious exactly which
             building/driveway is the actual arrival point rather than "somewhere on this
-            block". A soft halo ring plus a pin on top, both anchored to the same coordinate. */}
+            block". A soft green halo ring plus a matching green pin on top, both anchored to
+            the same coordinate -- green specifically (not the app's usual blue accent) so the
+            arrival point reads distinctly as "destination reached here", the same convention
+            the app's own original navigation design used. */}
         {destinationLatLng && (
           <>
             <Circle
               center={destinationLatLng}
-              radius={18}
+              radius={40}
               strokeWidth={2}
-              strokeColor="rgba(37, 99, 235, 0.9)"
-              fillColor="rgba(37, 99, 235, 0.18)"
+              strokeColor="rgba(34, 197, 94, 0.9)"
+              fillColor="rgba(34, 197, 94, 0.18)"
             />
             <Marker coordinate={destinationLatLng} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
               <View style={styles.destinationPinWrap}>
-                <Ionicons name="location" size={40} color={colors.accent} />
+                <Ionicons name="location" size={40} color="#22C55E" />
               </View>
             </Marker>
           </>
@@ -1565,6 +1597,14 @@ export function MapScreen() {
           onExit={exitNavigation}
           onShareEta={shareEta}
           onExpandDirections={() => directionsSheetRef.current?.expand()}
+          onAddStop={() => setAddingStopDuringNav(true)}
+          onRemoveStop={removeStopDuringNav}
+          hasStop={!!stopLocation}
+          onReportAlert={openAlertTypePicker}
+          onOpenDetection={() => {
+            Sentry.logger.info("map: opening vehicle detection screen");
+            setDetectionOpen(true);
+          }}
           onHeightChange={setInstructionCardHeight}
         />
       )}
