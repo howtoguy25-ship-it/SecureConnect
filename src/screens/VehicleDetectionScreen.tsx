@@ -107,6 +107,52 @@ function TargetCorners({ width, height, color }: { width: number; height: number
   );
 }
 
+// Maps a box from the Frame Processor's UPRIGHT coordinate space (frameWidth x frameHeight,
+// the same space `boxes` state and the on-screen overlay use) into a still photo's own RAW,
+// pre-rotation pixel space (rawWidth x rawHeight, matching decodePhotoForDetection's decode and
+// what expo-image-manipulator's crop actually operates against -- see captureForPlateAndLightbar's
+// own comment for why). This is the exact inverse of the rotation the Frame Processor's own
+// resize() call applies to go from raw to upright -- see that worklet's own comment for the
+// forward direction and the orientation-to-degrees mapping this mirrors.
+function mapUprightBoxToRawPhoto(
+  bbox: [number, number, number, number],
+  uprightWidth: number,
+  uprightHeight: number,
+  rawWidth: number,
+  rawHeight: number,
+  orientation: string
+): [number, number, number, number] {
+  if (uprightWidth <= 0 || uprightHeight <= 0) return bbox;
+  const [bx, by, bw, bh] = bbox;
+  const u0 = bx / uprightWidth;
+  const v0 = by / uprightHeight;
+  const u1 = (bx + bw) / uprightWidth;
+  const v1 = (by + bh) / uprightHeight;
+
+  const toRaw = (u: number, v: number): [number, number] => {
+    switch (orientation) {
+      case "landscape-right":
+        return [v, 1 - u];
+      case "landscape-left":
+        return [1 - v, u];
+      case "portrait-upside-down":
+        return [1 - u, 1 - v];
+      default:
+        return [u, v];
+    }
+  };
+
+  const [ru0, rv0] = toRaw(u0, v0);
+  const [ru1, rv1] = toRaw(u1, v1);
+
+  const rx0 = Math.min(ru0, ru1) * rawWidth;
+  const rx1 = Math.max(ru0, ru1) * rawWidth;
+  const ry0 = Math.min(rv0, rv1) * rawHeight;
+  const ry1 = Math.max(rv0, rv1) * rawHeight;
+
+  return [rx0, ry0, rx1 - rx0, ry1 - ry0];
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -507,14 +553,22 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       consecutiveFailuresRef.current = 0;
       setRecovering(false);
 
-      // The Frame Processor detects against its own video frame dimensions (frameSizeRef),
-      // which won't generally match this side capture's own photo dimensions exactly even
-      // though both request the same target resolution (device format negotiation doesn't
-      // guarantee an exact match) -- rescale each tracked box into this photo's own pixel space
-      // before cropping/sampling, rather than assuming the two coordinate spaces line up.
+      // The vehicle box (box.bbox) is in the Frame Processor's own UPRIGHT coordinate space
+      // (frameSizeRef, corrected -- see the Frame Processor's own comment on frame.orientation).
+      // This side capture's photo is a SEPARATE image with its own EXIF-style orientation
+      // (photoFile.orientation) -- confirmed from react-native-vision-camera's own PhotoFile
+      // doc ("Camera sensors are landscape, so e.g. portrait photos will have a value of
+      // landscape-left") and from expo-image-manipulator's own crop implementation (its bounds
+      // check compares against the EXIF-corrected UIImage.size, but the actual crop runs
+      // against the raw, PRE-rotation CGImage buffer -- so the rect it needs is really in that
+      // raw space, not the upright one the size check implies). decodePhotoForDetection's JPEG
+      // decode (used for lightbar sampling below) reads that same raw, pre-rotation buffer too.
+      // mapUprightBoxToRawPhoto (below) does the same rotation the Frame Processor's own
+      // resize() call does, just inverted -- upright box -> raw photo pixel space -- so both
+      // the lightbar sampler and the plate crop end up reading the actual pixels they're meant
+      // to, not an axis-swapped or rotated region.
       const frameSize = frameSizeRef.current;
-      const scaleX = frameSize && frameSize.width > 0 ? photo.width / frameSize.width : 1;
-      const scaleY = frameSize && frameSize.height > 0 ? photo.height / frameSize.height : 1;
+      const photoOrientation = photoFile.orientation;
 
       const nowMs = Date.now();
       const liveIds = speedTrackerRef.current.liveTrackIds();
@@ -522,28 +576,54 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
       const plateReadPromises: Promise<void>[] = [];
 
       for (const box of boxesRef.current) {
-        const rescaledBbox: [number, number, number, number] = [
-          box.bbox[0] * scaleX,
-          box.bbox[1] * scaleY,
-          box.bbox[2] * scaleX,
-          box.bbox[3] * scaleY,
-        ];
+        const rawBbox = frameSize
+          ? mapUprightBoxToRawPhoto(
+              box.bbox,
+              frameSize.width,
+              frameSize.height,
+              decoded.width,
+              decoded.height,
+              photoOrientation
+            )
+          : box.bbox;
 
-        if (sampleLightbarActivity(decoded, box.id, rescaledBbox, nowMs)) {
+        if (sampleLightbarActivity(decoded, box.id, rawBbox, nowMs)) {
           nextEmergencyIds.add(box.id);
         }
 
         if (plateTextsRef.current.has(box.id) || platesReadingRef.current.has(box.id)) continue;
         const attempts = plateAttemptsRef.current.get(box.id) ?? 0;
         if (attempts >= MAX_PLATE_ATTEMPTS) continue;
-        const region = locatePlateRegion(rescaledBbox);
+        // Computed against the vehicle's own UPRIGHT box -- locatePlateRegion's "lower-middle
+        // band" reasoning only makes sense relative to how the vehicle actually looks the right
+        // way up (real plate position), not the photo's raw, possibly-sideways pixel grid.
+        const region = locatePlateRegion(box.bbox);
         if (!region) continue;
+        // Only the actual crop passed to OCR needs to be in the photo's own raw pixel space --
+        // `region` itself (upright, matching the on-screen box coordinates) is what gets stored
+        // and rendered as the plate frame overlay below.
+        const rawRegionBbox = frameSize
+          ? mapUprightBoxToRawPhoto(
+              [region.x, region.y, region.w, region.h],
+              frameSize.width,
+              frameSize.height,
+              decoded.width,
+              decoded.height,
+              photoOrientation
+            )
+          : [region.x, region.y, region.w, region.h];
+        const rawRegion: PlateRegion = {
+          x: rawRegionBbox[0],
+          y: rawRegionBbox[1],
+          w: rawRegionBbox[2],
+          h: rawRegionBbox[3],
+        };
 
         plateAttemptsRef.current.set(box.id, attempts + 1);
         platesReadingRef.current.add(box.id);
         const trackId = box.id;
         plateReadPromises.push(
-          readPlateText(photo.uri, region)
+          readPlateText(photo.uri, rawRegion)
             .then((text) => {
               if (!text || unmountedRef.current) return;
               // Confirm before ever showing anything -- see PLATE_CANDIDATE_WINDOW's own
