@@ -760,7 +760,19 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                     : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
           const boxWidthPx = w * scale;
           const boxHeightPx = h * scale;
+          const boxLeftPx = x * scale + offsetX;
+          const boxTopPx = y * scale + offsetY;
           const lockColor = isEmergency ? "#DC2626" : isSelected ? "#22D3EE" : "#F59E0B";
+          // Keeps the type/speed labels fully on-screen even when the detected box itself
+          // extends past an edge -- a vehicle filling most of the frame very plausibly has its
+          // own left edge at or past 0, which used to cut the label's own text off (e.g.
+          // "Vehicle 44%" rendering as "cle 44%"). Shifts right by however far the box's own
+          // left is negative, never left, so the label stays anchored to the vehicle it's
+          // labeling rather than drifting toward the screen center. labelAboveBox drops both
+          // labels inside the box (below its top edge) instead of above it whenever there's no
+          // real room above without sitting under the status bar/notch.
+          const labelLeftPx = Math.max(0, -boxLeftPx);
+          const labelAboveBox = boxTopPx - 24 >= insets.top + spacing.xs;
           return (
             <React.Fragment key={box.id}>
               <Pressable
@@ -770,15 +782,21 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                   isEmergency && styles.boxEmergency,
                   isSelected && styles.boxSelected,
                   {
-                    left: x * scale + offsetX,
-                    top: y * scale + offsetY,
+                    left: boxLeftPx,
+                    top: boxTopPx,
                     width: boxWidthPx,
                     height: boxHeightPx,
                   },
                 ]}
               >
                 <TargetCorners width={boxWidthPx} height={boxHeightPx} color={lockColor} />
-                <Text style={[styles.boxLabel, isEmergency && styles.boxLabelEmergency]}>
+                <Text
+                  style={[
+                    styles.boxLabel,
+                    isEmergency && styles.boxLabelEmergency,
+                    { left: labelLeftPx, top: labelAboveBox ? -24 : 6 },
+                  ]}
+                >
                   {isEmergency ? `${box.label} — lights active` : `${box.label} ${Math.round(box.score * 100)}%`}
                 </Text>
                 {/* Top-center, just outside the box edge -- separate from the type/
@@ -786,7 +804,10 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                     frame the tracker emits a speed (at the Frame Processor's own detection
                     cadence, see FRAME_PROCESSOR_THROTTLE_MS above). */}
                 {speedLabel && (
-                  <View style={styles.speedLabelWrap} pointerEvents="none">
+                  <View
+                    style={[styles.speedLabelWrap, { top: labelAboveBox ? -24 : 6 }]}
+                    pointerEvents="none"
+                  >
                     <Text
                       style={[styles.speedLabel, box.state === "parked" && styles.speedLabelParked]}
                     >
@@ -812,31 +833,36 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                   its own real position, not a generic label floating under the vehicle box --
                   rendered as a sibling of the vehicle box (not nested in it) since the plate
                   region has its own independent coordinates in the source photo. */}
-              {plateInfo && (
-                <View
-                  pointerEvents="none"
-                  style={[
-                    styles.plateFrame,
-                    {
-                      left: plateInfo.region.x * scale + offsetX,
-                      top: plateInfo.region.y * scale + offsetY,
-                      width: plateInfo.region.w * scale,
-                      height: plateInfo.region.h * scale,
-                    },
-                  ]}
-                >
-                  <TargetCorners
-                    width={plateInfo.region.w * scale}
-                    height={plateInfo.region.h * scale}
-                    color="#22D3EE"
-                  />
-                  <View style={styles.plateFrameLabelWrap}>
-                    <Text style={styles.plateFrameLabelText} numberOfLines={1}>
-                      {plateInfo.text}
-                    </Text>
-                  </View>
-                </View>
-              )}
+              {plateInfo &&
+                (() => {
+                  const plateLeftPx = plateInfo.region.x * scale + offsetX;
+                  const plateTopPx = plateInfo.region.y * scale + offsetY;
+                  const plateWidthPx = plateInfo.region.w * scale;
+                  const plateHeightPx = plateInfo.region.h * scale;
+                  const plateLabelLeftPx = Math.max(0, -plateLeftPx);
+                  const plateLabelAbove = plateTopPx - 26 >= insets.top + spacing.xs;
+                  return (
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.plateFrame,
+                        { left: plateLeftPx, top: plateTopPx, width: plateWidthPx, height: plateHeightPx },
+                      ]}
+                    >
+                      <TargetCorners width={plateWidthPx} height={plateHeightPx} color="#22D3EE" />
+                      <View
+                        style={[
+                          styles.plateFrameLabelWrap,
+                          { left: plateLabelLeftPx, top: plateLabelAbove ? -26 : 6 },
+                        ]}
+                      >
+                        <Text style={styles.plateFrameLabelText} numberOfLines={1}>
+                          {plateInfo.text}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()}
             </React.Fragment>
           );
         })}
@@ -1024,10 +1050,13 @@ const styles = StyleSheet.create({
     left: 0,
     backgroundColor: "#F59E0B",
     color: "#111827",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    overflow: "hidden",
+    ...shadow.low,
   },
   boxLabelEmergency: {
     backgroundColor: "#DC2626",
@@ -1043,10 +1072,13 @@ const styles = StyleSheet.create({
   speedLabel: {
     backgroundColor: "#111827",
     color: "#fff",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    overflow: "hidden",
+    ...shadow.low,
   },
   speedLabelParked: {
     backgroundColor: "#4B5563",
@@ -1077,8 +1109,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 4,
+    borderRadius: 6,
     overflow: "hidden",
+    ...shadow.low,
   },
   banner: {
     position: "absolute",
