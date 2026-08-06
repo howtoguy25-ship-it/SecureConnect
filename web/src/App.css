@@ -470,6 +470,14 @@ button:focus-visible {
   color: #fff;
 }
 
+.fab-octonary {
+  bottom: calc(504px + env(safe-area-inset-bottom, 0px));
+  right: 20px;
+  background: var(--fab-surface);
+  color: var(--fab-icon);
+  font-size: 20px;
+}
+
 /* Only shown while navigating (the normal FAB stack is hidden then) -- lets alert pins be
    hidden just for this trip when they get dense enough to clutter the driving view, without
    touching the always-on region-wide alert visibility setting. */

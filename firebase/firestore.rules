@@ -131,5 +131,22 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
+
+    // Real card payment for web REV checks (Stripe) -- the web equivalent of mobile's Apple/
+    // Google IAP purchase, since there's no app store to lean on for a website. Owner only,
+    // both ways, same reasoning as config/revCheckProvider above: createRevCheckCheckout and
+    // runRevCheck (firebase/functions/index.js) read this server-side via the Admin SDK, which
+    // bypasses these rules entirely -- the secret key is never sent to any client.
+    match /config/stripeKeys {
+      allow read, write: if isAdmin();
+    }
+
+    // One doc per Stripe Checkout session, written only by runRevCheck via the Admin SDK once a
+    // real result has actually been delivered (see its own comment) -- marks that session's
+    // payment as spent so it can't be reused for a second free check. No client, including the
+    // owner, ever needs to read or write this directly.
+    match /revCheckPayments/{sessionId} {
+      allow read, write: if false;
+    }
   }
 }

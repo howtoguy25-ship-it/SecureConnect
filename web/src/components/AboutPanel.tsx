@@ -5,6 +5,7 @@ import { ADMIN_EMAILS, ADMIN_PHONE_NUMBERS } from "@/config/admin";
 import type { WebSettings } from "@/hooks/useSettings";
 import { MAP_THEME_LABELS, type MapThemeKey } from "@/utils/mapStyles";
 import { getRevCheckProviderConfig, saveRevCheckProviderConfig } from "@/services/revCheckAdmin";
+import { getStripeSecretKey, saveStripeSecretKey } from "@/services/stripeAdmin";
 import "./AboutPanel.css";
 
 const APP_VERSION = "1.0.0";
@@ -109,6 +110,43 @@ export function AboutPanel({
     }
   };
 
+  // Real Stripe Secret Key (Firestore config/stripeKeys) -- gates web's own REV check payment
+  // (createRevCheckCheckout in firebase/functions/index.js). Web-only: mobile pays via Apple/
+  // Google IAP instead, so this key has no mobile-side counterpart to mirror.
+  const [stripeKeyDraft, setStripeKeyDraft] = useState("");
+  const [stripeKeyLoaded, setStripeKeyLoaded] = useState(false);
+  const [savingStripeKey, setSavingStripeKey] = useState(false);
+  const [stripeKeySavedFlash, setStripeKeySavedFlash] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    getStripeSecretKey()
+      .then((key) => {
+        if (!cancelled) setStripeKeyDraft(key);
+      })
+      .catch((err) => console.warn("[about] failed to load Stripe secret key", err))
+      .finally(() => {
+        if (!cancelled) setStripeKeyLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  const onSaveStripeKey = async () => {
+    setSavingStripeKey(true);
+    try {
+      await saveStripeSecretKey(stripeKeyDraft);
+      setStripeKeySavedFlash(true);
+      setTimeout(() => setStripeKeySavedFlash(false), 2000);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Couldn't save -- something went wrong.");
+    } finally {
+      setSavingStripeKey(false);
+    }
+  };
+
   return (
     <div className="about-panel">
       <div className="about-tabs">
@@ -195,6 +233,37 @@ export function AboutPanel({
                   />
                   <button className="account-signin-button admin-tab-button" onClick={onSaveRevCheckKeys} disabled={savingKeys}>
                     {savingKeys ? "Saving…" : keysSavedFlash ? "Saved ✓" : "Save provider keys"}
+                  </button>
+                </>
+              )}
+
+              {/* Web-only -- gates createRevCheckCheckout (firebase/functions/index.js), which
+                  charges $14.99 AUD via a real Stripe Checkout session before a web user's REV
+                  check runs. Mobile has no counterpart since it pays via Apple/Google IAP
+                  instead. Only the Secret Key is needed -- the Checkout session is created
+                  entirely server-side, so there's no publishable key/Stripe.js on this client. */}
+              <div className="admin-tab-label">Stripe payments (owner only)</div>
+              <div className="account-prompt">
+                Web users pay $14.99 AUD per REV check via Stripe Checkout. Paste your Stripe
+                Secret Key below (Stripe Dashboard → Developers → API keys) once you have a real
+                Stripe account -- until then, web REV check payments can't start.
+              </div>
+              {!stripeKeyLoaded ? (
+                <div className="account-prompt">Loading…</div>
+              ) : (
+                <>
+                  <input
+                    className="rev-check-key-input"
+                    type="password"
+                    value={stripeKeyDraft}
+                    onChange={(e) => setStripeKeyDraft(e.target.value)}
+                    placeholder="Stripe Secret Key (sk_...)"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <button className="account-signin-button admin-tab-button" onClick={onSaveStripeKey} disabled={savingStripeKey}>
+                    {savingStripeKey ? "Saving…" : stripeKeySavedFlash ? "Saved ✓" : "Save Stripe key"}
                   </button>
                 </>
               )}

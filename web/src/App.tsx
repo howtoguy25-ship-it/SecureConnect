@@ -31,6 +31,7 @@ import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
 import { ConfirmPrompt } from "@/components/ConfirmPrompt";
 import { AboutPanel } from "@/components/AboutPanel";
+import { RevCheckPanel } from "@/components/RevCheckPanel";
 import { PhoneAuthPanel } from "@/components/PhoneAuthPanel";
 import { AdminPanel } from "@/components/AdminPanel";
 import { BusinessDetailPanel } from "@/components/BusinessDetailPanel";
@@ -330,6 +331,19 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [phoneAuthOpen, setPhoneAuthOpen] = useState(false);
+  const [revCheckOpen, setRevCheckOpen] = useState(false);
+  const [revCheckReturnSessionId, setRevCheckReturnSessionId] = useState<string | null>(null);
+
+  // Picks up the return trip from Stripe Checkout (?revcheck_session=<id> on the success_url) --
+  // opens the panel straight to its "running the check" state and strips the param so a refresh
+  // afterward doesn't re-trigger it.
+  useEffect(() => {
+    const sessionId = new URLSearchParams(window.location.search).get("revcheck_session");
+    if (!sessionId) return;
+    setRevCheckReturnSessionId(sessionId);
+    setRevCheckOpen(true);
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // Business/POI detail panel (hours, rating, reviews) -- fetched via Places whenever a
   // clickable map icon is tapped outside of any placement/zoom mode.
@@ -1693,7 +1707,14 @@ export default function App() {
   // any full-panel overlay is open on top of it, instead of letting them show through
   // behind/around the panel.
   const chromeHidden =
-    pendingType !== null || navigating || aboutOpen || phoneAuthOpen || adminOpen || reportOpen || detectionOpen;
+    pendingType !== null ||
+    navigating ||
+    aboutOpen ||
+    phoneAuthOpen ||
+    adminOpen ||
+    reportOpen ||
+    detectionOpen ||
+    revCheckOpen;
 
   // Real satellite selection, available while placing an alert -- previously the satellite FAB
   // lived inside the chromeHidden-gated cluster below, so it (and everything else in that
@@ -1701,7 +1722,8 @@ export default function App() {
   // satellite imagery to place a pin accurately against real ground features. Same fix as
   // mobile's own MapScreen. Every other chromeHidden reason (navigating, an actual full-panel
   // overlay open) still hides it -- only alert placement is the exception.
-  const satelliteToggleVisible = !navigating && !aboutOpen && !phoneAuthOpen && !adminOpen && !reportOpen && !detectionOpen;
+  const satelliteToggleVisible =
+    !navigating && !aboutOpen && !phoneAuthOpen && !adminOpen && !reportOpen && !detectionOpen && !revCheckOpen;
 
   const statusMessage = authError ?? locationError ?? null;
   const navSteps = directions?.routes[0]?.legs[0]?.steps ?? [];
@@ -2403,6 +2425,20 @@ export default function App() {
         </button>
       )}
 
+      {/* REV Check: real stolen/written-off/money-owing PPSR lookup, $14.99 AUD via Stripe --
+          matches mobile's IAP-gated REV Check feature. Own FAB slot so it never overlaps the
+          other persistent buttons above it. */}
+      {satelliteToggleVisible && (
+        <button
+          className="fab fab-octonary"
+          onClick={() => setRevCheckOpen(true)}
+          aria-label="Run a vehicle REV check"
+          title="Vehicle REV check"
+        >
+          🚗
+        </button>
+      )}
+
       {street3DMode && (
         <>
           <button className="street3d-exit" onClick={exitStreet3D} aria-label="Exit 3D view">
@@ -2502,6 +2538,16 @@ export default function App() {
       )}
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
+
+      {revCheckOpen && (
+        <RevCheckPanel
+          returnSessionId={revCheckReturnSessionId}
+          onClose={() => {
+            setRevCheckOpen(false);
+            setRevCheckReturnSessionId(null);
+          }}
+        />
+      )}
 
       {placeDetails && (
         <BusinessDetailPanel place={placeDetails} onGetDirections={getDirectionsToPlace} onClose={closeBusinessPanel} />
