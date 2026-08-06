@@ -22,6 +22,11 @@ import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens"
 // stored history (see searchHistory.ts's own cap) and collapses back to this.
 const COLLAPSED_HISTORY_COUNT = 3;
 
+// Sentinel placeId for the "My Location" quick row below -- lets a caller tell "pick my live,
+// continuously-updating GPS position" apart from a real place that merely happens to be near it
+// (a frozen PlaceDetails.location snapshot would go stale the instant the driver moves).
+export const MY_LOCATION_PLACE_ID = "__my_location__";
+
 interface Props {
   biasLocation?: LatLng;
   onDestinationSelected: (place: PlaceDetails) => void;
@@ -35,6 +40,16 @@ interface Props {
   // secondary "add a stop"/mid-nav search bars, where it wouldn't make sense.
   onFindNearestStation?: () => void;
   findingNearestStation?: boolean;
+  // "My Location" row at the top of the idle dropdown, Apple/Google-Maps-style -- only passed
+  // where picking the device's own live position as the result makes real sense (the "choose
+  // starting point" bar). See MY_LOCATION_PLACE_ID above for how the caller tells it apart from
+  // a real place.
+  showMyLocation?: boolean;
+  // Renders a second "From" row above the main search input, inside the same card -- the
+  // stacked From/To directions panel real map apps use. Only passed by the initial, pre-route
+  // search bar; the add-a-stop and mid-nav bars have no "from" to show.
+  originLabel?: string;
+  onPressOrigin?: () => void;
 }
 
 export function DestinationSearchBar({
@@ -44,6 +59,9 @@ export function DestinationSearchBar({
   onCancel,
   onFindNearestStation,
   findingNearestStation,
+  showMyLocation,
+  originLabel,
+  onPressOrigin,
 }: Props) {
   const [query, setQuery] = useState("");
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
@@ -123,6 +141,24 @@ export function DestinationSearchBar({
     [onDestinationSelected]
   );
 
+  // Deliberately bypasses selectPlace/addSearchHistoryEntry -- "My Location" is a live position,
+  // not a real place worth remembering in search history, and the caller (see MY_LOCATION_PLACE_ID
+  // above) needs the sentinel id intact to know to keep following GPS rather than freeze this
+  // one snapshot of biasLocation.
+  const selectMyLocation = useCallback(() => {
+    if (!biasLocation) return;
+    setQuery("My Location");
+    setPredictions([]);
+    Keyboard.dismiss();
+    setHistoryVisible(false);
+    onDestinationSelected({
+      placeId: MY_LOCATION_PLACE_ID,
+      name: "My Location",
+      address: "Current location",
+      location: biasLocation,
+    });
+  }, [biasLocation, onDestinationSelected]);
+
   const onSelectPrediction = useCallback(
     async (prediction: PlacePrediction) => {
       try {
@@ -155,7 +191,10 @@ export function DestinationSearchBar({
 
   const showHistory = historyVisible && !query.trim() && predictions.length === 0 && history.length > 0;
   const showQuickActions = historyVisible && !query.trim() && predictions.length === 0 && !!onFindNearestStation;
+  const showMyLocationRow =
+    historyVisible && !query.trim() && predictions.length === 0 && !!showMyLocation && !!biasLocation;
   const visibleHistory = historyExpanded ? history : history.slice(0, COLLAPSED_HISTORY_COUNT);
+  const hasOriginRow = !!originLabel && !!onPressOrigin;
 
   return (
     <>
@@ -169,30 +208,59 @@ export function DestinationSearchBar({
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissSearch} />
       )}
       <View style={[styles.container, { top: insets.top + spacing.md }]}>
-        <View style={styles.inputRow}>
-          <Ionicons name="search" size={18} color={colors.textMuted} />
-          <TextInput
-            value={query}
-            onChangeText={onChangeText}
-            onFocus={() => {
-              if (!query.trim()) setHistoryVisible(true);
-            }}
-            placeholder={placeholder}
-            placeholderTextColor={colors.textFaint}
-            style={styles.input}
-          />
-          {loading && <ActivityIndicator size="small" color={colors.accent} />}
-          {onCancel && (
-            <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel">
-              <Ionicons name="close-circle" size={20} color={colors.textFaint} />
-            </Pressable>
+        <View style={hasOriginRow ? styles.fieldsCard : undefined}>
+          {hasOriginRow && (
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.originRow, pressed && styles.rowPressed]}
+                onPress={onPressOrigin}
+                accessibilityLabel={`Starting point: ${originLabel}. Tap to change.`}
+              >
+                <Ionicons name="ellipse" size={10} color={colors.accent} />
+                <Text style={styles.originText} numberOfLines={1}>
+                  {originLabel}
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.textFaint} />
+              </Pressable>
+              <View style={styles.originDivider} />
+            </>
           )}
+          <View style={hasOriginRow ? styles.inputRowFlat : styles.inputRow}>
+            <Ionicons name="search" size={18} color={colors.textMuted} />
+            <TextInput
+              value={query}
+              onChangeText={onChangeText}
+              onFocus={() => {
+                if (!query.trim()) setHistoryVisible(true);
+              }}
+              placeholder={placeholder}
+              placeholderTextColor={colors.textFaint}
+              style={styles.input}
+            />
+            {loading && <ActivityIndicator size="small" color={colors.accent} />}
+            {onCancel && (
+              <Pressable onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel">
+                <Ionicons name="close-circle" size={20} color={colors.textFaint} />
+              </Pressable>
+            )}
+          </View>
         </View>
         {errorText && (
           <View style={styles.errorBanner}>
             <Ionicons name="alert-circle" size={16} color={colors.danger} />
             <Text style={styles.errorText}>{errorText}</Text>
           </View>
+        )}
+        {showMyLocationRow && (
+          <Pressable
+            style={({ pressed }) => [styles.myLocationRow, pressed && styles.rowPressed]}
+            onPress={selectMyLocation}
+          >
+            <View style={styles.myLocationIconWrap}>
+              <Ionicons name="navigate" size={13} color="#FFFFFF" />
+            </View>
+            <Text style={styles.myLocationText}>My Location</Text>
+          </Pressable>
         )}
         {showQuickActions && (
           <Pressable
@@ -298,9 +366,69 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     ...shadow.low,
   },
+  // Same visual card as fieldsCard's outer wrapper provides the bg/radius/shadow for, so this
+  // variant (used only when stacked under the origin row) stays flat -- otherwise the input row
+  // would draw its own separate rounded card on top of the shared one, doubling the shadow/edge.
+  inputRowFlat: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    height: 48,
+    gap: spacing.sm,
+  },
   input: {
     flex: 1,
     fontSize: 15,
+    color: colors.text,
+  },
+  // Shared card for the stacked From/To directions panel -- one rounded rect containing both
+  // the origin row and the search input, divided by a hairline, matching the real Apple/Google
+  // Maps "plan a route" panel instead of two separately-shadowed boxes stacked with a gap.
+  fieldsCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    ...shadow.low,
+  },
+  originRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    height: 40,
+  },
+  originText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  originDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing.md,
+  },
+  myLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
+    ...shadow.low,
+  },
+  myLocationIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  myLocationText: {
+    fontSize: 14,
+    fontWeight: "600",
     color: colors.text,
   },
   errorBanner: {

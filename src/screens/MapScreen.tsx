@@ -27,7 +27,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { MuteButton } from "@/components/MuteButton";
 import { CarNavArrow, PersonLocationDot } from "@/components/LocationMarkers";
-import { DestinationSearchBar } from "@/components/DestinationSearchBar";
+import { DestinationSearchBar, MY_LOCATION_PLACE_ID } from "@/components/DestinationSearchBar";
 import { NavigationInstructionCard } from "@/components/NavigationInstructionCard";
 import { NavBottomBar } from "@/components/NavBottomBar";
 import { NavOptionsSheet } from "@/screens/NavOptionsSheet";
@@ -160,6 +160,15 @@ export function MapScreen() {
   const [pendingDestination, setPendingDestination] = useState<PlaceDetails | null>(null);
   const [stopLocation, setStopLocation] = useState<LatLng | null>(null);
   const [pickingStop, setPickingStop] = useState(false);
+  // Real custom "From" -- Google/Apple-Maps-style, lets a route be planned between any two real
+  // searched places, not just always starting from the driver's own live GPS fix. null means
+  // "use my live location" (the previous, only behavior) -- deliberately not a frozen LatLng
+  // snapshot, so routeOriginLatLng below stays live (keeps tracking GPS) whenever the driver
+  // hasn't actually picked a different starting point. Reset back to null (My Location) whenever
+  // the route-planning flow closes (Start or Cancel), so a custom origin never silently carries
+  // over into the *next*, unrelated destination search.
+  const [originOverride, setOriginOverride] = useState<PlaceDetails | null>(null);
+  const [pickingOrigin, setPickingOrigin] = useState(false);
   const [routeOptions, setRouteOptions] = useState<Record<RouteProfileKey, Route> | null>(null);
   // Driving gets the 3-way Normal/Fastest/Safest picker above; every other travel mode gets a
   // single real route here instead -- Google has exactly one meaningful route per mode in the
@@ -218,6 +227,15 @@ export function MapScreen() {
     directionsSheetOpen ||
     navOptionsSheetOpen;
   const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
+  // Real, confirmed cause of alerts appearing twice: confirmAlertPlacement is async
+  // (reportAlert is a real Firestore write), and nothing previously stopped a second tap on
+  // "Set" -- landing before the first write resolves and placingAlert flips back to false --
+  // from firing reportAlert a second time, creating two separate documents for the one report.
+  // A ref (not just the submittingAlert state below) because it must block synchronously on
+  // the very next tap, not after a re-render; submittingAlert itself just drives the button's
+  // visible disabled/spinner state.
+  const submittingAlertRef = useRef(false);
+  const [submittingAlert, setSubmittingAlert] = useState(false);
 
   // Real "tap a shop, see its info" -- iOS's native MapKit provider here has no onPoiClick
   // event (react-native-maps only fires that on Google Maps/Android), so instead any map tap
@@ -326,6 +344,14 @@ export function MapScreen() {
         : null,
     [location]
   );
+
+  // The real route origin -- a custom "From" place if one's been picked, otherwise the driver's
+  // own live GPS fix (the only behavior before this existed). Only meaningful for the
+  // pre-Start planning flow below (fetchRouteOptions/onSelectTravelMode) -- once a trip is
+  // actually started, live navigation/reroute always tracks real GPS via currentLatLng directly,
+  // same as before, since you can't actually be turn-by-turn guided from a place you're not at.
+  const routeOriginLatLng = originOverride?.location ?? currentLatLng;
+  const routeOriginLabel = originOverride?.name ?? "My Location";
 
   // iOS's real 3D-buildings path -- deliberately NOT the custom Map3DView module above (that
   // one wraps Google's still-experimental, pre-GA "Maps 3D SDK for iOS", which has a real,
@@ -497,7 +523,14 @@ export function MapScreen() {
     // continuous native work stacked directly on top of vehicle detection's own tfjs
     // inference + camera capture loop, a genuine, confirmed contributor to detection
     // crashing/black-screening when opened mid-navigation.
-    if (!route || !followTilt || !currentLatLng || detectionOpen) return;
+    // Also skips while placing an alert -- this real, root-caused bug: without this guard,
+    // this effect kept re-centering the camera on the driver's own live position on every GPS
+    // tick throughout an entire placement session (every ~2s/5m while actually driving),
+    // fighting the user's manual pan of the fixed-center pin and, via onRegionChangeComplete,
+    // silently overwriting alertPlacementLatLng back toward wherever the driver currently is --
+    // not wherever they'd actually panned the pin to. That's the confirmed cause of "Set"
+    // saving a different spot than the one the pin visually showed.
+    if (!route || !followTilt || !currentLatLng || detectionOpen || placingAlert) return;
     if (Date.now() - navStartedAtRef.current < 1200) return;
     // Deliberately omits pitch/zoom here (animateCamera only touches the fields it's given,
     // leaving the rest alone) -- GPS updates land every ~2s or every 5m travelled, which while
@@ -508,7 +541,7 @@ export function MapScreen() {
     // follow-tilt is first entered (toggleFollowTilt/enterOverviewMode below) -- after that, only
     // center/heading keep tracking live position/direction of travel.
     mapRef.current?.animateCamera({ center: currentLatLng, heading }, { duration: 600 });
-  }, [route, followTilt, currentLatLng, heading, detectionOpen]);
+  }, [route, followTilt, currentLatLng, heading, detectionOpen, placingAlert]);
 
   // Actually applies the "tilted, zoomed in" chase cam the comment above promises -- followTilt
   // defaulting to true was previously the *only* thing that happened on nav start; the per-tick
@@ -534,8 +567,11 @@ export function MapScreen() {
     // See the per-tick effect above for why detectionOpen also skips this -- the map is fully
     // hidden behind the vehicle-detection modal in that state, so there's nothing to gain from
     // animating its camera, only real native work stacked on top of an already CPU/memory-heavy
-    // screen.
-    if (!route || !followTilt || detectionOpen) return;
+    // screen. Also skips while placing an alert, same reasoning as the per-tick effect above --
+    // this one only fires once per follow-tilt session in practice (chaseCamAppliedRef), but if
+    // that ref were ever reset while a placement was in progress this would otherwise yank the
+    // camera hard away from the pin the driver is mid-pan on.
+    if (!route || !followTilt || detectionOpen || placingAlert) return;
     if (chaseCamAppliedRef.current) return;
     if (!currentLatLng) return;
     // enterOverviewMode (tap the route line) sets chaseCamAppliedRef itself and applies its own
@@ -553,7 +589,7 @@ export function MapScreen() {
         : { center: currentLatLng, heading, pitch: 60, zoom: 18 },
       { duration: 700 }
     );
-  }, [route, followTilt, detectionOpen, currentLatLng, heading, overviewMode]);
+  }, [route, followTilt, detectionOpen, currentLatLng, heading, overviewMode, placingAlert]);
 
   const toggleFollowTilt = useCallback(() => {
     setFollowTilt((was) => {
@@ -809,14 +845,16 @@ export function MapScreen() {
   // `travelMode` closure) -- onSelectTravelMode below needs to fetch for the *new* mode the
   // instant it's picked, before the setTravelMode state update has actually landed, so passing
   // it as a plain argument sidesteps any stale-closure risk entirely.
+  // `origin` is likewise always passed explicitly (routeOriginLatLng at the call site) rather
+  // than read off currentLatLng here directly -- real support for a custom "From" place per the
+  // explicit request, instead of every route always starting from the driver's own live position.
   const fetchRouteOptions = useCallback(
-    async (destination: LatLng, waypoint: LatLng | undefined, mode: TravelMode) => {
-      if (!currentLatLng) return;
+    async (origin: LatLng, destination: LatLng, waypoint: LatLng | undefined, mode: TravelMode) => {
       setLoadingRouteOptions(true);
       setRouteOptionsError(null);
       try {
         if (mode === "driving") {
-          const options = await getRouteOptions(currentLatLng, destination, waypoint);
+          const options = await getRouteOptions(origin, destination, waypoint);
           setRouteOptions(options);
           setModeRoute(null);
           setModeRouteOptions([]);
@@ -832,7 +870,7 @@ export function MapScreen() {
           // directions factor in real published timetables, not just travel speed, and a real
           // transit trip commonly has several genuinely different services to choose between,
           // same as a real walk can have more than one genuinely different path).
-          const results = await getModeRouteOptions(currentLatLng, destination, mode, waypoint);
+          const results = await getModeRouteOptions(origin, destination, mode, waypoint);
           setModeRouteOptions(results);
           setSelectedModeRouteIndex(0);
           setModeRoute(results[0]);
@@ -859,7 +897,7 @@ export function MapScreen() {
         setLoadingRouteOptions(false);
       }
     },
-    [currentLatLng, routeCardHeight]
+    [routeCardHeight]
   );
 
   // Rough degrees-of-latitude span for a given real km distance (111km per degree of
@@ -1071,28 +1109,29 @@ export function MapScreen() {
 
   const onDestinationSelected = useCallback(
     (place: PlaceDetails) => {
-      if (!currentLatLng) return;
+      if (!routeOriginLatLng) return;
       setPendingDestination(place);
       setStopLocation(null);
       // A fresh destination pick always starts from Drive -- predictable default, matches how
       // the picker looked before travel modes existed.
       setTravelMode("driving");
-      fetchRouteOptions(place.location, undefined, "driving");
+      fetchRouteOptions(routeOriginLatLng, place.location, undefined, "driving");
     },
-    [currentLatLng, fetchRouteOptions]
+    [routeOriginLatLng, fetchRouteOptions]
   );
 
   // "Find nearest station" quick action -- skips typing a destination entirely and routes
-  // straight to whatever real bus/train stop Google's Places data says is genuinely closest,
-  // as a walking trip (getting to a station is a walk, not a drive). Reuses the exact same
-  // pendingDestination/fetchRouteOptions path onDestinationSelected does, so Start/Add-stop/
-  // the route preview line all work identically once there.
+  // straight to whatever real bus/train stop Google's Places data says is genuinely closest to
+  // the current route origin (a custom "From" if one's picked, otherwise live GPS -- see
+  // routeOriginLatLng), as a walking trip (getting to a station is a walk, not a drive). Reuses
+  // the exact same pendingDestination/fetchRouteOptions path onDestinationSelected does, so
+  // Start/Add-stop/the route preview line all work identically once there.
   const [findingNearestStation, setFindingNearestStation] = useState(false);
   const onFindNearestStation = useCallback(async () => {
-    if (!currentLatLng) return;
+    if (!routeOriginLatLng) return;
     setFindingNearestStation(true);
     try {
-      const station = await findNearestTransitStation(currentLatLng);
+      const station = await findNearestTransitStation(routeOriginLatLng);
       if (!station) {
         setRouteOptionsError("No nearby train or bus station found.");
         return;
@@ -1100,23 +1139,23 @@ export function MapScreen() {
       setPendingDestination(station);
       setStopLocation(null);
       setTravelMode("walking");
-      fetchRouteOptions(station.location, undefined, "walking");
+      fetchRouteOptions(routeOriginLatLng, station.location, undefined, "walking");
     } catch (err) {
       console.warn("[map] find nearest station failed", err);
       Sentry.logger.error("map: find nearest station failed", { error: String(err) });
     } finally {
       setFindingNearestStation(false);
     }
-  }, [currentLatLng, fetchRouteOptions]);
+  }, [routeOriginLatLng, fetchRouteOptions]);
 
   const onStopSelected = useCallback(
     (place: PlaceDetails) => {
-      if (!pendingDestination) return;
+      if (!pendingDestination || !routeOriginLatLng) return;
       setStopLocation(place.location);
       setPickingStop(false);
-      fetchRouteOptions(pendingDestination.location, place.location, travelMode);
+      fetchRouteOptions(routeOriginLatLng, pendingDestination.location, place.location, travelMode);
     },
-    [pendingDestination, fetchRouteOptions, travelMode]
+    [pendingDestination, routeOriginLatLng, fetchRouteOptions, travelMode]
   );
 
   // Real mid-trip "add a stop" -- previously the only Add Stop control was on the pre-Start
@@ -1302,11 +1341,11 @@ export function MapScreen() {
   const onSelectTravelMode = useCallback(
     (mode: TravelMode) => {
       setTravelMode(mode);
-      if (pendingDestination) {
-        fetchRouteOptions(pendingDestination.location, stopLocation ?? undefined, mode);
+      if (pendingDestination && routeOriginLatLng) {
+        fetchRouteOptions(routeOriginLatLng, pendingDestination.location, stopLocation ?? undefined, mode);
       }
     },
-    [pendingDestination, stopLocation, fetchRouteOptions]
+    [pendingDestination, stopLocation, routeOriginLatLng, fetchRouteOptions]
   );
 
   const onSelectProfile = useCallback(
@@ -1364,6 +1403,10 @@ export function MapScreen() {
     setModeRoute(null);
     setModeRouteOptions([]);
     setPendingDestination(null);
+    // Live navigation always tracks real GPS from here on (see routeOriginLatLng's own comment)
+    // -- clears any custom "From" so it doesn't silently carry over into the next, unrelated
+    // destination search once this trip ends.
+    setOriginOverride(null);
   }, [routeOptions, modeRoute, travelMode, selectedProfile, pendingDestination]);
 
   const cancelRouteOptions = useCallback(() => {
@@ -1375,7 +1418,27 @@ export function MapScreen() {
     setPickingStop(false);
     setRouteOptionsError(null);
     setTravelMode("driving");
+    setOriginOverride(null);
   }, []);
+
+  // "From" row tap on the initial search panel -- opens a second DestinationSearchBar configured
+  // for picking a custom origin (with the "My Location" quick row as the reset-to-live-GPS path,
+  // see MY_LOCATION_PLACE_ID). If a destination/route preview is already up when the origin
+  // changes, re-fetches it immediately against the new origin so the shown route/times stay
+  // accurate to what's actually selected, same "real routes and times" the destination pick
+  // itself always fetches.
+  const onOriginSelected = useCallback(
+    (place: PlaceDetails) => {
+      const next = place.placeId === MY_LOCATION_PLACE_ID ? null : place;
+      setOriginOverride(next);
+      setPickingOrigin(false);
+      if (pendingDestination) {
+        const origin = next?.location ?? currentLatLng;
+        if (origin) fetchRouteOptions(origin, pendingDestination.location, stopLocation ?? undefined, travelMode);
+      }
+    },
+    [pendingDestination, stopLocation, travelMode, currentLatLng, fetchRouteOptions]
+  );
 
   const exitNavigation = useCallback(() => {
     stopSpeaking();
@@ -1448,13 +1511,21 @@ export function MapScreen() {
   );
 
   const confirmAlertPlacement = useCallback(async () => {
+    if (submittingAlertRef.current) return;
     const type = pendingAlertTypeRef.current;
     const location = alertPlacementLatLng;
     if (!type || !location || !user) return;
-    await reportAlert(type, location, user.uid, settings.alertExpiryMs);
-    pendingAlertTypeRef.current = null;
-    setPlacingAlert(false);
-    setAlertPlacementLatLng(null);
+    submittingAlertRef.current = true;
+    setSubmittingAlert(true);
+    try {
+      await reportAlert(type, location, user.uid, settings.alertExpiryMs);
+      pendingAlertTypeRef.current = null;
+      setPlacingAlert(false);
+      setAlertPlacementLatLng(null);
+    } finally {
+      submittingAlertRef.current = false;
+      setSubmittingAlert(false);
+    }
   }, [alertPlacementLatLng, user, settings.alertExpiryMs]);
 
   const cancelAlertPlacement = useCallback(() => {
@@ -1953,16 +2024,34 @@ export function MapScreen() {
         </>
       )}
 
-      {!route && !pendingDestination && !placingAlert && (
+      {/* Custom "From" picker -- reachable either from the idle search panel's own From row
+          (no destination picked yet) or from the route-options card's From row once one has
+          been (see onOriginSelected re-fetching against pendingDestination when that's the
+          case). Gated only on !pendingDestination||pickingOrigin isn't needed since pickingOrigin
+          itself is the switch; it just needs to win over whichever of the two other panels would
+          otherwise show for the current pendingDestination state. */}
+      {!route && !placingAlert && pickingOrigin && (
         <DestinationSearchBar
           biasLocation={currentLatLng ?? undefined}
-          onDestinationSelected={onDestinationSelected}
-          onFindNearestStation={onFindNearestStation}
-          findingNearestStation={findingNearestStation}
+          onDestinationSelected={onOriginSelected}
+          placeholder="Choose starting point"
+          onCancel={() => setPickingOrigin(false)}
+          showMyLocation
         />
       )}
 
-      {!route && pendingDestination && pickingStop && (
+      {!route && !pendingDestination && !placingAlert && !pickingOrigin && (
+        <DestinationSearchBar
+          biasLocation={routeOriginLatLng ?? undefined}
+          onDestinationSelected={onDestinationSelected}
+          onFindNearestStation={onFindNearestStation}
+          findingNearestStation={findingNearestStation}
+          originLabel={routeOriginLabel}
+          onPressOrigin={() => setPickingOrigin(true)}
+        />
+      )}
+
+      {!route && pendingDestination && pickingStop && !pickingOrigin && (
         <DestinationSearchBar
           biasLocation={currentLatLng ?? undefined}
           onDestinationSelected={onStopSelected}
@@ -1971,7 +2060,7 @@ export function MapScreen() {
         />
       )}
 
-      {!route && pendingDestination && !pickingStop && (
+      {!route && pendingDestination && !pickingStop && !pickingOrigin && (
         <RouteOptionsCard
           options={routeOptions}
           modeRoute={modeRoute}
@@ -1989,6 +2078,8 @@ export function MapScreen() {
           onAddStop={() => setPickingStop(true)}
           hasStop={!!stopLocation}
           onHeightChange={setRouteCardHeight}
+          originLabel={routeOriginLabel}
+          onChangeOrigin={() => setPickingOrigin(true)}
         />
       )}
 
@@ -2363,6 +2454,7 @@ export function MapScreen() {
                 pressed && { opacity: pressedOpacity },
               ]}
               onPress={cancelAlertPlacement}
+              disabled={submittingAlert}
               accessibilityLabel="Cancel placing alert"
             >
               <Ionicons name="close" size={20} color={colors.text} />
@@ -2379,6 +2471,7 @@ export function MapScreen() {
                   pressed && { opacity: pressedOpacity },
                 ]}
                 onPress={togglePlacementFrontView}
+                disabled={submittingAlert}
                 accessibilityLabel={placementFrontView ? "Switch to normal height view" : "Switch to front driving view"}
               >
                 <Ionicons name={placementFrontView ? "eye-off-outline" : "eye-outline"} size={20} color={colors.text} />
@@ -2388,13 +2481,21 @@ export function MapScreen() {
               style={({ pressed }) => [
                 styles.placementButton,
                 styles.placementButtonSet,
-                pressed && { opacity: pressedOpacity },
+                submittingAlert && styles.placementButtonSetDisabled,
+                pressed && !submittingAlert && { opacity: pressedOpacity },
               ]}
               onPress={confirmAlertPlacement}
+              disabled={submittingAlert}
               accessibilityLabel="Set alert location"
             >
-              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-              <Text style={styles.placementButtonSetText}>Set</Text>
+              {submittingAlert ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                  <Text style={styles.placementButtonSetText}>Set</Text>
+                </>
+              )}
             </Pressable>
           </View>
         </View>
@@ -2557,6 +2658,10 @@ const styles = StyleSheet.create({
   },
   placementButtonSet: {
     backgroundColor: colors.accent,
+    minWidth: 64,
+  },
+  placementButtonSetDisabled: {
+    backgroundColor: colors.textFaint,
   },
   placementButtonSetText: {
     color: "#FFFFFF",

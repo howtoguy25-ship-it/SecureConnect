@@ -17,7 +17,17 @@ export const AlertMarker = React.memo(function AlertMarker({ alert, onPress }: P
   return (
     <Marker
       coordinate={{ latitude: alert.lat, longitude: alert.lng }}
-      onPress={() => onPress(alert)}
+      // react-native-maps fires MapView's own onPress *in addition to* a tapped Marker's onPress
+      // on the same touch (confirmed native iOS behavior, same class of issue already worked
+      // around for the speed-camera cluster markers) -- without stopping it here, tapping an
+      // alert also ran MapScreen's onMapPress Places lookup for whatever's directly underneath,
+      // opening the street/POI info sheet on top of this alert's own detail sheet a moment
+      // later. Real, confirmed root cause of "tapping an alert also shows the street" -- this
+      // stops the tap here so only the alert's own sheet ever opens.
+      onPress={(e) => {
+        e.stopPropagation();
+        onPress(alert);
+      }}
       tracksViewChanges={false}
     >
       <View style={[styles.pin, { backgroundColor: ALERT_COLORS[alert.type] }]}>

@@ -81,6 +81,12 @@ interface Props {
   // instead of guessing a fixed bottom padding that this card -- 3 route options, a mode row,
   // and Add stop/Start -- reliably grows taller than.
   onHeightChange?: (height: number) => void;
+  // "My Location" or a real picked place -- shown so it's always clear what these routes/times
+  // are actually FROM, and tappable (onChangeOrigin) to change it without backing all the way
+  // out to the destination search, same as real map apps let you edit either end of a trip from
+  // the route list screen.
+  originLabel?: string;
+  onChangeOrigin?: () => void;
 }
 
 // "Bus 418", "T2 Train", or for a multi-leg trip "Bus 418 + Bus 333" -- the real line(s) this
@@ -117,6 +123,8 @@ export function RouteOptionsCard({
   onAddStop,
   hasStop,
   onHeightChange,
+  originLabel,
+  onChangeOrigin,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -149,6 +157,20 @@ export function RouteOptionsCard({
           <Ionicons name="close" size={22} color={colors.textMuted} />
         </Pressable>
       </View>
+
+      {originLabel && onChangeOrigin && (
+        <Pressable
+          style={({ pressed }) => [styles.originRow, pressed && { opacity: pressedOpacity }]}
+          onPress={onChangeOrigin}
+          accessibilityLabel={`Starting from ${originLabel}. Tap to change.`}
+        >
+          <Ionicons name="ellipse" size={9} color={colors.accent} />
+          <Text style={styles.originText} numberOfLines={1}>
+            From {originLabel}
+          </Text>
+          <Ionicons name="pencil" size={13} color={colors.textFaint} />
+        </Pressable>
+      )}
 
       {/* Scrollable, and Start now lives INSIDE this ScrollView as its last item (not a fixed
           element after it) -- previously a route pick's "peek" (below) could still translate
@@ -379,6 +401,18 @@ const styles = StyleSheet.create({
   },
   scrollArea: {
     gap: spacing.sm,
+  },
+  originRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  originText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textMuted,
   },
   title: {
     fontSize: 17,
