@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Modal, Share, ActivityIndicator, Image } from "react-native";
+import { View, Text, StyleSheet, Pressable, Modal, Share, ActivityIndicator } from "react-native";
 import MapView, {
   PROVIDER_GOOGLE,
   Polyline,
@@ -25,6 +25,7 @@ import { useLocation } from "@/context/LocationContext";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { MuteButton } from "@/components/MuteButton";
+import { CarNavArrow, PersonLocationDot } from "@/components/LocationMarkers";
 import { DestinationSearchBar } from "@/components/DestinationSearchBar";
 import { NavigationInstructionCard } from "@/components/NavigationInstructionCard";
 import { NavBottomBar } from "@/components/NavBottomBar";
@@ -84,15 +85,13 @@ const DIAGNOSTIC_DISABLE_MAPVIEW = false;
 // showing whatever real business happens to be nearest, however far that actually is.
 const MAX_POI_TAP_DISTANCE_METERS = 120;
 
-// Real live-location markers, per explicit request -- a top-down car icon (rotated live with
-// heading via flat+rotation, exactly like the CSS triangle it replaces) while actively
-// navigating/driving, and a plain person icon (never rotated -- a walking/browsing position
-// doesn't have a meaningful "facing direction" the way a moving vehicle does) everywhere else.
-// Both replace the platform's native blue dot entirely (showsUserLocation is now always false
-// below) so the same custom marker is what's on screen in both states, not a dot that swaps to
-// an icon only sometimes.
-const CAR_PUCK = require("../../assets/markers/car-puck.png");
-const PERSON_MARKER = require("../../assets/markers/person-marker.png");
+// Real live-location markers -- see components/LocationMarkers.tsx: a directional arrow badge
+// (rotated live with heading via flat+rotation, exactly like the original CSS triangle) while
+// actively navigating/driving, and a pulsing location dot (never rotated -- a walking/browsing
+// position doesn't have a meaningful "facing direction" the way a moving vehicle does)
+// everywhere else. Both replace the platform's native blue dot entirely (showsUserLocation is
+// now always false below) so the same custom marker is what's on screen in both states, not a
+// dot that swaps to an icon only sometimes.
 
 // Real traffic-jam reroute suggestion (see the periodic check effect below) -- how often to
 // re-check, how long to stay quiet after a decline, the minimum genuine time savings worth
@@ -1756,36 +1755,29 @@ export function MapScreen() {
             <View style={styles.compassConeGlyph} />
           </Marker>
         )}
-        {/* Real car icon, replacing the default blue dot while actively navigating/driving --
-            flat+rotation is react-native-maps' own built-in support for a marker that rotates
-            with heading instead of always facing the camera, so it turns a full live 360° with
-            every heading update exactly the same way the CSS triangle it replaces did. The
-            source image's neutral pose has its nose pointing straight up (see
-            assets/markers/car-puck.png; verified with a real pixel-level principal-axis check
-            on the cropped asset, not just eyeballing a thumbnail -- the body's major axis comes
-            out within a fraction of a degree of vertical).
-            tracksViewChanges is true here (unlike this app's other static markers) for a real,
-            documented reason: react-native-maps has several open iOS issues where flat+rotation
-            on a custom Image/View marker child stops reflecting live rotation updates once
-            tracksViewChanges is false -- the native layer keeps the first snapshot's rotation
-            state instead of applying new ones. That's plausibly why this read as "not facing
-            the direction of travel" once it became a detailed car shape (a plain triangle's
-            staleness reads as much less obviously wrong than a car silhouette's does). This is
-            the one marker in this app that actually needs to keep re-tracking -- the perf cost
-            is one small marker, not a list. */}
+        {/* Real navigation arrow, replacing the default blue dot while actively navigating/
+            driving -- flat+rotation is react-native-maps' own built-in support for a marker
+            that rotates with heading instead of always facing the camera, so it turns a full
+            live 360° with every heading update. CarNavArrow is a plain-View/SVG component (see
+            components/LocationMarkers.tsx), deliberately not a raster <Image> -- react-native-
+            maps has several open iOS issues where flat+rotation on a custom *Image* marker
+            child stops reflecting live rotation updates once tracksViewChanges is false (the
+            exact bug an earlier photo-based version of this marker hit); a plain View doesn't
+            have that problem, so tracksViewChanges can safely stay false here, matching every
+            other static marker in this app. */}
         {route && currentLatLng && (
-          <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} tracksViewChanges>
-            <Image source={CAR_PUCK} style={styles.carPuckImage} resizeMode="contain" />
+          <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} tracksViewChanges={false}>
+            <CarNavArrow />
           </Marker>
         )}
-        {/* Real person icon for the normal (not navigating) map view -- per explicit request,
-            replacing the default blue dot there too. Deliberately not rotated: a walking/
-            browsing position doesn't have the same "facing direction" a moving vehicle does,
-            so this just tracks live position, the same convention Waze/Google Maps use for a
-            plain "you are here" marker versus their own directional vehicle pucks. */}
+        {/* Real person/location marker for the normal (not navigating) map view -- replacing
+            the default blue dot there too. Deliberately not rotated: a walking/browsing
+            position doesn't have the same "facing direction" a moving vehicle does, so this
+            just tracks live position with a pulsing halo, the same convention Waze/Google Maps
+            use for a plain "you are here" marker versus their own directional vehicle pucks. */}
         {!route && currentLatLng && (
           <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
-            <Image source={PERSON_MARKER} style={styles.personMarkerImage} resizeMode="contain" />
+            <PersonLocationDot />
           </Marker>
         )}
         {/* Preview of whichever route profile is highlighted in the picker below, before
@@ -2473,17 +2465,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.medium,
-  },
-  // Sized to read clearly at typical street-level zoom without dwarfing nearby markers/route
-  // line -- the source art already includes its own circular badge/outline (see
-  // assets/markers/car-puck.png), so no extra background/border wrapper is needed here.
-  carPuckImage: {
-    width: 42,
-    height: 42,
-  },
-  personMarkerImage: {
-    width: 36,
-    height: 36,
   },
   // Wide, soft, translucent "flashlight" cone -- apex (the narrow point) sits at the puck's
   // exact coordinate (see the Marker's anchor: {y: 1} above) and fans out in whichever
