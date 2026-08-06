@@ -151,6 +151,11 @@ module.exports = {
       "./modules/map3d/plugin/withGoogleMaps3DSignatureFix.js",
       "expo-apple-authentication",
       ...googleSigninPlugins,
+      // Real money REV checks (see src/services/iap.ts) -- StoreKit 2 on iOS / Play Billing on
+      // Android, both via this one cross-platform library. Registers the native IAP module and
+      // (iOS) the In-App Purchase capability automatically; the actual product itself still has
+      // to be created by hand in App Store Connect/Play Console with a matching product ID.
+      "react-native-iap",
       // Only uploads debug symbols/source maps during EAS builds once org/project/authToken
       // are set (from sentry.io -- Settings -> Auth Tokens for the token) -- harmless no-op
       // config without them, Sentry.init() below still works and reports crashes either way,

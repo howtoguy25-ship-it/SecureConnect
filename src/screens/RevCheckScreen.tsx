@@ -1,13 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
+import { useIAP, ErrorCode, type Purchase } from "react-native-iap";
 import { useSettings } from "@/context/SettingsContext";
 import { recordManualCheck, recordRevCheckResult, getVehicleHistory } from "@/services/vehicleHistory";
 import { runRevCheck, isRevCheckProviderConfigured, type RevCheckResult } from "@/services/revCheck";
 import { AU_STATES, DEFAULT_AU_STATE } from "@/utils/auStates";
+import { REV_CHECK_PRODUCT_ID, REV_CHECK_FALLBACK_PRICE_LABEL } from "@/services/iap";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 
@@ -30,6 +32,14 @@ function relativeTime(ms: number): string {
 // (matches what the AI detector actually reads) while the VIN field is what a real check
 // actually runs on. Never fabricates a result: with no provider key, or on any error, this shows
 // the real outcome from revCheck.ts, not invented data.
+//
+// Real money: once a provider key is connected, running a check is gated behind a real Apple/
+// Google In-App Purchase (see iap.ts) -- the app charges the driver the IAP price, then spends
+// the fixed wholesale cost from the connected PPSR account to actually run the search. The
+// purchased transaction is deliberately NOT finished/consumed until the real check succeeds --
+// if the BAPI call itself fails after a successful payment, the driver gets a free retry (same
+// already-paid transaction) instead of being charged twice or losing money on a check that never
+// delivered anything.
 export function RevCheckScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RevCheck">>();
@@ -40,6 +50,7 @@ export function RevCheckScreen() {
   const [vin, setVin] = useState(params?.vin ?? "");
   const [state, setState] = useState(params?.state ?? DEFAULT_AU_STATE);
   const [checking, setChecking] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
   const [result, setResult] = useState<RevCheckResult | null>(null);
   // Set only when `result` came from a PAST paid check loaded off this vehicle's history entry
   // (see the load effect below), never from a check just run this instant -- lets the render
@@ -48,7 +59,73 @@ export function RevCheckScreen() {
 
   const providerConfigured = isRevCheckProviderConfigured(settings);
 
-  // A real REV check costs real money (see the $6 notice below) -- closing this screen (or the
+  // Holds a purchase that has been PAID for but not yet delivered a successful check result --
+  // see the header comment above. A ref (not just state) because it's read from inside the
+  // useIAP purchase-success callback's own closure, which needs the current value synchronously,
+  // not a stale one from whenever that callback was created. hasPendingPaidRetry mirrors it into
+  // render-visible state so the button label/behavior can react to it.
+  const pendingPurchaseRef = useRef<Purchase | null>(null);
+  const [hasPendingPaidRetry, setHasPendingPaidRetry] = useState(false);
+
+  const runCheck = useCallback(
+    async (purchase: Purchase | null, finishTransactionFn: (args: { purchase: Purchase; isConsumable: boolean }) => Promise<void>) => {
+      const trimmedVin = vin.trim().toUpperCase();
+      const trimmedPlate = plate.trim().toUpperCase();
+      if (!trimmedVin) return;
+      setChecking(true);
+      setPurchasing(false);
+      setResult(null);
+      setCachedResultAt(null);
+      try {
+        await recordManualCheck(trimmedPlate, state, trimmedVin);
+        const outcome = await runRevCheck(trimmedVin, settings);
+        setResult(outcome);
+        if (outcome.outcome === "success") {
+          await recordRevCheckResult(trimmedPlate, trimmedVin, {
+            vehicle: outcome.vehicle,
+            securedInterestCount: outcome.securedInterestCount,
+            certificateUrl: outcome.certificateUrl,
+          });
+          // Value actually delivered -- now (and only now) is it honest to consume the purchase.
+          if (purchase) {
+            await finishTransactionFn({ purchase, isConsumable: true });
+          }
+          pendingPurchaseRef.current = null;
+          setHasPendingPaidRetry(false);
+        } else if (purchase) {
+          // Paid, but the real check didn't deliver -- keep the transaction open so "Retry" can
+          // reuse it for free instead of charging the driver again for a check that never ran.
+          pendingPurchaseRef.current = purchase;
+          setHasPendingPaidRetry(true);
+        }
+      } finally {
+        setChecking(false);
+      }
+    },
+    [plate, vin, state, settings]
+  );
+
+  const { connected, products, fetchProducts, requestPurchase, finishTransaction } = useIAP({
+    onPurchaseSuccess: (purchase) => {
+      runCheck(purchase, finishTransaction);
+    },
+    onPurchaseError: (error) => {
+      setPurchasing(false);
+      if (error.code !== ErrorCode.UserCancelled) {
+        setResult({ outcome: "error", message: `Payment didn't go through: ${error.message}` });
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (!connected) return;
+    fetchProducts({ skus: [REV_CHECK_PRODUCT_ID], type: "in-app" });
+  }, [connected, fetchProducts]);
+
+  const revCheckProduct = products.find((p) => p.id === REV_CHECK_PRODUCT_ID);
+  const priceLabel = revCheckProduct?.displayPrice ?? REV_CHECK_FALLBACK_PRICE_LABEL;
+
+  // A real REV check costs real money (see the cost notice below) -- closing this screen (or the
   // driver just navigating away) must never lose a result they already paid for. Loads whatever
   // was last saved for this exact plate/VIN (see vehicleHistory.ts's recordRevCheckResult) the
   // moment this screen opens with one prefilled, so re-opening a saved vehicle from history shows
@@ -93,27 +170,35 @@ export function RevCheckScreen() {
   }, [navigation]);
 
   const onStart = useCallback(async () => {
-    const trimmedVin = vin.trim().toUpperCase();
-    const trimmedPlate = plate.trim().toUpperCase();
-    if (!trimmedVin) return;
-    setChecking(true);
-    setResult(null);
-    setCachedResultAt(null);
-    try {
-      await recordManualCheck(trimmedPlate, state, trimmedVin);
-      const outcome = await runRevCheck(trimmedVin, settings);
-      setResult(outcome);
-      if (outcome.outcome === "success") {
-        await recordRevCheckResult(trimmedPlate, trimmedVin, {
-          vehicle: outcome.vehicle,
-          securedInterestCount: outcome.securedInterestCount,
-          certificateUrl: outcome.certificateUrl,
-        });
-      }
-    } finally {
-      setChecking(false);
+    if (!vin.trim()) return;
+
+    // Already paid for a prior attempt that failed after payment -- retry the same real check
+    // for free instead of buying it again.
+    if (pendingPurchaseRef.current) {
+      runCheck(pendingPurchaseRef.current, finishTransaction);
+      return;
     }
-  }, [plate, vin, state, settings]);
+
+    // No provider connected at all means this can only ever return the honest "not connected"
+    // placeholder -- charging real money for a check that's guaranteed not to deliver real data
+    // would be dishonest, so this path never touches the purchase flow.
+    if (!providerConfigured) {
+      runCheck(null, finishTransaction);
+      return;
+    }
+
+    setPurchasing(true);
+    try {
+      await requestPurchase({
+        request: { apple: { sku: REV_CHECK_PRODUCT_ID }, google: { skus: [REV_CHECK_PRODUCT_ID] } },
+        type: "in-app",
+      });
+      // The actual outcome (success/failure) arrives via onPurchaseSuccess/onPurchaseError above,
+      // not this promise -- see useIAP's own docs. This just dispatches the native purchase sheet.
+    } catch {
+      setPurchasing(false);
+    }
+  }, [vin, providerConfigured, requestPurchase, finishTransaction, runCheck]);
 
   const onOpenCertificate = useCallback((url: string) => {
     Linking.openURL(url).catch(() => {});
@@ -217,28 +302,42 @@ export function RevCheckScreen() {
           which is a national (not state-based) register.
         </Text>
 
-        {providerConfigured && (
+        {providerConfigured && !hasPendingPaidRetry && (
           <View style={styles.costNotice}>
             <MaterialCommunityIcons name="currency-usd" size={14} color={colors.warning} />
             <Text style={styles.costNoticeText}>
-              Running this check charges $6.00 via your connected PPSR provider account.
+              Running this check costs {priceLabel}, charged securely through the App Store.
+            </Text>
+          </View>
+        )}
+        {hasPendingPaidRetry && (
+          <View style={styles.costNotice}>
+            <MaterialCommunityIcons name="information-outline" size={14} color={colors.warning} />
+            <Text style={styles.costNoticeText}>
+              Your last check didn't complete after payment -- retrying is free, no second charge.
             </Text>
           </View>
         )}
 
         <Pressable
           onPress={onStart}
-          disabled={!vin.trim() || checking}
+          disabled={!vin.trim() || checking || purchasing}
           style={({ pressed }) => [
             styles.startButton,
-            (!vin.trim() || checking) && styles.startButtonDisabled,
-            pressed && !checking && vin.trim() && { opacity: pressedOpacity },
+            (!vin.trim() || checking || purchasing) && styles.startButtonDisabled,
+            pressed && !checking && !purchasing && vin.trim() && { opacity: pressedOpacity },
           ]}
         >
-          {checking ? (
+          {checking || purchasing ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.startButtonText}>Start REV Check</Text>
+            <Text style={styles.startButtonText}>
+              {hasPendingPaidRetry
+                ? "Retry REV Check (already paid)"
+                : providerConfigured
+                  ? `Pay ${priceLabel} & Start REV Check`
+                  : "Start REV Check"}
+            </Text>
           )}
         </Pressable>
       </View>
