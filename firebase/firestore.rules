@@ -71,6 +71,27 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
+    match /liveShares/{shareId} {
+      // Readable by anyone signed in (including the anonymous session the web recipient page
+      // creates for itself via ensureSignedIn()) -- there's no owner check on read, since the
+      // whole point is a link handed to someone who doesn't have an account. Only the creator
+      // can write to their own share, and only ever these fields (never createdBy/createdAt).
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.active == true
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number;
+
+      allow update: if isOwner(resource.data.createdBy)
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lat', 'lng', 'heading', 'etaText', 'arrivalClockText', 'active', 'updatedAt']);
+
+      allow delete: if isOwner(resource.data.createdBy);
+    }
+
     match /users/{uid} {
       // Anyone can read/write their own profile doc; only the admin can list/read everyone
       // else's (for the sign-in history panel) -- name/email/provider/timestamps only,

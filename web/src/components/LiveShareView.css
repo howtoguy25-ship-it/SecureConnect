@@ -1,0 +1,101 @@
+.live-share-root {
+  position: fixed;
+  inset: 0;
+  background: var(--app-bg);
+}
+
+.live-share-card {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  max-width: 360px;
+  margin: 0 auto;
+  background: var(--surface);
+  color: var(--surface-text);
+  border-radius: 16px;
+  padding: 16px 18px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-family: system-ui, sans-serif;
+  text-align: center;
+}
+
+.live-share-eta {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.live-share-arrival {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--surface-text-muted);
+}
+
+.live-share-live-dot {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #16a34a;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.live-share-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16a34a;
+  animation: live-share-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes live-share-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.live-share-ended {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--surface-text-muted);
+}
+
+.live-share-status {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg);
+  padding: 24px;
+}
+
+.live-share-status-card {
+  max-width: 320px;
+  text-align: center;
+  background: var(--surface);
+  color: var(--surface-text);
+  border-radius: 16px;
+  padding: 24px 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-family: system-ui, sans-serif;
+}
+
+.live-share-status-title {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.live-share-status-body {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--surface-text-muted);
+}

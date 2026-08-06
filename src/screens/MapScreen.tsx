@@ -67,6 +67,7 @@ import {
 } from "@/services/alerts";
 import { sirenDetection } from "@/services/sirenDetection";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmTrafficData } from "@/services/osmTrafficData";
+import { createLiveShare, updateLiveShare, endLiveShare } from "@/services/liveShare";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import { VehicleDetectionErrorBoundary } from "@/components/VehicleDetectionErrorBoundary";
 import type { AlertDoc, AlertType } from "@/types/alert";
@@ -421,6 +422,10 @@ export function MapScreen() {
   // in onDestinationSelected) gets a moment on screen before the camera snaps into the tilted
   // close-follow -- same "show the whole route, then follow" beat Apple Maps uses.
   const navStartedAtRef = useRef(0);
+  // Set once shareEta actually starts a live share for the current trip; cleared on
+  // exitNavigation. Kept as a ref (not state) since only the periodic-update interval and
+  // exitNavigation read it, and neither needs a re-render when it changes.
+  const liveShareIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Also skips while vehicle detection is open -- see detectionOpen's own effect-gating
@@ -1181,6 +1186,15 @@ export function MapScreen() {
     setFollowTilt(true);
     setStopLocation(null);
     setDestinationLatLng(null);
+    // Per explicit user answer ("Until navigation ends"), a share started this trip stops
+    // updating right here -- fire-and-forget since there's nothing useful to block exit on.
+    if (liveShareIdRef.current) {
+      const shareId = liveShareIdRef.current;
+      liveShareIdRef.current = null;
+      endLiveShare(shareId).catch((err) => {
+        Sentry.logger.error("map: end live share failed", { error: String(err) });
+      });
+    }
   }, []);
 
   // Flow (per spec: select the type first, then drag to place, then Set/Save):
@@ -1320,22 +1334,66 @@ export function MapScreen() {
     [route, remainingDurationSeconds]
   );
 
-  // One-time snapshot, not a live-updating tracked link -- matches the web app's own
-  // shareEta: a plain-text message with the current ETA/arrival time and a static Google
-  // Maps link to where the sender is right now, handed off to the OS share sheet.
+  // Real live-tracking link: the first tap creates a liveShares Firestore doc and a periodic
+  // effect (below) keeps it updated with position/ETA every REFRESH_MS while navigating; a
+  // second tap mid-trip reuses the same doc/link rather than creating a new one, so re-sharing
+  // doesn't fragment the trip across multiple stale links. The doc stops updating (and the
+  // recipient's page shows "trip ended") the moment exitNavigation fires, per explicit answer.
   const shareEta = useCallback(async () => {
-    if (!route || !currentLatLng) return;
-    const mapsLink = `https://www.google.com/maps?q=${currentLatLng.latitude},${currentLatLng.longitude}`;
+    if (!route || !currentLatLng || !user) return;
+    let shareId = liveShareIdRef.current;
+    try {
+      if (!shareId) {
+        shareId = await createLiveShare(user.uid, {
+          lat: currentLatLng.latitude,
+          lng: currentLatLng.longitude,
+          heading,
+          etaText: route.etaText,
+          arrivalClockText,
+        });
+        liveShareIdRef.current = shareId;
+      }
+    } catch (err) {
+      Sentry.logger.error("map: create live share failed", { error: String(err) });
+      console.warn("[map] create live share failed", err);
+    }
+    const liveLink = shareId
+      ? `https://tracklinemaps.com/live/${shareId}`
+      : `https://www.google.com/maps?q=${currentLatLng.latitude},${currentLatLng.longitude}`;
     const message =
       `I'm on my way -- ETA ${route.etaText}, arriving around ${arrivalClockText}. ` +
-      `My current location: ${mapsLink}`;
+      `Follow my live location: ${liveLink}`;
     try {
       await Share.share({ message });
     } catch (err) {
       Sentry.logger.error("map: share ETA failed", { error: String(err) });
       console.warn("[map] share ETA failed", err);
     }
-  }, [route, currentLatLng, arrivalClockText]);
+  }, [route, currentLatLng, arrivalClockText, heading, user]);
+
+  // Keeps the live share doc (if one was ever started for this trip) fresh while navigating --
+  // 12s matches the cadence other live-position writes in this app use as a reasonable
+  // balance between "recipient sees real movement" and Firestore write volume. Stops the
+  // instant route becomes null (interval cleanup) or liveShareIdRef is empty (nothing to
+  // update, most trips never call shareEta at all).
+  useEffect(() => {
+    if (!route) return;
+    const interval = setInterval(() => {
+      const shareId = liveShareIdRef.current;
+      const latLng = currentLatLngRef.current;
+      if (!shareId || !latLng) return;
+      updateLiveShare(shareId, {
+        lat: latLng.latitude,
+        lng: latLng.longitude,
+        heading,
+        etaText: route.etaText,
+        arrivalClockText,
+      }).catch((err) => {
+        Sentry.logger.error("map: update live share failed", { error: String(err) });
+      });
+    }, 12000);
+    return () => clearInterval(interval);
+  }, [route, heading, arrivalClockText]);
 
   return (
     <View style={styles.container}>
