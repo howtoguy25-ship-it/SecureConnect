@@ -1,15 +1,27 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useSettings } from "@/context/SettingsContext";
-import { recordManualCheck } from "@/services/vehicleHistory";
+import { recordManualCheck, recordRevCheckResult, getVehicleHistory } from "@/services/vehicleHistory";
 import { runRevCheck, isRevCheckProviderConfigured, type RevCheckResult } from "@/services/revCheck";
 import { AU_STATES, DEFAULT_AU_STATE } from "@/utils/auStates";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
+
+function relativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(ms).toLocaleDateString();
+}
 
 // Real vehicle history / REV check screen, wired to BusinessAPI.com.au's live PPSR Searches API
 // (see revCheck.ts's own header for the full contract this follows) once a provider key is
@@ -29,8 +41,44 @@ export function RevCheckScreen() {
   const [state, setState] = useState(params?.state ?? DEFAULT_AU_STATE);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<RevCheckResult | null>(null);
+  // Set only when `result` came from a PAST paid check loaded off this vehicle's history entry
+  // (see the load effect below), never from a check just run this instant -- lets the render
+  // show an honest "last checked X ago" instead of implying a stale result just happened live.
+  const [cachedResultAt, setCachedResultAt] = useState<number | null>(null);
 
   const providerConfigured = isRevCheckProviderConfigured(settings);
+
+  // A real REV check costs real money (see the $6 notice below) -- closing this screen (or the
+  // driver just navigating away) must never lose a result they already paid for. Loads whatever
+  // was last saved for this exact plate/VIN (see vehicleHistory.ts's recordRevCheckResult) the
+  // moment this screen opens with one prefilled, so re-opening a saved vehicle from history shows
+  // its last real result immediately instead of a blank form the driver would have to pay to
+  // refill.
+  useEffect(() => {
+    const lookupPlate = params?.plate?.trim().toUpperCase();
+    const lookupVin = params?.vin?.trim().toUpperCase();
+    if (!lookupPlate && !lookupVin) return;
+    let cancelled = false;
+    getVehicleHistory().then((history) => {
+      if (cancelled) return;
+      const match = history.find(
+        (e) => (lookupPlate && e.plate === lookupPlate) || (lookupVin && e.vin === lookupVin)
+      );
+      if (match?.lastResult) {
+        setResult({
+          outcome: "success",
+          message: "Check complete.",
+          vehicle: match.lastResult.vehicle,
+          securedInterestCount: match.lastResult.securedInterestCount,
+          certificateUrl: match.lastResult.certificateUrl,
+        });
+        setCachedResultAt(match.lastResult.checkedAt);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [params?.plate, params?.vin]);
 
   const hasVehicleSummary = params?.vehicleLabel !== undefined;
   const speedLabel = useMemo(() => {
@@ -50,10 +98,18 @@ export function RevCheckScreen() {
     if (!trimmedVin) return;
     setChecking(true);
     setResult(null);
+    setCachedResultAt(null);
     try {
       await recordManualCheck(trimmedPlate, state, trimmedVin);
       const outcome = await runRevCheck(trimmedVin, settings);
       setResult(outcome);
+      if (outcome.outcome === "success") {
+        await recordRevCheckResult(trimmedPlate, trimmedVin, {
+          vehicle: outcome.vehicle,
+          securedInterestCount: outcome.securedInterestCount,
+          certificateUrl: outcome.certificateUrl,
+        });
+      }
     } finally {
       setChecking(false);
     }
@@ -191,7 +247,9 @@ export function RevCheckScreen() {
         <View style={styles.successCard}>
           <View style={styles.successHeader}>
             <MaterialCommunityIcons name="check-decagram" size={20} color={colors.accent} />
-            <Text style={styles.successHeaderText}>Real result from PPSR/NEVDIS</Text>
+            <Text style={styles.successHeaderText}>
+              {cachedResultAt ? `Last checked ${relativeTime(cachedResultAt)}` : "Real result from PPSR/NEVDIS"}
+            </Text>
           </View>
 
           {result.vehicle ? (

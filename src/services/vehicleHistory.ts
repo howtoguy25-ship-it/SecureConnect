@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { RevCheckVehicle } from "@/services/revCheck";
 
 // Persistent log of vehicles this device has actually seen -- either fully identified by the
 // live AI detector (a confirmed, on-device plate read, same confirm logic
@@ -22,6 +23,15 @@ export interface VehicleHistoryEntry {
   lastSeenAt: number;
   timesSeen: number;
   source: VehicleHistorySource;
+  // The last real, paid REV check result for this vehicle, if one has ever completed -- kept so
+  // closing the REV check screen (or leaving and coming back later) never loses a result the
+  // driver already paid for. Null until a check actually succeeds at least once.
+  lastResult: {
+    vehicle?: RevCheckVehicle;
+    securedInterestCount?: number;
+    certificateUrl?: string | null;
+    checkedAt: number;
+  } | null;
 }
 
 const STORAGE_KEY = "@trackline/vehicleHistory";
@@ -89,6 +99,7 @@ export async function upsertDetectedVehicle(
       lastSeenAt: now,
       timesSeen: 1,
       source: "detected",
+      lastResult: null,
     });
   }
   return writeHistory(current);
@@ -133,8 +144,33 @@ export async function recordManualCheck(
       lastSeenAt: now,
       timesSeen: 1,
       source: "manual",
+      lastResult: null,
     });
   }
+  return writeHistory(current);
+}
+
+/** Called the instant a real REV check actually completes successfully -- attaches the result to
+ *  the SAME entry recordManualCheck just created/refreshed moments earlier (same plate/VIN key
+ *  derivation), so re-opening this vehicle later (from history, or from a fresh AI detection of
+ *  the same plate) shows the last real result immediately instead of nothing. Never invents an
+ *  entry to attach to -- if one somehow isn't there, this is a silent no-op rather than writing
+ *  a partial/inconsistent record. */
+export async function recordRevCheckResult(
+  rawPlate: string,
+  vin: string | null,
+  result: { vehicle?: RevCheckVehicle; securedInterestCount?: number; certificateUrl?: string | null }
+): Promise<VehicleHistoryEntry[]> {
+  const normalizedVin = vin ? vin.trim().toUpperCase() : null;
+  const plate = normalizePlate(rawPlate) || (normalizedVin ? `VIN:${normalizedVin}` : "");
+  if (!plate) return getVehicleHistory();
+  const current = await getVehicleHistory();
+  const existingIndex = current.findIndex((e) => e.plate === plate);
+  if (existingIndex < 0) return current;
+  current[existingIndex] = {
+    ...current[existingIndex],
+    lastResult: { ...result, checkedAt: Date.now() },
+  };
   return writeHistory(current);
 }
 

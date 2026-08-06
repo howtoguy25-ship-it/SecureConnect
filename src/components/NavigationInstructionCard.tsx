@@ -7,6 +7,19 @@ import { SpeedLimitSign } from "@/components/SpeedLimitSign";
 import { NAV_CARD_THEMES, type NavCardThemeKey } from "@/utils/navCardTheme";
 import { radius, spacing, shadow, pressedOpacity } from "@/theme/tokens";
 
+// Meters read faster than km for a turn that's coming up soon -- "0.4 km" makes a driver do the
+// conversion in their head at the exact moment they need to react fastest, where every other
+// real nav app (Google/Apple/Waze) already shows meters under 1km. Rounded to the nearest 10m:
+// exact-metre precision (e.g. "437 m") is false precision no GPS fix actually supports and is
+// harder to read at a glance while driving.
+function formatStepDistance(meters: number): string {
+  if (meters < 1000) {
+    const rounded = Math.max(10, Math.round(meters / 10) * 10);
+    return `${rounded} m`;
+  }
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
 export const MANEUVER_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   "turn-left": "arrow-back",
   "turn-right": "arrow-forward",
@@ -138,13 +151,22 @@ export function NavigationInstructionCard({
               <Ionicons name={icon} size={collapsed ? 22 : 30} color={theme.iconColor} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.instruction, { color: theme.text }, textShadow]} numberOfLines={collapsed ? 1 : 2}>
+              {/* No line cap when expanded -- a capped numberOfLines was cutting long instructions
+                  (e.g. "Head east on Old Kent Rd towards ...") off mid-word with "...", hiding the
+                  actual road name a driver needs to read. onHeightChange already reports this
+                  card's real rendered height to callers below it, so letting the text grow to
+                  however many lines it actually needs is safe -- nothing here assumes a fixed
+                  height anymore. Collapsed still caps to 1 line by design (that's the whole point
+                  of collapsing). */}
+              <Text style={[styles.instruction, { color: theme.text }, textShadow]} numberOfLines={collapsed ? 1 : undefined}>
                 {step.instruction}
               </Text>
               {!collapsed && (
-                <Text style={[styles.meta, { color: theme.textSecondary }, textShadow]}>
-                  {(step.distanceMeters / 1000).toFixed(1)} km
-                </Text>
+                <View style={[styles.distanceBadge, { backgroundColor: theme.actionBg }]}>
+                  <Text style={[styles.distanceText, { color: theme.iconColor }, textShadow]}>
+                    {formatStepDistance(step.distanceMeters)}
+                  </Text>
+                </View>
               )}
             </View>
           </Animated.View>
@@ -255,9 +277,21 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.2,
   },
-  meta: {
-    fontSize: 12,
-    marginTop: 4,
+  // Own pill, not just bigger plain text -- a real visual break from the instruction line above
+  // it (which already carries its own weight/color), so the distance reads as its own distinct,
+  // glanceable number rather than a small caption easy to skim past. alignSelf keeps the pill
+  // sized to its own text instead of stretching the full card width.
+  distanceBadge: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  distanceText: {
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   // Current road + speed limit -- a distinct row below the header so it's never layered on top
   // of (or squeezed into) the turn instruction text. Speed sign sized down slightly from its
