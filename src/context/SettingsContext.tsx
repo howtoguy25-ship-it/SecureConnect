@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -80,21 +80,26 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     await persistVoiceVolume(value);
   }, []);
 
-  return (
-    <SettingsContext.Provider
-      value={{
-        settings,
-        loaded,
-        updateSettings,
-        voiceEnabled,
-        toggleVoiceEnabled,
-        voiceVolume,
-        setVoiceVolume,
-      }}
-    >
-      {children}
-    </SettingsContext.Provider>
+  // Without this, the object literal below was a brand-new reference on every single render of
+  // this provider -- meaning every consumer (MapScreen chief among them, a very large component
+  // with a native MapView and a lot of child markers/overlays) re-rendered on ANY change here,
+  // including ones it doesn't even read, like dragging the volume slider or muting voice
+  // guidance. Real, measurable extra work on every one of those interactions, not just a
+  // theoretical concern -- this context wraps the entire app.
+  const value = useMemo(
+    () => ({
+      settings,
+      loaded,
+      updateSettings,
+      voiceEnabled,
+      toggleVoiceEnabled,
+      voiceVolume,
+      setVoiceVolume,
+    }),
+    [settings, loaded, updateSettings, voiceEnabled, toggleVoiceEnabled, voiceVolume, setVoiceVolume]
   );
+
+  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 
 export function useSettings(): SettingsContextValue {
