@@ -16,6 +16,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { File } from "expo-file-system";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { decodePhotoForDetection } from "@/services/vehicleDetection";
 import { loadBoxedTFLiteModel, TFLITE_INPUT_SIZE } from "@/services/tfliteVehicleModel";
 import { sampleLightbarActivity, pruneLightbarTracks } from "@/utils/lightbarDetector";
@@ -23,7 +25,9 @@ import { createSpeedTracker, type TrackedBox } from "@/utils/speedTracker";
 import { locatePlateRegion, type PlateRegion } from "@/utils/plateLocator";
 import { readPlateText } from "@/services/plateOcr";
 import { useLocation } from "@/context/LocationContext";
+import { upsertDetectedVehicle } from "@/services/vehicleHistory";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
+import type { RootStackParamList } from "@/navigation/RootNavigator";
 import { Sentry } from "@/services/sentry";
 
 // PHASE 2 (see the diagnostic protocol this followed): primary vehicle detection now runs
@@ -272,14 +276,22 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const [emergencyTrackIds, setEmergencyTrackIds] = useState<Set<number>>(new Set());
   // Tapping a box locks visual focus onto that one vehicle (a highlighted outline + checkmark)
   // when several are in frame -- purely a this-screen, this-session UI focus aid, the same way
-  // tapping a subject focuses a camera. Deliberately NOT a save/record feature: nothing here is
-  // written to storage, sent anywhere, or retrievable after this screen closes -- it clears the
-  // moment the vehicle's track is dropped or the screen closes, exactly like the live plate
-  // text above.
+  // tapping a subject focuses a camera. The selection itself is never written to storage or sent
+  // anywhere and clears the moment the vehicle's track is dropped or the screen closes. That's
+  // now separate from the plate text itself, though: once a plate is actually confirmed (see
+  // captureForPlateAndLightbar below), it IS automatically written to the on-device vehicle
+  // history log (vehicleHistory.ts) -- never sent off-device, but no longer session-only, per
+  // explicit request to remember fully-detected vehicles across sessions.
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
   const onSelectBox = useCallback((id: number) => {
     setSelectedTrackId((prev) => (prev === id ? null : id));
   }, []);
+  // Track ids whose plate has actually been confirmed AND written to the persistent vehicle
+  // history log this session (see captureForPlateAndLightbar's plate-confirm callback below) --
+  // purely a "saved" badge on-screen, the real persistence already happened the instant this
+  // gets set. Pruned alongside plateTexts/plateTextsRef in onDetections below.
+  const [savedTrackIds, setSavedTrackIds] = useState<Set<number>>(new Set());
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const cameraRef = useRef<Camera>(null);
   const sideIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -414,6 +426,15 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
         }
       }
       if (pruned) setPlateTexts(new Map(plateTextsRef.current));
+      setSavedTrackIds((prev) => {
+        let changed = false;
+        const next = new Set<number>();
+        for (const id of prev) {
+          if (liveIds.has(id)) next.add(id);
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
     },
     []
   );
@@ -647,6 +668,24 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
 
               plateTextsRef.current.set(trackId, { text: confirmedText, region });
               setPlateTexts(new Map(plateTextsRef.current));
+
+              // The exact moment a plate goes from "read" to "confirmed" (see
+              // PLATE_CONFIRM_COUNT above) -- real, on-device evidence, not a guess -- so this
+              // is also the moment this vehicle gets automatically written to the persistent
+              // history log, per explicit request. Reads the track's live label/speed off
+              // boxesRef (not stale closure state) so a confirm that lands a tick after the
+              // vehicle's own speed last updated still saves the freshest number available.
+              const trackedBox = boxesRef.current.find((b) => b.id === trackId);
+              if (trackedBox) {
+                upsertDetectedVehicle(confirmedText, {
+                  label: trackedBox.label as "Vehicle" | "Heavy Vehicle",
+                  speedKmh: trackedBox.state === "parked" ? 0 : trackedBox.speedKmh,
+                  speedKind: trackedBox.state === "parked" ? "absolute" : trackedBox.speedKind,
+                }).catch((err) => {
+                  Sentry.logger.error("vehicle-detection: history save failed", { error: String(err) });
+                });
+                setSavedTrackIds((prev) => (prev.has(trackId) ? prev : new Set(prev).add(trackId)));
+              }
             })
             .catch((err) => {
               Sentry.logger.error("vehicle-detection: plate OCR failed", { error: String(err) });
@@ -906,13 +945,15 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                 )}
               </Pressable>
               {/* Plate text only ever appears once on-device OCR actually confirms a real read
-                  (see plateOcr.ts) -- never a location guess with nothing behind it, and never
-                  stored or sent anywhere, just held in this screen's own state for as long as
-                  the vehicle stays tracked. The frame itself is the *real* estimated plate
-                  rectangle (plateLocator.ts's region, the same crop OCR actually read from) in
-                  its own real position, not a generic label floating under the vehicle box --
-                  rendered as a sibling of the vehicle box (not nested in it) since the plate
-                  region has its own independent coordinates in the source photo. */}
+                  (see plateOcr.ts) -- never a location guess with nothing behind it. Once
+                  confirmed it's also automatically written to the on-device vehicle history log
+                  (never sent off-device -- see vehicleHistory.ts and the small "Saved" badge
+                  below), not just held in this screen's own session state anymore. The frame
+                  itself is the *real* estimated plate rectangle (plateLocator.ts's region, the
+                  same crop OCR actually read from) in its own real position, not a generic label
+                  floating under the vehicle box -- rendered as a sibling of the vehicle box (not
+                  nested in it) since the plate region has its own independent coordinates in the
+                  source photo. */}
               {plateInfo &&
                 (() => {
                   const plateLeftPx = plateInfo.region.x * scale + offsetX;
@@ -921,6 +962,7 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                   const plateHeightPx = plateInfo.region.h * scale;
                   const plateLabelLeftPx = Math.max(0, -plateLeftPx);
                   const plateLabelAbove = plateTopPx - 26 >= insets.top + spacing.xs;
+                  const isSaved = savedTrackIds.has(box.id);
                   return (
                     <View
                       pointerEvents="none"
@@ -940,6 +982,14 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                           {plateInfo.text}
                         </Text>
                       </View>
+                      {isSaved && (
+                        <View style={styles.savedBadge} pointerEvents="none">
+                          <View style={styles.savedBadgeInner}>
+                            <Ionicons name="checkmark-circle" size={12} color="#22C55E" />
+                            <Text style={styles.savedBadgeText}>Saved</Text>
+                          </View>
+                        </View>
+                      )}
                     </View>
                   );
                 })()}
@@ -1037,6 +1087,31 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
               {selectedIsEmergency ? "Active" : "None detected"}
             </Text>
           </View>
+          {/* Only enabled once there's an actual confirmed plate to check -- a REV check needs a
+              real plate number, not a guess, same rule the plate label itself follows. Navigates
+              straight into the same RevCheckScreen a saved history entry opens, prefilled with
+              this vehicle's live label/speed/plate (see RevCheckScreen's own summary card). */}
+          <Pressable
+            onPress={() =>
+              selectedPlate &&
+              navigation.navigate("RevCheck", {
+                plate: selectedPlate.text,
+                vehicleLabel: selectedBox.label as "Vehicle" | "Heavy Vehicle",
+                speedKmh: selectedBox.state === "parked" ? 0 : selectedBox.speedKmh,
+                speedKind: selectedBox.state === "parked" ? "absolute" : selectedBox.speedKind,
+              })
+            }
+            disabled={!selectedPlate}
+            style={({ pressed }) => [
+              styles.revCheckButton,
+              !selectedPlate && styles.revCheckButtonDisabled,
+              pressed && !!selectedPlate && { opacity: pressedOpacity },
+            ]}
+          >
+            <Text style={styles.revCheckButtonText}>
+              {selectedPlate ? "Run REV Check" : "Waiting for plate read…"}
+            </Text>
+          </Pressable>
         </View>
       )}
 
@@ -1193,6 +1268,30 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     ...shadow.low,
   },
+  savedBadge: {
+    position: "absolute",
+    bottom: -20,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 3,
+  },
+  savedBadgeInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(17, 24, 39, 0.85)",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  savedBadgeText: {
+    color: "#22C55E",
+    fontSize: 10,
+    fontWeight: "700",
+  },
   banner: {
     position: "absolute",
     left: spacing.lg,
@@ -1265,6 +1364,21 @@ const styles = StyleSheet.create({
   },
   detailValueAlert: {
     color: "#F87171",
+  },
+  revCheckButton: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm + 2,
+    alignItems: "center",
+  },
+  revCheckButtonDisabled: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  revCheckButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
   },
   closeButton: {
     position: "absolute",

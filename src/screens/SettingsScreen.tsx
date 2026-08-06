@@ -170,6 +170,21 @@ export function SettingsScreen() {
     [updateSettings]
   );
 
+  // Local-only draft state for the two provider key fields -- only actually written to settings
+  // (and thus AsyncStorage) when Save is pressed, same "edit then apply" pattern as the custom
+  // alert-expiry hours/minutes fields above, not on every keystroke.
+  const [ppsrKeyDraft, setPpsrKeyDraft] = useState(settings.revCheckPpsrApiKey);
+  const [nevdisKeyDraft, setNevdisKeyDraft] = useState(settings.revCheckNevdisApiKey);
+  const [keysSavedFlash, setKeysSavedFlash] = useState(false);
+  const onSaveRevCheckKeys = useCallback(() => {
+    updateSettings({
+      revCheckPpsrApiKey: ppsrKeyDraft.trim(),
+      revCheckNevdisApiKey: nevdisKeyDraft.trim(),
+    });
+    setKeysSavedFlash(true);
+    setTimeout(() => setKeysSavedFlash(false), 2000);
+  }, [ppsrKeyDraft, nevdisKeyDraft, updateSettings]);
+
   // Real, live battery reading (not a static disclaimer) -- AI Vehicle Detection runs a real
   // camera + on-device AI analysis several times a second, which is genuinely one of the
   // heaviest things this app does. Both iOS and Android automatically slow the processor down
@@ -449,6 +464,57 @@ export function SettingsScreen() {
         </Pressable>
       </Section>
 
+      <Section title="Vehicle REV Checks">
+        <Text style={styles.helperText}>
+          Look up a vehicle's 5-year registration &amp; odometer history and stolen/written-off/
+          money-owing status -- Australia only. Vehicles the AI detector fully identifies (a
+          confirmed plate read) are saved here automatically; you can also enter any plate by
+          hand.
+        </Text>
+        <Pressable
+          onPress={() => navigation.navigate("VehicleHistory")}
+          style={({ pressed }) => [styles.revCheckLinkRow, pressed && { opacity: pressedOpacity }]}
+        >
+          <MaterialCommunityIcons name="car-search" size={20} color={colors.accent} />
+          <Text style={styles.revCheckLinkText}>View vehicle history & run a REV check</Text>
+          <MaterialCommunityIcons name="chevron-right" size={18} color={colors.textMuted} />
+        </Pressable>
+
+        <Text style={styles.rowLabel}>Provider keys</Text>
+        <Text style={styles.helperText}>
+          Real vehicle history isn't free -- PPSR (stolen/written-off/money-owing) and NEVDIS
+          (registration + odometer history) both require your own signed-up broker account.
+          Paste your keys below once you have them; checks stay clearly marked "not connected"
+          until then -- nothing here is ever fabricated.
+        </Text>
+        <TextInput
+          value={ppsrKeyDraft}
+          onChangeText={setPpsrKeyDraft}
+          placeholder="PPSR provider API key"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          style={styles.customExpiryInput}
+        />
+        <TextInput
+          value={nevdisKeyDraft}
+          onChangeText={setNevdisKeyDraft}
+          placeholder="NEVDIS provider API key"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          style={styles.customExpiryInput}
+        />
+        <Pressable
+          onPress={onSaveRevCheckKeys}
+          style={({ pressed }) => [styles.customExpiryApply, { alignItems: "center" }, pressed && { opacity: pressedOpacity }]}
+        >
+          <Text style={styles.customExpiryApplyText}>{keysSavedFlash ? "Saved" : "Save keys"}</Text>
+        </Pressable>
+      </Section>
+
       <Modal
         visible={batteryInfoOpen}
         transparent
@@ -705,6 +771,20 @@ const styles = StyleSheet.create({
   modalMeta: {
     fontSize: 12,
     fontWeight: "700",
+    color: colors.text,
+  },
+  revCheckLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  revCheckLinkText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
     color: colors.text,
   },
   signInButton: {
