@@ -40,6 +40,7 @@ import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
 import { PlaceInfoSheet } from "@/screens/PlaceInfoSheet";
 import { OsmMarkerSheet, type OsmMarkerKind } from "@/screens/OsmMarkerSheet";
 import {
+  getDirections,
   getRouteOptions,
   getDirectionsForMode,
   getModeRouteOptions,
@@ -82,6 +83,14 @@ const DIAGNOSTIC_DISABLE_MAPVIEW = false;
 // check that keeps an empty tap (open water, a park, a gap between buildings) from confidently
 // showing whatever real business happens to be nearest, however far that actually is.
 const MAX_POI_TAP_DISTANCE_METERS = 120;
+
+// Real traffic-jam reroute suggestion (see the periodic check effect below) -- how often to
+// re-check, how long to stay quiet after a decline, the minimum genuine time savings worth
+// interrupting for, and how close to the destination it stops bothering to check at all.
+const TRAFFIC_CHECK_INTERVAL_MS = 90_000;
+const TRAFFIC_SUGGESTION_COOLDOWN_MS = 8 * 60_000;
+const MIN_SAVED_SECONDS_TO_SUGGEST = 180;
+const MIN_REMAINING_METERS_TO_CHECK = 1500;
 
 export function MapScreen() {
   const { location } = useLocation();
@@ -1122,6 +1131,13 @@ export function MapScreen() {
   // navigation (cancelStopPreview) with nothing changed.
   const [stopPreviewRoute, setStopPreviewRoute] = useState<Route | null>(null);
   const [stopPreviewPlace, setStopPreviewPlace] = useState<PlaceDetails | null>(null);
+  // Real traffic-jam reroute suggestion -- a genuinely faster, avoid-highways (side streets)
+  // alternative found while a real, meaningful traffic delay exists on the remaining route (see
+  // the periodic check effect below). Held separately from `route` itself, same
+  // preview-then-confirm shape as stopPreviewRoute above, so it can draw green alongside the
+  // still-live blue route until the driver actually accepts it.
+  const [trafficSuggestionRoute, setTrafficSuggestionRoute] = useState<Route | null>(null);
+  const [trafficSuggestionSavedSeconds, setTrafficSuggestionSavedSeconds] = useState(0);
   const onStopSelectedDuringNav = useCallback(
     async (place: PlaceDetails) => {
       setAddingStopDuringNav(false);
@@ -1163,6 +1179,91 @@ export function MapScreen() {
   const cancelStopPreview = useCallback(() => {
     setStopPreviewRoute(null);
     setStopPreviewPlace(null);
+  }, []);
+
+  // Periodic real traffic check while navigating -- every 90s, re-fetches the remaining route
+  // WITH live traffic (departure_time=now) and compares it against a real avoid-highways
+  // alternative, also traffic-aware. Only surfaces a suggestion when both are true: the current
+  // route has a real, meaningful delay right now (hasTrafficDelay's existing 10%+60s-floor
+  // definition, not just normal light-traffic noise) AND the side-streets alternative is
+  // genuinely at least MIN_SAVED_SECONDS_TO_SUGGEST faster under that same live traffic --
+  // never a guessed/simulated "there's a jam ahead", always Google's own real-time traffic
+  // model on two real, independently-fetched routes.
+  //
+  // Deliberately keyed only on [route, destinationLatLng] (not currentLatLng, which changes on
+  // every GPS tick and would otherwise tear down/recreate this interval before it ever reached
+  // 90s) -- position, stop, and "is a suggestion already showing" are all read fresh from refs
+  // inside the interval callback instead.
+  const trafficSuggestionRouteRef = useRef<Route | null>(null);
+  trafficSuggestionRouteRef.current = trafficSuggestionRoute;
+  const stopLocationRef = useRef<LatLng | null>(null);
+  stopLocationRef.current = stopLocation;
+  // Also skips while any of these other route-editing flows are up -- a second green line
+  // (this suggestion's) appearing on top of the add-stop preview's own green line, or while
+  // actively placing an alert pin, would just be confusing overlap, not a helpful suggestion.
+  const otherFlowActiveRef = useRef(false);
+  otherFlowActiveRef.current = !!stopPreviewRoute || addingStopDuringNav || placingAlert;
+  const trafficCheckInFlightRef = useRef(false);
+  const trafficSuggestionDismissedAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!route || !destinationLatLng) return;
+    const interval = setInterval(async () => {
+      if (trafficSuggestionRouteRef.current || trafficCheckInFlightRef.current) return;
+      if (otherFlowActiveRef.current) return;
+      if (Date.now() - trafficSuggestionDismissedAtRef.current < TRAFFIC_SUGGESTION_COOLDOWN_MS) return;
+      const latLng = currentLatLngRef.current;
+      if (!latLng) return;
+      const remainingMeters =
+        distanceKm(latLng.latitude, latLng.longitude, destinationLatLng.latitude, destinationLatLng.longitude) *
+        1000;
+      if (remainingMeters < MIN_REMAINING_METERS_TO_CHECK) return;
+      trafficCheckInFlightRef.current = true;
+      try {
+        const waypoint = stopLocationRef.current ?? undefined;
+        const [liveCurrent, sideStreets] = await Promise.all([
+          getDirections(latLng, destinationLatLng, { waypoint, useTraffic: true }),
+          getDirections(latLng, destinationLatLng, { waypoint, useTraffic: true, avoidHighways: true }),
+        ]);
+        if (!liveCurrent.hasTrafficDelay) return;
+        const currentSeconds = liveCurrent.durationInTrafficSeconds ?? liveCurrent.durationSeconds;
+        const altSeconds = sideStreets.durationInTrafficSeconds ?? sideStreets.durationSeconds;
+        const savedSeconds = currentSeconds - altSeconds;
+        if (savedSeconds >= MIN_SAVED_SECONDS_TO_SUGGEST) {
+          setTrafficSuggestionRoute(sideStreets);
+          setTrafficSuggestionSavedSeconds(savedSeconds);
+        }
+      } catch (err) {
+        Sentry.logger.error("map: traffic reroute check failed", { error: String(err) });
+      } finally {
+        trafficCheckInFlightRef.current = false;
+      }
+    }, TRAFFIC_CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [route, destinationLatLng]);
+
+  // Clears any stale suggestion the moment the underlying route is replaced for any other
+  // reason (a real reroute, an add-stop confirm, exiting navigation) -- a suggestion computed
+  // against the old route's remaining path would no longer mean anything once route changes.
+  useEffect(() => {
+    setTrafficSuggestionRoute(null);
+    setTrafficSuggestionSavedSeconds(0);
+  }, [route]);
+
+  const acceptTrafficSuggestion = useCallback(() => {
+    if (!trafficSuggestionRoute) return;
+    guidanceRef.current = createGuidanceState();
+    setActiveStepIndex(0);
+    setRoute(trafficSuggestionRoute);
+  }, [trafficSuggestionRoute]);
+
+  // "Cancel route 2" -- dismisses the suggestion (route 1 was never actually replaced, so
+  // there's nothing else to undo) and starts the cooldown so the same jam doesn't immediately
+  // re-suggest itself again next check.
+  const dismissTrafficSuggestion = useCallback(() => {
+    setTrafficSuggestionRoute(null);
+    setTrafficSuggestionSavedSeconds(0);
+    trafficSuggestionDismissedAtRef.current = Date.now();
   }, []);
 
   // Real removal of a mid-trip stop -- clears stopLocation and recomputes the route straight
@@ -1636,6 +1737,13 @@ export function MapScreen() {
         {stopPreviewRoute && (
           <Polyline coordinates={stopPreviewRoute.polyline} strokeWidth={7} strokeColor="#22C55E" />
         )}
+        {/* Real traffic-jam reroute suggestion -- same green-alongside-blue treatment as the
+            add-stop preview above, drawn only once a genuinely faster side-streets alternative
+            has actually been found (see the periodic check effect). Route 1 (blue, above) never
+            stops being drawn while this is up. */}
+        {trafficSuggestionRoute && !stopPreviewRoute && (
+          <Polyline coordinates={trafficSuggestionRoute.polyline} strokeWidth={7} strokeColor="#22C55E" />
+        )}
         {/* Live device-compass "flashlight" cone -- separate from the route arrow below and
             rotated by deviceHeading (magnetometer), not travel heading, so it visually shows
             which way the PHONE is physically pointing right now without ever moving the
@@ -1942,6 +2050,45 @@ export function MapScreen() {
               <Text style={styles.placementButtonSetText}>Add Stop</Text>
             </Pressable>
           </View>
+        </View>
+      )}
+
+      {/* Real traffic-jam reroute suggestion -- only ever shown once the periodic check above
+          has actually found a genuinely faster side-streets alternative during a real traffic
+          delay. Tapping the main area accepts it (switches to route 2); the separate "Cancel
+          route 2" X dismisses it and keeps route 1 -- two siblings, not a nested Pressable,
+          same pattern NavigationInstructionCard's header already uses so the two targets can
+          never accidentally trigger each other. */}
+      {route && trafficSuggestionRoute && !stopPreviewRoute && !addingStopDuringNav && !placingAlert && (
+        <View
+          style={[
+            styles.trafficSuggestionBanner,
+            { top: insets.top + spacing.md + instructionCardHeight + spacing.md },
+          ]}
+        >
+          <Pressable
+            style={({ pressed }) => [styles.trafficSuggestionTapArea, pressed && { opacity: pressedOpacity }]}
+            onPress={acceptTrafficSuggestion}
+            accessibilityLabel={`Faster route via side streets, save about ${Math.max(1, Math.round(trafficSuggestionSavedSeconds / 60))} minutes. Tap to switch.`}
+          >
+            <View style={styles.trafficSuggestionIconWrap}>
+              <Ionicons name="flash" size={18} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.trafficSuggestionTitle}>Heavy traffic ahead</Text>
+              <Text style={styles.trafficSuggestionBody}>
+                Faster via side streets -- save {Math.max(1, Math.round(trafficSuggestionSavedSeconds / 60))} min
+              </Text>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={dismissTrafficSuggestion}
+            hitSlop={10}
+            style={({ pressed }) => [styles.trafficSuggestionClose, pressed && { opacity: pressedOpacity }]}
+            accessibilityLabel="Cancel route 2 -- keep current route"
+          >
+            <Ionicons name="close" size={18} color={colors.text} />
+          </Pressable>
         </View>
       )}
 
@@ -2526,6 +2673,52 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     ...shadow.medium,
+  },
+  trafficSuggestionBanner: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.sm + 2,
+    gap: spacing.sm,
+    ...shadow.high,
+  },
+  trafficSuggestionTapArea: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  trafficSuggestionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: colors.warning,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trafficSuggestionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  trafficSuggestionBody: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  trafficSuggestionClose: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
   },
   reroutingBadgeText: {
     color: "#FFFFFF",
