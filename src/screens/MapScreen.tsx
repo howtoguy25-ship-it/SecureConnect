@@ -296,15 +296,16 @@ export function MapScreen() {
   // itself. Unlike the X/Recenter pair (which fully drops out of following on manual pan or
   // tap), both states here keep the camera actively tracking live position/heading -- this is
   // the small circle toggle button's own state, not an "exit follow" action.
-  // Defaults true -- "the natural set view for starting navigation" is the pulled-back
-  // overview, not the tight chase-cam; the tight pose is now the opt-in ("original") one,
-  // reached via the locate button's double-tap (see onLocateButtonPress below).
-  const [overviewMode, setOverviewMode] = useState(true);
+  // Defaults false -- explicit request: navigation should start already in the tight, tilted
+  // "front view" (pitch 60/zoom 18, matching a driver's-eye chase-cam), not the pulled-back
+  // overview, and never require a manual adjustment to get there. The pulled-back pose is now
+  // the opt-in one, reached via the locate button (see onLocateButtonPress below).
+  const [overviewMode, setOverviewMode] = useState(false);
   useEffect(() => {
     // Exiting follow entirely (manual pan, or the X button) always resets this back to the
-    // default overview pose for next time -- resuming follow (Recenter) shouldn't silently
-    // land back in the tight view from a previous session.
-    if (!followTilt) setOverviewMode(true);
+    // default front-view pose for next time -- resuming follow (Recenter) shouldn't silently
+    // land back in the pulled-back overview from a previous session.
+    if (!followTilt) setOverviewMode(false);
   }, [followTilt]);
 
   const currentLatLng = useMemo(
@@ -531,10 +532,10 @@ export function MapScreen() {
     // case, not the "user tapped the line" one.
     if (Date.now() - navStartedAtRef.current < 1200) return;
     chaseCamAppliedRef.current = true;
-    // overviewMode defaults true -- see its own comment -- so a fresh nav session lands on the
-    // pulled-back pose by default; the tight pose only applies here if the driver had already
-    // switched to it (double-tapping the locate button) before this fires, e.g. resuming follow
-    // after a manual pan while already in the tight view.
+    // overviewMode defaults false -- see its own comment -- so a fresh nav session lands on the
+    // tight, tilted front-view pose by default; the pulled-back pose only applies here if the
+    // driver had already switched to it (tapping the locate button while already following)
+    // before this fires, e.g. resuming follow after a manual pan while already pulled back.
     mapRef.current?.animateCamera(
       overviewMode
         ? { center: currentLatLng, heading, pitch: 45, zoom: 15 }
@@ -598,8 +599,8 @@ export function MapScreen() {
   }, [currentLatLng, heading]);
 
   // The actual camera-height swap between the pulled-back "overview" pose and the tight
-  // "original" pose -- used by the locate button's double-tap handler below. Reuses the exact
-  // same two poses the default-apply effect above and enterOverviewMode (tapping the route
+  // "front view" pose -- used by the locate button below. Reuses the exact same two poses the
+  // default-apply effect above and enterOverviewMode (tapping the route
   // line) already use, so every path into either height lands on the same camera position.
   const applyOverviewPose = useCallback(
     (nextOverview: boolean) => {
@@ -616,35 +617,19 @@ export function MapScreen() {
     [currentLatLng, heading]
   );
 
-  // Double tap on the locate/recenter button switches camera HEIGHT (overview <-> the
-  // "original" tight pose); a single tap just recenters, matching the explicit ask: "if
-  // clicked twice it goes to original height map view and if clicked again once it re
-  // centers". RN's Pressable has no built-in double-tap, so this is a real wait-and-see: a 2nd
-  // press within RECENTER_DOUBLE_TAP_MS cancels the pending single-tap recenter and does the
-  // height swap instead. The height swap also resumes follow first if a manual pan had dropped
-  // out of it -- double-tapping the location button clearly means "put me back AND change the
-  // view", not "do nothing because I'd panned away a moment ago".
-  const RECENTER_DOUBLE_TAP_MS = 280;
-  const recenterTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (recenterTapTimerRef.current) clearTimeout(recenterTapTimerRef.current);
-    };
-  }, []);
+  // The locate/recenter button, per explicit request: while already following (the common
+  // case once navigation has started -- default is now the tight front view), each press
+  // toggles camera height, front <-> normal, back and forth, indefinitely. If the camera has
+  // instead drifted from a manual pan (not following), a press brings it back first rather
+  // than silently changing height while the driver is looking at a panned-away part of the
+  // map -- matches onRecenter's own existing behavior for that case (and for the plain
+  // browse-the-map, not-navigating case too).
   const onLocateButtonPress = useCallback(() => {
-    if (recenterTapTimerRef.current) {
-      clearTimeout(recenterTapTimerRef.current);
-      recenterTapTimerRef.current = null;
-      if (route) {
-        if (!followTilt) setFollowTilt(true);
-        applyOverviewPose(!overviewMode);
-      }
+    if (route && followTilt) {
+      applyOverviewPose(!overviewMode);
       return;
     }
-    recenterTapTimerRef.current = setTimeout(() => {
-      recenterTapTimerRef.current = null;
-      onRecenter();
-    }, RECENTER_DOUBLE_TAP_MS);
+    onRecenter();
   }, [route, followTilt, overviewMode, applyOverviewPose, onRecenter]);
 
   // Apple/Google Maps' own convention: a manual pan/tilt/rotate gesture drops the camera out of
@@ -1776,10 +1761,20 @@ export function MapScreen() {
             with heading instead of always facing the camera, so it turns a full live 360° with
             every heading update exactly the same way the CSS triangle it replaces did. The
             source image's neutral pose has its nose pointing straight up (see
-            assets/markers/car-puck.png), the same "must be upright at rotation 0" requirement
-            that triangle needed -- confirmed by eye when the asset was cropped, not assumed. */}
+            assets/markers/car-puck.png; verified with a real pixel-level principal-axis check
+            on the cropped asset, not just eyeballing a thumbnail -- the body's major axis comes
+            out within a fraction of a degree of vertical).
+            tracksViewChanges is true here (unlike this app's other static markers) for a real,
+            documented reason: react-native-maps has several open iOS issues where flat+rotation
+            on a custom Image/View marker child stops reflecting live rotation updates once
+            tracksViewChanges is false -- the native layer keeps the first snapshot's rotation
+            state instead of applying new ones. That's plausibly why this read as "not facing
+            the direction of travel" once it became a detailed car shape (a plain triangle's
+            staleness reads as much less obviously wrong than a car silhouette's does). This is
+            the one marker in this app that actually needs to keep re-tracking -- the perf cost
+            is one small marker, not a list. */}
         {route && currentLatLng && (
-          <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} tracksViewChanges={false}>
+          <Marker coordinate={currentLatLng} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} tracksViewChanges>
             <Image source={CAR_PUCK} style={styles.carPuckImage} resizeMode="contain" />
           </Marker>
         )}
@@ -2175,8 +2170,8 @@ export function MapScreen() {
             has dropped out of following. Deliberately understated (icon-only, no bright fill/
             label) per explicit request: a driving app's screen shouldn't have a big, bright
             button competing for attention; this only needs to be noticeable enough to find,
-            not loud. Camera-height switching (overview <-> original) now lives on the
-            always-present locate FAB's double-tap instead of a separate button here. */}
+            not loud. Camera-height switching (front view <-> overview) lives on the always-
+            present locate FAB instead of a separate button here. */}
         {route && !followTilt && (
           <Pressable
             style={({ pressed }) => [styles.recenterPill, pressed && { opacity: pressedOpacity }]}
@@ -2315,7 +2310,7 @@ export function MapScreen() {
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={onLocateButtonPress}
-        accessibilityLabel="Recenter on my location. Double tap to switch camera height."
+        accessibilityLabel="Recenter on my location, or switch camera height if already centered."
       >
         <Ionicons name="locate" size={route ? 17 : 22} color="#FFFFFF" />
       </Pressable>
