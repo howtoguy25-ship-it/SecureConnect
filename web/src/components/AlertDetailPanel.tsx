@@ -65,6 +65,10 @@ export function AlertDetailPanel({
         </div>
 
         <div className="detail-body">
+          {/* The reporter's own optional "up to 7 words" comment (see utils/commentFilter.ts) --
+              shown in full here, mirroring the mobile app's own detail sheet. */}
+          {alert.comment && <div className="detail-comment">"{alert.comment}"</div>}
+
           <button className="confirm-button" onClick={() => onConfirmStillHere(alert)}>
             Still here
           </button>

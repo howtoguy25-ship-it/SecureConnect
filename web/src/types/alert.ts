@@ -14,6 +14,10 @@ export interface AlertDoc {
   // services/alerts.ts's HIDE_DURATION_MS). Shared schema with the mobile app (same Firestore
   // collection/rules) -- was a plain uid[] (permanent hide) before this.
   hiddenBy: Record<string, number>;
+  // Optional, up to 7 words -- see utils/commentFilter.ts for the word cap and the profanity
+  // check both this client and reportAlert itself enforce before it's ever written. Mirrors
+  // mobile's same field on the same shared alerts collection.
+  comment?: string;
 }
 
 // Speed cameras and traffic lights are community-reported like everything else here —

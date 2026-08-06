@@ -6,6 +6,7 @@ import {
   Autocomplete,
   DirectionsRenderer,
   Circle,
+  OverlayView,
 } from "@react-google-maps/api";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth, ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
@@ -50,6 +51,7 @@ const LiveVehicleDetection = lazy(() =>
   import("@/components/LiveVehicleDetection").then((m) => ({ default: m.LiveVehicleDetection }))
 );
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
+import { containsBlockedLanguage, clampToWordLimit } from "@/utils/commentFilter";
 import { bearingDegrees, distanceKm, distanceToPolylineMeters } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE, MAP_THEME_STYLES } from "@/utils/mapStyles";
@@ -1412,25 +1414,50 @@ export default function App() {
     (type: AlertType) => {
       setPendingType(type);
       setPendingLocation(location ?? mapRef.current?.getCenter()?.toJSON() ?? DEFAULT_CENTER);
+      setPendingComment("");
       setReportOpen(false);
     },
     [location]
   );
 
-  const confirmPlacement = useCallback(async () => {
-    if (!pendingType || !pendingLocation) return;
-    if (!user) {
-      alert("Not signed in yet — check the banner at the top of the page.");
-      return;
-    }
-    await reportAlert(pendingType, pendingLocation, user.uid);
-    setPendingType(null);
-    setPendingLocation(null);
-  }, [pendingType, pendingLocation, user]);
+  // Optional "up to 7 words" comment, mirroring the mobile app -- clamped live to the word cap
+  // on every keystroke (see commentFilter.ts) so it's never possible to type past it.
+  const [pendingComment, setPendingComment] = useState("");
+  const onChangePendingComment = useCallback((text: string) => {
+    setPendingComment(clampToWordLimit(text));
+  }, []);
+  const pendingCommentBlocked = containsBlockedLanguage(pendingComment);
+
+  // Optional `overrideLocation` -- the "Set at my location" button passes the driver's own real
+  // live geolocation directly, skipping whatever the pin is currently at, so it reports at the
+  // real current position in one click instead of requiring the pin to already be dragged/
+  // tapped there. The normal drag/tap-to-place flow (Confirm location) is unchanged.
+  const confirmPlacement = useCallback(
+    async (overrideLocation?: google.maps.LatLngLiteral) => {
+      if (pendingCommentBlocked) return;
+      const targetLocation = overrideLocation ?? pendingLocation;
+      if (!pendingType || !targetLocation) return;
+      if (!user) {
+        alert("Not signed in yet — check the banner at the top of the page.");
+        return;
+      }
+      await reportAlert(pendingType, targetLocation, user.uid, pendingComment);
+      setPendingType(null);
+      setPendingLocation(null);
+      setPendingComment("");
+    },
+    [pendingType, pendingLocation, user, pendingComment, pendingCommentBlocked]
+  );
+
+  const confirmPlacementAtMyLocation = useCallback(() => {
+    if (!location) return;
+    confirmPlacement(location);
+  }, [location, confirmPlacement]);
 
   const cancelPlacement = useCallback(() => {
     setPendingType(null);
     setPendingLocation(null);
+    setPendingComment("");
   }, []);
 
   const onDeleteAlert = useCallback(async (alert: AlertDoc) => {
@@ -1572,6 +1599,14 @@ export default function App() {
   // behind/around the panel.
   const chromeHidden =
     pendingType !== null || navigating || aboutOpen || phoneAuthOpen || adminOpen || reportOpen || detectionOpen;
+
+  // Real satellite selection, available while placing an alert -- previously the satellite FAB
+  // lived inside the chromeHidden-gated cluster below, so it (and everything else in that
+  // cluster) went away the instant pendingType became non-null, leaving no way to switch to
+  // satellite imagery to place a pin accurately against real ground features. Same fix as
+  // mobile's own MapScreen. Every other chromeHidden reason (navigating, an actual full-panel
+  // overlay open) still hides it -- only alert placement is the exception.
+  const satelliteToggleVisible = !navigating && !aboutOpen && !phoneAuthOpen && !adminOpen && !reportOpen && !detectionOpen;
 
   const statusMessage = authError ?? locationError ?? null;
   const navSteps = directions?.routes[0]?.legs[0]?.steps ?? [];
@@ -1735,6 +1770,45 @@ export default function App() {
               onClick={() => setSelectedAlert(alert)}
             />
           ))}
+
+        {/* Comment caption -- mirrors the mobile app: shown only while this exact alert is the
+            one currently selected (its detail panel open), hiding once closed and reappearing
+            if reselected, per explicit request. OverlayView (unlike react-native-maps' Marker)
+            positions from real map pixel projection, so no anchor-fraction math is needed here
+            the way mobile's fixed pin height required -- getPixelPositionOffset just nudges it
+            below the marker's own circle each render. */}
+        {!(navigating && hideAlertsWhileNavigating) &&
+          alerts.map(
+            (alert) =>
+              alert.comment &&
+              selectedAlert?.id === alert.id && (
+                <OverlayView
+                  key={`${alert.id}-comment`}
+                  position={{ lat: alert.lat, lng: alert.lng }}
+                  mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+                  getPixelPositionOffset={(width) => ({ x: -(width / 2), y: 14 })}
+                >
+                  <div
+                    style={{
+                      maxWidth: 160,
+                      padding: "3px 8px",
+                      borderRadius: 8,
+                      // Semi-transparent -- not fully opaque, not so see-through it's hard to
+                      // read against a busy map background -- per explicit request, same style
+                      // as the mobile app's own caption.
+                      background: "rgba(17, 24, 39, 0.72)",
+                      color: "#fff",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textAlign: "center",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {alert.comment}
+                  </div>
+                </OverlayView>
+              )
+          )}
 
         {/* Real OpenStreetMap data -- see osmTrafficData.ts for what "real" means here
             (community-mapped, not an official feed). Green traffic-light glyph = signal,
@@ -2049,7 +2123,21 @@ export default function App() {
       )}
 
       {pendingType && pendingLocation && (
-        <PlacementBar type={pendingType} onConfirm={confirmPlacement} onCancel={cancelPlacement} />
+        <PlacementBar
+          type={pendingType}
+          comment={pendingComment}
+          onCommentChange={onChangePendingComment}
+          commentBlocked={pendingCommentBlocked}
+          // Explicitly wrapped (not onConfirm={confirmPlacement} directly) -- confirmPlacement
+          // takes an optional overrideLocation, and a plain DOM button's onClick always calls
+          // its handler with the native MouseEvent as the first argument; passed straight
+          // through, that event object would get used AS the override location instead of
+          // falling back to pendingLocation. Same fix already applied to mobile's own Set button.
+          onConfirm={() => confirmPlacement()}
+          onCancel={cancelPlacement}
+          onConfirmAtMyLocation={confirmPlacementAtMyLocation}
+          canUseMyLocation={!!location}
+        />
       )}
 
       {addingStop && (
@@ -2122,15 +2210,6 @@ export default function App() {
           </button>
 
           <button
-            className={`fab fab-quinary${mapTypeId === "hybrid" ? " fab-toggle-active" : ""}`}
-            onClick={() => setMapTypeId((v) => (v === "hybrid" ? "roadmap" : "hybrid"))}
-            aria-label={mapTypeId === "hybrid" ? "Switch to standard map" : "Switch to satellite view"}
-            title={mapTypeId === "hybrid" ? "Standard map" : "Satellite view"}
-          >
-            🛰️
-          </button>
-
-          <button
             className={`fab fab-senary${settings.showLiveCameras ? " fab-toggle-active" : ""}`}
             onClick={() => {
               const next = !settings.showLiveCameras;
@@ -2143,6 +2222,17 @@ export default function App() {
             📹
           </button>
         </>
+      )}
+
+      {satelliteToggleVisible && (
+        <button
+          className={`fab fab-quinary${mapTypeId === "hybrid" ? " fab-toggle-active" : ""}`}
+          onClick={() => setMapTypeId((v) => (v === "hybrid" ? "roadmap" : "hybrid"))}
+          aria-label={mapTypeId === "hybrid" ? "Switch to standard map" : "Switch to satellite view"}
+          title={mapTypeId === "hybrid" ? "Standard map" : "Satellite view"}
+        >
+          🛰️
+        </button>
       )}
 
       {street3DMode && (
