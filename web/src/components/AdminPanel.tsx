@@ -9,6 +9,10 @@ interface UserRow {
   email: string | null;
   phoneNumber: string | null;
   provider: string | null;
+  // Only ever set by the mobile app's own upsertSignedInProfile (src/services/userProfile.ts) --
+  // web never writes this field, so a missing value here means "web" (the original, only
+  // platform before mobile also started writing to this same collection).
+  platform: string | null;
   firstSignInAt: string;
   lastSignInAt: string;
   lastLat: number | null;
@@ -46,6 +50,7 @@ export function AdminPanel({ onClose }: Props) {
                 email: data.email ?? null,
                 phoneNumber: data.phoneNumber ?? null,
                 provider: data.provider ?? null,
+                platform: data.platform ?? null,
                 firstSignInAt: formatTimestamp(data.firstSignInAt),
                 lastSignInAt: formatTimestamp(data.lastSignInAt),
                 lastLat: typeof data.lastLat === "number" ? data.lastLat : null,
@@ -89,6 +94,7 @@ export function AdminPanel({ onClose }: Props) {
                 <th>Name</th>
                 <th>Email / Phone</th>
                 <th>Provider</th>
+                <th>Platform</th>
                 <th>First sign-in</th>
                 <th>Last sign-in</th>
                 <th>Last known location</th>
@@ -100,6 +106,7 @@ export function AdminPanel({ onClose }: Props) {
                   <td>{row.displayName ?? "—"}</td>
                   <td>{row.email ?? row.phoneNumber ?? "—"}</td>
                   <td>{row.provider?.replace(".com", "")}</td>
+                  <td>{row.platform ?? "web"}</td>
                   <td>{row.firstSignInAt}</td>
                   <td>{row.lastSignInAt}</td>
                   <td>

@@ -22,6 +22,14 @@ import {
   type User,
 } from "@firebase/auth";
 import { getFirestore } from "firebase/firestore";
+// From "@firebase/functions" (not the "firebase/functions" wrapper) -- this repo's OWN Cloud
+// Functions source lives at ./firebase/functions (see firebase.json), which collides with that
+// wrapper subpath under this project's own baseUrl-relative module resolution (tsconfig.json
+// sets baseUrl to the repo root for the "@/*" alias): `firebase/functions` resolves to our own
+// ./firebase/functions/index.js instead of the npm package, since TS tries baseUrl-relative
+// paths before node_modules. Confirmed via --traceResolution. Same class of fix (and the same
+// reasoning) as the "@firebase/auth" import above, just a different, unrelated cause.
+import { getFunctions } from "@firebase/functions";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { env } from "@/config/env";
 
@@ -60,6 +68,10 @@ export const auth = DIAGNOSTIC_DISABLE_ASYNC_STORAGE_PERSISTENCE
     });
 
 export const db = getFirestore(firebaseApp);
+// Backs runRevCheck (see src/services/revCheck.ts) -- the real PPSR provider key lives only in
+// firebase/functions/index.js's own Admin SDK read, never shipped to or reachable from this
+// client at all.
+export const functions = getFunctions(firebaseApp);
 
 /**
  * Alerts are attributed to a uid but the app has no account/login screen in v1,

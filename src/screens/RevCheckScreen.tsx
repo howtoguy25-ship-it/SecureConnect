@@ -5,9 +5,8 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useIAP, ErrorCode, type Purchase } from "react-native-iap";
-import { useSettings } from "@/context/SettingsContext";
 import { recordManualCheck, recordRevCheckResult, getVehicleHistory } from "@/services/vehicleHistory";
-import { runRevCheck, isRevCheckProviderConfigured, type RevCheckResult } from "@/services/revCheck";
+import { runRevCheck, subscribeRevCheckProviderStatus, type RevCheckResult } from "@/services/revCheck";
 import { AU_STATES, DEFAULT_AU_STATE } from "@/utils/auStates";
 import { REV_CHECK_PRODUCT_ID, REV_CHECK_FALLBACK_PRICE_LABEL } from "@/services/iap";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
@@ -44,7 +43,6 @@ export function RevCheckScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RevCheck">>();
   const params = route.params;
-  const { settings } = useSettings();
 
   const [plate, setPlate] = useState(params?.plate ?? "");
   const [vin, setVin] = useState(params?.vin ?? "");
@@ -57,7 +55,12 @@ export function RevCheckScreen() {
   // show an honest "last checked X ago" instead of implying a stale result just happened live.
   const [cachedResultAt, setCachedResultAt] = useState<number | null>(null);
 
-  const providerConfigured = isRevCheckProviderConfigured(settings);
+  // Live from Firestore now (config/revCheckStatus), not a local device setting -- see
+  // revCheck.ts's own header for why. Starts false (the same honest "assume not connected"
+  // default the old synchronous local-settings check always had) until the first real snapshot
+  // lands.
+  const [providerConfigured, setProviderConfigured] = useState(false);
+  useEffect(() => subscribeRevCheckProviderStatus(setProviderConfigured), []);
 
   // Holds a purchase that has been PAID for but not yet delivered a successful check result --
   // see the header comment above. A ref (not just state) because it's read from inside the
@@ -78,7 +81,7 @@ export function RevCheckScreen() {
       setCachedResultAt(null);
       try {
         await recordManualCheck(trimmedPlate, state, trimmedVin);
-        const outcome = await runRevCheck(trimmedVin, settings);
+        const outcome = await runRevCheck(trimmedVin);
         setResult(outcome);
         if (outcome.outcome === "success") {
           await recordRevCheckResult(trimmedPlate, trimmedVin, {
@@ -102,7 +105,7 @@ export function RevCheckScreen() {
         setChecking(false);
       }
     },
-    [plate, vin, state, settings]
+    [plate, vin, state]
   );
 
   const { connected, products, fetchProducts, requestPurchase, finishTransaction } = useIAP({

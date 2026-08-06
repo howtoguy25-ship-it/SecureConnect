@@ -46,13 +46,6 @@ export interface AppSettings {
   // traffic light, 24h for camera), matching behavior before this setting existed. Set in
   // milliseconds so services/alerts.ts's reportAlert can use it directly without reconverting.
   alertExpiryMs: number | null;
-  // Real REV-check provider credentials the driver enters themselves in Settings once they've
-  // signed up with a broker -- see RevCheckScreen/revCheck.ts. PPSR (stolen/written-off/money-
-  // owing) and NEVDIS (registration + odometer history) are separate Australian data sources
-  // with separate accredited-broker access, so separate keys. Empty string means "not connected
-  // yet", never a fabricated/placeholder key.
-  revCheckPpsrApiKey: string;
-  revCheckNevdisApiKey: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -68,8 +61,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mapTheme: "normal",
   navCardTheme: "dark",
   alertExpiryMs: null,
-  revCheckPpsrApiKey: "",
-  revCheckNevdisApiKey: "",
 };
 
 const STORAGE_KEY = "@trackline/settings";

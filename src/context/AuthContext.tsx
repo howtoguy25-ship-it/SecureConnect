@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth, ensureSignedIn } from "@/services/firebase";
+import { upsertSignedInProfile } from "@/services/userProfile";
 
 interface AuthContextValue {
   user: User | null;
@@ -35,6 +36,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     return unsubscribe;
   }, []);
+
+  // Real "saved immediately" per explicit request -- the instant any Google/Apple/Email sign-in
+  // actually lands (this fires the moment the listener above sees the new user), the account's
+  // name/email/provider gets written to Firestore, same collection/schema web's own
+  // upsertSignedInProfile already uses, so it shows up in the same owner-only admin sign-in
+  // panel. A no-op for the app's default anonymous session (upsertSignedInProfile checks
+  // isAnonymous itself), so this doesn't fire on every ordinary launch, only a real sign-in.
+  useEffect(() => {
+    if (user && !user.isAnonymous) {
+      upsertSignedInProfile(user).catch((err) => console.warn("[auth] profile sync failed", err));
+    }
+  }, [user]);
 
   // Same reasoning as SettingsContext's own fix -- a fresh object literal every render meant
   // every consumer re-rendered on any AuthProvider render, not just the ones that actually

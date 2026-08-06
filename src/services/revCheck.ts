@@ -1,20 +1,17 @@
-import type { AppSettings } from "@/services/settings";
+import { doc, onSnapshot, type Unsubscribe } from "firebase/firestore";
+// See firebase.ts's own comment on its "@firebase/functions" import for why this isn't the
+// plain "firebase/functions" wrapper -- same repo-relative path collision either way.
+import { httpsCallable } from "@firebase/functions";
+import { db, functions } from "@/services/firebase";
 
-// Real vehicle-history check via BusinessAPI.com.au's PPSR Searches API -- confirmed against
-// their actual published docs (businessapi.com.au/developers/api/ppsr-searches and
-// .../developers/authentication), not guessed. Two things worth knowing about how this really
-// works, both verified from those docs rather than assumed:
-//  1. The search key is a VIN (or a PPSR registration number, a separate finance-record ID),
-//     NEVER a number plate -- a plate isn't a stable enough identifier for PPSR's own purpose
-//     (it changes on re-registration/interstate moves; the VIN never does). NEVDIS vehicle data
-//     (make/model/year/stolen/written-off/safety recalls) only comes back on a VIN search.
-//  2. A search is async: POST creates it (returns a requestId, status "new"), then a GET on
-//     that same path + /{requestId} is polled until status is "completed" or "failed".
-const PPSR_BASE_URL = "https://businessapi.com.au/api/v2/ppsr/searches";
-const POLL_INTERVAL_MS = 2000;
-// BAPI's own docs: "Most searches complete within a few seconds" -- this is a generous ceiling
-// (~30s), not an expected wait, so a real completion is never cut off early.
-const MAX_POLL_ATTEMPTS = 15;
+// Real vehicle-history check via BusinessAPI.com.au's PPSR Searches API. The actual HTTP
+// create-then-poll flow now runs server-side (firebase/functions/index.js's runRevCheck) --
+// the owner's real, paid provider API key lives only in Firestore's config/revCheckProvider
+// doc, readable there only by the Admin SDK and by the owner's own signed-in client (see
+// firestore.rules), never by this client for a real paying user. This file is now just the
+// thin, honest client-side wrapper: ask the function to run the check, and separately watch
+// the public config/revCheckStatus.enabled flag (see subscribeRevCheckProviderStatus) so the
+// UI can keep showing an honest "not connected" without ever needing the real key itself.
 
 export interface RevCheckVehicle {
   vin: string;
@@ -38,101 +35,31 @@ export interface RevCheckResult {
   certificateUrl?: string | null;
 }
 
-export function isRevCheckProviderConfigured(settings: AppSettings): boolean {
-  return !!settings.revCheckPpsrApiKey.trim();
+// Live, so a driver already on this screen sees the moment the owner connects (or disconnects)
+// a real provider without needing to reopen the app -- onChange fires false on any read error
+// too, the same honest "assume not connected" default the old local-settings check always had.
+export function subscribeRevCheckProviderStatus(onChange: (enabled: boolean) => void): Unsubscribe {
+  return onSnapshot(
+    doc(db, "config", "revCheckStatus"),
+    (snap) => onChange(snap.exists() && snap.data()?.enabled === true),
+    () => onChange(false)
+  );
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const runRevCheckCallable = httpsCallable<{ vin: string }, RevCheckResult>(functions, "runRevCheck");
 
-export async function runRevCheck(vin: string, settings: AppSettings): Promise<RevCheckResult> {
-  const apiKey = settings.revCheckPpsrApiKey.trim();
-  if (!apiKey) {
-    return {
-      outcome: "not_connected",
-      message:
-        "No REV check provider connected yet. Add your PPSR provider API key in Settings → " +
-        "Vehicle REV Checks to enable real checks.",
-    };
-  }
-
+export async function runRevCheck(vin: string): Promise<RevCheckResult> {
   const trimmedVin = vin.trim().toUpperCase();
   if (!trimmedVin) {
     return { outcome: "error", message: "Enter a VIN to run a real check -- PPSR searches by VIN, not plate." };
   }
-
-  // Bearer auth, both key types -- confirmed from businessapi.com.au/developers/authentication.
-  const headers = {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-  };
-
   try {
-    const createResp = await fetch(PPSR_BASE_URL, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ vin: trimmedVin }),
-    });
-    if (!createResp.ok) {
-      const body = await createResp.text().catch(() => "");
-      return {
-        outcome: "error",
-        message: `PPSR provider rejected the request (HTTP ${createResp.status}).${body ? ` ${body.slice(0, 200)}` : ""}`,
-      };
-    }
-    const created = await createResp.json();
-    const requestId = created?.requestId;
-    if (requestId === undefined || requestId === null) {
-      return { outcome: "error", message: "PPSR provider didn't return a search ID -- try again." };
-    }
-
-    for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-      await sleep(POLL_INTERVAL_MS);
-      const statusResp = await fetch(`${PPSR_BASE_URL}/${requestId}`, { headers });
-      // A single bad poll (a transient network hiccup) shouldn't abort the whole check --
-      // just skip this tick and try again on the next one, up to MAX_POLL_ATTEMPTS.
-      if (!statusResp.ok) continue;
-      const statusBody = await statusResp.json();
-
-      if (statusBody?.status === "completed") {
-        const data = statusBody.data ?? {};
-        const vehicleData = data.nevdisData?.vehicles?.[0];
-        return {
-          outcome: "success",
-          message: "Check complete.",
-          vehicle: vehicleData
-            ? {
-                vin: vehicleData.vin ?? trimmedVin,
-                make: vehicleData.make ?? null,
-                model: vehicleData.model ?? null,
-                year: vehicleData.year ?? null,
-                colour: vehicleData.colour ?? null,
-                bodyType: vehicleData.bodyType ?? null,
-                registrationPlate: vehicleData.registrationPlate ?? null,
-                registrationExpiry: vehicleData.registrationExpiry ?? null,
-                stolen: !!vehicleData.stolen,
-                writtenOff: !!vehicleData.writtenOff,
-                safetyRecalls: vehicleData.safetyRecalls ?? null,
-              }
-            : undefined,
-          securedInterestCount: Array.isArray(data.registrations) ? data.registrations.length : 0,
-          certificateUrl: data.certificates?.[0]?.downloadUrl ?? null,
-        };
-      }
-      if (statusBody?.status === "failed") {
-        return { outcome: "error", message: "The PPSR provider couldn't complete this search -- try again." };
-      }
-      // "new" or "processing" -- keep polling.
-    }
-    return {
-      outcome: "error",
-      message: "This check is taking longer than expected -- try again in a moment.",
-    };
+    const result = await runRevCheckCallable({ vin: trimmedVin });
+    return result.data;
   } catch (err) {
     return {
       outcome: "error",
-      message: `Couldn't reach the PPSR provider: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Couldn't reach the REV check service: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

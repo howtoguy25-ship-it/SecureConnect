@@ -14,6 +14,8 @@ import { syncAlertRadiusToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
 import { signOutUser, deleteAccount } from "@/services/firebase";
 import { REV_CHECK_PRODUCT_ID } from "@/services/iap";
+import { getRevCheckProviderConfig, saveRevCheckProviderConfig } from "@/services/revCheckAdmin";
+import { isOwnerEmail } from "@/config/admin";
 import { BUSINESS_INFO } from "@/config/business";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
@@ -71,6 +73,12 @@ export function SettingsScreen() {
   // isAnonymous is the real signal for "hasn't actually signed in with an identity yet",
   // not just user being null/non-null.
   const isSignedIn = !!user && !user.isAnonymous;
+  // Gates the REV check provider-key section below -- per explicit request, that section (a
+  // real, paid business API credential) must only ever be visible to the app's owner, never any
+  // other signed-in user. This is only the UI gate; firestore.rules' own isAdmin() check is what
+  // actually stops a non-owner from reading/writing the underlying document even if they somehow
+  // got this UI to render (defense in depth, not the only line of defense).
+  const isOwner = isOwnerEmail(user?.email);
 
   // Real account deletion -- see firebase.ts's deleteAccount for exactly what this does and
   // doesn't remove. Confirmed with a real destructive-action dialog first (Alert.alert), same
@@ -248,20 +256,46 @@ export function SettingsScreen() {
     [updateSettings]
   );
 
-  // Local-only draft state for the two provider key fields -- only actually written to settings
-  // (and thus AsyncStorage) when Save is pressed, same "edit then apply" pattern as the custom
-  // alert-expiry hours/minutes fields above, not on every keystroke.
-  const [ppsrKeyDraft, setPpsrKeyDraft] = useState(settings.revCheckPpsrApiKey);
-  const [nevdisKeyDraft, setNevdisKeyDraft] = useState(settings.revCheckNevdisApiKey);
+  // Real, shared provider credentials now -- Firestore (config/revCheckProvider), not a local
+  // device setting, so the owner only ever has to paste these once and EVERY paying user's
+  // check actually works, not just the owner's own device (see revCheckAdmin.ts/revCheck.ts's
+  // own history for why local-only storage meant a real paying user's check could never
+  // succeed). Only fetched at all when isOwner -- no point reading (or trying to, since rules
+  // would reject it) a document nobody else can see.
+  const [ppsrKeyDraft, setPpsrKeyDraft] = useState("");
+  const [nevdisKeyDraft, setNevdisKeyDraft] = useState("");
+  const [keysLoaded, setKeysLoaded] = useState(false);
   const [keysSavedFlash, setKeysSavedFlash] = useState(false);
-  const onSaveRevCheckKeys = useCallback(() => {
-    updateSettings({
-      revCheckPpsrApiKey: ppsrKeyDraft.trim(),
-      revCheckNevdisApiKey: nevdisKeyDraft.trim(),
-    });
-    setKeysSavedFlash(true);
-    setTimeout(() => setKeysSavedFlash(false), 2000);
-  }, [ppsrKeyDraft, nevdisKeyDraft, updateSettings]);
+  const [savingKeys, setSavingKeys] = useState(false);
+  useEffect(() => {
+    if (!isOwner) return;
+    let cancelled = false;
+    getRevCheckProviderConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setPpsrKeyDraft(config.ppsrApiKey);
+        setNevdisKeyDraft(config.nevdisApiKey);
+      })
+      .catch((err) => console.warn("[settings] failed to load REV check provider config", err))
+      .finally(() => {
+        if (!cancelled) setKeysLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner]);
+  const onSaveRevCheckKeys = useCallback(async () => {
+    setSavingKeys(true);
+    try {
+      await saveRevCheckProviderConfig({ ppsrApiKey: ppsrKeyDraft, nevdisApiKey: nevdisKeyDraft });
+      setKeysSavedFlash(true);
+      setTimeout(() => setKeysSavedFlash(false), 2000);
+    } catch (err) {
+      Alert.alert("Couldn't save", err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setSavingKeys(false);
+    }
+  }, [ppsrKeyDraft, nevdisKeyDraft]);
 
   // Real, live battery reading (not a static disclaimer) -- AI Vehicle Detection runs a real
   // camera + on-device AI analysis several times a second, which is genuinely one of the
@@ -589,39 +623,64 @@ export function SettingsScreen() {
           <MaterialCommunityIcons name="chevron-right" size={18} color={colors.textMuted} />
         </Pressable>
 
-        <Text style={styles.rowLabel}>Provider keys</Text>
-        <Text style={styles.helperText}>
-          Real vehicle history isn't free -- PPSR (stolen/written-off/money-owing) and NEVDIS
-          (registration + odometer history) both require your own signed-up broker account.
-          Paste your keys below once you have them; checks stay clearly marked "not connected"
-          until then -- nothing here is ever fabricated.
-        </Text>
-        <TextInput
-          value={ppsrKeyDraft}
-          onChangeText={setPpsrKeyDraft}
-          placeholder="PPSR provider API key"
-          placeholderTextColor={colors.textFaint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          style={styles.customExpiryInput}
-        />
-        <TextInput
-          value={nevdisKeyDraft}
-          onChangeText={setNevdisKeyDraft}
-          placeholder="NEVDIS provider API key"
-          placeholderTextColor={colors.textFaint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          style={styles.customExpiryInput}
-        />
-        <Pressable
-          onPress={onSaveRevCheckKeys}
-          style={({ pressed }) => [styles.customExpiryApply, { alignItems: "center" }, pressed && { opacity: pressedOpacity }]}
-        >
-          <Text style={styles.customExpiryApplyText}>{keysSavedFlash ? "Saved" : "Save keys"}</Text>
-        </Pressable>
+        {/* Owner-only, per explicit request -- a real, paid business API credential, not
+            something any other signed-in user should ever be able to see or edit. Stored in
+            Firestore now (config/revCheckProvider), shared across every user's own real check
+            instead of a per-device local setting -- see revCheckAdmin.ts's own header. */}
+        {isOwner && (
+          <>
+            <Text style={styles.rowLabel}>Provider keys (owner only)</Text>
+            <Text style={styles.helperText}>
+              Real vehicle history isn't free -- PPSR (stolen/written-off/money-owing) and NEVDIS
+              (registration + odometer history) both require your own signed-up broker account.
+              Paste your keys below once you have them; every user's check stays clearly marked
+              "not connected" until then -- nothing here is ever fabricated. Saved to Firestore,
+              never bundled into the app itself, and only ever readable by your own signed-in
+              account or the server-side check function -- no other user's device can read it.
+            </Text>
+            {!keysLoaded ? (
+              <ActivityIndicator size="small" color={colors.textMuted} />
+            ) : (
+              <>
+                <TextInput
+                  value={ppsrKeyDraft}
+                  onChangeText={setPpsrKeyDraft}
+                  placeholder="PPSR provider API key"
+                  placeholderTextColor={colors.textFaint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                  style={styles.customExpiryInput}
+                />
+                <TextInput
+                  value={nevdisKeyDraft}
+                  onChangeText={setNevdisKeyDraft}
+                  placeholder="NEVDIS provider API key"
+                  placeholderTextColor={colors.textFaint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                  style={styles.customExpiryInput}
+                />
+                <Pressable
+                  onPress={onSaveRevCheckKeys}
+                  disabled={savingKeys}
+                  style={({ pressed }) => [
+                    styles.customExpiryApply,
+                    { alignItems: "center" },
+                    pressed && !savingKeys && { opacity: pressedOpacity },
+                  ]}
+                >
+                  {savingKeys ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.customExpiryApplyText}>{keysSavedFlash ? "Saved" : "Save keys"}</Text>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </>
+        )}
       </Section>
 
       <Modal

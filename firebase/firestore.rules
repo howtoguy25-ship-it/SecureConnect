@@ -100,5 +100,28 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
+
+    // Real vehicle REV check (PPSR) provider credentials -- split into two docs so the raw
+    // secret key and its own "is a real provider actually connected" status can have
+    // genuinely different read rules (Firestore rules are per-document, not per-field).
+    match /config/revCheckProvider {
+      // The raw API key itself. Admin (owner) only, both ways -- this is a real, paid business
+      // credential; no other signed-in user, anonymous or not, can ever read or write it. The
+      // actual REV check run for a paying user never touches this document from the client at
+      // all -- runRevCheck (firebase/functions/index.js) reads it server-side via the Admin
+      // SDK, which bypasses these rules entirely, so the key is never sent to any device but
+      // the owner's own while they're managing it in Settings.
+      allow read, write: if isAdmin();
+    }
+
+    match /config/revCheckStatus {
+      // Just {enabled: boolean} -- safe for every signed-in user (anonymous included, since
+      // the app is always signed in as at least that) to read, so the client can honestly show
+      // "not connected" and skip the paid purchase flow entirely when nothing's configured,
+      // without ever needing the real key to make that call. Only the owner can flip it, and
+      // only ever alongside actually saving/clearing the real key above (see SettingsScreen.tsx).
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
   }
 }
