@@ -1585,6 +1585,48 @@ export default function App() {
     }
   }, [location]);
 
+  // Memoized so the map's `options` prop keeps a stable identity across renders that don't
+  // actually change any of these values -- @react-google-maps/api re-applies map options
+  // whenever this object's reference changes, which is wasted work on every render otherwise.
+  // Declared before the `isLoaded` early return below (along with onMapLoad/onMapClick) so
+  // every hook in this component runs on every render, regardless of that guard -- hooks
+  // declared after an early return violate the Rules of Hooks (React error #310, "Rendered
+  // more hooks than during the previous render") the moment isLoaded flips from false to true.
+  const mapOptions = useMemo<google.maps.MapOptions>(
+    () => ({
+      disableDefaultUI: true,
+      zoomControl: false,
+      draggable: true,
+      gestureHandling: "greedy",
+      clickableIcons: true,
+      mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
+      styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
+        ? undefined
+        : (MAP_THEME_STYLES[settings.mapTheme] ?? (isDarkTheme ? DARK_MAP_STYLE : LIGHT_MAP_STYLE)),
+    }),
+    [isDarkTheme, settings.mapTheme]
+  );
+
+  const onMapLoad = useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+  }, []);
+
+  const onMapClick = useCallback(
+    (e: google.maps.MapMouseEvent) => {
+      const placeEvent = e as google.maps.MapMouseEvent & { placeId?: string };
+      if (pendingType && e.latLng) {
+        setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+      } else if (addingStop && e.latLng) {
+        setStopLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+        setAddingStop(false);
+      } else if (placeEvent.placeId) {
+        placeEvent.stop();
+        setSelectedPlaceId(placeEvent.placeId);
+      }
+    },
+    [pendingType, addingStop]
+  );
+
   if (!isLoaded) {
     return (
       <div className="loading-screen">
@@ -1687,44 +1729,6 @@ export default function App() {
           : mapZoomLevel >= 14
             ? 700
             : 1200;
-
-  // Memoized so the map's `options` prop keeps a stable identity across renders that don't
-  // actually change any of these values -- @react-google-maps/api re-applies map options
-  // whenever this object's reference changes, which is wasted work on every render otherwise.
-  const mapOptions = useMemo<google.maps.MapOptions>(
-    () => ({
-      disableDefaultUI: true,
-      zoomControl: false,
-      draggable: true,
-      gestureHandling: "greedy",
-      clickableIcons: true,
-      mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
-      styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
-        ? undefined
-        : (MAP_THEME_STYLES[settings.mapTheme] ?? (isDarkTheme ? DARK_MAP_STYLE : LIGHT_MAP_STYLE)),
-    }),
-    [isDarkTheme, settings.mapTheme]
-  );
-
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    mapRef.current = map;
-  }, []);
-
-  const onMapClick = useCallback(
-    (e: google.maps.MapMouseEvent) => {
-      const placeEvent = e as google.maps.MapMouseEvent & { placeId?: string };
-      if (pendingType && e.latLng) {
-        setPendingLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-      } else if (addingStop && e.latLng) {
-        setStopLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-        setAddingStop(false);
-      } else if (placeEvent.placeId) {
-        placeEvent.stop();
-        setSelectedPlaceId(placeEvent.placeId);
-      }
-    },
-    [pendingType, addingStop]
-  );
 
   return (
     <div className="app-root">
