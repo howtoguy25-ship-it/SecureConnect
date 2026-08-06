@@ -10,6 +10,7 @@ import MapView, {
 } from "react-native-maps";
 import { Map3DView, isMap3DSupported, type Map3DViewHandle } from "map3d";
 import * as Location from "expo-location";
+import { usePowerState } from "expo-battery";
 import { loadBoxedTFLiteModel } from "@/services/tfliteVehicleModel";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomSheet from "@gorhom/bottom-sheet";
@@ -233,6 +234,17 @@ export function MapScreen() {
   }, []);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
+  // Same live reading/threshold Settings' own battery notice uses (see SettingsScreen.tsx) --
+  // shown here as a small crossed-battery badge on the AI Detection entry points themselves
+  // (the FAB and the nav options row) so the warning is visible right where a driver decides to
+  // open it, not just buried in Settings. Deliberately advisory only, never disables the
+  // Pressable or blocks the tap -- the driver can still open detection under 50% if they want
+  // to. And because this only reads live here in MapScreen (not inside VehicleDetectionScreen
+  // itself), a session already open when battery crosses under 50% is completely unaffected --
+  // the badge only ever shows on the closed-screen entry points, never interrupts a session
+  // already running.
+  const { batteryLevel: detectionBatteryLevel } = usePowerState();
+  const detectionBatteryLow = detectionBatteryLevel >= 0 && detectionBatteryLevel * 100 < 50;
   // Starts loading the vehicle-detection model (the native TFLite model a Frame Processor calls
   // into -- see tfliteVehicleModel.ts) in the background the moment the map screen is up,
   // instead of only starting when the driver actually taps "AI Detection" -- the model load
@@ -2246,9 +2258,20 @@ export function MapScreen() {
           Sentry.logger.info("map: opening vehicle detection screen");
           setDetectionOpen(true);
         }}
-        accessibilityLabel="Live vehicle detection"
+        accessibilityLabel={
+          detectionBatteryLow
+            ? "Live vehicle detection -- battery below 50%, still works but may run slower"
+            : "Live vehicle detection"
+        }
       >
         <Ionicons name="videocam" size={route ? 18 : 24} color="#FFFFFF" />
+        {/* Advisory only -- see detectionBatteryLow's own comment above. Never disables this
+            Pressable, just flags it before the driver taps in. */}
+        {detectionBatteryLow && (
+          <View style={styles.fabBatteryBadge} pointerEvents="none">
+            <Ionicons name="battery-dead-outline" size={11} color="#FFFFFF" />
+          </View>
+        )}
       </Pressable>
 
       {/* Real 3D buildings toggle -- Android mounts the custom Map3DView module (Google's
@@ -2438,6 +2461,7 @@ export function MapScreen() {
         onEndNavigation={onNavOptionsEndNavigation}
         onClose={() => navOptionsSheetRef.current?.close()}
         onSheetChange={(index) => setNavOptionsSheetOpen(index >= 0)}
+        detectionBatteryLow={detectionBatteryLow}
       />
 
       {placeInfoLoading && (
@@ -2776,5 +2800,21 @@ const styles = StyleSheet.create({
   },
   fabActive: {
     backgroundColor: colors.accent,
+  },
+  // Small advisory badge on the AI Detection FAB when battery is under 50% -- see
+  // detectionBatteryLow's own comment. Purely visual, the Pressable underneath stays fully
+  // tappable either way.
+  fabBatteryBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.warning,
+    borderWidth: 1.5,
+    borderColor: colors.dark,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

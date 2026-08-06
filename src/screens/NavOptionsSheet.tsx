@@ -12,6 +12,10 @@ interface Props {
   onEndNavigation: () => void;
   onClose: () => void;
   onSheetChange?: (index: number) => void;
+  // Same live battery reading MapScreen's own AI Detection FAB badge uses -- advisory only,
+  // never disables this row. See MapScreen.tsx's detectionBatteryLow comment for the full
+  // reasoning (in particular: why this never interrupts a session already open).
+  detectionBatteryLow?: boolean;
 }
 
 // The "..." button on the new bottom trip bar (see NavBottomBar.tsx) -- everything that used
@@ -20,7 +24,7 @@ interface Props {
 // tab (ETA/road/Add Stop/options) rather than a wide row of icons competing with the turn
 // instructions for space.
 export const NavOptionsSheet = forwardRef<BottomSheet, Props>(function NavOptionsSheet(
-  { onReportAlert, onShareEta, onOpenDetection, onEndNavigation, onClose, onSheetChange },
+  { onReportAlert, onShareEta, onOpenDetection, onEndNavigation, onClose, onSheetChange, detectionBatteryLow },
   ref
 ) {
   const insets = useSafeAreaInsets();
@@ -55,6 +59,7 @@ export const NavOptionsSheet = forwardRef<BottomSheet, Props>(function NavOption
           iconBg={colors.surfaceMuted}
           iconColor={colors.text}
           label="AI Vehicle Detection"
+          subtitle={detectionBatteryLow ? "Battery below 50% -- still works, may run slower" : undefined}
           onPress={onOpenDetection}
         />
 
@@ -74,6 +79,7 @@ function OptionRow({
   iconColor,
   label,
   labelColor,
+  subtitle,
   onPress,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
@@ -81,18 +87,24 @@ function OptionRow({
   iconColor: string;
   label: string;
   labelColor?: string;
+  // Small advisory line under the label (e.g. a battery warning) -- purely informational, never
+  // changes what onPress does.
+  subtitle?: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && { opacity: pressedOpacity }]}
-      accessibilityLabel={label}
+      accessibilityLabel={subtitle ? `${label} -- ${subtitle}` : label}
     >
       <View style={[styles.rowIconWrap, { backgroundColor: iconBg }]}>
         <Ionicons name={icon} size={20} color={iconColor} />
       </View>
-      <Text style={[styles.rowLabel, labelColor ? { color: labelColor } : null]}>{label}</Text>
+      <View style={styles.rowTextWrap}>
+        <Text style={[styles.rowLabel, labelColor ? { color: labelColor } : null]}>{label}</Text>
+        {subtitle && <Text style={styles.rowSubtitle}>{subtitle}</Text>}
+      </View>
       <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
     </Pressable>
   );
@@ -144,11 +156,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  rowLabel: {
+  rowTextWrap: {
     flex: 1,
+  },
+  rowLabel: {
     fontSize: 15,
     fontWeight: "700",
     color: colors.text,
+  },
+  rowSubtitle: {
+    fontSize: 12,
+    color: colors.warning,
+    marginTop: 1,
   },
   divider: {
     height: 1,
