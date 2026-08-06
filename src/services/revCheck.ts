@@ -1,50 +1,138 @@
 import type { AppSettings } from "@/services/settings";
 
-// Real Australian vehicle-history data lives in two separate places, neither reachable for
-// free or without a signed-up broker account (researched directly, not assumed): PPSR
-// (stolen/written-off/money-owing -- ppsr.gov.au, ~$2/search direct or an accredited broker like
-// BusinessAPI.com.au), and NEVDIS (registration + odometer history -- not part of PPSR at all,
-// only reachable via a commercial broker like Motorweb/InfoAgent). This app has no such account
-// of its own and never fabricates vehicle history -- so this only ever returns a real result once
-// the driver has signed up themselves and pasted a real key into Settings, and even then, honestly
-// reports that this specific broker's request/response contract still needs to be wired in
-// (every broker's API shape is different -- there's no generic "REV check" HTTP call to make
-// without that broker's real docs in hand).
+// Real vehicle-history check via BusinessAPI.com.au's PPSR Searches API -- confirmed against
+// their actual published docs (businessapi.com.au/developers/api/ppsr-searches and
+// .../developers/authentication), not guessed. Two things worth knowing about how this really
+// works, both verified from those docs rather than assumed:
+//  1. The search key is a VIN (or a PPSR registration number, a separate finance-record ID),
+//     NEVER a number plate -- a plate isn't a stable enough identifier for PPSR's own purpose
+//     (it changes on re-registration/interstate moves; the VIN never does). NEVDIS vehicle data
+//     (make/model/year/stolen/written-off/safety recalls) only comes back on a VIN search.
+//  2. A search is async: POST creates it (returns a requestId, status "new"), then a GET on
+//     that same path + /{requestId} is polled until status is "completed" or "failed".
+const PPSR_BASE_URL = "https://businessapi.com.au/api/v2/ppsr/searches";
+const POLL_INTERVAL_MS = 2000;
+// BAPI's own docs: "Most searches complete within a few seconds" -- this is a generous ceiling
+// (~30s), not an expected wait, so a real completion is never cut off early.
+const MAX_POLL_ATTEMPTS = 15;
+
+export interface RevCheckVehicle {
+  vin: string;
+  make: string | null;
+  model: string | null;
+  year: string | null;
+  colour: string | null;
+  bodyType: string | null;
+  registrationPlate: string | null;
+  registrationExpiry: string | null;
+  stolen: boolean;
+  writtenOff: boolean;
+  safetyRecalls: unknown;
+}
+
 export interface RevCheckResult {
-  connected: boolean;
+  outcome: "not_connected" | "error" | "success";
   message: string;
+  vehicle?: RevCheckVehicle;
+  securedInterestCount?: number;
+  certificateUrl?: string | null;
 }
 
 export function isRevCheckProviderConfigured(settings: AppSettings): boolean {
-  return !!(settings.revCheckPpsrApiKey.trim() || settings.revCheckNevdisApiKey.trim());
+  return !!settings.revCheckPpsrApiKey.trim();
 }
 
-export async function runRevCheck(
-  plate: string,
-  state: string,
-  settings: AppSettings
-): Promise<RevCheckResult> {
-  const hasPpsr = !!settings.revCheckPpsrApiKey.trim();
-  const hasNevdis = !!settings.revCheckNevdisApiKey.trim();
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  if (!hasPpsr && !hasNevdis) {
+export async function runRevCheck(vin: string, settings: AppSettings): Promise<RevCheckResult> {
+  const apiKey = settings.revCheckPpsrApiKey.trim();
+  if (!apiKey) {
     return {
-      connected: false,
+      outcome: "not_connected",
       message:
-        "No REV check provider connected yet. Sign up for a PPSR broker (stolen/written-off/" +
-        "money-owing) and a NEVDIS broker (registration + odometer history), then add your API " +
-        "key in Settings → Vehicle REV Checks to enable real checks for this plate.",
+        "No REV check provider connected yet. Add your PPSR provider API key in Settings → " +
+        "Vehicle REV Checks to enable real checks.",
     };
   }
 
-  // A key is saved, but there's still no real request going out: each broker's endpoint URL,
-  // auth header shape, and response JSON are different, and none of that is known here yet.
-  // Honest about exactly what's missing, not a fabricated result dressed up as real data.
-  return {
-    connected: false,
-    message:
-      "Provider key saved, but the real request for your specific broker hasn't been wired in " +
-      "yet -- send the broker's API documentation and this will start returning real 5-year " +
-      "rego and odometer history for " + plate + " (" + state + ").",
+  const trimmedVin = vin.trim().toUpperCase();
+  if (!trimmedVin) {
+    return { outcome: "error", message: "Enter a VIN to run a real check -- PPSR searches by VIN, not plate." };
+  }
+
+  // Bearer auth, both key types -- confirmed from businessapi.com.au/developers/authentication.
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
   };
+
+  try {
+    const createResp = await fetch(PPSR_BASE_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ vin: trimmedVin }),
+    });
+    if (!createResp.ok) {
+      const body = await createResp.text().catch(() => "");
+      return {
+        outcome: "error",
+        message: `PPSR provider rejected the request (HTTP ${createResp.status}).${body ? ` ${body.slice(0, 200)}` : ""}`,
+      };
+    }
+    const created = await createResp.json();
+    const requestId = created?.requestId;
+    if (requestId === undefined || requestId === null) {
+      return { outcome: "error", message: "PPSR provider didn't return a search ID -- try again." };
+    }
+
+    for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+      await sleep(POLL_INTERVAL_MS);
+      const statusResp = await fetch(`${PPSR_BASE_URL}/${requestId}`, { headers });
+      // A single bad poll (a transient network hiccup) shouldn't abort the whole check --
+      // just skip this tick and try again on the next one, up to MAX_POLL_ATTEMPTS.
+      if (!statusResp.ok) continue;
+      const statusBody = await statusResp.json();
+
+      if (statusBody?.status === "completed") {
+        const data = statusBody.data ?? {};
+        const vehicleData = data.nevdisData?.vehicles?.[0];
+        return {
+          outcome: "success",
+          message: "Check complete.",
+          vehicle: vehicleData
+            ? {
+                vin: vehicleData.vin ?? trimmedVin,
+                make: vehicleData.make ?? null,
+                model: vehicleData.model ?? null,
+                year: vehicleData.year ?? null,
+                colour: vehicleData.colour ?? null,
+                bodyType: vehicleData.bodyType ?? null,
+                registrationPlate: vehicleData.registrationPlate ?? null,
+                registrationExpiry: vehicleData.registrationExpiry ?? null,
+                stolen: !!vehicleData.stolen,
+                writtenOff: !!vehicleData.writtenOff,
+                safetyRecalls: vehicleData.safetyRecalls ?? null,
+              }
+            : undefined,
+          securedInterestCount: Array.isArray(data.registrations) ? data.registrations.length : 0,
+          certificateUrl: data.certificates?.[0]?.downloadUrl ?? null,
+        };
+      }
+      if (statusBody?.status === "failed") {
+        return { outcome: "error", message: "The PPSR provider couldn't complete this search -- try again." };
+      }
+      // "new" or "processing" -- keep polling.
+    }
+    return {
+      outcome: "error",
+      message: "This check is taking longer than expected -- try again in a moment.",
+    };
+  } catch (err) {
+    return {
+      outcome: "error",
+      message: `Couldn't reach the PPSR provider: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }

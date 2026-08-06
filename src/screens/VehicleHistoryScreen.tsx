@@ -54,9 +54,13 @@ export function VehicleHistoryScreen() {
 
   const onOpenRevCheck = useCallback(
     (entry: VehicleHistoryEntry) => {
+      // A synthetic "VIN:<vin>" key (see vehicleHistory.ts's recordManualCheck) means this entry
+      // never had a real plate -- don't prefill the plate field with that placeholder text.
+      const isSyntheticVinKey = entry.plate.startsWith("VIN:");
       navigation.navigate("RevCheck", {
-        plate: entry.plate,
+        plate: isSyntheticVinKey ? undefined : entry.plate,
         state: entry.state ?? undefined,
+        vin: entry.vin ?? undefined,
         vehicleLabel: entry.label,
         speedKmh: entry.lastSpeedKmh,
         speedKind: entry.lastSpeedKind,
@@ -117,6 +121,7 @@ export function VehicleHistoryScreen() {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => {
             const speed = speedLabel(item);
+            const isSyntheticVinKey = item.plate.startsWith("VIN:");
             return (
               <Pressable
                 onPress={() => onOpenRevCheck(item)}
@@ -124,7 +129,9 @@ export function VehicleHistoryScreen() {
                 style={({ pressed }) => [styles.row, pressed && { opacity: pressedOpacity }]}
               >
                 <View style={styles.plateBadge}>
-                  <Text style={styles.plateBadgeText}>{item.plate}</Text>
+                  <Text style={styles.plateBadgeText}>
+                    {isSyntheticVinKey ? item.vin ?? item.plate : item.plate}
+                  </Text>
                 </View>
                 <View style={styles.rowInfo}>
                   <Text style={styles.rowMeta}>
@@ -136,6 +143,7 @@ export function VehicleHistoryScreen() {
                     {speed ? `${speed} · ` : ""}
                     Last seen {relativeTime(item.lastSeenAt)}
                     {item.state ? ` · ${item.state}` : ""}
+                    {!isSyntheticVinKey && item.vin ? ` · VIN saved` : ""}
                   </Text>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />

@@ -1,23 +1,23 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useSettings } from "@/context/SettingsContext";
 import { recordManualCheck } from "@/services/vehicleHistory";
-import { runRevCheck, type RevCheckResult } from "@/services/revCheck";
+import { runRevCheck, isRevCheckProviderConfigured, type RevCheckResult } from "@/services/revCheck";
 import { AU_STATES, DEFAULT_AU_STATE } from "@/utils/auStates";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 
-// Real, professionally-labelled vehicle history / REV check entry screen. Never fabricates a
-// result -- see revCheck.ts's own header for exactly why (no PPSR/NEVDIS broker account exists
-// for this app to call on the driver's behalf). What IS real here: the plate/state input, the
-// AU state selector, this plate's own live-detection summary when opened from one, the Start
-// button actually running the check function (not a dead stub), and Close actually navigating
-// back -- all genuinely functional, just honest that the *data* behind a run needs a connected
-// provider first.
+// Real vehicle history / REV check screen, wired to BusinessAPI.com.au's live PPSR Searches API
+// (see revCheck.ts's own header for the full contract this follows) once a provider key is
+// saved in Settings. PPSR searches by VIN, never a plate -- a plate isn't stable enough for
+// PPSR's own purpose (see revCheck.ts) -- so the plate field here is for this app's own record
+// (matches what the AI detector actually reads) while the VIN field is what a real check
+// actually runs on. Never fabricates a result: with no provider key, or on any error, this shows
+// the real outcome from revCheck.ts, not invented data.
 export function RevCheckScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RevCheck">>();
@@ -25,9 +25,12 @@ export function RevCheckScreen() {
   const { settings } = useSettings();
 
   const [plate, setPlate] = useState(params?.plate ?? "");
+  const [vin, setVin] = useState(params?.vin ?? "");
   const [state, setState] = useState(params?.state ?? DEFAULT_AU_STATE);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<RevCheckResult | null>(null);
+
+  const providerConfigured = isRevCheckProviderConfigured(settings);
 
   const hasVehicleSummary = params?.vehicleLabel !== undefined;
   const speedLabel = useMemo(() => {
@@ -42,18 +45,23 @@ export function RevCheckScreen() {
   }, [navigation]);
 
   const onStart = useCallback(async () => {
-    const trimmed = plate.trim().toUpperCase();
-    if (!trimmed) return;
+    const trimmedVin = vin.trim().toUpperCase();
+    const trimmedPlate = plate.trim().toUpperCase();
+    if (!trimmedVin) return;
     setChecking(true);
     setResult(null);
     try {
-      await recordManualCheck(trimmed, state);
-      const outcome = await runRevCheck(trimmed, state, settings);
+      await recordManualCheck(trimmedPlate, state, trimmedVin);
+      const outcome = await runRevCheck(trimmedVin, settings);
       setResult(outcome);
     } finally {
       setChecking(false);
     }
-  }, [plate, state, settings]);
+  }, [plate, vin, state, settings]);
+
+  const onOpenCertificate = useCallback((url: string) => {
+    Linking.openURL(url).catch(() => {});
+  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -61,8 +69,8 @@ export function RevCheckScreen() {
         <View style={styles.headerTextWrap}>
           <Text style={styles.title}>Vehicle REV Check</Text>
           <Text style={styles.subtitle}>
-            5-year registration &amp; odometer history, stolen/written-off/money-owing status --
-            Australia only.
+            Stolen / written-off / money-owing status &amp; NEVDIS vehicle data -- Australia only,
+            searched by VIN.
           </Text>
         </View>
         <Pressable
@@ -97,7 +105,24 @@ export function RevCheckScreen() {
       )}
 
       <View style={styles.formCard}>
-        <Text style={styles.fieldLabel}>NUMBER PLATE</Text>
+        <Text style={styles.fieldLabel}>VIN (required for a real check)</Text>
+        <TextInput
+          value={vin}
+          onChangeText={(t) => setVin(t.toUpperCase())}
+          placeholder="e.g. ZAM57YTA0T0000042"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={17}
+          style={styles.plateInput}
+        />
+        <Text style={styles.helperText}>
+          The 17-character chassis number -- on the rego papers, or the compliance plate visible
+          through the windshield. PPSR searches by VIN, not plate, since a plate can change on
+          re-registration.
+        </Text>
+
+        <Text style={styles.fieldLabel}>NUMBER PLATE (for your own records)</Text>
         <TextInput
           value={plate}
           onChangeText={(t) => setPlate(t.toUpperCase())}
@@ -132,17 +157,26 @@ export function RevCheckScreen() {
           })}
         </View>
         <Text style={styles.helperText}>
-          Vehicle history registers are looked up per Australian state/territory road authority --
-          other countries aren't supported yet.
+          Kept with this record for your own reference -- not sent to the PPSR search itself,
+          which is a national (not state-based) register.
         </Text>
+
+        {providerConfigured && (
+          <View style={styles.costNotice}>
+            <MaterialCommunityIcons name="currency-usd" size={14} color={colors.warning} />
+            <Text style={styles.costNoticeText}>
+              Running this check charges $6.00 via your connected PPSR provider account.
+            </Text>
+          </View>
+        )}
 
         <Pressable
           onPress={onStart}
-          disabled={!plate.trim() || checking}
+          disabled={!vin.trim() || checking}
           style={({ pressed }) => [
             styles.startButton,
-            (!plate.trim() || checking) && styles.startButtonDisabled,
-            pressed && !checking && plate.trim() && { opacity: pressedOpacity },
+            (!vin.trim() || checking) && styles.startButtonDisabled,
+            pressed && !checking && vin.trim() && { opacity: pressedOpacity },
           ]}
         >
           {checking ? (
@@ -153,12 +187,85 @@ export function RevCheckScreen() {
         </Pressable>
       </View>
 
-      {result && (
-        <View style={[styles.resultCard, result.connected ? styles.resultCardOk : styles.resultCardWarn]}>
+      {result && result.outcome === "success" && (
+        <View style={styles.successCard}>
+          <View style={styles.successHeader}>
+            <MaterialCommunityIcons name="check-decagram" size={20} color={colors.accent} />
+            <Text style={styles.successHeaderText}>Real result from PPSR/NEVDIS</Text>
+          </View>
+
+          {result.vehicle ? (
+            <>
+              <View style={styles.detailRowLight}>
+                <Text style={styles.detailLabelLight}>Vehicle</Text>
+                <Text style={styles.detailValueLight}>
+                  {[result.vehicle.year, result.vehicle.make, result.vehicle.model].filter(Boolean).join(" ") || "—"}
+                </Text>
+              </View>
+              <View style={styles.detailRowLight}>
+                <Text style={styles.detailLabelLight}>Colour / body</Text>
+                <Text style={styles.detailValueLight}>
+                  {[result.vehicle.colour, result.vehicle.bodyType].filter(Boolean).join(" · ") || "—"}
+                </Text>
+              </View>
+              <View style={styles.detailRowLight}>
+                <Text style={styles.detailLabelLight}>Plate on record</Text>
+                <Text style={styles.detailValueLight}>{result.vehicle.registrationPlate ?? "—"}</Text>
+              </View>
+              <View style={styles.detailRowLight}>
+                <Text style={styles.detailLabelLight}>Rego expiry</Text>
+                <Text style={styles.detailValueLight}>{result.vehicle.registrationExpiry ?? "—"}</Text>
+              </View>
+              <View style={styles.detailRowLight}>
+                <Text style={styles.detailLabelLight}>Stolen</Text>
+                <Text style={[styles.detailValueLight, result.vehicle.stolen && styles.detailValueDanger]}>
+                  {result.vehicle.stolen ? "YES" : "No"}
+                </Text>
+              </View>
+              <View style={styles.detailRowLight}>
+                <Text style={styles.detailLabelLight}>Written off</Text>
+                <Text style={[styles.detailValueLight, result.vehicle.writtenOff && styles.detailValueDanger]}>
+                  {result.vehicle.writtenOff ? "YES" : "No"}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <Text style={styles.resultText}>
+              No NEVDIS vehicle data came back for this VIN -- the PPSR security-interest result
+              below is still real.
+            </Text>
+          )}
+
+          <View style={styles.detailRowLight}>
+            <Text style={styles.detailLabelLight}>Registered security interests</Text>
+            <Text
+              style={[
+                styles.detailValueLight,
+                (result.securedInterestCount ?? 0) > 0 && styles.detailValueDanger,
+              ]}
+            >
+              {result.securedInterestCount ?? 0}
+            </Text>
+          </View>
+
+          {result.certificateUrl && (
+            <Pressable
+              onPress={() => onOpenCertificate(result.certificateUrl as string)}
+              style={({ pressed }) => [styles.certButton, pressed && { opacity: pressedOpacity }]}
+            >
+              <MaterialCommunityIcons name="file-certificate-outline" size={16} color={colors.accent} />
+              <Text style={styles.certButtonText}>View PPSR certificate</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {result && result.outcome !== "success" && (
+        <View style={[styles.resultCard, result.outcome === "error" ? styles.resultCardError : styles.resultCardWarn]}>
           <MaterialCommunityIcons
-            name={result.connected ? "check-decagram" : "information-outline"}
+            name={result.outcome === "error" ? "alert-circle-outline" : "information-outline"}
             size={20}
-            color={result.connected ? colors.accent : colors.warning}
+            color={result.outcome === "error" ? colors.danger : colors.warning}
           />
           <Text style={styles.resultText}>{result.message}</Text>
         </View>
@@ -239,10 +346,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: spacing.md,
     height: 52,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "800",
     fontFamily: "monospace",
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     color: colors.text,
   },
   stateGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs + 2 },
@@ -258,6 +365,17 @@ const styles = StyleSheet.create({
   stateChipText: { fontSize: 13, fontWeight: "700", color: colors.textMuted },
   stateChipTextSelected: { color: "#FFFFFF" },
   helperText: { fontSize: 12, color: colors.textFaint, lineHeight: 16 },
+  costNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: "#FEF3C7",
+    borderRadius: radius.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  costNoticeText: { flex: 1, fontSize: 12, fontWeight: "600", color: "#92400E" },
   startButton: {
     backgroundColor: colors.accent,
     borderRadius: radius.md,
@@ -276,9 +394,45 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignItems: "flex-start",
   },
-  resultCardOk: { backgroundColor: "#EFF6FF" },
   resultCardWarn: { backgroundColor: "#FEF3C7" },
+  resultCardError: { backgroundColor: "#FEE2E2" },
   resultText: { flex: 1, fontSize: 13, color: colors.text, lineHeight: 19 },
+  successCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.xs,
+    ...shadow.low,
+  },
+  successHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    marginBottom: spacing.xs,
+  },
+  successHeaderText: { fontSize: 13, fontWeight: "800", color: colors.text },
+  detailRowLight: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  detailLabelLight: { fontSize: 13, color: colors.textMuted },
+  detailValueLight: { fontSize: 13, fontWeight: "700", color: colors.text },
+  detailValueDanger: { color: colors.danger },
+  certButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+  },
+  certButtonText: { fontSize: 13, fontWeight: "700", color: colors.accent },
   settingsLink: {
     flexDirection: "row",
     alignItems: "center",

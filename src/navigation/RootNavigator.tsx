@@ -13,6 +13,10 @@ export type RevCheckParams = {
   // the live AI detection detail panel. Left undefined for a blank manual entry.
   plate?: string;
   state?: string;
+  // Prefilled VIN -- only ever comes from a saved history entry that already had one recorded
+  // (see vehicleHistory.ts). The camera can't read a VIN, so a detection-screen "Run REV Check"
+  // tap never has one; the driver types it in on this screen instead.
+  vin?: string;
   // Only present when opened from a live/saved AI detection -- shown as a read-only summary
   // card above the check form, per the explicit "display Speed Travelling, Number Plate" ask.
   vehicleLabel?: "Vehicle" | "Heavy Vehicle";

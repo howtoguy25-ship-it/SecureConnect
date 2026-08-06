@@ -10,8 +10,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export type VehicleHistorySource = "detected" | "manual";
 
 export interface VehicleHistoryEntry {
-  plate: string; // normalized: trimmed, uppercased, matches what's shown on screen
+  plate: string; // normalized: trimmed, uppercased, matches what's shown on screen. May be a
+  // synthetic "VIN:<vin>" key when a manual check was run with a VIN but no known plate -- see
+  // recordManualCheck.
   state: string | null; // AU state/territory code (utils/auStates.ts) -- only known for a manual entry
+  vin: string | null; // real PPSR/NEVDIS searches key on this, never the plate -- see revCheck.ts
   label: "Vehicle" | "Heavy Vehicle";
   lastSpeedKmh: number | null;
   lastSpeedKind: "absolute" | "closing" | null;
@@ -78,6 +81,7 @@ export async function upsertDetectedVehicle(
     current.push({
       plate,
       state: null,
+      vin: null,
       label: info.label,
       lastSpeedKmh: info.speedKmh,
       lastSpeedKind: info.speedKind,
@@ -94,9 +98,16 @@ export async function upsertDetectedVehicle(
  *  plate (and its selected state, since a manual entry knows one and a live detection doesn't)
  *  so it shows up in history the same as an auto-detected vehicle would. Never overwrites an
  *  existing "detected" entry's richer state (label/speed) with blanks, just refreshes state and
- *  bumps the seen count/timestamp. */
-export async function recordManualCheck(rawPlate: string, state: string | null): Promise<VehicleHistoryEntry[]> {
-  const plate = normalizePlate(rawPlate);
+ *  bumps the seen count/timestamp. A real PPSR/NEVDIS search (see revCheck.ts) always keys on
+ *  VIN, not plate -- so when the driver only typed a VIN and no known plate, this falls back to
+ *  a synthetic "VIN:<vin>" key just so the check still shows up in history at all. */
+export async function recordManualCheck(
+  rawPlate: string,
+  state: string | null,
+  vin: string | null = null
+): Promise<VehicleHistoryEntry[]> {
+  const normalizedVin = vin ? vin.trim().toUpperCase() : null;
+  const plate = normalizePlate(rawPlate) || (normalizedVin ? `VIN:${normalizedVin}` : "");
   if (!plate) return getVehicleHistory();
   const current = await getVehicleHistory();
   const now = Date.now();
@@ -106,6 +117,7 @@ export async function recordManualCheck(rawPlate: string, state: string | null):
     current[existingIndex] = {
       ...existing,
       state: state ?? existing.state,
+      vin: normalizedVin ?? existing.vin,
       lastSeenAt: now,
       timesSeen: existing.timesSeen + 1,
     };
@@ -113,6 +125,7 @@ export async function recordManualCheck(rawPlate: string, state: string | null):
     current.push({
       plate,
       state,
+      vin: normalizedVin,
       label: "Vehicle",
       lastSpeedKmh: null,
       lastSpeedKind: null,
