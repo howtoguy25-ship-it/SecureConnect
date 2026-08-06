@@ -54,6 +54,9 @@ export async function reportAlert(
   type: AlertType,
   location: { lat: number; lng: number },
   uid: string,
+  // Real per-user override (Settings' "Alert lifetime") -- null/undefined keeps the existing
+  // per-type default (ALERT_TTL_MS). Mirrors mobile's services/alerts.ts signature exactly.
+  customTtlMs?: number | null,
   // Optional, up to 7 words, mirroring the mobile app -- re-clamped and re-checked against the
   // profanity list here too (not just in PlacementBar's own live validation), so a comment can
   // never reach Firestore over the word limit or containing a not-allowed word no matter what
@@ -64,6 +67,7 @@ export async function reportAlert(
 ): Promise<string> {
   const now = Date.now();
   const geohash = encodeGeohash(location.lat, location.lng, 9);
+  const ttlMs = customTtlMs ?? ALERT_TTL_MS[type];
   const trimmedComment = comment?.trim();
   const safeComment =
     trimmedComment && !containsBlockedLanguage(trimmedComment) ? clampToWordLimit(trimmedComment) : undefined;
@@ -75,7 +79,7 @@ export async function reportAlert(
     geohash,
     createdBy: uid,
     createdAt: serverTimestamp(),
-    expiresAt: Timestamp.fromMillis(now + ALERT_TTL_MS[type]),
+    expiresAt: Timestamp.fromMillis(now + ttlMs),
     confirmCount: 0,
     hiddenBy: {},
     ...(safeComment ? { comment: safeComment } : {}),

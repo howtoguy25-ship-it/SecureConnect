@@ -1,7 +1,30 @@
 import { useEffect, useState } from "react";
+import type { AlertType } from "@/types/alert";
+
+export const ALL_ALERT_TYPES: AlertType[] = [
+  "police",
+  "emergency_vehicle",
+  "hazard",
+  "camera",
+  "crash",
+  "traffic_light",
+];
+
+// The radius auto-set whenever alertsEnabled flips off -> on -- matches mobile's own spec
+// exactly ("if toggled on alerts radius is automatically set for 30kms").
+export const DEFAULT_ALERT_RADIUS_KM = 30;
 
 export interface WebSettings {
   alertRadiusKm: number;
+  // Master on/off for receiving/showing community alerts at all -- off means none are shown
+  // regardless of radius. Mirrors mobile's settings.ts exactly.
+  alertsEnabled: boolean;
+  // Which AlertTypes to actually show/receive while alertsEnabled is on.
+  visibleAlertTypes: AlertType[];
+  // Real per-user override (Settings' "Alert lifetime") for how long an alert THIS device
+  // reports stays live before auto-expiring, in ms -- null keeps each type's own default
+  // (types/alert.ts's ALERT_TTL_MS). Mirrors mobile's settings.ts field exactly.
+  alertExpiryMs: number | null;
   // When true, ignore the radius entirely and show every non-expired alert (e.g. all of
   // Australia) so everyone in the region sees the same set.
   regionWide: boolean;
@@ -42,6 +65,9 @@ export interface WebSettings {
 
 const DEFAULT_SETTINGS: WebSettings = {
   alertRadiusKm: 5,
+  alertsEnabled: true,
+  visibleAlertTypes: ALL_ALERT_TYPES,
+  alertExpiryMs: null,
   regionWide: false,
   fixedZone: false,
   hideDetectionTrace: false,
@@ -73,6 +99,17 @@ export function useSettings() {
   return {
     settings,
     setAlertRadiusKm: (alertRadiusKm: number) => setSettings((s) => ({ ...s, alertRadiusKm })),
+    // Auto-sets a 30km radius on the off -> on transition, matching mobile's own spec exactly
+    // ("if toggled on alerts radius is automatically set for 30kms").
+    setAlertsEnabled: (alertsEnabled: boolean) =>
+      setSettings((s) => ({
+        ...s,
+        alertsEnabled,
+        alertRadiusKm: alertsEnabled && !s.alertsEnabled ? DEFAULT_ALERT_RADIUS_KM : s.alertRadiusKm,
+      })),
+    setVisibleAlertTypes: (updater: (types: AlertType[]) => AlertType[]) =>
+      setSettings((s) => ({ ...s, visibleAlertTypes: updater(s.visibleAlertTypes) })),
+    setAlertExpiryMs: (alertExpiryMs: number | null) => setSettings((s) => ({ ...s, alertExpiryMs })),
     setRegionWide: (regionWide: boolean) => setSettings((s) => ({ ...s, regionWide })),
     setFixedZone: (fixedZone: boolean) => setSettings((s) => ({ ...s, fixedZone })),
     setHideDetectionTrace: (hideDetectionTrace: boolean) =>
