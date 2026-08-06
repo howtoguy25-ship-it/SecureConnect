@@ -15,7 +15,7 @@ service cloud.firestore {
     // so these lists are duplicated here -- they're what's actually enforced.
     function isAdmin() {
       return isSignedIn()
-        && (request.auth.token.email in ['howtoguy25@gmail.com']
+        && (request.auth.token.email in ['howtoguy25@gmail.com', 'support@tracklinemaps.com']
           || request.auth.token.phone_number in ['+61474011265']);
     }
 
