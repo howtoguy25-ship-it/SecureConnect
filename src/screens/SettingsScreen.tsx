@@ -16,6 +16,7 @@ import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens"
 import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
 import { ALERT_LABELS, type AlertType } from "@/types/alert";
 import { MAP_THEME_LABELS, type MapThemeKey } from "@/utils/mapStyle";
+import { NAV_CARD_THEME_LABELS, NAV_CARD_THEMES, type NavCardThemeKey } from "@/utils/navCardTheme";
 import { TRAFFIC_LIGHT_MARKER, SPEED_CAMERA_MARKER } from "@/utils/osmMarkerStyle";
 import type { RootStackParamList } from "@/navigation/RootNavigator";
 
@@ -56,6 +57,8 @@ const MAP_THEME_SWATCH_COLORS: Record<MapThemeKey, [string, string]> = {
   blueGrey: ["#232a35", "#5b9bf0"],
   greenYellow: ["#0f2417", "#facc15"],
 };
+
+const NAV_CARD_THEME_ORDER: NavCardThemeKey[] = ["dark", "light", "aqua"];
 
 export function SettingsScreen() {
   const { settings, updateSettings } = useSettings();
@@ -159,6 +162,11 @@ export function SettingsScreen() {
 
   const onMapThemeSelect = useCallback(
     (theme: MapThemeKey) => updateSettings({ mapTheme: theme }),
+    [updateSettings]
+  );
+
+  const onNavCardThemeSelect = useCallback(
+    (theme: NavCardThemeKey) => updateSettings({ navCardTheme: theme }),
     [updateSettings]
   );
 
@@ -340,6 +348,38 @@ export function SettingsScreen() {
                 </View>
                 <Text style={[styles.themeTileLabel, isSelected && styles.themeTileLabelSelected]}>
                   {MAP_THEME_LABELS[theme]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
+      <Section title="Navigation card colors">
+        <Text style={styles.helperText}>
+          Colors for the turn-by-turn card during navigation only -- the map itself keeps
+          whichever theme is picked above.
+        </Text>
+        <View style={styles.themeGrid}>
+          {NAV_CARD_THEME_ORDER.map((theme) => {
+            const isSelected = settings.navCardTheme === theme;
+            const themeColors = NAV_CARD_THEMES[theme];
+            return (
+              <Pressable
+                key={theme}
+                onPress={() => onNavCardThemeSelect(theme)}
+                style={({ pressed }) => [
+                  styles.themeTile,
+                  isSelected && styles.themeTileSelected,
+                  pressed && { opacity: pressedOpacity },
+                ]}
+                accessibilityLabel={`${NAV_CARD_THEME_LABELS[theme]} navigation card theme`}
+              >
+                <View style={[styles.themeSwatch, { backgroundColor: themeColors.background }]}>
+                  <Text style={[styles.navCardSwatchText, { color: themeColors.text }]}>Aa</Text>
+                </View>
+                <Text style={[styles.themeTileLabel, isSelected && styles.themeTileLabelSelected]}>
+                  {NAV_CARD_THEME_LABELS[theme]}
                 </Text>
               </Pressable>
             );
@@ -720,6 +760,11 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 8,
     borderRadius: 3,
+  },
+  navCardSwatchText: {
+    alignSelf: "center",
+    fontSize: 20,
+    fontWeight: "800",
   },
   themeTileLabel: {
     fontSize: 12,

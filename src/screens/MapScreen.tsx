@@ -67,7 +67,6 @@ import {
 } from "@/services/alerts";
 import { sirenDetection } from "@/services/sirenDetection";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmTrafficData } from "@/services/osmTrafficData";
-import { SpeedLimitSign } from "@/components/SpeedLimitSign";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import { VehicleDetectionErrorBoundary } from "@/components/VehicleDetectionErrorBoundary";
 import type { AlertDoc, AlertType } from "@/types/alert";
@@ -333,6 +332,10 @@ export function MapScreen() {
   // the road that's actually being driven on over a merely-closer crossing street right at an
   // intersection (see its own comment). Skipped entirely while a fetch is already in flight.
   const [speedLimitKmh, setSpeedLimitKmh] = useState<number | null>(null);
+  // The road the driver is currently on -- from the exact same lookup as speedLimitKmh (see
+  // fetchSpeedLimitNear's own SpeedLimitResult.roadName), just previously discarded. Shown on
+  // the nav card as its own "current road" row, distinct from the next-turn instruction text.
+  const [currentRoadName, setCurrentRoadName] = useState<string | null>(null);
   const lastSpeedLimitFetchRef = useRef<LatLng | null>(null);
   const lastSpeedLimitStepIndexRef = useRef<number | null>(null);
   const speedLimitFetchInFlightRef = useRef(false);
@@ -349,8 +352,14 @@ export function MapScreen() {
     lastSpeedLimitStepIndexRef.current = activeStepIndex;
     speedLimitFetchInFlightRef.current = true;
     fetchSpeedLimitNear(currentLatLng.latitude, currentLatLng.longitude, heading)
-      .then((result) => setSpeedLimitKmh(result?.kmh ?? null))
-      .catch(() => setSpeedLimitKmh(null))
+      .then((result) => {
+        setSpeedLimitKmh(result?.kmh ?? null);
+        setCurrentRoadName(result?.roadName ?? null);
+      })
+      .catch(() => {
+        setSpeedLimitKmh(null);
+        setCurrentRoadName(null);
+      })
       .finally(() => {
         speedLimitFetchInFlightRef.current = false;
       });
@@ -358,6 +367,7 @@ export function MapScreen() {
   useEffect(() => {
     if (!route) {
       setSpeedLimitKmh(null);
+      setCurrentRoadName(null);
       lastSpeedLimitFetchRef.current = null;
     }
   }, [route]);
@@ -1603,6 +1613,9 @@ export function MapScreen() {
           etaText={route.etaText}
           arrivalClockText={arrivalClockText}
           distanceRemainingText={`${(remainingDistanceMeters / 1000).toFixed(1)} km`}
+          roadName={currentRoadName}
+          speedLimitKmh={speedLimitKmh}
+          themeKey={settings.navCardTheme}
           onExit={exitNavigation}
           onShareEta={shareEta}
           onExpandDirections={() => directionsSheetRef.current?.expand()}
@@ -1629,16 +1642,6 @@ export function MapScreen() {
           placeholder="Add a stop on the way"
           onCancel={() => setAddingStopDuringNav(false)}
         />
-      )}
-
-      {/* Real, OSM-tagged posted speed limit for the road currently under the driver -- see
-          the throttled fetch effect above. Mid-left, not a corner -- every corner during
-          navigation is already spoken for (nav card up top, zoom/FAB stack at the bottom),
-          same placement reasoning as the web app's own version. */}
-      {route && speedLimitKmh !== null && (
-        <View style={styles.speedLimitSignWrap} pointerEvents="none">
-          <SpeedLimitSign kmh={speedLimitKmh} />
-        </View>
       )}
 
       {/* Off-route auto-reroute is silent otherwise -- a fresh route fetch (a real network
@@ -2145,12 +2148,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "800",
-  },
-  speedLimitSignWrap: {
-    position: "absolute",
-    left: spacing.md,
-    top: "50%",
-    marginTop: -32,
   },
   topRightControls: {
     position: "absolute",
