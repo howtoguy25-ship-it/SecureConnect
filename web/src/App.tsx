@@ -1930,6 +1930,30 @@ export default function App() {
         initialRange={map3dInitialRange}
       />
 
+      {/* Web-only, kept on purpose -- unlike mobile, a lot of web visitors are on a desktop/
+          laptop without a trackpad's pinch gesture, so an explicit +/- control matters here
+          even though scroll-wheel/double-click zoom also work. */}
+      <div className="zoom-control">
+        <button
+          onClick={() => {
+            const map = mapRef.current;
+            if (map) map.setZoom((map.getZoom() ?? 15) + 1);
+          }}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={() => {
+            const map = mapRef.current;
+            if (map) map.setZoom((map.getZoom() ?? 15) - 1);
+          }}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+      </div>
+
       {!chromeHidden && (
         <button
           className={`about-button${topBannerActive ? " chrome-shifted" : ""}`}
@@ -2218,6 +2242,29 @@ export default function App() {
           title={mapTypeId === "hybrid" ? "Standard map" : "Satellite view"}
         >
           🛰️
+        </button>
+      )}
+
+      {/* Persistent 3D buildings toggle, matching mobile's always-present FAB (Ionicons
+          "business-outline") -- web previously only ever entered 3D via tapping the route
+          line or the max-zoom prompt, with no discoverable button for casual browsing.
+          Also switches to satellite/hybrid imagery so this always lands on the real
+          photorealistic 3D tiles (Map3DView) instead of just tilting a flat road map. */}
+      {satelliteToggleVisible && (
+        <button
+          className={`fab fab-septenary${street3DMode ? " fab-toggle-active" : ""}`}
+          onClick={() => {
+            if (street3DMode) {
+              exitStreet3D();
+            } else {
+              setMapTypeId("hybrid");
+              enterStreet3D();
+            }
+          }}
+          aria-label={street3DMode ? "Switch to standard map" : "Switch to 3D buildings view"}
+          title={street3DMode ? "Standard map" : "3D buildings"}
+        >
+          🏙️
         </button>
       )}
 
