@@ -1521,7 +1521,14 @@ export function MapScreen() {
     [currentLatLng]
   );
 
-  const confirmAlertPlacement = useCallback(async () => {
+  // Optional `overrideLocation` -- the "Set at my location" button below passes the driver's
+  // own live GPS fix directly, skipping the fixed-center pin's current alertPlacementLatLng
+  // entirely, so it reports at the real current position in one tap instead of requiring the
+  // map to already be panned there. Deliberately typed as a real LatLng (never the Pressable's
+  // own event object) -- every call site below passes either nothing or an explicit LatLng, no
+  // call site passes onPress={confirmAlertPlacement} directly, which would otherwise hand the
+  // GestureResponderEvent to this parameter instead.
+  const confirmAlertPlacement = useCallback(async (overrideLocation?: LatLng) => {
     if (submittingAlertRef.current) return;
     // Real enforcement, not just a disabled-looking button -- blocks the actual Firestore write
     // whenever the typed comment contains a not-allowed word (see commentFilter.ts), same check
@@ -1529,7 +1536,7 @@ export function MapScreen() {
     // check alone).
     if (containsBlockedLanguage(alertComment)) return;
     const type = pendingAlertTypeRef.current;
-    const location = alertPlacementLatLng;
+    const location = overrideLocation ?? alertPlacementLatLng;
     if (!type || !location || !user) return;
     submittingAlertRef.current = true;
     setSubmittingAlert(true);
@@ -1544,6 +1551,15 @@ export function MapScreen() {
       setSubmittingAlert(false);
     }
   }, [alertPlacementLatLng, user, settings.alertExpiryMs, alertComment]);
+
+  // "Set at my location" -- per explicit request, a one-tap shortcut beside Cancel/Set that
+  // places AND immediately confirms the alert at the driver's own real live GPS position,
+  // without needing the fixed-center pin to already be panned there first. The normal "pan the
+  // map to place it anywhere" flow is untouched -- this is an addition, not a replacement.
+  const confirmAlertPlacementAtMyLocation = useCallback(() => {
+    if (!currentLatLng) return;
+    confirmAlertPlacement(currentLatLng);
+  }, [currentLatLng, confirmAlertPlacement]);
 
   const cancelAlertPlacement = useCallback(() => {
     pendingAlertTypeRef.current = null;
@@ -1935,7 +1951,12 @@ export function MapScreen() {
           </>
         )}
         {visibleAlerts.map((alert) => (
-          <AlertMarker key={alert.id} alert={alert} onPress={onMarkerPress} />
+          <AlertMarker
+            key={alert.id}
+            alert={alert}
+            onPress={onMarkerPress}
+            isSelected={selectedAlert?.id === alert.id}
+          />
         ))}
         {settings.showTrafficLights &&
           trafficLightClusters.map((c) =>
@@ -2530,6 +2551,22 @@ export function MapScreen() {
                 <Ionicons name={placementFrontView ? "eye-off-outline" : "eye-outline"} size={20} color={colors.text} />
               </Pressable>
             )}
+            {/* One-tap "place it exactly where I am right now" -- per explicit request, beside
+                Cancel/Set. Sets AND immediately confirms in the same tap using the driver's own
+                live GPS fix, rather than requiring the fixed-center pin to already be panned
+                there. The normal pan-anywhere flow (Set button) is untouched. */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.placementButton,
+                styles.placementButtonRemove,
+                pressed && !submittingAlert && !!currentLatLng && { opacity: pressedOpacity },
+              ]}
+              onPress={confirmAlertPlacementAtMyLocation}
+              disabled={submittingAlert || !currentLatLng}
+              accessibilityLabel="Set alert at my current location"
+            >
+              <Ionicons name="locate" size={20} color={colors.text} />
+            </Pressable>
             <Pressable
               style={({ pressed }) => [
                 styles.placementButton,
@@ -2537,7 +2574,7 @@ export function MapScreen() {
                 (submittingAlert || alertCommentBlocked) && styles.placementButtonSetDisabled,
                 pressed && !submittingAlert && !alertCommentBlocked && { opacity: pressedOpacity },
               ]}
-              onPress={confirmAlertPlacement}
+              onPress={() => confirmAlertPlacement()}
               disabled={submittingAlert || alertCommentBlocked}
               accessibilityLabel="Set alert location"
             >
@@ -2585,7 +2622,15 @@ export function MapScreen() {
         onHide={onHideAlert}
         onConfirmStillHere={onConfirmStillHere}
         onClose={() => detailSheetRef.current?.close()}
-        onSheetChange={(index) => setDetailSheetOpen(index >= 0)}
+        onSheetChange={(index) => {
+          setDetailSheetOpen(index >= 0);
+          // Real "swipe away hides it" per explicit request -- this fires for BOTH the pan-
+          // down-to-close gesture and the explicit X (onClose above just calls .close(), which
+          // triggers this same callback), so either dismiss path clears the selection and, via
+          // AlertMarker's own isSelected prop, hides that alert's comment caption back on the
+          // map. Tapping the marker again re-selects it and the caption reappears.
+          if (index < 0) setSelectedAlert(null);
+        }}
       />
       <PlaceInfoSheet
         ref={placeInfoSheetRef}

@@ -10,7 +10,10 @@ export interface AlertDoc {
   createdAt: number;
   expiresAt: number;
   confirmCount: number;
-  hiddenBy: string[];
+  // Map of uid -> the ms timestamp they hid this alert -- self-only, time-boxed (1 hour, see
+  // services/alerts.ts's HIDE_DURATION_MS). Shared schema with the mobile app (same Firestore
+  // collection/rules) -- was a plain uid[] (permanent hide) before this.
+  hiddenBy: Record<string, number>;
 }
 
 // Speed cameras and traffic lights are community-reported like everything else here —

@@ -7,6 +7,11 @@ import { AlertTypeGlyph } from "@/components/AlertTypeGlyph";
 interface Props {
   alert: AlertDoc;
   onPress: (alert: AlertDoc) => void;
+  // True only while this exact alert's detail sheet is the one currently open (see MapScreen's
+  // selectedAlert) -- per explicit request, the comment caption isn't a permanent map fixture:
+  // it shows while a user is actively viewing this alert and hides again the moment they swipe
+  // the sheet away (or tap a different alert), reappearing if they come back to it later.
+  isSelected: boolean;
 }
 
 // Memoized so MapScreen re-renders (e.g. every GPS tick, which changes currentLatLng but not
@@ -20,7 +25,7 @@ const PIN_SIZE = 34;
 const COMMENT_GAP = 3;
 const COMMENT_HEIGHT = 30;
 
-export const AlertMarker = React.memo(function AlertMarker({ alert, onPress }: Props) {
+export const AlertMarker = React.memo(function AlertMarker({ alert, onPress, isSelected }: Props) {
   // react-native-maps anchors a Marker's geographic coordinate to a FRACTION of its own
   // rendered content box (default {x:0.5, y:1}, i.e. bottom-center) -- which was fine when the
   // pin circle was the marker's only content, but a comment caption stacked below it (per
@@ -50,24 +55,36 @@ export const AlertMarker = React.memo(function AlertMarker({ alert, onPress }: P
         e.stopPropagation();
         onPress(alert);
       }}
-      tracksViewChanges={false}
+      // false (the default, cheap path) for every marker with no comment at all, same as
+      // before. Alerts WITH a comment need this true instead -- tracksViewChanges is what makes
+      // react-native-maps actually re-rasterize the marker's native bitmap when isSelected
+      // toggles below; left false, the very first render (whichever selection state that
+      // happened to be) would be frozen forever, and the show/hide-on-select behavior would
+      // never actually appear on screen. Real, deliberate cost only for the subset of alerts
+      // that actually have a comment, not a blanket regression for every marker.
+      tracksViewChanges={!!alert.comment}
     >
       <View style={styles.column}>
         <View style={[styles.pin, { backgroundColor: ALERT_COLORS[alert.type] }]}>
           <AlertTypeGlyph type={alert.type} size={18} color="#FFFFFF" />
         </View>
         {/* Small, semi-transparent (not fully opaque, not so transparent it's hard to read --
-            per explicit request) caption directly under the pin. Fixed height regardless of the
-            actual text (see COMMENT_HEIGHT above) so the anchor math above stays exact; up to 2
-            lines is comfortably enough room for the 7-word cap this is limited to (see
-            commentFilter.ts). */}
+            per explicit request) caption directly under the pin -- only while this alert is the
+            one currently selected/being viewed (isSelected), hiding again once its detail sheet
+            is swiped away and reappearing if reopened (see MapScreen's own comment on where
+            selectedAlert gets cleared). The OUTER wrap still always renders at its fixed height
+            whenever there's a comment at all, selected or not -- only the bubble inside is
+            conditional -- so the anchor math above (computed purely from whether a comment
+            exists) never has to account for a layout height that changes with selection too. */}
         {alert.comment && (
           <View style={styles.commentWrap}>
-            <View style={styles.commentBubble}>
-              <Text style={styles.commentText} numberOfLines={2}>
-                {alert.comment}
-              </Text>
-            </View>
+            {isSelected && (
+              <View style={styles.commentBubble}>
+                <Text style={styles.commentText} numberOfLines={2}>
+                  {alert.comment}
+                </Text>
+              </View>
+            )}
           </View>
         )}
       </View>

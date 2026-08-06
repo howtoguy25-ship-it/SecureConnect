@@ -10,7 +10,12 @@ export interface AlertDoc {
   createdAt: number; // ms epoch
   expiresAt: number; // ms epoch
   confirmCount: number;
-  hiddenBy: string[];
+  // Map of uid -> the ms timestamp they hid this alert -- self-only (never affects any other
+  // user's own view) and time-boxed, per explicit request: services/alerts.ts's
+  // isHiddenForUser treats an entry older than its own HIDE_DURATION_MS (1 hour) as expired, so
+  // the alert reappears for that one user again unless they hide it again. Was a plain uid[]
+  // (permanent hide) before this.
+  hiddenBy: Record<string, number>;
   // Optional, up to 7 words -- see commentFilter.ts for the word cap and the profanity check
   // both the client and reportAlert itself enforce before this is ever written. undefined when
   // the reporter didn't add one (the overwhelming majority of alerts, same as before this

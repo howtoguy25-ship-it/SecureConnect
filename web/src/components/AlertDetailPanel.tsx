@@ -75,7 +75,7 @@ export function AlertDetailPanel({
             </button>
           ) : (
             <button className="hide-button" onClick={() => onHide(alert)}>
-              Hide
+              Hide for 1 hour
             </button>
           )}
 

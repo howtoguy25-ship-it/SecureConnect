@@ -8,7 +8,6 @@ import {
   Timestamp,
   updateDoc,
   where,
-  arrayUnion,
   increment,
   addDoc,
   getDocs,
@@ -20,6 +19,19 @@ import { ALERT_TTL_MS, type AlertDoc, type AlertType } from "@/types/alert";
 import { containsBlockedLanguage, clampToWordLimit } from "@/utils/commentFilter";
 
 const ALERTS_COLLECTION = "alerts";
+
+// Real "hide for 1 hour, self only" per explicit request -- hiding was previously permanent
+// (a plain uid array, once in it, always excluded from that user's own view). hiddenBy is now
+// a map of uid -> the ms timestamp they hid it, so a hide can genuinely expire: past this many
+// ms, isHiddenForUser below stops counting it, and the alert reappears for that one user again
+// (never for anyone else -- this only ever filters what THIS uid's own client shows, same as
+// before). Re-hiding just overwrites the same key with a fresh timestamp.
+const HIDE_DURATION_MS = 60 * 60 * 1000;
+
+function isHiddenForUser(alert: AlertDoc, uid: string): boolean {
+  const hiddenAt = alert.hiddenBy[uid];
+  return typeof hiddenAt === "number" && Date.now() - hiddenAt < HIDE_DURATION_MS;
+}
 
 function toAlertDoc(id: string, data: any): AlertDoc {
   return {
@@ -41,7 +53,10 @@ function toAlertDoc(id: string, data: any): AlertDoc {
       data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : (data.createdAt ?? Date.now()),
     expiresAt: data.expiresAt instanceof Timestamp ? data.expiresAt.toMillis() : data.expiresAt,
     confirmCount: data.confirmCount ?? 0,
-    hiddenBy: data.hiddenBy ?? [],
+    // Pre-migration docs could still have the old plain-array shape for a short window (short-
+    // lived alerts, 45min-24h TTL, all pruned by the scheduled cleanup function well within a
+    // day) -- treated as "nobody's hidden it yet" rather than crashing on the shape mismatch.
+    hiddenBy: data.hiddenBy && typeof data.hiddenBy === "object" && !Array.isArray(data.hiddenBy) ? data.hiddenBy : {},
     comment: typeof data.comment === "string" && data.comment.length > 0 ? data.comment : undefined,
   };
 }
@@ -79,7 +94,7 @@ export async function reportAlert(
     createdAt: serverTimestamp(),
     expiresAt: Timestamp.fromMillis(now + ttlMs),
     confirmCount: 0,
-    hiddenBy: [],
+    hiddenBy: {},
     ...(safeComment ? { comment: safeComment } : {}),
   });
 
@@ -122,10 +137,19 @@ export async function getNearbyAlerts(
   return Array.from(seen.values()).filter(
     (alert) =>
       alert.expiresAt > now &&
-      !alert.hiddenBy.includes(currentUid) &&
+      !isHiddenForUser(alert, currentUid) &&
       distanceKm(userLat, userLng, alert.lat, alert.lng) <= radiusKm
   );
 }
+
+// Re-applies the same filter on a plain timer, not just whenever a new Firestore snapshot
+// happens to arrive -- a hide expiring after HIDE_DURATION_MS is purely a client-side clock
+// event, nothing about the alert doc itself changes when that hour passes, so without this a
+// hidden alert would only ever reappear by coincidence (whenever something else about it, or
+// another alert in the same geohash cell, happened to trigger a fresh snapshot). One minute is
+// frequent enough that "re displays" after the hour is up feels prompt without re-filtering on
+// every render.
+const REEMIT_INTERVAL_MS = 60 * 1000;
 
 /**
  * Live subscription variant of getNearbyAlerts. Since Firestore range queries can't be
@@ -151,7 +175,7 @@ export function subscribeNearbyAlerts(
     const filtered = Array.from(merged.values()).filter(
       (alert) =>
         alert.expiresAt > now &&
-        !alert.hiddenBy.includes(currentUid) &&
+        !isHiddenForUser(alert, currentUid) &&
         distanceKm(userLat, userLng, alert.lat, alert.lng) <= radiusKm
     );
     onChange(filtered);
@@ -175,16 +199,25 @@ export function subscribeNearbyAlerts(
     );
   });
 
-  return () => unsubscribes.forEach((unsub) => unsub());
+  const reemitInterval = setInterval(emit, REEMIT_INTERVAL_MS);
+
+  return () => {
+    clearInterval(reemitInterval);
+    unsubscribes.forEach((unsub) => unsub());
+  };
 }
 
 export async function deleteAlert(alertId: string): Promise<void> {
   await deleteDoc(doc(db, ALERTS_COLLECTION, alertId));
 }
 
+// Hides for the CALLING user only, for HIDE_DURATION_MS (1 hour), per explicit request -- never
+// affects any other user's own view (each uid's hide is its own key in the map), and re-hiding
+// later (once it's reappeared, or even before) just overwrites this same key with a fresh
+// timestamp, restarting the hour.
 export async function hideAlertForUser(alertId: string, uid: string): Promise<void> {
   await updateDoc(doc(db, ALERTS_COLLECTION, alertId), {
-    hiddenBy: arrayUnion(uid),
+    [`hiddenBy.${uid}`]: Date.now(),
   });
 }
 

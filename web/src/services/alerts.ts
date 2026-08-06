@@ -8,7 +8,6 @@ import {
   Timestamp,
   updateDoc,
   where,
-  arrayUnion,
   increment,
   addDoc,
   type Unsubscribe,
@@ -18,6 +17,18 @@ import { encodeGeohash, geohashQueryBounds, distanceKm } from "@/utils/geo";
 import { ALERT_TTL_MS, type AlertDoc, type AlertType } from "@/types/alert";
 
 const ALERTS_COLLECTION = "alerts";
+
+// Real "hide for 1 hour, self only" -- shared schema/behavior with the mobile app (same
+// Firestore collection/rules, see firebase/firestore.rules and mobile's services/alerts.ts).
+// Hiding was previously permanent (a plain uid array); hiddenBy is now a map of
+// uid -> the ms timestamp they hid it, so a hide genuinely expires and only ever affects that
+// one uid's own view.
+const HIDE_DURATION_MS = 60 * 60 * 1000;
+
+function isHiddenForUser(alert: AlertDoc, uid: string): boolean {
+  const hiddenAt = alert.hiddenBy[uid];
+  return typeof hiddenAt === "number" && Date.now() - hiddenAt < HIDE_DURATION_MS;
+}
 
 function toAlertDoc(id: string, data: any): AlertDoc {
   return {
@@ -30,7 +41,10 @@ function toAlertDoc(id: string, data: any): AlertDoc {
     createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : data.createdAt,
     expiresAt: data.expiresAt instanceof Timestamp ? data.expiresAt.toMillis() : data.expiresAt,
     confirmCount: data.confirmCount ?? 0,
-    hiddenBy: data.hiddenBy ?? [],
+    // Pre-migration docs could briefly still have the old plain-array shape -- treated as
+    // "nobody's hidden it yet" rather than crashing on the shape mismatch (short-lived alerts,
+    // all pruned by the scheduled cleanup function well within a day).
+    hiddenBy: data.hiddenBy && typeof data.hiddenBy === "object" && !Array.isArray(data.hiddenBy) ? data.hiddenBy : {},
   };
 }
 
@@ -51,11 +65,16 @@ export async function reportAlert(
     createdAt: serverTimestamp(),
     expiresAt: Timestamp.fromMillis(now + ALERT_TTL_MS[type]),
     confirmCount: 0,
-    hiddenBy: [],
+    hiddenBy: {},
   });
 
   return ref.id;
 }
+
+// Re-applies the hide filter on a plain timer, not just whenever a new Firestore snapshot
+// happens to arrive -- a hide expiring after HIDE_DURATION_MS is purely a client-side clock
+// event, so without this a hidden alert would only reappear by coincidence.
+const REEMIT_INTERVAL_MS = 60 * 1000;
 
 /**
  * Live subscription to alerts within radiusKm of (userLat, userLng). Subscribes to each of
@@ -81,7 +100,7 @@ export function subscribeNearbyAlerts(
     const filtered = Array.from(merged.values()).filter(
       (alert) =>
         alert.expiresAt > now &&
-        !alert.hiddenBy.includes(currentUid) &&
+        !isHiddenForUser(alert, currentUid) &&
         distanceKm(userLat, userLng, alert.lat, alert.lng) <= radiusKm
     );
     onChange(filtered);
@@ -105,7 +124,12 @@ export function subscribeNearbyAlerts(
     );
   });
 
-  return () => unsubscribes.forEach((unsub) => unsub());
+  const reemitInterval = setInterval(emit, REEMIT_INTERVAL_MS);
+
+  return () => {
+    clearInterval(reemitInterval);
+    unsubscribes.forEach((unsub) => unsub());
+  };
 }
 
 /**
@@ -118,13 +142,20 @@ export function subscribeAllAlerts(
   currentUid: string,
   onChange: (alerts: AlertDoc[]) => void
 ): Unsubscribe {
-  return onSnapshot(query(collection(db, ALERTS_COLLECTION)), (snap) => {
+  let latestDocs: AlertDoc[] = [];
+  function emit() {
     const now = Date.now();
-    const alerts = snap.docs
-      .map((d) => toAlertDoc(d.id, d.data()))
-      .filter((alert) => alert.expiresAt > now && !alert.hiddenBy.includes(currentUid));
-    onChange(alerts);
+    onChange(latestDocs.filter((alert) => alert.expiresAt > now && !isHiddenForUser(alert, currentUid)));
+  }
+  const unsubscribe = onSnapshot(query(collection(db, ALERTS_COLLECTION)), (snap) => {
+    latestDocs = snap.docs.map((d) => toAlertDoc(d.id, d.data()));
+    emit();
   });
+  const reemitInterval = setInterval(emit, REEMIT_INTERVAL_MS);
+  return () => {
+    clearInterval(reemitInterval);
+    unsubscribe();
+  };
 }
 
 export async function deleteAlert(alertId: string): Promise<void> {
@@ -133,7 +164,7 @@ export async function deleteAlert(alertId: string): Promise<void> {
 
 export async function hideAlertForUser(alertId: string, uid: string): Promise<void> {
   await updateDoc(doc(db, ALERTS_COLLECTION, alertId), {
-    hiddenBy: arrayUnion(uid),
+    [`hiddenBy.${uid}`]: Date.now(),
   });
 }
 

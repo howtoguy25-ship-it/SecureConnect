@@ -84,6 +84,8 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
             </Pressable>
 
             {isOwner ? (
+              // Only the reporter can ever delete their own alert -- a real, global removal,
+              // unlike Hide below (self-only, time-boxed) which every other user gets instead.
               <Pressable
                 style={({ pressed }) => [styles.deleteButton, pressed && { opacity: pressedOpacity }]}
                 onPress={() => onDelete(alert)}
@@ -91,11 +93,14 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
                 <Text style={styles.deleteText}>Delete</Text>
               </Pressable>
             ) : (
+              // Self-only, per explicit request -- hides this alert from just this account's own
+              // view for 1 hour (see alerts.ts's HIDE_DURATION_MS), then it reappears unless
+              // hidden again. Never affects what any other user sees.
               <Pressable
                 style={({ pressed }) => [styles.hideButton, pressed && { opacity: pressedOpacity }]}
                 onPress={() => onHide(alert)}
               >
-                <Text style={styles.hideText}>Hide</Text>
+                <Text style={styles.hideText}>Hide for 1 hour</Text>
               </Pressable>
             )}
           </>
