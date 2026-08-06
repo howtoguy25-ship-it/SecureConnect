@@ -1,56 +1,87 @@
-import { useEffect, useRef, useState } from "react";
-import { AppState } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { useAppOpenAd } from "react-native-google-mobile-ads";
 import { env } from "@/config/env";
 import { ensureAdsInitialized } from "@/services/ads";
+import { shouldShowAppOpenAd, recordAppOpenAdShown } from "@/services/appOpenAdSchedule";
+import { isNavigationActive } from "@/services/navState";
 import { Sentry } from "@/services/sentry";
 
-// Renders nothing -- just loads and shows one full-screen App Open ad on true cold start.
+// Renders nothing -- loads and shows a full-screen App Open ad on real app-open events (cold
+// start, and every background->foreground resume), up to 3 times per day: immediately on the
+// first open, then only once at least 1h has passed since the 1st ad, then only once at least
+// 3h total has passed since the 1st ad (see appOpenAdSchedule.ts for the exact gating -- those
+// are real per-user-open, calendar-day-capped rules, not a background timer that fires
+// regardless of whether the app is even open).
 //
-// Deliberately NOT re-shown on every foreground-from-background (only once, ever, per app
-// launch) and never tied to anything navigation-related: this is a driving app, and an ad
-// popping up over an active turn-by-turn session would be a real safety problem, not just an
-// annoyance. Cold start is safe by definition -- there's no way to already be mid-navigation
-// the instant the app has just launched, since navigation state doesn't exist yet at that
-// point -- so gating on "first mount only" is sufficient without needing any awareness of
-// navigation state at all.
+// Never shown while turn-by-turn navigation is active (isNavigationActive(), set by MapScreen)
+// -- this is a driving app, and an ad popping up over an active route, including on a resume
+// mid-navigation, would be a real safety problem, not just an annoyance.
 export function AppOpenAdManager() {
   const { isLoaded, isShowing, load, show } = useAppOpenAd(env.ads.appOpenUnitId);
-  const hasShownRef = useRef(false);
   // Real crash evidence (multiple .ips logs + a screen recording all showing the app
   // aborting within ~1-2s of a cold launch, before any UI is even usable) points at
   // show() firing before the app's native window is actually active -- a documented
   // AdMob App Open ad gotcha: presenting a full-screen ad before the root view controller
-  // is key/active can crash natively. This component now waits for AppState to actually
-  // report "active" (it's not guaranteed to already be that by the time this JS-side
-  // effect runs on a cold start) before ever calling show().
+  // is key/active can crash natively. This component waits for AppState to actually report
+  // "active" before ever calling show().
   const [appIsActive, setAppIsActive] = useState(AppState.currentState === "active");
+  // Set once shouldShowAppOpenAd() has said yes for the *current* open and cleared the
+  // instant that ad is actually shown (or the open is superseded by a new one) -- this is
+  // what the show-effect below waits on, separately from isLoaded, so a load that finishes
+  // after the user has already moved on (e.g. backgrounded again) doesn't show a stale ad.
+  const pendingShowRef = useRef(false);
 
-  useEffect(() => {
-    if (appIsActive) return;
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") setAppIsActive(true);
-    });
-    return () => subscription.remove();
-  }, [appIsActive]);
-
-  useEffect(() => {
-    ensureAdsInitialized()
-      .then(() => {
+  const evaluateOpen = useCallback(() => {
+    pendingShowRef.current = false;
+    if (isNavigationActive()) return;
+    shouldShowAppOpenAd()
+      .then((should) => {
+        if (!should || isNavigationActive()) return;
+        pendingShowRef.current = true;
         Sentry.logger.info("ads: calling app open ad load()");
         load();
       })
       .catch((err) => {
-        Sentry.logger.error("ads: app open ad load failed", { error: String(err) });
-        console.warn("[ads] app open ad load failed", err);
+        Sentry.logger.error("ads: app open ad schedule check failed", { error: String(err) });
+        console.warn("[ads] app open ad schedule check failed", err);
+      });
+  }, [load]);
+
+  // ensureAdsInitialized() runs unconditionally on cold start -- BannerAdBar's native
+  // <BannerAd> has no init call of its own and relies on this having already run, regardless
+  // of whether today's App Open ad cap happens to be reached already. It's cached/idempotent
+  // (see ads.ts), so evaluateOpen() below can also await it on every open with no extra cost.
+  useEffect(() => {
+    ensureAdsInitialized()
+      .then(() => evaluateOpen())
+      .catch((err) => {
+        Sentry.logger.error("ads: Google Mobile Ads SDK failed to initialize", { error: String(err) });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (isLoaded && appIsActive && !isShowing && !hasShownRef.current) {
-      hasShownRef.current = true;
+    const subscription = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state === "active") {
+        setAppIsActive(true);
+        // A real return-to-foreground counts as its own "app opened again" for the 3-per-day
+        // cadence -- re-evaluate whether this is the 2nd/3rd ad's turn, or none at all yet.
+        evaluateOpen();
+      } else {
+        setAppIsActive(false);
+      }
+    });
+    return () => subscription.remove();
+  }, [evaluateOpen]);
+
+  useEffect(() => {
+    if (isLoaded && appIsActive && !isShowing && pendingShowRef.current && !isNavigationActive()) {
+      pendingShowRef.current = false;
       Sentry.logger.info("ads: calling app open ad show()");
+      recordAppOpenAdShown().catch((err) => {
+        Sentry.logger.error("ads: failed to record app open ad shown", { error: String(err) });
+      });
       show();
     }
   }, [isLoaded, appIsActive, isShowing, show]);

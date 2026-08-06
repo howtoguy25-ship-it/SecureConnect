@@ -68,6 +68,7 @@ import {
 import { sirenDetection } from "@/services/sirenDetection";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmTrafficData } from "@/services/osmTrafficData";
 import { createLiveShare, updateLiveShare, endLiveShare } from "@/services/liveShare";
+import { setNavigationActive } from "@/services/navState";
 import { VehicleDetectionScreen } from "@/screens/VehicleDetectionScreen";
 import { VehicleDetectionErrorBoundary } from "@/components/VehicleDetectionErrorBoundary";
 import type { AlertDoc, AlertType } from "@/types/alert";
@@ -96,6 +97,15 @@ export function MapScreen() {
 
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
+
+  // Keeps the module-level navState flag (read by AppOpenAdManager, mounted outside this
+  // screen entirely) in sync with whether turn-by-turn is actually active -- the app-open ad
+  // frequency-capping logic must never show a full-screen ad over an in-progress route, even
+  // when that "app open" is really just a background->foreground resume mid-navigation.
+  useEffect(() => {
+    setNavigationActive(!!route);
+    return () => setNavigationActive(false);
+  }, [route]);
   // Real measured height of NavigationInstructionCard (see its onHeightChange) -- the button
   // column below it (Recenter/mute/settings) positions off this instead of a fixed guess, so
   // it never ends up partly hidden behind a taller-than-expected card. 96 is just the
