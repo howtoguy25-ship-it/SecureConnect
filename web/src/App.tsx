@@ -265,6 +265,30 @@ function formatExpiryMs(ms: number): string {
   return `${hours}h ${minutes}m`;
 }
 
+// Line-icon FAB glyphs matching the mobile app's Ionicons exactly ("locate" and "map-outline")
+// instead of emoji, which render inconsistently across OSes/browsers and don't match iOS's
+// look at all -- the recenter button in particular used a paper-plane arrow (➤) that isn't
+// what "locate" looks like on mobile (a target/crosshair), and satellite used a 🛰️ emoji where
+// mobile's own toggle uses a plain flat-map glyph, not a satellite.
+function LocateIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </svg>
+  );
+}
+
+function MapOutlineIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M9 3 3 5v16l6-2 6 2 6-2V3l-6 2-6-2Z" />
+      <path d="M9 3v16M15 5v16" />
+    </svg>
+  );
+}
+
 export default function App() {
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -2280,7 +2304,7 @@ export default function App() {
           disabled={!location}
           aria-label="Recenter on my location"
         >
-          ➤
+          <LocateIcon />
         </button>
       )}
 
@@ -2313,7 +2337,7 @@ export default function App() {
             disabled={!location}
             aria-label="Recenter on my location"
           >
-            ➤
+            <LocateIcon />
           </button>
 
           {trailTip && <div className="trail-tip">{trailTip}</div>}
@@ -2352,7 +2376,7 @@ export default function App() {
           aria-label={mapTypeId === "hybrid" ? "Switch to standard map" : "Switch to satellite view"}
           title={mapTypeId === "hybrid" ? "Standard map" : "Satellite view"}
         >
-          🛰️
+          <MapOutlineIcon />
         </button>
       )}
 
@@ -2384,7 +2408,13 @@ export default function App() {
           <button className="street3d-exit" onClick={exitStreet3D} aria-label="Exit 3D view">
             ✕ Exit 3D
           </button>
-          <Street3DJoystick onRotate={rotateStreet3D} onTilt={tiltStreet3D} />
+          {/* Touch devices get native two-finger rotate/tilt (Google Maps' own gesture
+              handling, unopposed here since nothing's programmatically driving the camera
+              every frame outside follow mode) instead of the on-screen joystick -- matching
+              mobile, which has never had one, always relying on native map gestures.
+              Desktop/mouse users keep the joystick since there's no touch gesture to give
+              them. */}
+          {!IS_TOUCH_DEVICE && <Street3DJoystick onRotate={rotateStreet3D} onTilt={tiltStreet3D} />}
         </>
       )}
 

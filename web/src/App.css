@@ -395,6 +395,12 @@ button:focus-visible {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
   cursor: pointer;
   z-index: 10;
+  /* Centers the inline-SVG icon buttons (LocateIcon/MapOutlineIcon) exactly the way the
+     emoji/text glyph buttons already read as centered -- an SVG needs real flex centering,
+     not just text-align/line-height, to land dead-center rather than a few px off. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .fab-secondary {
