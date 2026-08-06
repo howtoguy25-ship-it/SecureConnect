@@ -66,6 +66,15 @@ export const AlertDetailSheet = forwardRef<BottomSheet, Props>(function AlertDet
               </Pressable>
             </View>
 
+            {/* The reporter's own optional "up to 7 words" comment (see commentFilter.ts) --
+                shown in full here (the map pin's own caption, see AlertMarker, truncates to 2
+                lines at a much smaller size to fit on the map itself). */}
+            {alert.comment && (
+              <View style={styles.commentBox}>
+                <Text style={styles.commentText}>"{alert.comment}"</Text>
+              </View>
+            )}
+
             <Pressable
               style={({ pressed }) => [styles.confirmButton, pressed && { opacity: pressedOpacity }]}
               onPress={() => onConfirmStillHere(alert)}
@@ -142,6 +151,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  commentBox: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  commentText: {
+    fontSize: 13,
+    fontStyle: "italic",
+    color: colors.text,
   },
   confirmButton: {
     flexDirection: "row",

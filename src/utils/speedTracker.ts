@@ -27,11 +27,21 @@ export interface TrackedBox {
   // must label these differently -- see VehicleDetectionScreen's speedLabel.
   speedKind: "absolute" | "closing" | null;
   state: "moving" | "parked";
+  // True for a box re-emitted from a track's grace period below (no fresh detection matched
+  // it THIS frame) rather than a real detection just in -- carries the last real bbox/score
+  // forward unchanged so the on-screen lock doesn't blink off for a single missed frame (a
+  // driver's hand shifting the phone slightly, brief motion blur, momentary occlusion). Purely
+  // informational for callers that want it; the box itself renders identically either way, per
+  // explicit request that this read as one continuous, strong lock, not a flicker.
+  coasting: boolean;
 }
 
 interface InternalTrack {
   id: number;
   bbox: [number, number, number, number];
+  score: number;
+  label: string;
+  confidence?: number;
   // Last time this track had an *actual* detection match -- not touched while a track is
   // being carried forward through its grace period below.
   lastSeenMs: number;
@@ -66,7 +76,25 @@ const RESUME_AFTER_FRAMES = 3;
 // dropped the track immediately and started a brand new one next frame, meaning a fresh (and
 // possibly different) classification attempt for what's actually the same vehicle -- which is
 // what showed up as the same ordinary car flip-flopping between "Police car" and "Vehicle".
-const TRACK_GRACE_MS = 600;
+// Raised from 600ms (2 missed Frame Processor ticks at the 300ms throttle) to 900ms (3 ticks)
+// -- real, confirmed cause of the on-screen box vanishing the instant the phone moved even
+// slightly: a miss here used to drop the track out of `update()`'s own result entirely (see
+// the grace-period loop at the bottom of update() below), not just internally, so the box blinked
+// off-screen and any in-progress plate OCR/lightbar sampling for that vehicle reset to zero
+// (captureForPlateAndLightbar skips its whole cycle whenever there's no tracked box in frame).
+// This alone doesn't fix that -- see the grace-period loop's own comment for the actual fix --
+// but a slightly longer window gives handheld camera shake more real margin to resolve within.
+const TRACK_GRACE_MS = 900;
+// How far (relative to the larger of the incoming detection's and the candidate track's own
+// box size) a detection's center may drift from a track's last known center and still count as
+// the same vehicle. 1.2x (the previous, detection-size-only value) was tight enough that an
+// ordinary handheld shake -- the phone itself moving a few centimeters, not the vehicle -- could
+// shift a distant/small vehicle's on-screen position past it in a single ~300ms tick, spawning a
+// brand new track (and resetting plate-OCR/lightbar progress) instead of continuing the real one
+// that's still there. Widened, and now taking the larger of both boxes' own dimensions (not just
+// the new detection's), so a track doesn't lose its match just because this tick's raw detection
+// box happened to come back smaller/further away than usual.
+const MATCH_DISTANCE_FACTOR = 1.8;
 // How much a tracked box eases toward each new raw detection instead of snapping straight to
 // it -- the underlying detector's box coordinates jitter slightly frame to frame even for a
 // vehicle that isn't really moving relative to the frame, which read as the box not quite
@@ -164,7 +192,6 @@ export function createSpeedTracker() {
 
     for (const det of detections) {
       const [cx, cy] = boxCenter(det.bbox);
-      const maxDist = Math.max(det.bbox[2], det.bbox[3]) * 1.2;
 
       let best: InternalTrack | null = null;
       let bestDist = Infinity;
@@ -172,6 +199,11 @@ export function createSpeedTracker() {
         if (!unmatched.has(t.id)) continue;
         const [tcx, tcy] = boxCenter(t.bbox);
         const d = Math.hypot(cx - tcx, cy - tcy);
+        // See MATCH_DISTANCE_FACTOR's own comment -- the larger of either box's own size, not
+        // just this tick's incoming detection, so a track doesn't lose its match just because
+        // the raw detection happened to come back a different size than the track itself.
+        const maxDist =
+          Math.max(det.bbox[2], det.bbox[3], t.bbox[2], t.bbox[3]) * MATCH_DISTANCE_FACTOR;
         if (d < maxDist && d < bestDist) {
           best = t;
           bestDist = d;
@@ -242,6 +274,9 @@ export function createSpeedTracker() {
         nextTracks.push({
           id: best.id,
           bbox,
+          score: det.score,
+          label: det.label,
+          confidence: det.confidence,
           lastSeenMs: nowMs,
           distanceM,
           speedKmh,
@@ -259,12 +294,16 @@ export function createSpeedTracker() {
           speedKmh: outputSpeedKmh,
           speedKind,
           state,
+          coasting: false,
         });
       } else {
         const id = nextId++;
         nextTracks.push({
           id,
           bbox: det.bbox,
+          score: det.score,
+          label: det.label,
+          confidence: det.confidence,
           lastSeenMs: nowMs,
           distanceM: rawDistanceM,
           speedKmh: null,
@@ -282,17 +321,40 @@ export function createSpeedTracker() {
           speedKmh: null,
           speedKind: null,
           state: "moving",
+          coasting: false,
         });
       }
     }
 
-    // Tracks that weren't matched this frame are kept alive (not shown, since there's no
-    // fresh detection to draw a box for) for a short grace period in case the miss was just
-    // one bad frame, instead of immediately discarding their identity.
+    // Tracks that weren't matched this frame are kept alive for a short grace period in case
+    // the miss was just one bad frame (a partially-visible/edge-of-frame vehicle, or -- the
+    // real, confirmed cause this specifically fixes -- the phone itself moving a little, which
+    // can push a real detection's score or position just far enough that this tick's raw
+    // detections don't include/match it at all). Previously these were kept alive internally
+    // (for matching purposes) but never re-added to `result`, so the on-screen box -- and, since
+    // captureForPlateAndLightbar skips its whole cycle whenever there's no tracked box in frame,
+    // any in-progress plate OCR/lightbar sampling too -- blinked off for the entire grace period
+    // even though the vehicle never actually left view. Re-emitting the track's own last known
+    // bbox/score/label here (coasting: true) keeps the on-screen lock solid through a brief miss
+    // instead of flickering, exactly the "strong, immediate, tolerates a little phone movement"
+    // behavior this was built for -- it only ever holds the LAST REAL detection steady for up to
+    // TRACK_GRACE_MS, never fabricates a new one.
     for (const t of tracks) {
-      if (!matchedIds.has(t.id) && nowMs - t.lastSeenMs < TRACK_GRACE_MS) {
-        nextTracks.push(t);
-      }
+      if (matchedIds.has(t.id)) continue;
+      if (nowMs - t.lastSeenMs >= TRACK_GRACE_MS) continue;
+      nextTracks.push(t);
+      const { speedKmh: outputSpeedKmh, speedKind } = combineWithEgoSpeed(t.speedKmh, t.state, egoSpeedMps);
+      result.push({
+        id: t.id,
+        bbox: t.bbox,
+        score: t.score,
+        label: t.label,
+        confidence: t.confidence,
+        speedKmh: outputSpeedKmh,
+        speedKind,
+        state: t.state,
+        coasting: true,
+      });
     }
 
     tracks = nextTracks;

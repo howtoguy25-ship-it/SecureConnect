@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Modal, Share, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Pressable, Modal, Share, ActivityIndicator, TextInput } from "react-native";
 import MapView, {
   PROVIDER_GOOGLE,
   Polyline,
@@ -71,6 +71,7 @@ import {
   confirmAlert,
 } from "@/services/alerts";
 import { sirenDetection } from "@/services/sirenDetection";
+import { containsBlockedLanguage, clampToWordLimit, MAX_ALERT_COMMENT_WORDS } from "@/utils/commentFilter";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmTrafficData } from "@/services/osmTrafficData";
 import { createLiveShare, updateLiveShare, endLiveShare } from "@/services/liveShare";
 import { setNavigationActive } from "@/services/navState";
@@ -236,6 +237,16 @@ export function MapScreen() {
   // visible disabled/spinner state.
   const submittingAlertRef = useRef(false);
   const [submittingAlert, setSubmittingAlert] = useState(false);
+  // Optional "up to 7 words" comment, per explicit request -- typed while placing the pin
+  // (below), clamped live to the word cap on every keystroke (see commentFilter.ts) and
+  // re-validated for blocked language both here (blocks Set, see confirmAlertPlacement) and
+  // again inside reportAlert itself before it's ever written. Reset on both a successful submit
+  // and Cancel so the next report always starts blank.
+  const [alertComment, setAlertComment] = useState("");
+  const alertCommentBlocked = containsBlockedLanguage(alertComment);
+  const onChangeAlertComment = useCallback((text: string) => {
+    setAlertComment(clampToWordLimit(text));
+  }, []);
 
   // Real "tap a shop, see its info" -- iOS's native MapKit provider here has no onPoiClick
   // event (react-native-maps only fires that on Google Maps/Android), so instead any map tap
@@ -1512,26 +1523,33 @@ export function MapScreen() {
 
   const confirmAlertPlacement = useCallback(async () => {
     if (submittingAlertRef.current) return;
+    // Real enforcement, not just a disabled-looking button -- blocks the actual Firestore write
+    // whenever the typed comment contains a not-allowed word (see commentFilter.ts), same check
+    // reportAlert itself repeats server-side-equivalent (belt and braces, not relying on either
+    // check alone).
+    if (containsBlockedLanguage(alertComment)) return;
     const type = pendingAlertTypeRef.current;
     const location = alertPlacementLatLng;
     if (!type || !location || !user) return;
     submittingAlertRef.current = true;
     setSubmittingAlert(true);
     try {
-      await reportAlert(type, location, user.uid, settings.alertExpiryMs);
+      await reportAlert(type, location, user.uid, settings.alertExpiryMs, alertComment);
       pendingAlertTypeRef.current = null;
       setPlacingAlert(false);
       setAlertPlacementLatLng(null);
+      setAlertComment("");
     } finally {
       submittingAlertRef.current = false;
       setSubmittingAlert(false);
     }
-  }, [alertPlacementLatLng, user, settings.alertExpiryMs]);
+  }, [alertPlacementLatLng, user, settings.alertExpiryMs, alertComment]);
 
   const cancelAlertPlacement = useCallback(() => {
     pendingAlertTypeRef.current = null;
     setPlacingAlert(false);
     setAlertPlacementLatLng(null);
+    setAlertComment("");
   }, []);
 
   // Tilts (or flattens) the camera for the "2 views" alert-placement switcher -- deliberately
@@ -2389,20 +2407,6 @@ export function MapScreen() {
         <Ionicons name="business-outline" size={route ? 17 : 22} color="#FFFFFF" />
       </Pressable>
 
-      <Pressable
-        style={({ pressed }) => [
-          styles.fabSecondary,
-          route && styles.fabSecondaryCompact,
-          { bottom: navFabBaseBottom + (route ? 108 : 210) },
-          mapType === "hybrid" && styles.fabActive,
-          pressed && { opacity: pressedOpacity },
-        ]}
-        onPress={() => setMapType((v) => (v === "standard" ? "hybrid" : "standard"))}
-        accessibilityLabel={mapType === "hybrid" ? "Switch to standard map" : "Switch to satellite map"}
-      >
-        <Ionicons name="map-outline" size={route ? 17 : 22} color="#FFFFFF" />
-      </Pressable>
-
       {/* Permanent recenter button -- always in this stack, on top of the satellite and "+"
           buttons below it, regardless of whether navigation is active. Previously the only
           recenter control was the nav-only pill up top (only ever rendered once
@@ -2423,6 +2427,31 @@ export function MapScreen() {
         </>
       )}
       </View>
+
+      {/* Real satellite selection, available while placing an alert -- previously this button
+          lived inside the FAB cluster above, entirely hidden the moment placingAlert became
+          true (see that cluster's own comment), so there was no way to switch to satellite
+          imagery to place a pin accurately against real ground features (a driveway, a specific
+          building) per explicit request. Pulled out to its own render with the same position it
+          already had in that stack (navFabBaseBottom + 108/210) so nothing shifts for the
+          normal, not-placing-an-alert case -- only now also visible while placingAlert is true.
+          Still hidden behind an open bottom sheet or the destination/route pickers, same as
+          before. */}
+      {!anySheetOpen && !pendingDestination && (
+        <Pressable
+          style={({ pressed }) => [
+            styles.fabSecondary,
+            route && styles.fabSecondaryCompact,
+            { bottom: navFabBaseBottom + (route ? 108 : 210) },
+            mapType === "hybrid" && styles.fabActive,
+            pressed && { opacity: pressedOpacity },
+          ]}
+          onPress={() => setMapType((v) => (v === "standard" ? "hybrid" : "standard"))}
+          accessibilityLabel={mapType === "hybrid" ? "Switch to standard map" : "Switch to satellite map"}
+        >
+          <Ionicons name="map-outline" size={route ? 17 : 22} color="#FFFFFF" />
+        </Pressable>
+      )}
 
       {/* Never shown while navigating -- a driving app shouldn't have anything competing for
           attention with the road/turn instructions, safety concern first and foremost. Also
@@ -2446,6 +2475,30 @@ export function MapScreen() {
       {placingAlert && (
         <View style={[styles.placementBar, { bottom: insets.bottom + spacing.xl }]}>
           <Text style={styles.placementBarText}>Move the map to place the pin</Text>
+          {/* Optional "up to 7 words" comment, per explicit request -- clamped live to that
+              word cap on every keystroke (onChangeAlertComment) so it's never possible to type
+              past it, and re-checked for blocked language here (inline error, blocks Set) as
+              well as again inside reportAlert itself before the write. Shown under the alert
+              itself once posted -- see AlertMarker's own comment bubble and AlertDetailSheet. */}
+          <TextInput
+            value={alertComment}
+            onChangeText={onChangeAlertComment}
+            placeholder="Add a short comment (optional)"
+            placeholderTextColor={colors.textFaint}
+            editable={!submittingAlert}
+            style={[styles.placementCommentInput, alertCommentBlocked && styles.placementCommentInputError]}
+            maxLength={120}
+          />
+          <View style={styles.placementCommentFooter}>
+            {alertCommentBlocked ? (
+              <Text style={styles.placementCommentError}>That wording isn't allowed -- please rephrase.</Text>
+            ) : (
+              <View />
+            )}
+            <Text style={styles.placementCommentCount}>
+              {alertComment.trim() ? alertComment.trim().split(/\s+/).length : 0}/{MAX_ALERT_COMMENT_WORDS} words
+            </Text>
+          </View>
           <View style={styles.placementBarButtons}>
             <Pressable
               style={({ pressed }) => [
@@ -2481,11 +2534,11 @@ export function MapScreen() {
               style={({ pressed }) => [
                 styles.placementButton,
                 styles.placementButtonSet,
-                submittingAlert && styles.placementButtonSetDisabled,
-                pressed && !submittingAlert && { opacity: pressedOpacity },
+                (submittingAlert || alertCommentBlocked) && styles.placementButtonSetDisabled,
+                pressed && !submittingAlert && !alertCommentBlocked && { opacity: pressedOpacity },
               ]}
               onPress={confirmAlertPlacement}
-              disabled={submittingAlert}
+              disabled={submittingAlert || alertCommentBlocked}
               accessibilityLabel="Set alert location"
             >
               {submittingAlert ? (
@@ -2620,26 +2673,55 @@ const styles = StyleSheet.create({
     ...shadow.high,
   },
   placementBar: {
+    // Column, not row -- previously this bar only ever held one line of text and a row of
+    // buttons side by side (space-between). Now stacks: label text, the optional comment field,
+    // its word-count/error footer, then the buttons row, each full-width.
     position: "absolute",
     left: spacing.md,
     right: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
     padding: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.md,
+    gap: spacing.sm,
     ...shadow.high,
   },
   placementBarText: {
-    flex: 1,
     fontSize: 14,
     fontWeight: "600",
     color: colors.text,
   },
+  placementCommentInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 13,
+    color: colors.text,
+    backgroundColor: colors.surfaceMuted,
+  },
+  placementCommentInputError: {
+    borderColor: colors.danger,
+  },
+  placementCommentFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  placementCommentError: {
+    flex: 1,
+    fontSize: 11,
+    color: colors.danger,
+    fontWeight: "600",
+  },
+  placementCommentCount: {
+    fontSize: 11,
+    color: colors.textFaint,
+  },
   placementBarButtons: {
     flexDirection: "row",
+    justifyContent: "flex-end",
     gap: spacing.sm,
   },
   placementButton: {

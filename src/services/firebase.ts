@@ -14,6 +14,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  deleteUser,
   GoogleAuthProvider,
   OAuthProvider,
   EmailAuthProvider,
@@ -154,5 +155,25 @@ export async function signOutUser(): Promise<void> {
   // broken until the next full restart happens to re-trigger ensureSignedIn -- immediately
   // re-establishing a fresh anonymous session here keeps everything else working exactly the
   // way it already did before the user ever signed in.
+  await signInAnonymously(auth);
+}
+
+// Real account deletion (Firebase Auth), per explicit request that this "work" -- not a
+// disguised sign-out. Firebase requires a RECENT sign-in for deleteUser to succeed; a session
+// that's been open a while throws auth/requires-recent-login instead of silently doing nothing,
+// which the caller (SettingsScreen) surfaces by asking the driver to sign out and back in first
+// rather than failing with a raw Firebase error code. This only ever removes the Firebase Auth
+// identity itself -- it does not attempt to delete this uid's past alert reports (no dedicated
+// cleanup path exists for that; they remain exactly as any other expired/eventually-pruned
+// report would) and does not touch App Store/Google Play purchase history, which lives with the
+// platform account, not this one.
+export async function deleteAccount(): Promise<void> {
+  const current = auth.currentUser;
+  if (!current || current.isAnonymous) {
+    throw new Error("No signed-in account to delete.");
+  }
+  await deleteUser(current);
+  // Same reasoning as signOutUser above -- keep the app usable immediately with a fresh
+  // anonymous session instead of leaving it in a signed-out-with-no-session limbo.
   await signInAnonymously(auth);
 }

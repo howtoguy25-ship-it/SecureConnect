@@ -1172,15 +1172,20 @@ const styles = StyleSheet.create({
     position: "absolute",
     borderWidth: 1,
     borderColor: "rgba(245, 158, 11, 0.35)",
+    // Rounded lock outline (a "rounded square," per explicit request) instead of a sharp
+    // rectangle -- the corner brackets below are rounded to match (borderTopLeftRadius etc.)
+    // so they read as one continuous rounded lock frame around the vehicle, not brackets
+    // floating over a square edge.
+    borderRadius: 14,
   },
   corner: {
     position: "absolute",
     borderColor: "#F59E0B",
   },
-  cornerTL: { top: -1, left: -1, borderTopWidth: 3, borderLeftWidth: 3 },
-  cornerTR: { top: -1, right: -1, borderTopWidth: 3, borderRightWidth: 3 },
-  cornerBL: { bottom: -1, left: -1, borderBottomWidth: 3, borderLeftWidth: 3 },
-  cornerBR: { bottom: -1, right: -1, borderBottomWidth: 3, borderRightWidth: 3 },
+  cornerTL: { top: -1, left: -1, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 12 },
+  cornerTR: { top: -1, right: -1, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 12 },
+  cornerBL: { bottom: -1, left: -1, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 12 },
+  cornerBR: { bottom: -1, right: -1, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 12 },
   boxEmergency: {
     borderColor: "#DC2626",
   },

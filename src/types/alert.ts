@@ -11,6 +11,11 @@ export interface AlertDoc {
   expiresAt: number; // ms epoch
   confirmCount: number;
   hiddenBy: string[];
+  // Optional, up to 7 words -- see commentFilter.ts for the word cap and the profanity check
+  // both the client and reportAlert itself enforce before this is ever written. undefined when
+  // the reporter didn't add one (the overwhelming majority of alerts, same as before this
+  // existed) -- never an empty string.
+  comment?: string;
 }
 
 // Speed cameras and traffic lights are community-reported like everything else here —

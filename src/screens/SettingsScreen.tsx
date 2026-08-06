@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable, Modal, TextInput } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable, Modal, TextInput, Alert, ActivityIndicator } from "react-native";
 import Slider from "@react-native-community/slider";
 import Constants from "expo-constants";
 import * as Application from "expo-application";
 import { usePowerState } from "expo-battery";
+import { useIAP } from "react-native-iap";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -11,7 +12,8 @@ import { useSettings } from "@/context/SettingsContext";
 import { useAuth } from "@/context/AuthContext";
 import { syncAlertRadiusToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
-import { signOutUser } from "@/services/firebase";
+import { signOutUser, deleteAccount } from "@/services/firebase";
+import { REV_CHECK_PRODUCT_ID } from "@/services/iap";
 import { BUSINESS_INFO } from "@/config/business";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
 import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
@@ -69,6 +71,81 @@ export function SettingsScreen() {
   // isAnonymous is the real signal for "hasn't actually signed in with an identity yet",
   // not just user being null/non-null.
   const isSignedIn = !!user && !user.isAnonymous;
+
+  // Real account deletion -- see firebase.ts's deleteAccount for exactly what this does and
+  // doesn't remove. Confirmed with a real destructive-action dialog first (Alert.alert), same
+  // as any other irreversible action in this app.
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const onDeleteAccount = useCallback(() => {
+    Alert.alert(
+      "Delete account?",
+      "This permanently deletes your signed-in account. This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingAccount(true);
+            try {
+              await deleteAccount();
+            } catch (err) {
+              const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
+              Alert.alert(
+                "Couldn't delete account",
+                code === "auth/requires-recent-login"
+                  ? "For your security, sign out and sign back in, then try deleting your account again right away."
+                  : "Something went wrong -- check your connection and try again."
+              );
+            } finally {
+              setDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
+  // Real "Restore Purchases" -- required by App Store review whenever an app has any IAP, even
+  // though the app's one product (a REV check, see iap.ts) is a Consumable, which Apple's own
+  // restore mechanism doesn't restore by design (a consumable is meant to be used once, not
+  // re-granted). getAvailablePurchases still surfaces one real, useful case for a consumable
+  // though: a purchase that was PAID for but never finished/consumed (see RevCheckScreen's own
+  // pendingPurchaseRef -- e.g. the app was killed right after payment, before a check result
+  // could be delivered) shows up here as an unfinished transaction. Tapping this can't finish
+  // that purchase itself (finishing it requires actually running the check it paid for, which
+  // needs the VIN, only entered on RevCheckScreen) -- it just gives an honest answer either way
+  // instead of a button that silently does nothing for the one real IAP this app has.
+  const [restoringPurchases, setRestoringPurchases] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
+  const restoreRequestedRef = useRef(false);
+  const { getAvailablePurchases, availablePurchases } = useIAP({
+    onError: () => {
+      if (!restoreRequestedRef.current) return;
+      restoreRequestedRef.current = false;
+      setRestoringPurchases(false);
+      setRestoreMessage("Couldn't check for purchases -- check your connection and try again.");
+    },
+  });
+  useEffect(() => {
+    if (!restoreRequestedRef.current) return;
+    restoreRequestedRef.current = false;
+    setRestoringPurchases(false);
+    const hasPendingRevCheck = availablePurchases.some((p) => p.productId === REV_CHECK_PRODUCT_ID);
+    setRestoreMessage(
+      hasPendingRevCheck
+        ? "Found a paid REV check that wasn't completed -- open Vehicle REV Check and run a check with the same VIN to finish it, free."
+        : "No purchases to restore."
+    );
+  }, [availablePurchases]);
+  const onRestorePurchases = useCallback(() => {
+    setRestoringPurchases(true);
+    setRestoreMessage(null);
+    restoreRequestedRef.current = true;
+    getAvailablePurchases().catch(() => {
+      // onError above already handles the user-facing message for this.
+    });
+  }, [getAvailablePurchases]);
 
   const onRadiusChange = useCallback(
     async (value: number) => {
@@ -210,6 +287,18 @@ export function SettingsScreen() {
             >
               <Text style={styles.signOutButtonText}>Sign out</Text>
             </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.deleteAccountButton, pressed && { opacity: pressedOpacity }]}
+              onPress={onDeleteAccount}
+              disabled={deletingAccount}
+              accessibilityLabel="Delete account"
+            >
+              {deletingAccount ? (
+                <ActivityIndicator size="small" color={colors.danger} />
+              ) : (
+                <Text style={styles.deleteAccountButtonText}>Delete account</Text>
+              )}
+            </Pressable>
           </>
         ) : (
           <>
@@ -225,6 +314,25 @@ export function SettingsScreen() {
             </Pressable>
           </>
         )}
+      </Section>
+
+      <Section title="Purchases">
+        <Text style={styles.helperText}>
+          Restore any in-app purchase tied to your App Store / Google account on this device.
+        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.signOutButton, pressed && { opacity: pressedOpacity }]}
+          onPress={onRestorePurchases}
+          disabled={restoringPurchases}
+          accessibilityLabel="Restore purchases"
+        >
+          {restoringPurchases ? (
+            <ActivityIndicator size="small" color={colors.text} />
+          ) : (
+            <Text style={styles.restorePurchasesButtonText}>Restore purchases</Text>
+          )}
+        </Pressable>
+        {restoreMessage && <Text style={styles.helperText}>{restoreMessage}</Text>}
       </Section>
 
       <Section title="Live alerts">
@@ -821,6 +929,20 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontWeight: "700",
     fontSize: 14,
+  },
+  restorePurchasesButtonText: {
+    color: colors.text,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  deleteAccountButton: {
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+  },
+  deleteAccountButtonText: {
+    color: colors.danger,
+    fontWeight: "600",
+    fontSize: 13,
   },
   themeGrid: {
     flexDirection: "row",

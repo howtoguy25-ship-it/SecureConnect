@@ -17,6 +17,7 @@ import {
 import { db } from "@/services/firebase";
 import { encodeGeohash, geohashQueryBounds, distanceKm } from "@/utils/geo";
 import { ALERT_TTL_MS, type AlertDoc, type AlertType } from "@/types/alert";
+import { containsBlockedLanguage, clampToWordLimit } from "@/utils/commentFilter";
 
 const ALERTS_COLLECTION = "alerts";
 
@@ -41,6 +42,7 @@ function toAlertDoc(id: string, data: any): AlertDoc {
     expiresAt: data.expiresAt instanceof Timestamp ? data.expiresAt.toMillis() : data.expiresAt,
     confirmCount: data.confirmCount ?? 0,
     hiddenBy: data.hiddenBy ?? [],
+    comment: typeof data.comment === "string" && data.comment.length > 0 ? data.comment : undefined,
   };
 }
 
@@ -50,11 +52,23 @@ export async function reportAlert(
   uid: string,
   // Real per-user override (Settings' "Alert lifetime") -- null/undefined keeps the existing
   // per-type default (ALERT_TTL_MS), same behavior as before this setting existed.
-  customTtlMs?: number | null
+  customTtlMs?: number | null,
+  // Optional, up to 7 words, per explicit request -- re-clamped and re-checked against the
+  // profanity list here too (not just in the placement bar's own live validation), so a comment
+  // can never reach Firestore over the word limit or containing a not-allowed word no matter
+  // what path got it here. A comment that still contains blocked language after clamping is
+  // dropped entirely (undefined) rather than silently saved -- this app has no server-side
+  // moderation, so refusing to write it at all is the only real enforcement available.
+  comment?: string | null
 ): Promise<string> {
   const now = Date.now();
   const geohash = encodeGeohash(location.latitude, location.longitude, 9);
   const ttlMs = customTtlMs ?? ALERT_TTL_MS[type];
+  const trimmedComment = comment?.trim();
+  const safeComment =
+    trimmedComment && !containsBlockedLanguage(trimmedComment)
+      ? clampToWordLimit(trimmedComment)
+      : undefined;
 
   const ref = await addDoc(collection(db, ALERTS_COLLECTION), {
     type,
@@ -66,6 +80,7 @@ export async function reportAlert(
     expiresAt: Timestamp.fromMillis(now + ttlMs),
     confirmCount: 0,
     hiddenBy: [],
+    ...(safeComment ? { comment: safeComment } : {}),
   });
 
   return ref.id;
