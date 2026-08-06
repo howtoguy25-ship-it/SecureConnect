@@ -1,0 +1,46 @@
+# EAS build/submit always archives starting from the git repository root (this file's
+# location), never just the subfolder you ran the command from -- see
+# https://docs.expo.dev/build-reference/easignore/. Neither TrackLine (this root) nor
+# SiteSpark (site-builder/) is its own separate git repo, so every eas build/submit run
+# for either app uploads BOTH apps' files unless this file trims it down.
+#
+# IMPORTANT: once an .easignore file exists, EAS stops reading .gitignore entirely for
+# archiving purposes, so every exclusion below is copied in from the .gitignore files at
+# repo root, web/, and site-builder/ (nothing here is new/riskier than what git already
+# keeps out of version control) -- plus one addition at the very end.
+
+node_modules/
+.expo/
+dist/
+web-build/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+.DS_Store
+*.log
+.env
+.env.local
+*.tsbuildinfo
+/android/
+/ios/
+site-builder/ios/
+site-builder/android/
+.metro-health-check*
+firebase-debug.log
+firestore-debug.log
+functions/node_modules/
+functions/lib/
+site-builder/firebase/functions/node_modules/
+site-builder/firebase/functions/lib/
+.git/
+
+# TrackLine's offline model-training scripts + ~9MB of training artifacts (Python +
+# checkpoints) -- used once, by hand, to produce the small TFJS model that's actually
+# bundled at assets/models/vehicle-classifier/. Never imported by either app's runtime
+# code, so every build/submit in this repo (TrackLine's own included) can safely skip
+# uploading it.
+training/
