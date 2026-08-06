@@ -28,9 +28,6 @@ export const MANEUVER_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 interface Props {
   step: RouteStep | null;
-  etaText: string;
-  arrivalClockText: string;
-  distanceRemainingText: string;
   // The road the driver is ON right now (from the same OSM lookup the speed limit uses) --
   // distinct from `step.instruction`'s "turn onto X", which is the NEXT road. Null until a
   // real lookup resolves one (never a guess).
@@ -38,46 +35,26 @@ interface Props {
   speedLimitKmh: number | null;
   themeKey: NavCardThemeKey;
   onExit: () => void;
-  onShareEta: () => void;
   // Opens the full turn-by-turn directions list -- the whole icon+text area is tappable for
-  // this (a bigger, easier target than a small dedicated button would be), while the actions
-  // row/exit keep their own separate buttons so they're never accidentally triggered by the
-  // same tap.
+  // this (a bigger, easier target than a small dedicated button would be), while the exit
+  // button keeps its own separate target so it's never accidentally triggered by the same tap.
   onExpandDirections: () => void;
-  // Real mid-trip add-a-stop -- same handlers MapScreen's own add-stop search bar and stop
-  // state already use; this just gives them a second, more discoverable entry point matching
-  // the old nav card layout, not new logic. hasStop toggles the label/icon to "Remove Stop"
-  // once a mid-trip stop is actually active.
-  onAddStop: () => void;
-  onRemoveStop: () => void;
-  hasStop: boolean;
-  onReportAlert: () => void;
-  onOpenDetection: () => void;
-  // Reports the card's real rendered height (instruction text can wrap to 2 lines, meta text
-  // can wrap too) so callers positioning other controls below it -- see MapScreen's
-  // topRightControls -- can react to the actual height instead of guessing a fixed number.
-  // A guessed constant meant the button column below could end up overlapping the bottom of a
-  // taller (longer-instruction) card, which is exactly what made those buttons intermittently
-  // miss taps depending on which instruction happened to be showing.
+  // Reports the card's real rendered height (instruction text can wrap to 2 lines) so callers
+  // positioning other controls below it -- see MapScreen's topRightControls -- can react to
+  // the actual height instead of guessing a fixed number. A guessed constant meant the button
+  // column below could end up overlapping the bottom of a taller (longer-instruction) card,
+  // which is exactly what made those buttons intermittently miss taps depending on which
+  // instruction happened to be showing.
   onHeightChange?: (height: number) => void;
 }
 
 export function NavigationInstructionCard({
   step,
-  etaText,
-  arrivalClockText,
-  distanceRemainingText,
   roadName,
   speedLimitKmh,
   themeKey,
   onExit,
-  onShareEta,
   onExpandDirections,
-  onAddStop,
-  onRemoveStop,
-  hasStop,
-  onReportAlert,
-  onOpenDetection,
   onHeightChange,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -112,11 +89,10 @@ export function NavigationInstructionCard({
   }, [step, translateY, opacity]);
 
   // Real collapse toggle -- tapping the chevron drops this down to just the icon + a single
-  // line of instruction text (plus the road/speed row below, still live), hiding the actions
-  // row and End navigation button entirely, so a driver who wants to see more of the actual
-  // route/map underneath can do that without losing turn guidance altogether. Defaults open
-  // (matches the card's previous always-expanded behavior) -- this is an opt-in "give me more
-  // screen" action, not a new default.
+  // line of instruction text (plus the road/speed row below, still live), so a driver who
+  // wants to see more of the actual route/map underneath can do that without losing turn
+  // guidance altogether. Defaults open (matches the card's previous always-expanded behavior)
+  // -- this is an opt-in "give me more screen" action, not a new default.
   const [collapsed, setCollapsed] = useState(false);
 
   // Real background-transparency toggle -- the small circle button in the header. Off (normal)
@@ -167,8 +143,7 @@ export function NavigationInstructionCard({
               </Text>
               {!collapsed && (
                 <Text style={[styles.meta, { color: theme.textSecondary }, textShadow]}>
-                  {(step.distanceMeters / 1000).toFixed(1)} km · ETA {etaText} (arrives {arrivalClockText}) ·{" "}
-                  {distanceRemainingText} left
+                  {(step.distanceMeters / 1000).toFixed(1)} km
                 </Text>
               )}
             </View>
@@ -230,75 +205,7 @@ export function NavigationInstructionCard({
         </View>
       )}
 
-      {!collapsed && (
-        <>
-          {/* Real actions -- same handlers MapScreen's own scattered add-stop/report/detection
-              entry points already use, just surfaced together here too, matching the app's
-              original nav card layout. Report gets its own hazard-triangle styling (filled
-              orange badge) instead of the shared translucent background every other action
-              uses, so it reads as the one safety-critical action in the row. */}
-          <View style={styles.actionsRow}>
-            <NavAction
-              icon={hasStop ? "close-circle-outline" : "add-circle-outline"}
-              label={hasStop ? "Remove Stop" : "Add Stop"}
-              onPress={hasStop ? onRemoveStop : onAddStop}
-              bg={theme.actionBg}
-              color={theme.actionText}
-            />
-            <NavAction icon="share-outline" label="Share ETA" onPress={onShareEta} bg={theme.actionBg} color={theme.actionText} />
-            <NavAction
-              icon="warning"
-              label="Report"
-              onPress={onReportAlert}
-              bg="#F59E0B"
-              color="#111827"
-            />
-            <NavAction
-              icon="videocam-outline"
-              label="AI Detection"
-              onPress={onOpenDetection}
-              bg={theme.actionBg}
-              color={theme.actionText}
-            />
-          </View>
-
-          <Pressable
-            onPress={onExit}
-            style={({ pressed }) => [styles.endNavButton, pressed && { opacity: pressedOpacity }]}
-            accessibilityLabel="End navigation"
-          >
-            <Text style={styles.endNavButtonText}>End navigation</Text>
-          </Pressable>
-        </>
-      )}
     </View>
-  );
-}
-
-function NavAction({
-  icon,
-  label,
-  onPress,
-  bg,
-  color,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
-  bg: string;
-  color: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.navAction, { backgroundColor: bg }, pressed && { opacity: pressedOpacity }]}
-      accessibilityLabel={label}
-    >
-      <Ionicons name={icon} size={20} color={color} />
-      <Text style={[styles.navActionLabel, { color }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -312,8 +219,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm + 2,
     ...shadow.medium,
   },
-  // Collapsed state shrinks padding further -- with the actions row/End navigation button
-  // both gone (see the render call site), the card is just the header + road/speed row's own
+  // Collapsed state shrinks padding further -- with the meta line gone too (see the header
+  // render above), the card is just the icon + single instruction line + road/speed row's own
   // height plus this trimmed padding, real screen space back for the map/route underneath.
   cardCollapsed: {
     padding: spacing.sm + 2,
@@ -384,32 +291,5 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-  },
-  actionsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  navAction: {
-    flex: 1,
-    alignItems: "center",
-    gap: 4,
-    paddingVertical: spacing.xs + 2,
-    marginHorizontal: 2,
-    borderRadius: radius.md,
-  },
-  navActionLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  endNavButton: {
-    backgroundColor: "#DC2626",
-    borderRadius: radius.md,
-    paddingVertical: spacing.md - 2,
-    alignItems: "center",
-  },
-  endNavButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 15,
   },
 });

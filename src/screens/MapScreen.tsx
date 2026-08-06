@@ -27,6 +27,8 @@ import { useSettings } from "@/context/SettingsContext";
 import { MuteButton } from "@/components/MuteButton";
 import { DestinationSearchBar } from "@/components/DestinationSearchBar";
 import { NavigationInstructionCard } from "@/components/NavigationInstructionCard";
+import { NavBottomBar } from "@/components/NavBottomBar";
+import { NavOptionsSheet } from "@/screens/NavOptionsSheet";
 import { RouteDirectionsSheet } from "@/screens/RouteDirectionsSheet";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { AlertMarker } from "@/components/AlertMarker";
@@ -94,6 +96,7 @@ export function MapScreen() {
   const placeInfoSheetRef = useRef<BottomSheet>(null);
   const osmMarkerSheetRef = useRef<BottomSheet>(null);
   const directionsSheetRef = useRef<BottomSheet>(null);
+  const navOptionsSheetRef = useRef<BottomSheet>(null);
 
   const [route, setRoute] = useState<Route | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -116,6 +119,10 @@ export function MapScreen() {
   // instead of a fixed guess, so the previewed route never ends up partly hidden behind the
   // card. 320 is a reasonable fallback for the one frame before the first real measurement.
   const [routeCardHeight, setRouteCardHeight] = useState(320);
+  // Same measured-height pattern again, for the new bottom trip bar (NavBottomBar) -- the FAB
+  // column's bottom offset (see its render call site) adds this so the two never overlap. 76
+  // is a reasonable fallback for the one frame before the first real measurement lands.
+  const [bottomBarHeight, setBottomBarHeight] = useState(76);
   const guidanceRef = useRef(createGuidanceState());
   // True only while a fresh route is actively being fetched after drifting off the current one
   // -- drives the small "Rerouting..." banner below.
@@ -167,6 +174,12 @@ export function MapScreen() {
 
   const [bannerVisible, setBannerVisible] = useState(false);
   const [placingAlert, setPlacingAlert] = useState(false);
+  // Real "set incidents from 2 views" toggle, only offered while reporting during active
+  // navigation -- pitches the camera to a front/driving perspective at whatever spot the user
+  // has already panned to (see togglePlacementFrontView below), for easier placement of a
+  // location just passed. Deliberately resets to false whenever placement starts/ends so it
+  // never carries a stale tilt into the next report.
+  const [placementFrontView, setPlacementFrontView] = useState(false);
   // Tracks whether either alert sheet is actually open (not just mounted -- both are always
   // mounted, controlled via ref) so the FAB column below can hide itself while a sheet
   // covers most of the screen -- previously the FABs stayed rendered at their normal
@@ -177,8 +190,14 @@ export function MapScreen() {
   const [placeInfoSheetOpen, setPlaceInfoSheetOpen] = useState(false);
   const [directionsSheetOpen, setDirectionsSheetOpen] = useState(false);
   const [osmMarkerSheetOpen, setOsmMarkerSheetOpen] = useState(false);
+  const [navOptionsSheetOpen, setNavOptionsSheetOpen] = useState(false);
   const anySheetOpen =
-    reportSheetOpen || detailSheetOpen || placeInfoSheetOpen || osmMarkerSheetOpen || directionsSheetOpen;
+    reportSheetOpen ||
+    detailSheetOpen ||
+    placeInfoSheetOpen ||
+    osmMarkerSheetOpen ||
+    directionsSheetOpen ||
+    navOptionsSheetOpen;
   const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
 
   // Real "tap a shop, see its info" -- iOS's native MapKit provider here has no onPoiClick
@@ -258,12 +277,15 @@ export function MapScreen() {
   // itself. Unlike the X/Recenter pair (which fully drops out of following on manual pan or
   // tap), both states here keep the camera actively tracking live position/heading -- this is
   // the small circle toggle button's own state, not an "exit follow" action.
-  const [overviewMode, setOverviewMode] = useState(false);
+  // Defaults true -- "the natural set view for starting navigation" is the pulled-back
+  // overview, not the tight chase-cam; the tight pose is now the opt-in ("original") one,
+  // reached via the locate button's double-tap (see onLocateButtonPress below).
+  const [overviewMode, setOverviewMode] = useState(true);
   useEffect(() => {
     // Exiting follow entirely (manual pan, or the X button) always resets this back to the
-    // tight pose for next time -- resuming follow (Recenter) shouldn't silently land back in
-    // overview from a previous session.
-    if (!followTilt) setOverviewMode(false);
+    // default overview pose for next time -- resuming follow (Recenter) shouldn't silently
+    // land back in the tight view from a previous session.
+    if (!followTilt) setOverviewMode(true);
   }, [followTilt]);
 
   const currentLatLng = useMemo(
@@ -490,8 +512,17 @@ export function MapScreen() {
     // case, not the "user tapped the line" one.
     if (Date.now() - navStartedAtRef.current < 1200) return;
     chaseCamAppliedRef.current = true;
-    mapRef.current?.animateCamera({ center: currentLatLng, heading, pitch: 60, zoom: 18 }, { duration: 700 });
-  }, [route, followTilt, detectionOpen, currentLatLng, heading]);
+    // overviewMode defaults true -- see its own comment -- so a fresh nav session lands on the
+    // pulled-back pose by default; the tight pose only applies here if the driver had already
+    // switched to it (double-tapping the locate button) before this fires, e.g. resuming follow
+    // after a manual pan while already in the tight view.
+    mapRef.current?.animateCamera(
+      overviewMode
+        ? { center: currentLatLng, heading, pitch: 45, zoom: 15 }
+        : { center: currentLatLng, heading, pitch: 60, zoom: 18 },
+      { duration: 700 }
+    );
+  }, [route, followTilt, detectionOpen, currentLatLng, heading, overviewMode]);
 
   const toggleFollowTilt = useCallback(() => {
     setFollowTilt((was) => {
@@ -547,27 +578,55 @@ export function MapScreen() {
     }
   }, [currentLatLng, heading]);
 
-  // The small circle toggle button in topRightControls -- unlike toggleFollowTilt/onRecenter
-  // above (which fully drop out of following, freezing the camera where it is until Recenter
-  // is tapped again), this keeps the camera actively tracking live position/heading the whole
-  // time; it only ever changes how pulled-back/tilted the view is. Reuses the exact same
-  // pulled-back pose enterOverviewMode (tapping the route line) already uses, so both paths
-  // into "overview" land on the same camera position -- and the same tight pose the default
-  // chase-cam effect applies for the way back.
-  const toggleOverviewMode = useCallback(() => {
-    if (!currentLatLng || !followTilt) return;
-    setOverviewMode((was) => {
-      const next = !was;
+  // The actual camera-height swap between the pulled-back "overview" pose and the tight
+  // "original" pose -- used by the locate button's double-tap handler below. Reuses the exact
+  // same two poses the default-apply effect above and enterOverviewMode (tapping the route
+  // line) already use, so every path into either height lands on the same camera position.
+  const applyOverviewPose = useCallback(
+    (nextOverview: boolean) => {
+      if (!currentLatLng) return;
       chaseCamAppliedRef.current = true;
+      setOverviewMode(nextOverview);
       mapRef.current?.animateCamera(
-        next
+        nextOverview
           ? { center: currentLatLng, heading, pitch: 45, zoom: 15 }
           : { center: currentLatLng, heading, pitch: 60, zoom: 18 },
         { duration: 500 }
       );
-      return next;
-    });
-  }, [currentLatLng, heading, followTilt]);
+    },
+    [currentLatLng, heading]
+  );
+
+  // Double tap on the locate/recenter button switches camera HEIGHT (overview <-> the
+  // "original" tight pose); a single tap just recenters, matching the explicit ask: "if
+  // clicked twice it goes to original height map view and if clicked again once it re
+  // centers". RN's Pressable has no built-in double-tap, so this is a real wait-and-see: a 2nd
+  // press within RECENTER_DOUBLE_TAP_MS cancels the pending single-tap recenter and does the
+  // height swap instead. The height swap also resumes follow first if a manual pan had dropped
+  // out of it -- double-tapping the location button clearly means "put me back AND change the
+  // view", not "do nothing because I'd panned away a moment ago".
+  const RECENTER_DOUBLE_TAP_MS = 280;
+  const recenterTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (recenterTapTimerRef.current) clearTimeout(recenterTapTimerRef.current);
+    };
+  }, []);
+  const onLocateButtonPress = useCallback(() => {
+    if (recenterTapTimerRef.current) {
+      clearTimeout(recenterTapTimerRef.current);
+      recenterTapTimerRef.current = null;
+      if (route) {
+        if (!followTilt) setFollowTilt(true);
+        applyOverviewPose(!overviewMode);
+      }
+      return;
+    }
+    recenterTapTimerRef.current = setTimeout(() => {
+      recenterTapTimerRef.current = null;
+      onRecenter();
+    }, RECENTER_DOUBLE_TAP_MS);
+  }, [route, followTilt, overviewMode, applyOverviewPose, onRecenter]);
 
   // Apple/Google Maps' own convention: a manual pan/tilt/rotate gesture drops the camera out of
   // auto-follow instead of being fought by it. Without this, the close-follow effect above
@@ -1056,33 +1115,55 @@ export function MapScreen() {
   // the route through that stop the same way the off-route auto-reroute effect above does,
   // without leaving/re-entering navigation.
   const [addingStopDuringNav, setAddingStopDuringNav] = useState(false);
+  // Real preview step, per explicit request -- picking a place no longer applies the reroute
+  // immediately; it computes the route through that stop and holds it here so it can be drawn
+  // green (see the Polyline render below) alongside the still-live blue route, with a
+  // back/confirm bar to either commit it (confirmStopPreview) or cancel back to plain live
+  // navigation (cancelStopPreview) with nothing changed.
+  const [stopPreviewRoute, setStopPreviewRoute] = useState<Route | null>(null);
+  const [stopPreviewPlace, setStopPreviewPlace] = useState<PlaceDetails | null>(null);
   const onStopSelectedDuringNav = useCallback(
     async (place: PlaceDetails) => {
       setAddingStopDuringNav(false);
       if (!currentLatLng || !destinationLatLng) return;
-      setStopLocation(place.location);
       setRerouting(true);
       try {
-        const fresh =
+        const preview =
           travelMode === "driving"
             ? (await getRouteOptions(currentLatLng, destinationLatLng, place.location))[selectedProfile]
             : await getDirectionsForMode(currentLatLng, destinationLatLng, travelMode, place.location);
-        guidanceRef.current = createGuidanceState();
-        setActiveStepIndex(0);
-        setRoute(fresh);
-        mapRef.current?.fitToCoordinates(fresh.polyline, {
-          edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
+        setStopPreviewPlace(place);
+        setStopPreviewRoute(preview);
+        mapRef.current?.fitToCoordinates(preview.polyline, {
+          edgePadding: { top: 120, right: 60, bottom: 220, left: 60 },
           animated: true,
         });
       } catch (err) {
-        console.warn("[map] add stop during nav failed", err);
-        Sentry.logger.error("map: add stop during nav failed", { error: String(err) });
+        console.warn("[map] add stop preview failed", err);
+        Sentry.logger.error("map: add stop preview failed", { error: String(err) });
       } finally {
         setRerouting(false);
       }
     },
     [currentLatLng, destinationLatLng, travelMode, selectedProfile]
   );
+
+  const confirmStopPreview = useCallback(() => {
+    if (!stopPreviewRoute || !stopPreviewPlace) return;
+    guidanceRef.current = createGuidanceState();
+    setActiveStepIndex(0);
+    setStopLocation(stopPreviewPlace.location);
+    setRoute(stopPreviewRoute);
+    setStopPreviewRoute(null);
+    setStopPreviewPlace(null);
+  }, [stopPreviewRoute, stopPreviewPlace]);
+
+  // The "back" button, per explicit request -- discards the preview and returns to using
+  // navigation exactly as it was, live route/puck/turn card untouched throughout.
+  const cancelStopPreview = useCallback(() => {
+    setStopPreviewRoute(null);
+    setStopPreviewPlace(null);
+  }, []);
 
   // Real removal of a mid-trip stop -- clears stopLocation and recomputes the route straight
   // to the original destination, the same real fetch this screen already does for adding one,
@@ -1229,6 +1310,19 @@ export function MapScreen() {
     reportSheetRef.current?.expand();
   }, []);
 
+  // The new "..." options sheet's own rows (see NavOptionsSheet) -- each just closes that
+  // sheet first, then hands off to the exact same handler the old actions row used, no new
+  // underlying logic.
+  const onNavOptionsReportAlert = useCallback(() => {
+    navOptionsSheetRef.current?.close();
+    openAlertTypePicker();
+  }, [openAlertTypePicker]);
+  const onNavOptionsOpenDetection = useCallback(() => {
+    navOptionsSheetRef.current?.close();
+    Sentry.logger.info("map: opening vehicle detection screen");
+    setDetectionOpen(true);
+  }, []);
+
   const onAlertTypeSelected = useCallback(
     (type: AlertType) => {
       if (!currentLatLng) return;
@@ -1262,6 +1356,45 @@ export function MapScreen() {
     setAlertPlacementLatLng(null);
   }, []);
 
+  // Tilts (or flattens) the camera for the "2 views" alert-placement switcher -- deliberately
+  // omits `center` from animateCamera (only pitch/heading are given) so the fixed-center pin's
+  // actual target location, wherever the user has panned the map to, never moves. Re-centering
+  // here would silently discard a careful manual pan back onto a spot the driver just passed,
+  // which is the exact case this switch-view button exists to make easier.
+  const togglePlacementFrontView = useCallback(() => {
+    setPlacementFrontView((was) => {
+      const next = !was;
+      mapRef.current?.animateCamera(
+        next ? { pitch: 60, heading } : { pitch: 0, heading: 0 },
+        { duration: 400 }
+      );
+      return next;
+    });
+  }, [heading]);
+
+  // Restores the proper nav camera pose (based on overviewMode) once placement ends -- without
+  // this, canceling/confirming an alert reported from the front-view switch would leave the
+  // camera stuck tilted at pitch 60 with no heading tracking, since the per-tick follow effect
+  // deliberately never touches pitch (see its own comment) and nothing else would ever put it
+  // back. Only actually animates if the switcher was used -- the common case of never touching
+  // it shouldn't cost an extra camera jog against an already-correct chase-cam pose.
+  useEffect(() => {
+    if (placingAlert) return;
+    if (placementFrontView && route && followTilt && currentLatLng) {
+      mapRef.current?.animateCamera(
+        overviewMode
+          ? { center: currentLatLng, heading, pitch: 45, zoom: 15 }
+          : { center: currentLatLng, heading, pitch: 60, zoom: 18 },
+        { duration: 400 }
+      );
+    }
+    setPlacementFrontView(false);
+    // Deliberately scoped to only the placingAlert transition -- route/followTilt/currentLatLng
+    // /overviewMode/heading are read for their value at that moment, not meant to re-trigger
+    // this restore every time any of them changes independently while still placing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placingAlert]);
+
   const onMarkerPress = useCallback((alert: AlertDoc) => {
     setSelectedAlert(alert);
     detailSheetRef.current?.expand();
@@ -1281,6 +1414,11 @@ export function MapScreen() {
   const onConfirmStillHere = useCallback(async (alert: AlertDoc) => {
     await confirmAlert(alert.id);
   }, []);
+
+  // The right-edge FAB stack's base offset -- during navigation this leaves real room below it
+  // for the new bottom trip bar (NavBottomBar), using its actual measured height instead of a
+  // guessed constant (same reasoning as instructionCardHeight/routeCardHeight above).
+  const navFabBaseBottom = insets.bottom + 24 + (route ? bottomBarHeight + spacing.sm : 0);
 
   const activeStep = route?.steps[activeStepIndex] ?? null;
   // Real "you've arrived at the stop" detection for a transit trip -- scoped to the FIRST
@@ -1380,6 +1518,15 @@ export function MapScreen() {
       console.warn("[map] share ETA failed", err);
     }
   }, [route, currentLatLng, arrivalClockText, heading, user]);
+
+  const onNavOptionsShareEta = useCallback(() => {
+    navOptionsSheetRef.current?.close();
+    shareEta();
+  }, [shareEta]);
+  const onNavOptionsEndNavigation = useCallback(() => {
+    navOptionsSheetRef.current?.close();
+    exitNavigation();
+  }, [exitNavigation]);
 
   // Keeps the live share doc (if one was ever started for this trip) fresh while navigating --
   // 12s matches the cadence other live-position writes in this app use as a reasonable
@@ -1481,6 +1628,13 @@ export function MapScreen() {
             tappable
             onPress={enterOverviewMode}
           />
+        )}
+        {/* Real mid-trip add-a-stop preview, per explicit request: the route through the new
+            stop draws in green, right alongside the still-live blue route above -- a genuine
+            side-by-side comparison, not a replacement, until confirmStopPreview actually
+            commits it (see the confirm/back bar below). */}
+        {stopPreviewRoute && (
+          <Polyline coordinates={stopPreviewRoute.polyline} strokeWidth={7} strokeColor="#22C55E" />
         )}
         {/* Live device-compass "flashlight" cone -- separate from the route arrow below and
             rotated by deviceHeading (magnetometer), not travel heading, so it visually shows
@@ -1717,24 +1871,31 @@ export function MapScreen() {
       {route && (
         <NavigationInstructionCard
           step={activeStep}
-          etaText={route.etaText}
-          arrivalClockText={arrivalClockText}
-          distanceRemainingText={`${(remainingDistanceMeters / 1000).toFixed(1)} km`}
           roadName={currentRoadName}
           speedLimitKmh={speedLimitKmh}
           themeKey={settings.navCardTheme}
           onExit={exitNavigation}
-          onShareEta={shareEta}
           onExpandDirections={() => directionsSheetRef.current?.expand()}
+          onHeightChange={setInstructionCardHeight}
+        />
+      )}
+
+      {/* Waze/Google-Maps-style bottom trip bar -- ETA/arrival/distance + road name, Add Stop,
+          and the "..." options menu (Report/Share ETA/AI Detection/End -- see NavOptionsSheet).
+          Hidden while the add-stop search or its green preview is up (both render their own
+          bottom bar/confirm bar in this same screen region) to avoid stacking two bars. */}
+      {route && !addingStopDuringNav && !stopPreviewRoute && (
+        <NavBottomBar
+          etaText={route.etaText}
+          arrivalClockText={arrivalClockText}
+          distanceRemainingText={`${(remainingDistanceMeters / 1000).toFixed(1)} km`}
+          roadName={currentRoadName}
+          themeKey={settings.navCardTheme}
+          hasStop={!!stopLocation}
           onAddStop={() => setAddingStopDuringNav(true)}
           onRemoveStop={removeStopDuringNav}
-          hasStop={!!stopLocation}
-          onReportAlert={openAlertTypePicker}
-          onOpenDetection={() => {
-            Sentry.logger.info("map: opening vehicle detection screen");
-            setDetectionOpen(true);
-          }}
-          onHeightChange={setInstructionCardHeight}
+          onOptions={() => navOptionsSheetRef.current?.expand()}
+          onHeightChange={setBottomBarHeight}
         />
       )}
 
@@ -1749,6 +1910,39 @@ export function MapScreen() {
           placeholder="Add a stop on the way"
           onCancel={() => setAddingStopDuringNav(false)}
         />
+      )}
+
+      {/* Confirm/back bar for the green add-stop preview above -- Back discards it and returns
+          to live navigation exactly as it was; Add Stop actually commits the reroute. */}
+      {stopPreviewRoute && (
+        <View style={[styles.placementBar, { bottom: insets.bottom + spacing.xl }]}>
+          <Text style={styles.placementBarText}>Add this stop to your route?</Text>
+          <View style={styles.placementBarButtons}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.placementButton,
+                styles.placementButtonRemove,
+                pressed && { opacity: pressedOpacity },
+              ]}
+              onPress={cancelStopPreview}
+              accessibilityLabel="Back -- cancel adding this stop"
+            >
+              <Ionicons name="arrow-back" size={20} color={colors.text} />
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.placementButton,
+                styles.placementButtonSet,
+                pressed && { opacity: pressedOpacity },
+              ]}
+              onPress={confirmStopPreview}
+              accessibilityLabel="Confirm add stop"
+            >
+              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+              <Text style={styles.placementButtonSetText}>Add Stop</Text>
+            </Pressable>
+          </View>
+        </View>
       )}
 
       {/* Off-route auto-reroute is silent otherwise -- a fresh route fetch (a real network
@@ -1813,10 +2007,12 @@ export function MapScreen() {
           },
         ]}
       >
-        {/* A real, clearly-labeled "Recenter" pill once the user has panned away (manual drag
-            or exiting the 3D view both drop followTilt to false) -- previously this was always
-            just a small icon-only circle, easy to miss/not recognize as "get my location back"
-            versus the plain "X" that makes sense once already in the 3D view. */}
+        {/* Small, muted "out of place, come back" indicator -- only appears once a manual pan
+            has dropped out of following. Deliberately understated (icon-only, no bright fill/
+            label) per explicit request: a driving app's screen shouldn't have a big, bright
+            button competing for attention; this only needs to be noticeable enough to find,
+            not loud. Camera-height switching (overview <-> original) now lives on the
+            always-present locate FAB's double-tap instead of a separate button here. */}
         {route && !followTilt && (
           <Pressable
             style={({ pressed }) => [styles.recenterPill, pressed && { opacity: pressedOpacity }]}
@@ -1824,8 +2020,7 @@ export function MapScreen() {
             hitSlop={8}
             accessibilityLabel="Recenter on my location"
           >
-            <Ionicons name="navigate" size={16} color="#FFFFFF" />
-            <Text style={styles.recenterPillText}>Recenter</Text>
+            <Ionicons name="navigate" size={16} color={colors.textMuted} />
           </Pressable>
         )}
         {route && followTilt && (
@@ -1836,22 +2031,6 @@ export function MapScreen() {
             accessibilityLabel="Exit close-follow view"
           >
             <Ionicons name="close" size={20} color={colors.text} />
-          </Pressable>
-        )}
-        {/* Real, reversible camera-distance toggle -- tap to pull the chase-cam back to a
-            wider, still-tilted overview (same pose as tapping the route line); tap again to
-            return to the tight close-follow view. Never drops out of following either way
-            (see toggleOverviewMode's own comment) -- purely how pulled-back the view is, not
-            whether it's tracking. Icon switches to a location arrow while pulled back, the
-            same visual "tap to snap back" language the Recenter pill above already uses. */}
-        {route && followTilt && (
-          <Pressable
-            style={({ pressed }) => [styles.viewToggleButton, pressed && { opacity: pressedOpacity }]}
-            onPress={toggleOverviewMode}
-            hitSlop={8}
-            accessibilityLabel={overviewMode ? "Return to close-follow view" : "Pull back to wider overview view"}
-          >
-            <Ionicons name={overviewMode ? "navigate" : "expand-outline"} size={22} color={colors.text} />
           </Pressable>
         )}
         {/* Voice guidance only ever speaks during active turn-by-turn navigation, so mute
@@ -1891,24 +2070,25 @@ export function MapScreen() {
           else competes for that space. */}
       {!anySheetOpen && !placingAlert && !pendingDestination && (
         <>
-      <Pressable
-        style={({ pressed }) => [
-          styles.fab,
-          route && styles.fabCompact,
-          { bottom: insets.bottom + 24 },
-          pressed && { opacity: pressedOpacity },
-        ]}
-        onPress={openAlertTypePicker}
-        accessibilityLabel="Report an alert"
-      >
-        <Ionicons name="add" size={route ? 22 : 28} color="#FFFFFF" />
-      </Pressable>
+      {/* Hidden during navigation -- Report now lives in the bottom trip bar's "..." options
+          menu (see NavOptionsSheet), so this would just be a second, redundant entry point to
+          the same flow while also being the button that most needs the space back for the new
+          bottom bar. Still the only way to report an alert while just browsing the map. */}
+      {!route && (
+        <Pressable
+          style={({ pressed }) => [styles.fab, { bottom: insets.bottom + 24 }, pressed && { opacity: pressedOpacity }]}
+          onPress={openAlertTypePicker}
+          accessibilityLabel="Report an alert"
+        >
+          <Ionicons name="add" size={28} color="#FFFFFF" />
+        </Pressable>
+      )}
 
       <Pressable
         style={({ pressed }) => [
           styles.fabSecondary,
           route && styles.fabSecondaryCompact,
-          { bottom: insets.bottom + 24 + (route ? 54 : 70) },
+          { bottom: navFabBaseBottom + (route ? 0 : 70) },
           pressed && { opacity: pressedOpacity },
         ]}
         onPress={() => {
@@ -1929,7 +2109,7 @@ export function MapScreen() {
         style={({ pressed }) => [
           styles.fabSecondary,
           route && styles.fabSecondaryCompact,
-          { bottom: insets.bottom + 24 + (route ? 108 : 140) },
+          { bottom: navFabBaseBottom + (route ? 54 : 140) },
           show3D && styles.fabActive,
           pressed && { opacity: pressedOpacity },
         ]}
@@ -1948,7 +2128,7 @@ export function MapScreen() {
         style={({ pressed }) => [
           styles.fabSecondary,
           route && styles.fabSecondaryCompact,
-          { bottom: insets.bottom + 24 + (route ? 162 : 210) },
+          { bottom: navFabBaseBottom + (route ? 108 : 210) },
           mapType === "hybrid" && styles.fabActive,
           pressed && { opacity: pressedOpacity },
         ]}
@@ -1967,11 +2147,11 @@ export function MapScreen() {
         style={({ pressed }) => [
           styles.fabSecondary,
           route && styles.fabSecondaryCompact,
-          { bottom: insets.bottom + 24 + (route ? 216 : 280) },
+          { bottom: navFabBaseBottom + (route ? 162 : 280) },
           pressed && { opacity: pressedOpacity },
         ]}
-        onPress={onRecenter}
-        accessibilityLabel="Recenter on my location"
+        onPress={onLocateButtonPress}
+        accessibilityLabel="Recenter on my location. Double tap to switch camera height."
       >
         <Ionicons name="locate" size={route ? 17 : 22} color="#FFFFFF" />
       </Pressable>
@@ -2013,6 +2193,23 @@ export function MapScreen() {
             >
               <Ionicons name="close" size={20} color={colors.text} />
             </Pressable>
+            {/* "Set incidents from 2 views" -- only offered while reporting during active
+                navigation, since that's the real scenario this exists for: spotting something
+                just passed and wanting the clearer, driver's-eye front view to place it
+                precisely, an option that doesn't apply when just browsing the map. */}
+            {route && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.placementButton,
+                  styles.placementButtonRemove,
+                  pressed && { opacity: pressedOpacity },
+                ]}
+                onPress={togglePlacementFrontView}
+                accessibilityLabel={placementFrontView ? "Switch to normal height view" : "Switch to front driving view"}
+              >
+                <Ionicons name={placementFrontView ? "eye-off-outline" : "eye-outline"} size={20} color={colors.text} />
+              </Pressable>
+            )}
             <Pressable
               style={({ pressed }) => [
                 styles.placementButton,
@@ -2081,6 +2278,15 @@ export function MapScreen() {
         activeStepIndex={activeStepIndex}
         onClose={() => directionsSheetRef.current?.close()}
         onSheetChange={(index) => setDirectionsSheetOpen(index >= 0)}
+      />
+      <NavOptionsSheet
+        ref={navOptionsSheetRef}
+        onReportAlert={onNavOptionsReportAlert}
+        onShareEta={onNavOptionsShareEta}
+        onOpenDetection={onNavOptionsOpenDetection}
+        onEndNavigation={onNavOptionsEndNavigation}
+        onClose={() => navOptionsSheetRef.current?.close()}
+        onSheetChange={(index) => setNavOptionsSheetOpen(index >= 0)}
       />
 
       {placeInfoLoading && (
@@ -2289,31 +2495,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...shadow.low,
   },
-  // Deliberately bigger than the other topRightControls circles -- the one button in this
-  // column a driver is meant to reach for mid-drive without hunting for a small target.
-  viewToggleButton: {
-    width: 48,
-    height: 48,
+  // Small and muted on purpose -- explicit request: not a big, bright button, just enough to
+  // notice and tap when the camera has drifted from the driver's own position.
+  recenterPill: {
+    width: 36,
+    height: 36,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
     ...shadow.low,
-  },
-  recenterPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs + 2,
-    height: 40,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
-    ...shadow.low,
-  },
-  recenterPillText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 13,
   },
   osmLoadingBadge: {
     width: 40,
