@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import { BUSINESS_INFO } from "@/config/business";
 import { ADMIN_EMAILS, ADMIN_PHONE_NUMBERS } from "@/config/admin";
 import type { WebSettings } from "@/hooks/useSettings";
 import { MAP_THEME_LABELS, type MapThemeKey } from "@/utils/mapStyles";
+import { getRevCheckProviderConfig, saveRevCheckProviderConfig } from "@/services/revCheckAdmin";
 import "./AboutPanel.css";
 
 const APP_VERSION = "1.0.0";
@@ -67,6 +68,47 @@ export function AboutPanel({
   // branding/version/legal links move to a second tab instead of being the first thing shown.
   const [tab, setTab] = useState<Tab>("account");
 
+  // Real, shared provider credentials (Firestore config/revCheckProvider) -- mirrors mobile's
+  // owner-only Settings section exactly, see revCheckAdmin.ts. Only the mobile app actually
+  // runs a paid check against this (no web payment flow), but the owner can manage the key
+  // from either platform since it's the same Firestore doc either way.
+  const [ppsrKeyDraft, setPpsrKeyDraft] = useState("");
+  const [nevdisKeyDraft, setNevdisKeyDraft] = useState("");
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const [savingKeys, setSavingKeys] = useState(false);
+  const [keysSavedFlash, setKeysSavedFlash] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    getRevCheckProviderConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setPpsrKeyDraft(config.ppsrApiKey);
+        setNevdisKeyDraft(config.nevdisApiKey);
+      })
+      .catch((err) => console.warn("[about] failed to load REV check provider config", err))
+      .finally(() => {
+        if (!cancelled) setKeysLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  const onSaveRevCheckKeys = async () => {
+    setSavingKeys(true);
+    try {
+      await saveRevCheckProviderConfig({ ppsrApiKey: ppsrKeyDraft, nevdisApiKey: nevdisKeyDraft });
+      setKeysSavedFlash(true);
+      setTimeout(() => setKeysSavedFlash(false), 2000);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Couldn't save -- something went wrong.");
+    } finally {
+      setSavingKeys(false);
+    }
+  };
+
   return (
     <div className="about-panel">
       <div className="about-tabs">
@@ -113,6 +155,49 @@ export function AboutPanel({
               <button className="account-signin-button admin-tab-button" onClick={onOpenAdmin}>
                 View sign-in history
               </button>
+
+              {/* Owner-only, per explicit request -- a real, paid business API credential, not
+                  something any other signed-in user should ever be able to see or edit. Stored
+                  in Firestore (config/revCheckProvider), shared with the mobile app's own
+                  owner-only Settings section -- see revCheckAdmin.ts's header. */}
+              <div className="admin-tab-label">Provider keys (owner only)</div>
+              <div className="account-prompt">
+                Real vehicle history isn't free -- PPSR (stolen/written-off/money-owing) and
+                NEVDIS (registration + odometer history) both require your own signed-up broker
+                account. Paste your keys below once you have them; every user's check stays
+                clearly marked "not connected" until then. Saved to Firestore, never bundled into
+                either app, and only ever readable by your own signed-in account or the
+                server-side check function.
+              </div>
+              {!keysLoaded ? (
+                <div className="account-prompt">Loading…</div>
+              ) : (
+                <>
+                  <input
+                    className="rev-check-key-input"
+                    type="password"
+                    value={ppsrKeyDraft}
+                    onChange={(e) => setPpsrKeyDraft(e.target.value)}
+                    placeholder="PPSR provider API key"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <input
+                    className="rev-check-key-input"
+                    type="password"
+                    value={nevdisKeyDraft}
+                    onChange={(e) => setNevdisKeyDraft(e.target.value)}
+                    placeholder="NEVDIS provider API key"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <button className="account-signin-button admin-tab-button" onClick={onSaveRevCheckKeys} disabled={savingKeys}>
+                    {savingKeys ? "Saving…" : keysSavedFlash ? "Saved ✓" : "Save provider keys"}
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>

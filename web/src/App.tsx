@@ -1599,10 +1599,13 @@ export default function App() {
       draggable: true,
       gestureHandling: "greedy",
       clickableIcons: true,
-      mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || undefined,
-      styles: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID
-        ? undefined
-        : (MAP_THEME_STYLES[settings.mapTheme] ?? (isDarkTheme ? DARK_MAP_STYLE : LIGHT_MAP_STYLE)),
+      // No `mapId` here on purpose -- Google Maps ignores a client-side `styles` array
+      // entirely on any map that has a Map ID (vector) set, styling only via the cloud
+      // console instead. That silently broke the map color themes below the moment a
+      // VITE_GOOGLE_MAPS_MAP_ID env var got configured (for the optional 3D tilt view),
+      // even though the theme picker itself still looked like it was working. Matching the
+      // mobile app -- whose color themes always apply via a plain style array -- wins here.
+      styles: MAP_THEME_STYLES[settings.mapTheme] ?? (isDarkTheme ? DARK_MAP_STYLE : LIGHT_MAP_STYLE),
     }),
     [isDarkTheme, settings.mapTheme]
   );
@@ -1927,27 +1930,6 @@ export default function App() {
         initialRange={map3dInitialRange}
       />
 
-      <div className="zoom-control">
-        <button
-          onClick={() => {
-            const map = mapRef.current;
-            if (map) map.setZoom((map.getZoom() ?? 15) + 1);
-          }}
-          aria-label="Zoom in"
-        >
-          +
-        </button>
-        <button
-          onClick={() => {
-            const map = mapRef.current;
-            if (map) map.setZoom((map.getZoom() ?? 15) - 1);
-          }}
-          aria-label="Zoom out"
-        >
-          −
-        </button>
-      </div>
-
       {!chromeHidden && (
         <button
           className={`about-button${topBannerActive ? " chrome-shifted" : ""}`}
@@ -2012,7 +1994,7 @@ export default function App() {
                 <input
                   type="range"
                   min={1}
-                  max={15}
+                  max={200}
                   disabled={settings.regionWide}
                   value={settings.alertRadiusKm}
                   onChange={(e) => setAlertRadiusKm(Number(e.target.value))}

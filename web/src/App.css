@@ -440,38 +440,6 @@ button:focus-visible {
   }
 }
 
-/* Custom zoom +/- control, replacing the native one -- see the comment in App.tsx's map
-   options for why (its position was unreliable on vector maps and kept landing on top of
-   the FAB column). Bottom-left keeps it clear of the FAB stack (right) and the speed-limit
-   sign (mid-left) at the same time. */
-.zoom-control {
-  position: absolute;
-  left: 16px;
-  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-
-.zoom-control button {
-  width: 34px;
-  height: 34px;
-  border: none;
-  background: var(--fab-surface);
-  color: var(--fab-icon);
-  font-size: 19px;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.zoom-control button:first-child {
-  border-bottom: 1px solid var(--surface-border);
-}
-
 .about-button {
   position: absolute;
   top: 16px;
