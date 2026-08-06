@@ -241,6 +241,20 @@ export function MapScreen() {
   // exiting navigation entirely.
   const [followTilt, setFollowTilt] = useState(true);
 
+  // Whether the tilted chase-cam is currently pulled back to the wider "overview" pose (same
+  // pose enterOverviewMode below already uses when tapping the route line) or the tight
+  // close-follow pose -- purely a camera distance/tilt choice, independent of followTilt
+  // itself. Unlike the X/Recenter pair (which fully drops out of following on manual pan or
+  // tap), both states here keep the camera actively tracking live position/heading -- this is
+  // the small circle toggle button's own state, not an "exit follow" action.
+  const [overviewMode, setOverviewMode] = useState(false);
+  useEffect(() => {
+    // Exiting follow entirely (manual pan, or the X button) always resets this back to the
+    // tight pose for next time -- resuming follow (Recenter) shouldn't silently land back in
+    // overview from a previous session.
+    if (!followTilt) setOverviewMode(false);
+  }, [followTilt]);
+
   const currentLatLng = useMemo(
     () =>
       location
@@ -498,7 +512,9 @@ export function MapScreen() {
   // Apple/Google Maps' own convention when you tap the route during nav: not the tight
   // chase-cam (that's what the small toggle button gives you), but a pulled-back 3D view that
   // shows the surrounding blocks/buildings around your position, not just the next turn. Sets
-  // followTilt=true so the same exit ("X") control in topRightControls works to back out of it.
+  // followTilt=true so the same exit ("X") control in topRightControls works to back out of it,
+  // and overviewMode=true so the small circle toggle button (below) shows the right icon/state
+  // too, even though this action was triggered by tapping the line rather than that button.
   const lineTapAtRef = useRef(0);
   const enterOverviewMode = useCallback(() => {
     lineTapAtRef.current = Date.now();
@@ -507,6 +523,7 @@ export function MapScreen() {
     // the very next GPS tick -- this call sets the camera explicitly right below.
     chaseCamAppliedRef.current = true;
     setFollowTilt(true);
+    setOverviewMode(true);
     if (currentLatLng) {
       mapRef.current?.animateCamera(
         { center: currentLatLng, heading, pitch: 45, zoom: 15 },
@@ -514,6 +531,28 @@ export function MapScreen() {
       );
     }
   }, [currentLatLng, heading]);
+
+  // The small circle toggle button in topRightControls -- unlike toggleFollowTilt/onRecenter
+  // above (which fully drop out of following, freezing the camera where it is until Recenter
+  // is tapped again), this keeps the camera actively tracking live position/heading the whole
+  // time; it only ever changes how pulled-back/tilted the view is. Reuses the exact same
+  // pulled-back pose enterOverviewMode (tapping the route line) already uses, so both paths
+  // into "overview" land on the same camera position -- and the same tight pose the default
+  // chase-cam effect applies for the way back.
+  const toggleOverviewMode = useCallback(() => {
+    if (!currentLatLng || !followTilt) return;
+    setOverviewMode((was) => {
+      const next = !was;
+      chaseCamAppliedRef.current = true;
+      mapRef.current?.animateCamera(
+        next
+          ? { center: currentLatLng, heading, pitch: 45, zoom: 15 }
+          : { center: currentLatLng, heading, pitch: 60, zoom: 18 },
+        { duration: 500 }
+      );
+      return next;
+    });
+  }, [currentLatLng, heading, followTilt]);
 
   // Apple/Google Maps' own convention: a manual pan/tilt/rotate gesture drops the camera out of
   // auto-follow instead of being fought by it. Without this, the close-follow effect above
@@ -1731,6 +1770,22 @@ export function MapScreen() {
             <Ionicons name="close" size={20} color={colors.text} />
           </Pressable>
         )}
+        {/* Real, reversible camera-distance toggle -- tap to pull the chase-cam back to a
+            wider, still-tilted overview (same pose as tapping the route line); tap again to
+            return to the tight close-follow view. Never drops out of following either way
+            (see toggleOverviewMode's own comment) -- purely how pulled-back the view is, not
+            whether it's tracking. Icon switches to a location arrow while pulled back, the
+            same visual "tap to snap back" language the Recenter pill above already uses. */}
+        {route && followTilt && (
+          <Pressable
+            style={({ pressed }) => [styles.viewToggleButton, pressed && { opacity: pressedOpacity }]}
+            onPress={toggleOverviewMode}
+            hitSlop={8}
+            accessibilityLabel={overviewMode ? "Return to close-follow view" : "Pull back to wider overview view"}
+          >
+            <Ionicons name={overviewMode ? "navigate" : "expand-outline"} size={22} color={colors.text} />
+          </Pressable>
+        )}
         {/* Voice guidance only ever speaks during active turn-by-turn navigation, so mute
             only means anything then -- previously always rendered here, which put it at the
             exact same top offset as the destination search bar (both start at
@@ -2160,6 +2215,17 @@ const styles = StyleSheet.create({
   settingsButton: {
     width: 40,
     height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.low,
+  },
+  // Deliberately bigger than the other topRightControls circles -- the one button in this
+  // column a driver is meant to reach for mid-drive without hunting for a small target.
+  viewToggleButton: {
+    width: 48,
+    height: 48,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     alignItems: "center",

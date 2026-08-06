@@ -63,7 +63,7 @@ export function MuteButton() {
             : "Unmute voice guidance"
         }
       >
-        <Ionicons name={voiceEnabled ? "volume-high" : "volume-mute"} size={22} color={colors.text} />
+        <Ionicons name={voiceEnabled ? "volume-high" : "volume-mute"} size={26} color={colors.text} />
       </Pressable>
     </View>
   );
@@ -73,9 +73,11 @@ const styles = StyleSheet.create({
   wrap: {
     position: "relative",
   },
+  // Deliberately bigger than a standard 40px topRightControls circle -- explicit request to
+  // make the volume control an easier, more obvious mid-drive target.
   button: {
-    width: 40,
-    height: 40,
+    width: 48,
+    height: 48,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     alignItems: "center",
@@ -84,7 +86,7 @@ const styles = StyleSheet.create({
   },
   sliderCard: {
     position: "absolute",
-    right: 48,
+    right: 56,
     top: 0,
     height: 40,
     width: 150,
