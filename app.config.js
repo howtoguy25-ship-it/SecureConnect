@@ -16,7 +16,12 @@ module.exports = {
   expo: {
     name: "TrackLine",
     slug: "trackline",
-    version: "1.0.0",
+    // The user-facing marketing version (CFBundleShortVersionString) -- separate from the
+    // internal build number, which EAS auto-increments remotely on every submit
+    // (eas.json's appVersionSource: "remote" + production.autoIncrement) and never lives here.
+    // Bumped from 1.0.0 now that REV checks + real IAP monetization landed -- a genuine feature
+    // milestone, not just an internal TestFlight build tick.
+    version: "1.1.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",

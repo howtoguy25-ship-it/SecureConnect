@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, Image, StyleSheet, Switch, ScrollView, Pressable, Modal, TextInput } from "react-native";
 import Slider from "@react-native-community/slider";
 import Constants from "expo-constants";
+import * as Application from "expo-application";
 import { usePowerState } from "expo-battery";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
@@ -611,7 +612,19 @@ export function SettingsScreen() {
       <View style={styles.about}>
         <Image source={require("../../assets/icon.png")} style={styles.aboutLogo} />
         <Text style={styles.aboutName}>{Constants.expoConfig?.name ?? "TrackLine"}</Text>
-        <Text style={styles.aboutVersion}>Version {Constants.expoConfig?.version ?? "1.0.0"}</Text>
+        {/* expo-application's nativeApplicationVersion/nativeBuildVersion read the ACTUAL
+            running binary's Info.plist (real, verifiable), not just this JS bundle's static
+            config -- the build number specifically is what changes on every single TestFlight
+            update (EAS auto-increments it remotely, see app.config.js's own comment), so
+            showing it here is the real, honest way to confirm a given device actually picked up
+            a new build, not just the marketing version (which intentionally stays the same
+            across many builds until a real feature milestone). Falls back to expoConfig's
+            static version only if the native field is unavailable (e.g. Expo Go, never how this
+            app ships). */}
+        <Text style={styles.aboutVersion}>
+          Version {Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? "1.0.0"}
+          {Application.nativeBuildVersion ? ` (build ${Application.nativeBuildVersion})` : ""}
+        </Text>
         {BUSINESS_INFO.businessName ? (
           <Text style={styles.aboutMeta}>{BUSINESS_INFO.businessName}</Text>
         ) : null}
