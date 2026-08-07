@@ -1505,10 +1505,18 @@ export default function App() {
         alert("Not signed in yet — check the banner at the top of the page.");
         return;
       }
-      await reportAlert(pendingType, targetLocation, user.uid, settings.alertExpiryMs, pendingComment);
-      setPendingType(null);
-      setPendingLocation(null);
-      setPendingComment("");
+      try {
+        await reportAlert(pendingType, targetLocation, user.uid, settings.alertExpiryMs, pendingComment);
+        setPendingType(null);
+        setPendingLocation(null);
+        setPendingComment("");
+      } catch (err) {
+        // Previously unhandled -- a failed write (permission denied, network drop) left the
+        // placement pin sitting there with zero feedback, indistinguishable from Confirm having
+        // silently done nothing at all.
+        console.warn("[app] reportAlert failed", err);
+        alert("Couldn't set that alert -- check your connection and try again.");
+      }
     },
     [pendingType, pendingLocation, user, settings.alertExpiryMs, pendingComment, pendingCommentBlocked]
   );

@@ -1537,7 +1537,16 @@ export function MapScreen() {
     if (containsBlockedLanguage(alertComment)) return;
     const type = pendingAlertTypeRef.current;
     const location = overrideLocation ?? alertPlacementLatLng;
-    if (!type || !location || !user) return;
+    // Previously bailed here with zero feedback -- tapping Set just silently did nothing (no
+    // banner, no error, placement bar stayed exactly as-is), which is indistinguishable from the
+    // write itself failing. !user specifically means the anonymous/real sign-in Firebase sets up
+    // on launch hasn't resolved yet, a real (if rare) race, not something the driver caused.
+    if (!type || !location) return;
+    if (!user) {
+      setBannerMessage("Still signing you in -- try Set again in a moment.");
+      setBannerVisible(true);
+      return;
+    }
     submittingAlertRef.current = true;
     setSubmittingAlert(true);
     try {
@@ -1546,6 +1555,15 @@ export function MapScreen() {
       setPlacingAlert(false);
       setAlertPlacementLatLng(null);
       setAlertComment("");
+    } catch (err) {
+      // Same "log it, don't just swallow it" pattern as the rest of this screen (see reroute/
+      // place-lookup catches above) -- but this write is important enough that the driver also
+      // needs to actually see it failed, since nothing else here would ever tell them the alert
+      // they just tried to set never made it to Firestore.
+      console.warn("[map] reportAlert failed", err);
+      Sentry.logger.error("map: reportAlert failed", { error: String(err) });
+      setBannerMessage("Couldn't set that alert -- check your connection and try again.");
+      setBannerVisible(true);
     } finally {
       submittingAlertRef.current = false;
       setSubmittingAlert(false);
