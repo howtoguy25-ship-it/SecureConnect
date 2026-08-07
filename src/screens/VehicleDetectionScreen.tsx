@@ -38,7 +38,14 @@ import { Sentry } from "@/services/sentry";
 // crops, at a much slower cadence) was the real, architectural cause of the recurring freeze,
 // not any of the resolution/timing values that had been tuned around it before. Only detection
 // results (box coordinates, label, score) cross back to JS -- never raw frames.
-const MIN_DETECTION_SCORE = 0.35;
+// Lowered from 0.35 -- real, confirmed complaint: a vehicle only partly in frame (cropped by
+// the dash/window pillar, or genuinely half-blocked by another car) scores meaningfully lower
+// than the same vehicle fully visible, and 0.35 was missing it outright on the very first
+// detection (before TRACK_GRACE_MS in speedTracker.ts even gets a chance to help -- that grace
+// period only covers a MISSED frame on an already-tracked vehicle, not a partial vehicle that
+// never cleared the bar to start being tracked at all). Same real trade as before: a few more
+// false positives for meaningfully fewer real, partially-visible vehicles going undetected.
+const MIN_DETECTION_SCORE = 0.3;
 // This model's own fixed TFLite_Detection_PostProcess output size (see
 // assets/models/tflite_ssd_mobilenet_v1) -- it never returns more than this many candidate
 // detections per frame, regardless of how many are actually above MIN_DETECTION_SCORE.
@@ -877,10 +884,24 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                   : Math.abs(box.speedKmh) < 3
                     ? "steady"
                     : `${box.speedKmh > 0 ? "▲" : "▼"} ${Math.round(Math.abs(box.speedKmh))} km/h`;
-          const boxWidthPx = w * scale;
-          const boxHeightPx = h * scale;
-          const boxLeftPx = x * scale + offsetX;
-          const boxTopPx = y * scale + offsetY;
+          // Clamped to the visible container -- a close vehicle at 5x zoom (or just one that
+          // fills most of the frame at 1x) very plausibly has a real box bigger than the screen
+          // itself, with its edges landing well off-screen in every direction. Previously the
+          // box (and its TargetCorners brackets) rendered at its true, unclamped size/position
+          // regardless, meaning a box that big had EVERY edge off-screen -- no border, no
+          // corner, nothing visible at all, even though a vehicle genuinely was detected and
+          // labeled (the confidence chip, drawn separately, was the only thing still showing).
+          // Computing true edges first and clamping each one independently means whatever
+          // portion of the box actually is on-screen still draws a real, visible rounded-corner
+          // frame hugging the visible part of the vehicle, instead of vanishing entirely.
+          const rawLeftPx = x * scale + offsetX;
+          const rawTopPx = y * scale + offsetY;
+          const rawRightPx = rawLeftPx + w * scale;
+          const rawBottomPx = rawTopPx + h * scale;
+          const boxLeftPx = Math.max(0, Math.min(rawLeftPx, containerSize.width));
+          const boxTopPx = Math.max(0, Math.min(rawTopPx, containerSize.height));
+          const boxWidthPx = Math.max(0, Math.min(rawRightPx, containerSize.width) - boxLeftPx);
+          const boxHeightPx = Math.max(0, Math.min(rawBottomPx, containerSize.height) - boxTopPx);
           const lockColor = isEmergency ? "#DC2626" : isSelected ? "#22D3EE" : "#F59E0B";
           // Keeps the type/speed labels fully on-screen even when the detected box itself
           // extends past an edge -- a vehicle filling most of the frame very plausibly has its
@@ -956,10 +977,18 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
                   source photo. */}
               {plateInfo &&
                 (() => {
-                  const plateLeftPx = plateInfo.region.x * scale + offsetX;
-                  const plateTopPx = plateInfo.region.y * scale + offsetY;
-                  const plateWidthPx = plateInfo.region.w * scale;
-                  const plateHeightPx = plateInfo.region.h * scale;
+                  // Same off-screen-edge clamp as the vehicle box above -- a plate region is
+                  // normally a small sub-crop well inside the vehicle box, but on a vehicle box
+                  // that's itself mostly off-screen (a close vehicle at 5x zoom) the plate region
+                  // can still start off-screen too.
+                  const rawPlateLeftPx = plateInfo.region.x * scale + offsetX;
+                  const rawPlateTopPx = plateInfo.region.y * scale + offsetY;
+                  const rawPlateRightPx = rawPlateLeftPx + plateInfo.region.w * scale;
+                  const rawPlateBottomPx = rawPlateTopPx + plateInfo.region.h * scale;
+                  const plateLeftPx = Math.max(0, Math.min(rawPlateLeftPx, containerSize.width));
+                  const plateTopPx = Math.max(0, Math.min(rawPlateTopPx, containerSize.height));
+                  const plateWidthPx = Math.max(0, Math.min(rawPlateRightPx, containerSize.width) - plateLeftPx);
+                  const plateHeightPx = Math.max(0, Math.min(rawPlateBottomPx, containerSize.height) - plateTopPx);
                   const plateLabelLeftPx = Math.max(0, -plateLeftPx);
                   const plateLabelAbove = plateTopPx - 26 >= insets.top + spacing.xs;
                   const isSaved = savedTrackIds.has(box.id);
