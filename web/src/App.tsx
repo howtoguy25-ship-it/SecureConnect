@@ -27,6 +27,7 @@ import { PlacementBar } from "@/components/PlacementBar";
 import { NavigationCard, type NavViewMode } from "@/components/NavigationCard";
 import { NavMiniBox } from "@/components/NavMiniBox";
 import { TrafficSuggestionBanner, EndSuggestedRouteButton } from "@/components/TrafficSuggestionBanner";
+import { OsmMarkerPanel, type OsmMarkerKind } from "@/components/OsmMarkerPanel";
 import { VoiceControl } from "@/components/VoiceControl";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
@@ -320,6 +321,11 @@ export default function App() {
 
   const [alerts, setAlerts] = useState<AlertDoc[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<AlertDoc | null>(null);
+  const [selectedOsmMarker, setSelectedOsmMarker] = useState<{
+    kind: OsmMarkerKind;
+    lat: number;
+    lng: number;
+  } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [detectionOpen, setDetectionOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -2067,13 +2073,14 @@ export default function App() {
               key={`tl-${point.id}`}
               position={{ lat: point.lat, lng: point.lng }}
               icon={trafficLightIcon(osmIconScale)}
-              title="Traffic signal (OpenStreetMap data)"
+              title="Traffic signal (OpenStreetMap data) -- tap for a real Street View image"
               // Explicit, high zIndex -- markers always sit above the base map tiles
               // regardless of type in normal Google Maps behavior, but this makes
               // that non-negotiable rather than assumed, specifically because
               // satellite/hybrid imagery is a much busier, more visually competing
               // background than the plain roadmap this was originally tuned against.
               zIndex={500}
+              onClick={() => setSelectedOsmMarker({ kind: "traffic_light", lat: point.lat, lng: point.lng })}
             />
           ))}
 
@@ -2083,8 +2090,9 @@ export default function App() {
               key={`sc-${point.id}`}
               position={{ lat: point.lat, lng: point.lng }}
               icon={speedCameraIcon(osmIconScale)}
-              title="Speed camera (OpenStreetMap data)"
+              title="Speed camera (OpenStreetMap data) -- tap for a real Street View image"
               zIndex={500}
+              onClick={() => setSelectedOsmMarker({ kind: "speed_camera", lat: point.lat, lng: point.lng })}
             />
           ))}
 
@@ -2396,7 +2404,11 @@ export default function App() {
             aria-label={settings.showLiveCameras ? "Hide live traffic cameras" : "Show live traffic cameras"}
             title="Live traffic cameras (NSW)"
           >
-            📹
+            {/* Deliberately not 🎥/📹 -- those look nearly identical to the AI Detection
+                button's own 🎥 at FAB size and were getting confused for it. 📡 reads as "live
+                feed" instead, which is also honestly what this is (a real government camera
+                feed), not "open my own camera" like AI Detection is. */}
+            📡
           </button>
         </>
       )}
@@ -2581,6 +2593,14 @@ export default function App() {
           onHide={onHideAlert}
           onConfirmStillHere={onConfirmStillHere}
           onClose={() => setSelectedAlert(null)}
+        />
+      )}
+
+      {selectedOsmMarker && (
+        <OsmMarkerPanel
+          kind={selectedOsmMarker.kind}
+          location={{ lat: selectedOsmMarker.lat, lng: selectedOsmMarker.lng }}
+          onClose={() => setSelectedOsmMarker(null)}
         />
       )}
     </div>
