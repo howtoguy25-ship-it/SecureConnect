@@ -94,6 +94,79 @@ export function distanceToPolylineMeters(
   return minDist;
 }
 
+/** Walks forward along a polyline starting from the point on it nearest (lat, lon), returning
+ *  the lat/lon reached after `meters` of travel along the line -- "the point 1km ahead on the
+ *  route from here," not just some fixed vertex. Used to scope the traffic-jam check to a
+ *  near-term window ahead of the driver (per explicit request: "traffic ... from their
+ *  location live -to 1km") instead of averaging delay over the whole remaining trip. Returns
+ *  null if the polyline ends before `meters` is covered (remaining route is shorter than the
+ *  window -- the whole-route check already covers that case). */
+export function pointAheadOnPolylineMeters(
+  lat: number,
+  lon: number,
+  polyline: { latitude: number; longitude: number }[],
+  meters: number
+): { latitude: number; longitude: number } | null {
+  if (polyline.length < 2) return null;
+
+  // Same nearest-segment projection distanceToPolylineMeters above uses, so "ahead" starts
+  // from wherever the driver actually is relative to the route line, not the nearest vertex.
+  const metersPerDegLat = 111_320;
+  const metersPerDegLon = 111_320 * Math.cos((lat * Math.PI) / 180);
+  const px = lon * metersPerDegLon;
+  const py = lat * metersPerDegLat;
+
+  let bestIndex = 0;
+  let bestT = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    const ax = a.longitude * metersPerDegLon;
+    const ay = a.latitude * metersPerDegLat;
+    const bx = b.longitude * metersPerDegLon;
+    const by = b.latitude * metersPerDegLat;
+    const abx = bx - ax;
+    const aby = by - ay;
+    const lengthSq = abx * abx + aby * aby;
+    const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / lengthSq)) : 0;
+    const cx = ax + t * abx;
+    const cy = ay + t * aby;
+    const dist = Math.hypot(px - cx, py - cy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIndex = i;
+      bestT = t;
+    }
+  }
+
+  const segStart = polyline[bestIndex];
+  const segEnd = polyline[bestIndex + 1];
+  let cursor = {
+    latitude: segStart.latitude + bestT * (segEnd.latitude - segStart.latitude),
+    longitude: segStart.longitude + bestT * (segEnd.longitude - segStart.longitude),
+  };
+  let cursorIndex = bestIndex;
+  let segRemainingMeters = distanceKm(cursor.latitude, cursor.longitude, segEnd.latitude, segEnd.longitude) * 1000;
+
+  let remaining = meters;
+  while (remaining > segRemainingMeters) {
+    remaining -= segRemainingMeters;
+    cursorIndex += 1;
+    if (cursorIndex >= polyline.length - 1) return null;
+    cursor = polyline[cursorIndex];
+    const next = polyline[cursorIndex + 1];
+    segRemainingMeters = distanceKm(cursor.latitude, cursor.longitude, next.latitude, next.longitude) * 1000;
+  }
+
+  const next = polyline[cursorIndex + 1];
+  const frac = segRemainingMeters > 0 ? remaining / segRemainingMeters : 0;
+  return {
+    latitude: cursor.latitude + frac * (next.latitude - cursor.latitude),
+    longitude: cursor.longitude + frac * (next.longitude - cursor.longitude),
+  };
+}
+
 export function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;

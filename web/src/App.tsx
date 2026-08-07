@@ -55,7 +55,7 @@ const LiveVehicleDetection = lazy(() =>
 );
 import { ALERT_COLORS, ALERT_EMOJI, type AlertDoc, type AlertType } from "@/types/alert";
 import { containsBlockedLanguage, clampToWordLimit } from "@/utils/commentFilter";
-import { bearingDegrees, distanceKm, distanceToPolylineMeters } from "@/utils/geo";
+import { bearingDegrees, distanceKm, distanceToPolylineMeters, pointAheadOnPolylineMeters } from "@/utils/geo";
 import { stripHtml, formatArrivalClock } from "@/utils/navFormat";
 import { DARK_MAP_STYLE, LIGHT_MAP_STYLE, MAP_THEME_STYLES } from "@/utils/mapStyles";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmPoint } from "@/services/osmTrafficData";
@@ -104,6 +104,11 @@ const TRAFFIC_SUGGESTION_COOLDOWN_MS = 8 * 60_000;
 const MIN_SAVED_SECONDS_TO_SUGGEST = 180;
 const MIN_REMAINING_METERS_TO_CHECK = 1500;
 const TRAFFIC_SUGGESTION_DISPLAY_MS = 10_000;
+// The actual trigger window, per explicit request ("traffic ... from their location live -to
+// 1km") -- the suggestion only fires off a real, live-traffic delay detected in the next 1km
+// of the route ahead of the driver, not an average over the whole remaining trip. Mirrors
+// mobile's own constant exactly.
+const NEAR_TERM_TRAFFIC_CHECK_METERS = 1000;
 
 // Cached by "color:scale" so repeated calls return the *same* object reference instead of a
 // fresh one on every render -- markers (alerts + every OSM traffic light/speed camera, which
@@ -1043,22 +1048,28 @@ export default function App() {
     manualViewActive,
   ]);
 
-  // Periodic real traffic check while navigating -- every 90s, fetches the remaining route
-  // WITH live traffic (departureTime: now) and compares it against a real avoid-highways
-  // alternative, also traffic-aware. Only surfaces a suggestion when both are true: the current
-  // route has a real, meaningful delay right now (10%+60s floor over free-flow -- same formula
-  // mobile's getDirections uses) AND the side-streets alternative is genuinely at least
-  // MIN_SAVED_SECONDS_TO_SUGGEST faster under that same live traffic -- never a
-  // guessed/simulated "there's a jam ahead", always Google's own real-time traffic model on two
-  // real, independently-fetched routes. "Back streets/alleyways" maps to Google's real
-  // avoidHighways flag -- the actual mechanism it exposes for this, same honest framing as
-  // mobile's own implementation.
+  // Periodic real traffic check while navigating -- every 90s. The actual trigger is scoped
+  // tightly to the next NEAR_TERM_TRAFFIC_CHECK_METERS (1km) of the route ahead of the
+  // driver's live position (pointAheadOnPolylineMeters walks the current route's own
+  // overview_path forward from wherever the driver actually is), not a whole-trip average -- a
+  // real, meaningful live-traffic delay (10%+60s floor over free-flow, same formula mobile's
+  // getDirections uses) has to exist in that near-term window specifically. Only once that's
+  // confirmed does it fetch the actual full-route alternative (the side-streets/avoid-highways
+  // route that would actually be switched to) and re-check it's genuinely at least
+  // MIN_SAVED_SECONDS_TO_SUGGEST faster -- never a guessed/simulated "there's a jam ahead",
+  // always Google's own real-time traffic model (itself built from real aggregated
+  // device-location data across Google's whole user base -- this app's own install base isn't
+  // remotely large enough to build an independent version of that from its own users' phone
+  // signals the way Waze does). "Back streets/alleyways" maps to Google's real avoidHighways
+  // flag -- the actual mechanism it exposes for this.
   const trafficSuggestionRouteRef = useRef<google.maps.DirectionsResult | null>(null);
   trafficSuggestionRouteRef.current = trafficSuggestionRoute;
   const trafficCheckInFlightRef = useRef(false);
   const trafficSuggestionDismissedAtRef = useRef(0);
   const trafficCheckLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
   trafficCheckLocationRef.current = location;
+  const trafficCheckDirectionsRef = useRef<google.maps.DirectionsResult | null>(null);
+  trafficCheckDirectionsRef.current = directions;
 
   useEffect(() => {
     if (!navigating || travelMode !== "driving" || !destination) return;
@@ -1070,17 +1081,19 @@ export default function App() {
       if (!origin) return;
       const remainingMeters = distanceKm(origin.lat, origin.lng, destination.lat, destination.lng) * 1000;
       if (remainingMeters < MIN_REMAINING_METERS_TO_CHECK) return;
+      const currentRoutePath = trafficCheckDirectionsRef.current?.routes[0]?.overview_path;
+      if (!currentRoutePath) return;
       trafficCheckInFlightRef.current = true;
 
       const directionsService = new google.maps.DirectionsService();
       const waypoints = stopLocation ? [{ location: stopLocation, stopover: true }] : undefined;
-      const fetchRoute = (avoidHighways: boolean) =>
+      const fetchRoute = (routeDestination: google.maps.LatLngLiteral, avoidHighways: boolean, withWaypoints: boolean) =>
         new Promise<google.maps.DirectionsResult>((resolve, reject) => {
           directionsService.route(
             {
               origin,
-              destination,
-              waypoints,
+              destination: routeDestination,
+              waypoints: withWaypoints ? waypoints : undefined,
               travelMode: google.maps.TravelMode.DRIVING,
               avoidHighways,
               drivingOptions: { departureTime: new Date(), trafficModel: google.maps.TrafficModel.BEST_GUESS },
@@ -1092,20 +1105,44 @@ export default function App() {
           );
         });
 
-      Promise.all([fetchRoute(false), fetchRoute(true)])
-        .then(([liveCurrent, sideStreets]) => {
-          const totals = (result: google.maps.DirectionsResult) =>
-            result.routes[0]?.legs.reduce(
-              (acc, leg) => ({
-                normal: acc.normal + (leg.duration?.value ?? 0),
-                traffic: acc.traffic + (leg.duration_in_traffic?.value ?? leg.duration?.value ?? 0),
-              }),
-              { normal: 0, traffic: 0 }
-            ) ?? { normal: 0, traffic: 0 };
+      const totals = (result: google.maps.DirectionsResult) =>
+        result.routes[0]?.legs.reduce(
+          (acc, leg) => ({
+            normal: acc.normal + (leg.duration?.value ?? 0),
+            traffic: acc.traffic + (leg.duration_in_traffic?.value ?? leg.duration?.value ?? 0),
+          }),
+          { normal: 0, traffic: 0 }
+        ) ?? { normal: 0, traffic: 0 };
+
+      // Step 1: the actual trigger -- is there a real, live-traffic delay in just the next 1km
+      // of the route ahead of the driver right now. aheadPoint is a real point on the current
+      // route's own path (falls back to the destination itself if the remaining route is
+      // already shorter than the window, which the remainingMeters guard above already covers
+      // in practice).
+      const aheadPointLatLng = pointAheadOnPolylineMeters(
+        origin.lat,
+        origin.lng,
+        currentRoutePath.map((p) => ({ lat: p.lat(), lng: p.lng() })),
+        NEAR_TERM_TRAFFIC_CHECK_METERS
+      );
+      const aheadPoint = aheadPointLatLng ?? destination;
+
+      fetchRoute(aheadPoint, false, false)
+        .then((nearTerm) => {
+          const near = totals(nearTerm);
+          const hasNearTermDelay = near.traffic > near.normal + Math.max(60, near.normal * 0.1);
+          if (!hasNearTermDelay) return null;
+
+          // Step 2: only once a real, near-term jam is confirmed does this fetch the actual
+          // full-route side-streets alternative (what's offered/switched to if accepted) and
+          // re-check the whole trip is still genuinely worth the interruption.
+          return Promise.all([fetchRoute(destination, false, true), fetchRoute(destination, true, true)]);
+        })
+        .then((pair) => {
+          if (!pair) return;
+          const [liveCurrent, sideStreets] = pair;
           const current = totals(liveCurrent);
           const alt = totals(sideStreets);
-          const hasTrafficDelay = current.traffic > current.normal + Math.max(60, current.normal * 0.1);
-          if (!hasTrafficDelay) return;
           const savedSeconds = current.traffic - alt.traffic;
           if (savedSeconds >= MIN_SAVED_SECONDS_TO_SUGGEST) {
             setTrafficSuggestionRoute(sideStreets);

@@ -58,7 +58,7 @@ import {
   type PlaceDetails,
   type PlaceInfo,
 } from "@/services/places";
-import { distanceKm, bearingDegrees, distanceToPolylineMeters } from "@/utils/geo";
+import { distanceKm, bearingDegrees, distanceToPolylineMeters, pointAheadOnPolylineMeters } from "@/utils/geo";
 import type { LatLng } from "@/utils/polyline";
 import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuidance";
 import { speak, stopSpeaking } from "@/services/voice";
@@ -107,6 +107,12 @@ const MIN_REMAINING_METERS_TO_CHECK = 1500;
 // Yes/No/X -- per explicit request. An unattended banner clears itself the same way a manual
 // dismiss does (same cooldown applies) rather than lingering over the map indefinitely.
 const TRAFFIC_SUGGESTION_DISPLAY_MS = 10_000;
+// The actual trigger window, per explicit request ("traffic ... from their location live -to
+// 1km") -- the suggestion only fires off a real, live-traffic delay detected in the next 1km
+// of the route ahead of the driver, not an average over the whole remaining trip (which could
+// hide a real jam right ahead behind an otherwise-clear rest of the trip, or flag one that's
+// nowhere near the driver yet).
+const NEAR_TERM_TRAFFIC_CHECK_METERS = 1000;
 
 export function MapScreen() {
   const { location } = useLocation();
@@ -1247,14 +1253,18 @@ export function MapScreen() {
     setStopPreviewPlace(null);
   }, []);
 
-  // Periodic real traffic check while navigating -- every 90s, re-fetches the remaining route
-  // WITH live traffic (departure_time=now) and compares it against a real avoid-highways
-  // alternative, also traffic-aware. Only surfaces a suggestion when both are true: the current
-  // route has a real, meaningful delay right now (hasTrafficDelay's existing 10%+60s-floor
-  // definition, not just normal light-traffic noise) AND the side-streets alternative is
-  // genuinely at least MIN_SAVED_SECONDS_TO_SUGGEST faster under that same live traffic --
+  // Periodic real traffic check while navigating -- every 90s. The actual trigger is scoped
+  // tightly to the next NEAR_TERM_TRAFFIC_CHECK_METERS (1km) of the route ahead of the driver's
+  // live position (pointAheadOnPolylineMeters walks the route's own polyline forward from
+  // wherever the driver actually is), not a whole-trip average -- a real, meaningful live-
+  // traffic delay (hasTrafficDelay's existing 10%+60s-floor definition) has to exist in that
+  // near-term window specifically. Only once that's confirmed does it fetch the actual
+  // full-route alternative (the side-streets/avoid-highways route that would actually be
+  // switched to) and re-check it's genuinely at least MIN_SAVED_SECONDS_TO_SUGGEST faster --
   // never a guessed/simulated "there's a jam ahead", always Google's own real-time traffic
-  // model on two real, independently-fetched routes.
+  // model (which is itself built from real aggregated device-location data across Google's
+  // whole user base -- this app's own install base isn't remotely large enough to build an
+  // independent version of that from its own users' phone signals the way Waze does).
   //
   // Deliberately keyed only on [route, destinationLatLng] (not currentLatLng, which changes on
   // every GPS tick and would otherwise tear down/recreate this interval before it ever reached
@@ -1286,12 +1296,25 @@ export function MapScreen() {
       if (remainingMeters < MIN_REMAINING_METERS_TO_CHECK) return;
       trafficCheckInFlightRef.current = true;
       try {
+        // Step 1: the actual trigger -- is there a real, live-traffic delay in just the next
+        // 1km of the route ahead of the driver right now. aheadPoint is a real point on the
+        // route's own polyline (falls back to the destination itself if the remaining route is
+        // already shorter than the window, which MIN_REMAINING_METERS_TO_CHECK above already
+        // guards against in practice).
+        const aheadPoint =
+          pointAheadOnPolylineMeters(latLng.latitude, latLng.longitude, route.polyline, NEAR_TERM_TRAFFIC_CHECK_METERS) ??
+          destinationLatLng;
+        const nearTerm = await getDirections(latLng, aheadPoint, { useTraffic: true });
+        if (!nearTerm.hasTrafficDelay) return;
+
+        // Step 2: only once a real, near-term jam is confirmed does this fetch the actual
+        // full-route side-streets alternative (what's offered/switched to if accepted) and
+        // re-check the whole trip is still genuinely worth the interruption.
         const waypoint = stopLocationRef.current ?? undefined;
         const [liveCurrent, sideStreets] = await Promise.all([
           getDirections(latLng, destinationLatLng, { waypoint, useTraffic: true }),
           getDirections(latLng, destinationLatLng, { waypoint, useTraffic: true, avoidHighways: true }),
         ]);
-        if (!liveCurrent.hasTrafficDelay) return;
         const currentSeconds = liveCurrent.durationInTrafficSeconds ?? liveCurrent.durationSeconds;
         const altSeconds = sideStreets.durationInTrafficSeconds ?? sideStreets.durationSeconds;
         const savedSeconds = currentSeconds - altSeconds;
