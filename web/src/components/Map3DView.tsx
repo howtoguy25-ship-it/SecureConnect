@@ -115,6 +115,12 @@ export const Map3DView = forwardRef<Map3DViewHandle, Props>(function Map3DView(
           range: Math.max(initialRange * 3, 1500),
           mode: MapMode.HYBRID,
           gestureHandling: "GREEDY",
+          // Google's own default pan/tilt/rotate/zoom button cluster, per explicit request --
+          // finger gestures (pinch-zoom, drag-pan, two-finger tilt/rotate, all already enabled
+          // by GREEDY above) are the only intended way to move this camera. rotate()/tilt() on
+          // the imperative handle above still work for desktop's own joystick fallback, since
+          // those set map.heading/map.tilt directly rather than going through this native UI.
+          defaultUIHidden: true,
         });
         map.addEventListener("gmp-steadychange", (e) => {
           setIsSteady(e.isSteady);
