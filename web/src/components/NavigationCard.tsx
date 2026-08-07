@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { stripHtml, formatDistance } from "@/utils/navFormat";
 import { NavActionsRow } from "@/components/NavActionsRow";
 import "./NavigationCard.css";
@@ -19,6 +20,10 @@ interface Props {
   onShareEta: () => void;
   onReportAlert: () => void;
   onOpenDetection: () => void;
+  // Real measured card height, so the caller (App.tsx) can position the traffic-suggestion
+  // banner and "End suggested route" pill right below this card instead of guessing a fixed
+  // top offset that could overlap it. Same pattern RouteOptionsCard already uses.
+  onHeightChange?: (height: number) => void;
 }
 
 export function NavigationCard({
@@ -36,6 +41,7 @@ export function NavigationCard({
   onShareEta,
   onReportAlert,
   onOpenDetection,
+  onHeightChange,
 }: Props) {
   const instruction = step ? stripHtml(step.instructions) : "Recalculating…";
   const headline =
@@ -43,8 +49,23 @@ export function NavigationCard({
       ? `In ${formatDistance(distanceToManeuverM)}, ${instruction}`
       : instruction;
 
+  const cardRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || !onHeightChange) return;
+    onHeightChange(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) onHeightChange(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="nav-card">
+    <div className="nav-card" ref={cardRef}>
       <button
         className="nav-card-collapse"
         onClick={onCollapse}

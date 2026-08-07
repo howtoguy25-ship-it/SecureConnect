@@ -1,0 +1,115 @@
+.traffic-suggestion-banner {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  /* "Clear but transparent but not too transparent" per explicit request -- a translucent dark
+     glass tab, not the fully opaque #111827 NavigationCard itself uses, so the map stays
+     visible through it while the text stays readable. */
+  background: rgba(17, 24, 39, 0.82);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 15;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.traffic-suggestion-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.traffic-suggestion-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f59e0b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.traffic-suggestion-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.traffic-suggestion-title {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.traffic-suggestion-body {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  margin-top: 1px;
+}
+
+.traffic-suggestion-close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.traffic-suggestion-action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.traffic-suggestion-action-row button {
+  flex: 1;
+  padding: 9px 6px;
+  border-radius: 10px;
+  border: none;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.traffic-suggestion-no {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.traffic-suggestion-yes {
+  background: #2563eb;
+  color: #fff;
+}
+
+.end-suggested-route-wrap {
+  position: absolute;
+  left: 16px;
+  z-index: 15;
+}
+
+.end-suggested-route-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(17, 24, 39, 0.82);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}

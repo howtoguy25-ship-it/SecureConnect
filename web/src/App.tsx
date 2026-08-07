@@ -26,6 +26,7 @@ import { AlertDetailPanel } from "@/components/AlertDetailPanel";
 import { PlacementBar } from "@/components/PlacementBar";
 import { NavigationCard, type NavViewMode } from "@/components/NavigationCard";
 import { NavMiniBox } from "@/components/NavMiniBox";
+import { TrafficSuggestionBanner, EndSuggestedRouteButton } from "@/components/TrafficSuggestionBanner";
 import { VoiceControl } from "@/components/VoiceControl";
 import { RouteOptionsCard } from "@/components/RouteOptionsCard";
 import { StreetViewNav } from "@/components/StreetViewNav";
@@ -92,6 +93,17 @@ const OFF_ROUTE_CONFIRM_TICKS = 2;
 // briefly still off the eventual snapped route (GPS settling right after a fetch) could
 // immediately trigger a second one back-to-back.
 const OFF_ROUTE_REROUTE_COOLDOWN_MS = 15000;
+
+// Real traffic-jam reroute suggestion (see the periodic check effect below) -- mirrors
+// mobile's own constants of the same name exactly. How often to re-check, how long to stay
+// quiet after a decline, the minimum genuine time saving worth interrupting for, how close to
+// the destination it stops bothering to check at all, and how long the suggestion banner stays
+// up before auto-dismissing if left untouched.
+const TRAFFIC_CHECK_INTERVAL_MS = 90_000;
+const TRAFFIC_SUGGESTION_COOLDOWN_MS = 8 * 60_000;
+const MIN_SAVED_SECONDS_TO_SUGGEST = 180;
+const MIN_REMAINING_METERS_TO_CHECK = 1500;
+const TRAFFIC_SUGGESTION_DISPLAY_MS = 10_000;
 
 // Cached by "color:scale" so repeated calls return the *same* object reference instead of a
 // fresh one on every render -- markers (alerts + every OSM traffic light/speed camera, which
@@ -345,6 +357,28 @@ export default function App() {
   // route never ends up partly hidden behind the card. 280 is a reasonable fallback for the
   // one frame before the first real measurement lands.
   const [routeCardHeight, setRouteCardHeight] = useState(280);
+  // Real measured height of the nav card / mini-box (see their own onHeightChange), so the
+  // traffic-suggestion banner and "End suggested route" pill can sit right below whichever one
+  // is currently showing instead of guessing a fixed top offset that could overlap it. 260 is a
+  // reasonable fallback for the one frame before the first real measurement lands (same pattern
+  // routeCardHeight above uses).
+  const [navCardHeight, setNavCardHeight] = useState(260);
+  // Real traffic-jam reroute suggestion -- a genuinely faster, avoid-highways (side streets)
+  // alternative found while a real, meaningful traffic delay exists on the remaining route (see
+  // the periodic check effect below). Held separately from `directions` itself so it can be
+  // previewed before the driver actually accepts it. Mirrors mobile's own implementation.
+  const [trafficSuggestionRoute, setTrafficSuggestionRoute] = useState<google.maps.DirectionsResult | null>(null);
+  const [trafficSuggestionSavedSeconds, setTrafficSuggestionSavedSeconds] = useState(0);
+  // The route that was live right before a traffic suggestion was accepted -- kept around only
+  // while driving the accepted suggestion, so "End suggested route" can put the driver straight
+  // back on the exact route they started with.
+  const [acceptedSuggestionOriginalRoute, setAcceptedSuggestionOriginalRoute] =
+    useState<google.maps.DirectionsResult | null>(null);
+  // Read (not a dependency) by the live-ETA refresh in the directions-fetch effect above, so a
+  // refresh that happens to land while a suggestion is active keeps requesting the side-streets
+  // route instead of silently reverting to the original profile.
+  const suggestedRouteActiveRef = useRef(false);
+  suggestedRouteActiveRef.current = acceptedSuggestionOriginalRoute !== null;
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>(() => getSearchHistory());
   // Shown while the search input is focused/non-empty-typed -- explicitly NOT tied to blur, since
   // blur fires before a history row's onClick registers and would hide the panel first.
@@ -722,13 +756,20 @@ export default function App() {
 
     if (navigating) {
       const profile = ROUTE_PROFILES[selectedRouteKey];
+      // While an accepted traffic suggestion is active (see acceptedSuggestionOriginalRoute /
+      // the traffic-check effect below), this same live-ETA refresh -- which normally re-fires
+      // every ~50m of travel regardless -- keeps requesting the side-streets (avoidHighways)
+      // character instead of silently snapping back to the originally-selected profile's, which
+      // would otherwise revert "Yes" within about 50m without the driver ever touching "End
+      // suggested route".
+      const avoidHighways = suggestedRouteActiveRef.current ? true : profile.avoidHighways;
       directionsService.route(
         {
           origin,
           destination,
           waypoints,
           travelMode: google.maps.TravelMode.DRIVING,
-          avoidHighways: profile.avoidHighways,
+          avoidHighways,
           avoidTolls: profile.avoidTolls,
           // Traffic-aware ETA -- previously none of the three profiles requested this at all,
           // so every ETA shown was a static/typical-conditions estimate with zero live-traffic
@@ -738,7 +779,12 @@ export default function App() {
         (result, status) => {
           if (status === "OK" && result) {
             setDirections(result);
-            setRouteOptions((prev) => ({ ...prev, [selectedRouteKey]: result }));
+            // Not written into routeOptions[selectedRouteKey] while a suggestion is active --
+            // that key still represents the driver's original Best/Fast/Comfort pick, and
+            // overwriting it here would mislabel a side-streets result as that profile.
+            if (!suggestedRouteActiveRef.current) {
+              setRouteOptions((prev) => ({ ...prev, [selectedRouteKey]: result }));
+            }
             setActiveStepIndex(0);
           }
         }
@@ -996,6 +1042,135 @@ export default function App() {
     mapTypeId,
     manualViewActive,
   ]);
+
+  // Periodic real traffic check while navigating -- every 90s, fetches the remaining route
+  // WITH live traffic (departureTime: now) and compares it against a real avoid-highways
+  // alternative, also traffic-aware. Only surfaces a suggestion when both are true: the current
+  // route has a real, meaningful delay right now (10%+60s floor over free-flow -- same formula
+  // mobile's getDirections uses) AND the side-streets alternative is genuinely at least
+  // MIN_SAVED_SECONDS_TO_SUGGEST faster under that same live traffic -- never a
+  // guessed/simulated "there's a jam ahead", always Google's own real-time traffic model on two
+  // real, independently-fetched routes. "Back streets/alleyways" maps to Google's real
+  // avoidHighways flag -- the actual mechanism it exposes for this, same honest framing as
+  // mobile's own implementation.
+  const trafficSuggestionRouteRef = useRef<google.maps.DirectionsResult | null>(null);
+  trafficSuggestionRouteRef.current = trafficSuggestionRoute;
+  const trafficCheckInFlightRef = useRef(false);
+  const trafficSuggestionDismissedAtRef = useRef(0);
+  const trafficCheckLocationRef = useRef<google.maps.LatLngLiteral | null>(null);
+  trafficCheckLocationRef.current = location;
+
+  useEffect(() => {
+    if (!navigating || travelMode !== "driving" || !destination) return;
+    const interval = setInterval(() => {
+      if (trafficSuggestionRouteRef.current || trafficCheckInFlightRef.current) return;
+      if (suggestedRouteActiveRef.current) return;
+      if (Date.now() - trafficSuggestionDismissedAtRef.current < TRAFFIC_SUGGESTION_COOLDOWN_MS) return;
+      const origin = trafficCheckLocationRef.current;
+      if (!origin) return;
+      const remainingMeters = distanceKm(origin.lat, origin.lng, destination.lat, destination.lng) * 1000;
+      if (remainingMeters < MIN_REMAINING_METERS_TO_CHECK) return;
+      trafficCheckInFlightRef.current = true;
+
+      const directionsService = new google.maps.DirectionsService();
+      const waypoints = stopLocation ? [{ location: stopLocation, stopover: true }] : undefined;
+      const fetchRoute = (avoidHighways: boolean) =>
+        new Promise<google.maps.DirectionsResult>((resolve, reject) => {
+          directionsService.route(
+            {
+              origin,
+              destination,
+              waypoints,
+              travelMode: google.maps.TravelMode.DRIVING,
+              avoidHighways,
+              drivingOptions: { departureTime: new Date(), trafficModel: google.maps.TrafficModel.BEST_GUESS },
+            },
+            (result, status) => {
+              if (status === "OK" && result) resolve(result);
+              else reject(new Error(status));
+            }
+          );
+        });
+
+      Promise.all([fetchRoute(false), fetchRoute(true)])
+        .then(([liveCurrent, sideStreets]) => {
+          const totals = (result: google.maps.DirectionsResult) =>
+            result.routes[0]?.legs.reduce(
+              (acc, leg) => ({
+                normal: acc.normal + (leg.duration?.value ?? 0),
+                traffic: acc.traffic + (leg.duration_in_traffic?.value ?? leg.duration?.value ?? 0),
+              }),
+              { normal: 0, traffic: 0 }
+            ) ?? { normal: 0, traffic: 0 };
+          const current = totals(liveCurrent);
+          const alt = totals(sideStreets);
+          const hasTrafficDelay = current.traffic > current.normal + Math.max(60, current.normal * 0.1);
+          if (!hasTrafficDelay) return;
+          const savedSeconds = current.traffic - alt.traffic;
+          if (savedSeconds >= MIN_SAVED_SECONDS_TO_SUGGEST) {
+            setTrafficSuggestionRoute(sideStreets);
+            setTrafficSuggestionSavedSeconds(savedSeconds);
+          }
+        })
+        .catch((err) => {
+          console.warn("[map] traffic reroute check failed", err);
+        })
+        .finally(() => {
+          trafficCheckInFlightRef.current = false;
+        });
+    }, TRAFFIC_CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [navigating, travelMode, destination?.lat, destination?.lng, stopLocation?.lat, stopLocation?.lng]);
+
+  // Clears any stale suggestion the moment directions is replaced for any other reason (a real
+  // reroute, an add-stop confirm, exiting navigation) -- a suggestion computed against the old
+  // remaining path would no longer mean anything once directions change. Deliberately does NOT
+  // touch acceptedSuggestionOriginalRoute -- accepting a suggestion itself calls setDirections,
+  // which would otherwise wipe out the very state it just set in the same tick.
+  useEffect(() => {
+    setTrafficSuggestionRoute(null);
+    setTrafficSuggestionSavedSeconds(0);
+  }, [directions]);
+
+  // "Displays for 10 seconds" per explicit request -- an unattended banner auto-dismisses
+  // itself (same cooldown as a manual No/X) instead of sitting over the map indefinitely.
+  useEffect(() => {
+    if (!trafficSuggestionRoute) return;
+    const timer = setTimeout(() => {
+      setTrafficSuggestionRoute(null);
+      setTrafficSuggestionSavedSeconds(0);
+      trafficSuggestionDismissedAtRef.current = Date.now();
+    }, TRAFFIC_SUGGESTION_DISPLAY_MS);
+    return () => clearTimeout(timer);
+  }, [trafficSuggestionRoute]);
+
+  const acceptTrafficSuggestion = useCallback(() => {
+    if (!trafficSuggestionRoute) return;
+    // Remember exactly what was live before switching, so "End suggested route" can put the
+    // driver straight back on it rather than recomputing something merely similar.
+    setAcceptedSuggestionOriginalRoute(directions);
+    setActiveStepIndex(0);
+    setDirections(trafficSuggestionRoute);
+  }, [trafficSuggestionRoute, directions]);
+
+  // Covers both the No button and the X -- dismisses the suggestion (the live route was never
+  // actually replaced, so there's nothing else to undo) and starts the cooldown so the same jam
+  // doesn't immediately re-suggest itself again next check.
+  const dismissTrafficSuggestion = useCallback(() => {
+    setTrafficSuggestionRoute(null);
+    setTrafficSuggestionSavedSeconds(0);
+    trafficSuggestionDismissedAtRef.current = Date.now();
+  }, []);
+
+  // "End suggested route" -- only ever available while actually driving an accepted
+  // suggestion (see acceptedSuggestionOriginalRoute). Restores the exact route the driver was
+  // on before they said yes.
+  const endSuggestedRoute = useCallback(() => {
+    if (!acceptedSuggestionOriginalRoute) return;
+    setActiveStepIndex(0);
+    setDirections(acceptedSuggestionOriginalRoute);
+    setAcceptedSuggestionOriginalRoute(null);
+  }, [acceptedSuggestionOriginalRoute]);
 
   // Spoken turn-by-turn guidance -- speaks the active step's instruction once when it actually
   // changes (a turn was completed / navigation just started), not on every GPS tick.
@@ -1497,6 +1672,12 @@ export default function App() {
     setRouteOrigin(location);
     lastLocationRef.current = location;
     setNavCardCollapsed(false);
+    // Safety clear for a fresh nav session -- normally already cleared by endNavigation, but a
+    // stray leftover here would incorrectly show "End suggested route" and force
+    // avoidHighways on this brand-new trip.
+    setTrafficSuggestionRoute(null);
+    setTrafficSuggestionSavedSeconds(0);
+    setAcceptedSuggestionOriginalRoute(null);
   }, [location]);
 
   const endNavigation = useCallback(() => {
@@ -1510,6 +1691,9 @@ export default function App() {
     setTravelMode("driving");
     setModeRoute(null);
     setManualViewActive(false);
+    setTrafficSuggestionRoute(null);
+    setTrafficSuggestionSavedSeconds(0);
+    setAcceptedSuggestionOriginalRoute(null);
     stopSpeaking();
   }, []);
 
@@ -2047,6 +2231,7 @@ export default function App() {
           onShareEta={shareEta}
           onReportAlert={onReportClick}
           onOpenDetection={() => setDetectionOpen(true)}
+          onHeightChange={setNavCardHeight}
         />
       )}
 
@@ -2056,7 +2241,21 @@ export default function App() {
           distanceToManeuverM={distanceToManeuverM}
           etaText={navEta?.text ?? ""}
           onExpand={() => setNavCardCollapsed(false)}
+          onHeightChange={setNavCardHeight}
         />
+      )}
+
+      {navigating && trafficSuggestionRoute && (
+        <TrafficSuggestionBanner
+          top={16 + navCardHeight + 12}
+          savedMinutes={Math.max(1, Math.round(trafficSuggestionSavedSeconds / 60))}
+          onAccept={acceptTrafficSuggestion}
+          onDismiss={dismissTrafficSuggestion}
+        />
+      )}
+
+      {navigating && acceptedSuggestionOriginalRoute && (
+        <EndSuggestedRouteButton top={16 + navCardHeight + 12} onEnd={endSuggestedRoute} />
       )}
 
       {streetViewUnavailable && (

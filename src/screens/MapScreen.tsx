@@ -103,6 +103,10 @@ const TRAFFIC_CHECK_INTERVAL_MS = 90_000;
 const TRAFFIC_SUGGESTION_COOLDOWN_MS = 8 * 60_000;
 const MIN_SAVED_SECONDS_TO_SUGGEST = 180;
 const MIN_REMAINING_METERS_TO_CHECK = 1500;
+// How long the suggestion banner stays up before auto-dismissing if the driver doesn't tap
+// Yes/No/X -- per explicit request. An unattended banner clears itself the same way a manual
+// dismiss does (same cooldown applies) rather than lingering over the map indefinitely.
+const TRAFFIC_SUGGESTION_DISPLAY_MS = 10_000;
 
 export function MapScreen() {
   const { location } = useLocation();
@@ -794,6 +798,7 @@ export function MapScreen() {
         guidanceRef.current = createGuidanceState();
         setActiveStepIndex(0);
         setRoute(fresh);
+        setAcceptedSuggestionOriginalRoute(null);
         mapRef.current?.fitToCoordinates(fresh.polyline, {
           edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
           animated: true,
@@ -1194,6 +1199,10 @@ export function MapScreen() {
   // still-live blue route until the driver actually accepts it.
   const [trafficSuggestionRoute, setTrafficSuggestionRoute] = useState<Route | null>(null);
   const [trafficSuggestionSavedSeconds, setTrafficSuggestionSavedSeconds] = useState(0);
+  // The route that was live right before a traffic suggestion was accepted -- kept around only
+  // while driving the accepted suggestion, so "End suggested route" can put the driver straight
+  // back on the exact route they started with, not just re-fetch a fresh one from scratch.
+  const [acceptedSuggestionOriginalRoute, setAcceptedSuggestionOriginalRoute] = useState<Route | null>(null);
   const onStopSelectedDuringNav = useCallback(
     async (place: PlaceDetails) => {
       setAddingStopDuringNav(false);
@@ -1226,6 +1235,7 @@ export function MapScreen() {
     setActiveStepIndex(0);
     setStopLocation(stopPreviewPlace.location);
     setRoute(stopPreviewRoute);
+    setAcceptedSuggestionOriginalRoute(null);
     setStopPreviewRoute(null);
     setStopPreviewPlace(null);
   }, [stopPreviewRoute, stopPreviewPlace]);
@@ -1306,21 +1316,49 @@ export function MapScreen() {
     setTrafficSuggestionSavedSeconds(0);
   }, [route]);
 
+  // "Displays for 10 seconds" per explicit request -- an unattended banner auto-dismisses
+  // itself (same cooldown as a manual No/X) instead of sitting over the map indefinitely.
+  // Cleared/restarted whenever a new suggestion appears; a real Yes/No/X tap in the meantime
+  // already clears trafficSuggestionRoute itself, which tears this effect down too.
+  useEffect(() => {
+    if (!trafficSuggestionRoute) return;
+    const timer = setTimeout(() => {
+      setTrafficSuggestionRoute(null);
+      setTrafficSuggestionSavedSeconds(0);
+      trafficSuggestionDismissedAtRef.current = Date.now();
+    }, TRAFFIC_SUGGESTION_DISPLAY_MS);
+    return () => clearTimeout(timer);
+  }, [trafficSuggestionRoute]);
+
   const acceptTrafficSuggestion = useCallback(() => {
     if (!trafficSuggestionRoute) return;
+    // Remember exactly what was live before switching, so "End suggested route" can put the
+    // driver straight back on it rather than recomputing something merely similar.
+    setAcceptedSuggestionOriginalRoute(route);
     guidanceRef.current = createGuidanceState();
     setActiveStepIndex(0);
     setRoute(trafficSuggestionRoute);
-  }, [trafficSuggestionRoute]);
+  }, [trafficSuggestionRoute, route]);
 
-  // "Cancel route 2" -- dismisses the suggestion (route 1 was never actually replaced, so
-  // there's nothing else to undo) and starts the cooldown so the same jam doesn't immediately
-  // re-suggest itself again next check.
+  // "Cancel route 2" -- covers both the No button and the X -- dismisses the suggestion (route
+  // 1 was never actually replaced, so there's nothing else to undo) and starts the cooldown so
+  // the same jam doesn't immediately re-suggest itself again next check.
   const dismissTrafficSuggestion = useCallback(() => {
     setTrafficSuggestionRoute(null);
     setTrafficSuggestionSavedSeconds(0);
     trafficSuggestionDismissedAtRef.current = Date.now();
   }, []);
+
+  // "End suggested route" -- only ever available while actually driving an accepted
+  // suggestion (see acceptedSuggestionOriginalRoute). Restores the exact route the driver was
+  // on before they said yes, same guidance-reset shape as every other route swap here.
+  const endSuggestedRoute = useCallback(() => {
+    if (!acceptedSuggestionOriginalRoute) return;
+    guidanceRef.current = createGuidanceState();
+    setActiveStepIndex(0);
+    setRoute(acceptedSuggestionOriginalRoute);
+    setAcceptedSuggestionOriginalRoute(null);
+  }, [acceptedSuggestionOriginalRoute]);
 
   // Real removal of a mid-trip stop -- clears stopLocation and recomputes the route straight
   // to the original destination, the same real fetch this screen already does for adding one,
@@ -1337,6 +1375,7 @@ export function MapScreen() {
       guidanceRef.current = createGuidanceState();
       setActiveStepIndex(0);
       setRoute(fresh);
+      setAcceptedSuggestionOriginalRoute(null);
       mapRef.current?.fitToCoordinates(fresh.polyline, {
         edgePadding: { top: 120, right: 60, bottom: 120, left: 60 },
         animated: true,
@@ -1403,6 +1442,7 @@ export function MapScreen() {
     guidanceRef.current = createGuidanceState();
     setActiveStepIndex(0);
     setRoute(chosen);
+    setAcceptedSuggestionOriginalRoute(null);
     setDestinationLatLng(pendingDestination.location);
     navStartedAtRef.current = Date.now();
     setFollowTilt(true);
@@ -1458,6 +1498,7 @@ export function MapScreen() {
     setFollowTilt(true);
     setStopLocation(null);
     setDestinationLatLng(null);
+    setAcceptedSuggestionOriginalRoute(null);
     // Per explicit user answer ("Until navigation ends"), a share started this trip stops
     // updating right here -- fire-and-forget since there's nothing useful to block exit on.
     if (liveShareIdRef.current) {
@@ -2219,10 +2260,11 @@ export function MapScreen() {
 
       {/* Real traffic-jam reroute suggestion -- only ever shown once the periodic check above
           has actually found a genuinely faster side-streets alternative during a real traffic
-          delay. Tapping the main area accepts it (switches to route 2); the separate "Cancel
-          route 2" X dismisses it and keeps route 1 -- two siblings, not a nested Pressable,
-          same pattern NavigationInstructionCard's header already uses so the two targets can
-          never accidentally trigger each other. */}
+          delay. Semi-transparent "island" tab per explicit request (not opaque, not so
+          transparent it's hard to read), auto-dismisses after TRAFFIC_SUGGESTION_DISPLAY_MS if
+          left untouched, and gives three distinct real controls: Yes (accept), No (decline),
+          and a separate X close -- all three just call through to accept/dismiss, kept as
+          separate elements because that's what was explicitly asked for. */}
       {route && trafficSuggestionRoute && !stopPreviewRoute && !addingStopDuringNav && !placingAlert && (
         <View
           style={[
@@ -2230,11 +2272,7 @@ export function MapScreen() {
             { top: insets.top + spacing.md + instructionCardHeight + spacing.md },
           ]}
         >
-          <Pressable
-            style={({ pressed }) => [styles.trafficSuggestionTapArea, pressed && { opacity: pressedOpacity }]}
-            onPress={acceptTrafficSuggestion}
-            accessibilityLabel={`Faster route via side streets, save about ${Math.max(1, Math.round(trafficSuggestionSavedSeconds / 60))} minutes. Tap to switch.`}
-          >
+          <View style={styles.trafficSuggestionTopRow}>
             <View style={styles.trafficSuggestionIconWrap}>
               <Ionicons name="flash" size={18} color="#FFFFFF" />
             </View>
@@ -2244,14 +2282,55 @@ export function MapScreen() {
                 Faster via side streets -- save {Math.max(1, Math.round(trafficSuggestionSavedSeconds / 60))} min
               </Text>
             </View>
-          </Pressable>
+            <Pressable
+              onPress={dismissTrafficSuggestion}
+              hitSlop={10}
+              style={({ pressed }) => [styles.trafficSuggestionClose, pressed && { opacity: pressedOpacity }]}
+              accessibilityLabel="Close -- not wanted, keep current route"
+            >
+              <Ionicons name="close" size={16} color={colors.text} />
+            </Pressable>
+          </View>
+          <View style={styles.trafficSuggestionActionRow}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.trafficSuggestionActionButton,
+                styles.trafficSuggestionNoButton,
+                pressed && { opacity: pressedOpacity },
+              ]}
+              onPress={dismissTrafficSuggestion}
+              accessibilityLabel="No -- keep current route"
+            >
+              <Text style={styles.trafficSuggestionNoText}>No</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.trafficSuggestionActionButton,
+                styles.trafficSuggestionYesButton,
+                pressed && { opacity: pressedOpacity },
+              ]}
+              onPress={acceptTrafficSuggestion}
+              accessibilityLabel={`Yes -- switch to the faster route, save about ${Math.max(1, Math.round(trafficSuggestionSavedSeconds / 60))} minutes`}
+            >
+              <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+              <Text style={styles.trafficSuggestionYesText}>Yes</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {/* "End suggested route" -- only shown while actually driving an accepted suggestion (see
+          acceptedSuggestionOriginalRoute), per explicit request. Restores the exact route the
+          driver was on before they accepted. */}
+      {route && acceptedSuggestionOriginalRoute && !stopPreviewRoute && !addingStopDuringNav && !placingAlert && (
+        <View style={[styles.endSuggestedRouteWrap, { top: insets.top + spacing.md + instructionCardHeight + spacing.md }]}>
           <Pressable
-            onPress={dismissTrafficSuggestion}
-            hitSlop={10}
-            style={({ pressed }) => [styles.trafficSuggestionClose, pressed && { opacity: pressedOpacity }]}
-            accessibilityLabel="Cancel route 2 -- keep current route"
+            style={({ pressed }) => [styles.endSuggestedRouteButton, pressed && { opacity: pressedOpacity }]}
+            onPress={endSuggestedRoute}
+            accessibilityLabel="End suggested route -- return to your original route"
           >
-            <Ionicons name="close" size={18} color={colors.text} />
+            <Ionicons name="return-up-back" size={16} color="#FFFFFF" />
+            <Text style={styles.endSuggestedRouteText}>End suggested route</Text>
           </Pressable>
         </View>
       )}
@@ -2930,17 +3009,17 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: spacing.md,
     right: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
+    // "Clear but transparent but not too transparent" per explicit request -- a translucent
+    // dark glass tab rather than the fully opaque colors.surface it used to be, so the map
+    // stays visible through it while the text stays readable.
+    backgroundColor: "rgba(17, 24, 39, 0.82)",
     borderRadius: radius.lg,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.sm + 2,
     gap: spacing.sm,
     ...shadow.high,
   },
-  trafficSuggestionTapArea: {
-    flex: 1,
+  trafficSuggestionTopRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
@@ -2956,21 +3035,70 @@ const styles = StyleSheet.create({
   trafficSuggestionTitle: {
     fontSize: 13,
     fontWeight: "800",
-    color: colors.text,
+    color: "#FFFFFF",
   },
   trafficSuggestionBody: {
     fontSize: 12,
     fontWeight: "600",
-    color: colors.textMuted,
+    color: "rgba(255, 255, 255, 0.75)",
     marginTop: 1,
   },
   trafficSuggestionClose: {
-    width: 30,
-    height: 30,
+    width: 26,
+    height: 26,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  trafficSuggestionActionRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  trafficSuggestionActionButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+  },
+  trafficSuggestionNoButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+  },
+  trafficSuggestionNoText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  trafficSuggestionYesButton: {
+    backgroundColor: colors.accent,
+  },
+  trafficSuggestionYesText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  endSuggestedRouteWrap: {
+    position: "absolute",
+    left: spacing.md,
+    alignItems: "flex-start",
+  },
+  endSuggestedRouteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: "rgba(17, 24, 39, 0.82)",
+    borderRadius: radius.pill,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + 4,
+    ...shadow.high,
+  },
+  endSuggestedRouteText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
   reroutingBadgeText: {
     color: "#FFFFFF",
