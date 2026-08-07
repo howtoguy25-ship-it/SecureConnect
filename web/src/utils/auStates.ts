@@ -20,3 +20,22 @@ export const AU_STATES: AuState[] = [
 ];
 
 export const DEFAULT_AU_STATE = "NSW";
+
+// Real state/territory classification for a lat/lng, used to tag every alert with the region
+// it was placed in (see services/alerts.ts's reportAlert) so alert visibility can be filtered
+// by real Australian regions instead of a plain distance radius -- per explicit request. Exact
+// mirror of mobile's src/utils/auStates.ts -- see that file's header for the border-approximation
+// notes (most of Australia's internal borders genuinely are straight lines; the NSW/VIC Murray
+// River border and the remote SA/QLD desert corner are the two approximated soft spots).
+export type AuRegionCode = "NSW" | "VIC" | "QLD" | "WA" | "SA" | "TAS" | "ACT" | "NT";
+
+export function classifyAuRegion(lat: number, lng: number): AuRegionCode {
+  if (lat <= -39.3) return "TAS";
+  if (lat <= -35.05 && lat >= -36.0 && lng >= 148.7 && lng <= 149.45) return "ACT";
+  if (lng < 129) return "WA";
+  if (lng < 138 && lat > -26) return "NT";
+  if (lng < 141 && lat <= -26) return "SA";
+  if (lat > -29) return "QLD";
+  if (lat <= -36) return "VIC";
+  return "NSW";
+}

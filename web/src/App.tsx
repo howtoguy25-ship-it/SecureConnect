@@ -12,13 +12,13 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth, ensureSignedIn, signInWithGoogle, signInWithApple, signOutUser } from "@/services/firebase";
 import { upsertSignedInProfile, updateLastKnownLocation } from "@/services/userProfile";
 import {
-  subscribeNearbyAlerts,
-  subscribeAllAlerts,
+  subscribeVisibleAlerts,
   reportAlert,
   deleteAlert,
   hideAlertForUser,
   confirmAlert,
 } from "@/services/alerts";
+import { classifyAuRegion, AU_STATES, type AuRegionCode } from "@/utils/auStates";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { useSettings, ALL_ALERT_TYPES } from "@/hooks/useSettings";
 import { ReportAlertPanel } from "@/components/ReportAlertPanel";
@@ -299,12 +299,10 @@ export default function App() {
   const { location, error: locationError } = useGeolocation();
   const {
     settings,
-    setAlertRadiusKm,
+    setVisibleRegions,
     setAlertsEnabled,
     setVisibleAlertTypes,
     setAlertExpiryMs,
-    setRegionWide,
-    setFixedZone,
     setHideDetectionTrace,
     setTheme,
     setMapTheme,
@@ -421,6 +419,13 @@ export default function App() {
     [setVisibleAlertTypes]
   );
 
+  const onRegionToggle = useCallback(
+    (code: AuRegionCode, value: boolean) => {
+      setVisibleRegions((regions) => (value ? [...regions, code] : regions.filter((r) => r !== code)));
+    },
+    [setVisibleRegions]
+  );
+
   const [customExpiryOpen, setCustomExpiryOpen] = useState(false);
   const [customHoursText, setCustomHoursText] = useState("");
   const [customMinutesText, setCustomMinutesText] = useState("");
@@ -510,9 +515,8 @@ export default function App() {
   // The fetch above (onMapIdle) pulls in whatever the current *viewport* covers, which can be
   // far from the driver's own position after panning around to look at somewhere else. This
   // trims what's actually rendered down to the configured radius from the driver's own live
-  // location (settings.osmLayerRadiusKm, 1-200km, same slider pattern as alertRadiusKm), so
-  // "how far this layer shows from me" means what it says regardless of where the map itself is
-  // currently panned to look.
+  // location (settings.osmLayerRadiusKm, 1-200km), so "how far this layer shows from me" means
+  // what it says regardless of where the map itself is currently panned to look.
   const visibleOsmTrafficLights = useMemo(
     () =>
       location
@@ -567,10 +571,6 @@ export default function App() {
   const [street3DMode, setStreet3DMode] = useState(false);
   const promptedAtMaxZoomRef = useRef(false);
 
-  // Fixed alert zone
-  const [zoneCenter, setZoneCenter] = useState<google.maps.LatLngLiteral | null>(null);
-  const [showLeaveZonePrompt, setShowLeaveZonePrompt] = useState(false);
-  const leaveZonePromptedRef = useRef(false);
 
   // Theme: "system" tracks the OS/browser preference live; "light"/"dark" is a saved
   // override. The actual color swap happens via CSS variables keyed off a data-theme
@@ -672,74 +672,36 @@ export default function App() {
     }
   }, []);
 
+  // First-launch default: the moment a real geolocation fix comes in, if the driver hasn't
+  // toggled on any region yet, seed visibleRegions with whichever real Australian state/
+  // territory their current location falls in -- mirrors mobile's own MapScreen.tsx effect
+  // exactly. Only ever fires once (guarded by visibleRegions.length === 0).
+  const regionSeededRef = useRef(false);
+  useEffect(() => {
+    if (regionSeededRef.current || !location || settings.visibleRegions.length > 0) return;
+    regionSeededRef.current = true;
+    setVisibleRegions(() => [classifyAuRegion(location.lat, location.lng)]);
+  }, [location, settings.visibleRegions]);
+
   // Fully off (and cleared) when the user has disabled alerts altogether -- matches mobile's
-  // own spec exactly ("if toggled off user who is active doesn't receive no alerts").
+  // own spec exactly ("if toggled off user who is active doesn't receive no alerts"). Real
+  // Australian state/territory selection instead of a distance radius, per explicit request --
+  // mirrors mobile's own subscribeVisibleAlerts call exactly.
   useEffect(() => {
     if (!user || !settings.alertsEnabled) {
       setAlerts([]);
       return;
     }
+    return subscribeVisibleAlerts(settings.visibleRegions, user.uid, setAlerts);
+  }, [settings.alertsEnabled, settings.visibleRegions, user?.uid]);
 
-    if (settings.regionWide) {
-      return subscribeAllAlerts(user.uid, setAlerts);
-    }
-
-    const queryCenter = settings.fixedZone ? zoneCenter ?? location : location;
-    if (!queryCenter) return;
-
-    return subscribeNearbyAlerts(
-      queryCenter.lat,
-      queryCenter.lng,
-      settings.alertRadiusKm,
-      user.uid,
-      setAlerts
-    );
-  }, [
-    location?.lat,
-    location?.lng,
-    settings.alertsEnabled,
-    settings.alertRadiusKm,
-    settings.regionWide,
-    settings.fixedZone,
-    zoneCenter?.lat,
-    zoneCenter?.lng,
-    user?.uid,
-  ]);
-
-  // Per-type visibility filter, applied on top of the radius/region-wide subscription above --
-  // lets a driver e.g. only care about police + hazards without changing what's actually
-  // fetched. Mirrors mobile's own visibleAlerts useMemo exactly.
+  // Per-type visibility filter, applied on top of the region subscription above -- lets a
+  // driver e.g. only care about police + hazards without changing what's actually fetched.
+  // Mirrors mobile's own visibleAlerts useMemo exactly.
   const visibleAlerts = useMemo(
     () => alerts.filter((alert) => settings.visibleAlertTypes.includes(alert.type)),
     [alerts, settings.visibleAlertTypes]
   );
-
-  // Seed the fixed zone's center the moment it's turned on; clear it when turned off so
-  // it re-seeds fresh next time instead of reusing a stale spot.
-  useEffect(() => {
-    if (settings.fixedZone && !zoneCenter && location) {
-      setZoneCenter(location);
-      leaveZonePromptedRef.current = false;
-    }
-    if (!settings.fixedZone && zoneCenter) {
-      setZoneCenter(null);
-      setShowLeaveZonePrompt(false);
-    }
-  }, [settings.fixedZone, zoneCenter, location]);
-
-  // Watch for drifting outside the fixed zone's radius and prompt once per "leaving" event.
-  useEffect(() => {
-    if (!settings.fixedZone || !zoneCenter || !location) return;
-    const distFromZoneKm = distanceKm(zoneCenter.lat, zoneCenter.lng, location.lat, location.lng);
-    if (distFromZoneKm > settings.alertRadiusKm) {
-      if (!leaveZonePromptedRef.current) {
-        leaveZonePromptedRef.current = true;
-        setShowLeaveZonePrompt(true);
-      }
-    } else {
-      leaveZonePromptedRef.current = false;
-    }
-  }, [location?.lat, location?.lng, settings.fixedZone, settings.alertRadiusKm, zoneCenter]);
 
   // Compute/refresh directions. Before navigating, this fetches three real, distinctly
   // -constrained routes (Best/Fast/Comfort) so the route picker has real options to show.
@@ -2110,17 +2072,29 @@ export default function App() {
                 </div>
               )}
 
-              <label>
-                Alert radius: {settings.alertRadiusKm} km
-                <input
-                  type="range"
-                  min={1}
-                  max={200}
-                  disabled={!settings.alertsEnabled || settings.regionWide}
-                  value={settings.alertRadiusKm}
-                  onChange={(e) => setAlertRadiusKm(Number(e.target.value))}
-                />
-              </label>
+              {/* Real Australian state/territory multi-select -- replaces the old 1-200km
+                  radius slider and the regionWide/fixedZone checkboxes, per explicit request.
+                  A driver sees every alert in every region toggled on, regardless of distance.
+                  Matches mobile's own Settings screen exactly. */}
+              <div className="radius-helper-text">Regions</div>
+              <div className="radius-helper-text">
+                Toggle on whichever real Australian states/territories you want to see alerts
+                from -- you'll see every alert in every region toggled on, regardless of how far
+                away it is.
+              </div>
+              <div className="alert-type-grid">
+                {AU_STATES.map((state) => (
+                  <label key={state.code} className="radius-checkbox alert-type-checkbox">
+                    <input
+                      type="checkbox"
+                      disabled={!settings.alertsEnabled}
+                      checked={settings.visibleRegions.includes(state.code as AuRegionCode)}
+                      onChange={(e) => onRegionToggle(state.code as AuRegionCode, e.target.checked)}
+                    />
+                    {state.label}
+                  </label>
+                ))}
+              </div>
 
               {/* Per-type visibility grid, matching mobile's Settings screen exactly -- lets a
                   driver e.g. only care about police + hazards without changing what's fetched. */}
@@ -2189,23 +2163,6 @@ export default function App() {
                 </div>
               )}
 
-              <label className="radius-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.regionWide}
-                  onChange={(e) => setRegionWide(e.target.checked)}
-                />
-                Show all alerts region-wide (e.g. all of Australia)
-              </label>
-              <label className="radius-checkbox">
-                <input
-                  type="checkbox"
-                  disabled={settings.regionWide}
-                  checked={settings.fixedZone}
-                  onChange={(e) => setFixedZone(e.target.checked)}
-                />
-                Lock alert zone to current spot
-              </label>
               <label className="radius-checkbox">
                 <input
                   type="checkbox"
@@ -2495,17 +2452,6 @@ export default function App() {
           onYes={enterStreet3D}
           onNo={declineStreet3D}
           variant="top"
-        />
-      )}
-
-      {showLeaveZonePrompt && (
-        <ConfirmPrompt
-          message={`Leaving zone — you've moved past your ${settings.alertRadiusKm} km alert zone limit. Adjust to view all alerts around your current surroundings?`}
-          onYes={() => {
-            setShowLeaveZonePrompt(false);
-            setFixedZone(false);
-          }}
-          onNo={() => setShowLeaveZonePrompt(false)}
         />
       )}
 

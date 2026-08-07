@@ -6,6 +6,11 @@ export interface AlertDoc {
   lat: number;
   lng: number;
   geohash: string;
+  // Real Australian state/territory the alert was placed in (see utils/auStates.ts's
+  // classifyAuRegion), used to filter alert visibility by region instead of a distance radius.
+  // Optional only because alerts written before this field existed lack it -- they age out
+  // naturally within their own TTL (45min-24h), no backfill needed.
+  region?: string;
   createdBy: string;
   createdAt: number;
   expiresAt: number;

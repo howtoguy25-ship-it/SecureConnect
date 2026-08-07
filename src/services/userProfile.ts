@@ -2,10 +2,10 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/services/firebase";
 
-export async function syncAlertRadiusToProfile(uid: string, alertRadiusKm: number): Promise<void> {
+export async function syncVisibleRegionsToProfile(uid: string, visibleRegions: string[]): Promise<void> {
   await setDoc(
     doc(db, "users", uid),
-    { alertRadiusKm, updatedAt: Date.now() },
+    { visibleRegions, updatedAt: Date.now() },
     { merge: true }
   );
 }

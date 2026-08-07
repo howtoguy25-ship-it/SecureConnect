@@ -64,12 +64,13 @@ import { createGuidanceState, evaluateGuidance } from "@/services/navigationGuid
 import { speak, stopSpeaking } from "@/services/voice";
 import { formatArrivalClock } from "@/utils/navFormat";
 import {
-  subscribeNearbyAlerts,
+  subscribeVisibleAlerts,
   reportAlert,
   deleteAlert,
   hideAlertForUser,
   confirmAlert,
 } from "@/services/alerts";
+import { classifyAuRegion } from "@/utils/auStates";
 import { sirenDetection } from "@/services/sirenDetection";
 import { containsBlockedLanguage, clampToWordLimit, MAX_ALERT_COMMENT_WORDS } from "@/utils/commentFilter";
 import { fetchOsmTrafficData, fetchSpeedLimitNear, type OsmTrafficData } from "@/services/osmTrafficData";
@@ -106,7 +107,7 @@ const MIN_REMAINING_METERS_TO_CHECK = 1500;
 export function MapScreen() {
   const { location } = useLocation();
   const { user } = useAuth();
-  const { settings, voiceEnabled, voiceVolume } = useSettings();
+  const { settings, updateSettings, voiceEnabled, voiceVolume } = useSettings();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
 
@@ -699,30 +700,29 @@ export function MapScreen() {
     if (followTilt) setFollowTilt(false);
   }, [followTilt]);
 
-  // Subscribe to nearby alerts (Phase 3 + Phase 5) whenever position or radius changes
-  // meaningfully. Fully off (and cleared) when the user has disabled alerts altogether --
-  // "if toggled off user who is active doesn't receive no alerts".
+  // First-launch default: the moment a real GPS fix comes in, if the driver hasn't toggled on
+  // any region yet, seed visibleRegions with whichever real Australian state/territory their
+  // current location falls in -- so alerts "just work" out of the box without requiring a trip
+  // to Settings first, while still letting them add/remove regions freely afterward. Only ever
+  // fires once (guarded by visibleRegions.length === 0); intentionally does nothing further
+  // once the driver has an explicit selection, even an empty one they cleared on purpose.
+  const regionSeededRef = useRef(false);
   useEffect(() => {
-    if (!currentLatLng || !user || !settings.alertsEnabled) {
+    if (regionSeededRef.current || !currentLatLng || settings.visibleRegions.length > 0) return;
+    regionSeededRef.current = true;
+    updateSettings({ visibleRegions: [classifyAuRegion(currentLatLng.latitude, currentLatLng.longitude)] });
+  }, [currentLatLng, settings.visibleRegions, updateSettings]);
+
+  // Subscribe to alerts in every toggled-on region (Phase 3 + Phase 5), real Australian state/
+  // territory selection instead of a distance radius. Fully off (and cleared) when the user has
+  // disabled alerts altogether -- "if toggled off user who is active doesn't receive no alerts".
+  useEffect(() => {
+    if (!user || !settings.alertsEnabled) {
       setNearbyAlerts([]);
       return;
     }
-    const unsubscribe = subscribeNearbyAlerts(
-      currentLatLng.latitude,
-      currentLatLng.longitude,
-      settings.alertRadiusKm,
-      user.uid,
-      setNearbyAlerts
-    );
-    return unsubscribe;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    user?.uid,
-    settings.alertsEnabled,
-    settings.alertRadiusKm,
-    currentLatLng ? Math.round(currentLatLng.latitude * 200) : null,
-    currentLatLng ? Math.round(currentLatLng.longitude * 200) : null,
-  ]);
+    return subscribeVisibleAlerts(settings.visibleRegions, user.uid, setNearbyAlerts);
+  }, [user?.uid, settings.alertsEnabled, settings.visibleRegions]);
 
   // Per-type visibility filter, applied on top of the radius subscription above -- lets a
   // driver e.g. only care about police + hazards without changing what's actually fetched.

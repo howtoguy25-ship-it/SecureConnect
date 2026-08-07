@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { AlertType } from "@/types/alert";
 import type { MapThemeKey } from "@/utils/mapStyle";
 import type { NavCardThemeKey } from "@/utils/navCardTheme";
+import type { AuRegionCode } from "@/utils/auStates";
 
 export const ALL_ALERT_TYPES: AlertType[] = [
   "police",
@@ -12,15 +13,16 @@ export const ALL_ALERT_TYPES: AlertType[] = [
   "traffic_light",
 ];
 
-// The radius auto-set whenever alertsEnabled flips off -> on (see SettingsScreen) -- the
-// user's own spec: "if toggled on alerts radius is automatically set for 30kms".
-export const DEFAULT_ALERT_RADIUS_KM = 30;
-
 export interface AppSettings {
-  alertRadiusKm: number; // 1-200km
+  // Real Australian state/territory selection -- replaces the old 1-200km alertRadiusKm
+  // slider, per explicit request. A driver sees every non-expired alert in every region they've
+  // toggled on, regardless of how far away it is; toggling off a region stops showing its
+  // alerts entirely. Empty until the first-launch auto-detect effect (see MapScreen.tsx) seeds
+  // it with whichever region the device's own current location falls in.
+  visibleRegions: AuRegionCode[];
   // Master on/off for receiving/showing community alerts (police/camera/crash/etc.) at all --
-  // off means none are shown regardless of radius, matching the user's "if toggled off user
-  // who is active doesn't receive no alerts" spec.
+  // off means none are shown regardless of which regions are toggled on, matching the user's
+  // "if toggled off user who is active doesn't receive no alerts" spec.
   alertsEnabled: boolean;
   // Which AlertTypes to actually show/receive while alertsEnabled is on -- lets a driver
   // e.g. only care about police + hazards and not crashes.
@@ -33,8 +35,8 @@ export interface AppSettings {
   // reports above, which are temporary/mobile and user-submitted.
   showTrafficLights: boolean;
   showSpeedCameras: boolean;
-  // How far from the driver's own location that layer is fetched/shown, independent of
-  // alertRadiusKm above (community alerts) -- same 1-200km range and slider pattern.
+  // How far from the driver's own location that layer is fetched/shown -- independent of
+  // visibleRegions above (community alerts), which is region-based rather than a radius.
   osmLayerRadiusKm: number; // 1-200km
   // Which map color theme customMapStyle renders -- see utils/mapStyle.ts.
   mapTheme: MapThemeKey;
@@ -49,7 +51,9 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  alertRadiusKm: 5,
+  // Empty on a fresh install -- MapScreen.tsx's first-launch effect seeds this with whichever
+  // region the device's own current location falls in, the moment a real GPS fix comes in.
+  visibleRegions: [],
   alertsEnabled: true,
   visibleAlertTypes: ALL_ALERT_TYPES,
   autoShareDetections: false,

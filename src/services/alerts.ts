@@ -10,11 +10,11 @@ import {
   where,
   increment,
   addDoc,
-  getDocs,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
-import { encodeGeohash, geohashQueryBounds, distanceKm } from "@/utils/geo";
+import { encodeGeohash } from "@/utils/geo";
+import { classifyAuRegion, type AuRegionCode } from "@/utils/auStates";
 import { ALERT_TTL_MS, type AlertDoc, type AlertType } from "@/types/alert";
 import { containsBlockedLanguage, clampToWordLimit } from "@/utils/commentFilter";
 
@@ -40,6 +40,7 @@ function toAlertDoc(id: string, data: any): AlertDoc {
     lat: data.lat,
     lng: data.lng,
     geohash: data.geohash,
+    region: typeof data.region === "string" ? data.region : undefined,
     createdBy: data.createdBy,
     // createdAt is written with serverTimestamp() (see reportAlert below), which the local
     // optimistic write Firestore fires through onSnapshot *before* the server round-trip
@@ -78,6 +79,7 @@ export async function reportAlert(
 ): Promise<string> {
   const now = Date.now();
   const geohash = encodeGeohash(location.latitude, location.longitude, 9);
+  const region = classifyAuRegion(location.latitude, location.longitude);
   const ttlMs = customTtlMs ?? ALERT_TTL_MS[type];
   const trimmedComment = comment?.trim();
   const safeComment =
@@ -90,6 +92,7 @@ export async function reportAlert(
     lat: location.latitude,
     lng: location.longitude,
     geohash,
+    region,
     createdBy: uid,
     createdAt: serverTimestamp(),
     expiresAt: Timestamp.fromMillis(now + ttlMs),
@@ -101,109 +104,52 @@ export async function reportAlert(
   return ref.id;
 }
 
-/**
- * One-shot fetch of alerts within radiusKm of (userLat, userLng), already filtered to
- * exclude expired alerts and anything the current user has hidden.
- */
-export async function getNearbyAlerts(
-  userLat: number,
-  userLng: number,
-  radiusKm: number,
-  currentUid: string
-): Promise<AlertDoc[]> {
-  const bounds = geohashQueryBounds(userLat, userLng, radiusKm);
-  const now = Date.now();
-
-  const snapshots = await Promise.all(
-    bounds.map(([start, end]) =>
-      getDocs(
-        query(
-          collection(db, ALERTS_COLLECTION),
-          where("geohash", ">=", start),
-          where("geohash", "<", end)
-        )
-      )
-    )
-  );
-
-  const seen = new Map<string, AlertDoc>();
-  for (const snap of snapshots) {
-    for (const docSnap of snap.docs) {
-      const alert = toAlertDoc(docSnap.id, docSnap.data());
-      seen.set(alert.id, alert);
-    }
-  }
-
-  return Array.from(seen.values()).filter(
-    (alert) =>
-      alert.expiresAt > now &&
-      !isHiddenForUser(alert, currentUid) &&
-      distanceKm(userLat, userLng, alert.lat, alert.lng) <= radiusKm
-  );
-}
-
-// Re-applies the same filter on a plain timer, not just whenever a new Firestore snapshot
+// Re-applies the hide filter on a plain timer, not just whenever a new Firestore snapshot
 // happens to arrive -- a hide expiring after HIDE_DURATION_MS is purely a client-side clock
 // event, nothing about the alert doc itself changes when that hour passes, so without this a
-// hidden alert would only ever reappear by coincidence (whenever something else about it, or
-// another alert in the same geohash cell, happened to trigger a fresh snapshot). One minute is
-// frequent enough that "re displays" after the hour is up feels prompt without re-filtering on
-// every render.
+// hidden alert would only ever reappear by coincidence (whenever something else about it
+// happened to trigger a fresh snapshot). One minute is frequent enough that "reappears" after
+// the hour is up feels prompt without re-filtering on every render.
 const REEMIT_INTERVAL_MS = 60 * 1000;
 
 /**
- * Live subscription variant of getNearbyAlerts. Since Firestore range queries can't be
- * combined across the 9 geohash cells with a single onSnapshot, we subscribe to each
- * cell separately and re-merge + re-filter on every change.
+ * Live subscription to every non-expired alert whose region is one of visibleRegions -- real
+ * Australian state/territory selection (see utils/auStates.ts's classifyAuRegion) instead of a
+ * plain distance radius, per explicit request: a driver who toggles on e.g. NSW and QLD sees
+ * every alert in both regions regardless of how far away it is, not just nearby ones. An empty
+ * selection means "nothing toggled on" -- Firestore's own `in` operator rejects an empty array,
+ * so that case is handled here by skipping the query entirely and emitting nothing, rather than
+ * letting it throw.
  */
-export function subscribeNearbyAlerts(
-  userLat: number,
-  userLng: number,
-  radiusKm: number,
+export function subscribeVisibleAlerts(
+  visibleRegions: string[],
   currentUid: string,
   onChange: (alerts: AlertDoc[]) => void
 ): Unsubscribe {
-  const bounds = geohashQueryBounds(userLat, userLng, radiusKm);
-  const cellResults = new Map<string, AlertDoc[]>();
-
-  function emit() {
-    const now = Date.now();
-    const merged = new Map<string, AlertDoc>();
-    for (const alerts of cellResults.values()) {
-      for (const alert of alerts) merged.set(alert.id, alert);
-    }
-    const filtered = Array.from(merged.values()).filter(
-      (alert) =>
-        alert.expiresAt > now &&
-        !isHiddenForUser(alert, currentUid) &&
-        distanceKm(userLat, userLng, alert.lat, alert.lng) <= radiusKm
-    );
-    onChange(filtered);
+  if (visibleRegions.length === 0) {
+    onChange([]);
+    return () => {};
   }
 
-  const unsubscribes = bounds.map(([start, end]) => {
-    const cellKey = start;
-    return onSnapshot(
-      query(
-        collection(db, ALERTS_COLLECTION),
-        where("geohash", ">=", start),
-        where("geohash", "<", end)
-      ),
-      (snap) => {
-        cellResults.set(
-          cellKey,
-          snap.docs.map((d) => toAlertDoc(d.id, d.data()))
-        );
-        emit();
-      }
-    );
-  });
+  let latestDocs: AlertDoc[] = [];
+  function emit() {
+    const now = Date.now();
+    onChange(latestDocs.filter((alert) => alert.expiresAt > now && !isHiddenForUser(alert, currentUid)));
+  }
+
+  const unsubscribe = onSnapshot(
+    query(collection(db, ALERTS_COLLECTION), where("region", "in", visibleRegions)),
+    (snap) => {
+      latestDocs = snap.docs.map((d) => toAlertDoc(d.id, d.data()));
+      emit();
+    }
+  );
 
   const reemitInterval = setInterval(emit, REEMIT_INTERVAL_MS);
 
   return () => {
     clearInterval(reemitInterval);
-    unsubscribes.forEach((unsub) => unsub());
+    unsubscribe();
   };
 }
 

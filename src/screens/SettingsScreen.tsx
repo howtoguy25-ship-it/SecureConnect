@@ -10,7 +10,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSettings } from "@/context/SettingsContext";
 import { useAuth } from "@/context/AuthContext";
-import { syncAlertRadiusToProfile } from "@/services/userProfile";
+import { syncVisibleRegionsToProfile } from "@/services/userProfile";
 import { setVoiceEnabled } from "@/services/voice";
 import { signOutUser, deleteAccount } from "@/services/firebase";
 import { REV_CHECK_PRODUCT_ID } from "@/services/iap";
@@ -18,8 +18,9 @@ import { getRevCheckProviderConfig, saveRevCheckProviderConfig } from "@/service
 import { isOwnerEmail } from "@/config/admin";
 import { BUSINESS_INFO } from "@/config/business";
 import { colors, radius, shadow, spacing, pressedOpacity } from "@/theme/tokens";
-import { ALL_ALERT_TYPES, DEFAULT_ALERT_RADIUS_KM } from "@/services/settings";
+import { ALL_ALERT_TYPES } from "@/services/settings";
 import { ALERT_LABELS, type AlertType } from "@/types/alert";
+import { AU_STATES, type AuRegionCode } from "@/utils/auStates";
 import { MAP_THEME_LABELS, type MapThemeKey } from "@/utils/mapStyle";
 import { NAV_CARD_THEME_LABELS, NAV_CARD_THEMES, type NavCardThemeKey } from "@/utils/navCardTheme";
 import { TRAFFIC_LIGHT_MARKER, SPEED_CAMERA_MARKER } from "@/utils/osmMarkerStyle";
@@ -155,27 +156,26 @@ export function SettingsScreen() {
     });
   }, [getAvailablePurchases]);
 
-  const onRadiusChange = useCallback(
-    async (value: number) => {
-      const rounded = Math.round(value);
-      await updateSettings({ alertRadiusKm: rounded });
-      if (user) await syncAlertRadiusToProfile(user.uid, rounded);
+  // Real Australian state/territory multi-select -- replaces the old 1-200km radius slider,
+  // per explicit request. Toggling a region on/off adds/removes it from the set the alert
+  // subscription queries by (see MapScreen.tsx's subscribeVisibleAlerts call).
+  const onRegionToggle = useCallback(
+    async (code: AuRegionCode, value: boolean) => {
+      const next = value
+        ? [...settings.visibleRegions, code]
+        : settings.visibleRegions.filter((r) => r !== code);
+      await updateSettings({ visibleRegions: next });
+      if (user) await syncVisibleRegionsToProfile(user.uid, next);
     },
-    [updateSettings, user]
+    [updateSettings, user, settings.visibleRegions]
   );
 
-  // Off = no alerts shown/received at all, regardless of radius. Turning it back on resets
-  // to a fresh 30km radius rather than whatever it was left at -- the user's own spec.
+  // Off = no alerts shown/received at all, regardless of which regions are toggled on.
   const onAlertsEnabledToggle = useCallback(
     async (value: boolean) => {
-      if (value) {
-        await updateSettings({ alertsEnabled: true, alertRadiusKm: DEFAULT_ALERT_RADIUS_KM });
-        if (user) await syncAlertRadiusToProfile(user.uid, DEFAULT_ALERT_RADIUS_KM);
-      } else {
-        await updateSettings({ alertsEnabled: false });
-      }
+      await updateSettings({ alertsEnabled: value });
     },
-    [updateSettings, user]
+    [updateSettings]
   );
 
   const onAlertTypeToggle = useCallback(
@@ -378,21 +378,27 @@ export function SettingsScreen() {
           />
         </Row>
         <Text style={styles.helperText}>
-          Off — you won't see or receive any community alerts. Turning it back on sets your
-          radius to 30 km; adjust it below any time.
+          Off — you won't see or receive any community alerts.
         </Text>
 
-        <Row label={`Alert visibility radius — ${settings.alertRadiusKm} km`}>
-          <Slider
-            minimumValue={1}
-            maximumValue={200}
-            step={1}
-            value={settings.alertRadiusKm}
-            onSlidingComplete={onRadiusChange}
-            disabled={!settings.alertsEnabled}
-            minimumTrackTintColor={colors.accent}
-          />
-        </Row>
+        <Text style={styles.rowLabel}>Regions</Text>
+        <Text style={styles.helperText}>
+          Toggle on whichever real Australian states/territories you want to see alerts from --
+          you'll see every alert in every region toggled on, regardless of how far away it is.
+        </Text>
+        <View style={styles.alertTypeGrid}>
+          {AU_STATES.map((state) => (
+            <View key={state.code} style={styles.alertTypeRow}>
+              <Text style={styles.alertTypeLabel}>{state.label}</Text>
+              <Switch
+                value={settings.visibleRegions.includes(state.code as AuRegionCode)}
+                onValueChange={(value) => onRegionToggle(state.code as AuRegionCode, value)}
+                disabled={!settings.alertsEnabled}
+                trackColor={{ true: colors.accent, false: colors.border }}
+              />
+            </View>
+          ))}
+        </View>
 
         <View style={styles.alertTypeGrid}>
           {ALL_ALERT_TYPES.map((type) => (

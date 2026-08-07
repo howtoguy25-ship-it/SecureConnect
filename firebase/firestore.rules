@@ -30,7 +30,8 @@ service cloud.firestore {
         && request.resource.data.expiresAt is timestamp
         && request.resource.data.lat is number
         && request.resource.data.lng is number
-        && request.resource.data.geohash is string;
+        && request.resource.data.geohash is string
+        && request.resource.data.region in ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
 
       // Creator can delete their own alert outright (global delete) -- only the creator, per
       // explicit request ("only the users who places them can delete for the rest").

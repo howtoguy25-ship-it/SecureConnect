@@ -13,7 +13,8 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
-import { encodeGeohash, geohashQueryBounds, distanceKm } from "@/utils/geo";
+import { encodeGeohash } from "@/utils/geo";
+import { classifyAuRegion } from "@/utils/auStates";
 import { ALERT_TTL_MS, type AlertDoc, type AlertType } from "@/types/alert";
 import { containsBlockedLanguage, clampToWordLimit } from "@/utils/commentFilter";
 
@@ -38,6 +39,7 @@ function toAlertDoc(id: string, data: any): AlertDoc {
     lat: data.lat,
     lng: data.lng,
     geohash: data.geohash,
+    region: typeof data.region === "string" ? data.region : undefined,
     createdBy: data.createdBy,
     createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : data.createdAt,
     expiresAt: data.expiresAt instanceof Timestamp ? data.expiresAt.toMillis() : data.expiresAt,
@@ -67,6 +69,7 @@ export async function reportAlert(
 ): Promise<string> {
   const now = Date.now();
   const geohash = encodeGeohash(location.lat, location.lng, 9);
+  const region = classifyAuRegion(location.lat, location.lng);
   const ttlMs = customTtlMs ?? ALERT_TTL_MS[type];
   const trimmedComment = comment?.trim();
   const safeComment =
@@ -77,6 +80,7 @@ export async function reportAlert(
     lat: location.lat,
     lng: location.lng,
     geohash,
+    region,
     createdBy: uid,
     createdAt: serverTimestamp(),
     expiresAt: Timestamp.fromMillis(now + ttlMs),
@@ -94,80 +98,34 @@ export async function reportAlert(
 const REEMIT_INTERVAL_MS = 60 * 1000;
 
 /**
- * Live subscription to alerts within radiusKm of (userLat, userLng). Subscribes to each of
- * the 9 geohash cells separately (Firestore range queries can't span multiple prefixes in
- * one listener) and re-merges + re-filters on every change.
+ * Live subscription to every non-expired alert whose region is one of visibleRegions -- real
+ * Australian state/territory selection (see utils/auStates.ts's classifyAuRegion) instead of a
+ * plain distance radius, per explicit request. Mirrors mobile's services/alerts.ts exactly.
+ * An empty selection means "nothing toggled on" -- Firestore's own `in` operator rejects an
+ * empty array, so that case is handled here by skipping the query and emitting nothing.
  */
-export function subscribeNearbyAlerts(
-  userLat: number,
-  userLng: number,
-  radiusKm: number,
+export function subscribeVisibleAlerts(
+  visibleRegions: string[],
   currentUid: string,
   onChange: (alerts: AlertDoc[]) => void
 ): Unsubscribe {
-  const bounds = geohashQueryBounds(userLat, userLng, radiusKm);
-  const cellResults = new Map<string, AlertDoc[]>();
-
-  function emit() {
-    const now = Date.now();
-    const merged = new Map<string, AlertDoc>();
-    for (const alerts of cellResults.values()) {
-      for (const alert of alerts) merged.set(alert.id, alert);
-    }
-    const filtered = Array.from(merged.values()).filter(
-      (alert) =>
-        alert.expiresAt > now &&
-        !isHiddenForUser(alert, currentUid) &&
-        distanceKm(userLat, userLng, alert.lat, alert.lng) <= radiusKm
-    );
-    onChange(filtered);
+  if (visibleRegions.length === 0) {
+    onChange([]);
+    return () => {};
   }
 
-  const unsubscribes = bounds.map(([start, end]) => {
-    const cellKey = start;
-    return onSnapshot(
-      query(
-        collection(db, ALERTS_COLLECTION),
-        where("geohash", ">=", start),
-        where("geohash", "<", end)
-      ),
-      (snap) => {
-        cellResults.set(
-          cellKey,
-          snap.docs.map((d) => toAlertDoc(d.id, d.data()))
-        );
-        emit();
-      }
-    );
-  });
-
-  const reemitInterval = setInterval(emit, REEMIT_INTERVAL_MS);
-
-  return () => {
-    clearInterval(reemitInterval);
-    unsubscribes.forEach((unsub) => unsub());
-  };
-}
-
-/**
- * Live subscription to every non-expired alert regardless of distance — used for
- * "region-wide" visibility (e.g. all of Australia sees the same alerts) instead of the
- * tight nearby-radius view. Firestore doesn't need a geo filter here since alerts already
- * self-expire (45min-24hr), keeping the collection small enough for a plain live query.
- */
-export function subscribeAllAlerts(
-  currentUid: string,
-  onChange: (alerts: AlertDoc[]) => void
-): Unsubscribe {
   let latestDocs: AlertDoc[] = [];
   function emit() {
     const now = Date.now();
     onChange(latestDocs.filter((alert) => alert.expiresAt > now && !isHiddenForUser(alert, currentUid)));
   }
-  const unsubscribe = onSnapshot(query(collection(db, ALERTS_COLLECTION)), (snap) => {
-    latestDocs = snap.docs.map((d) => toAlertDoc(d.id, d.data()));
-    emit();
-  });
+  const unsubscribe = onSnapshot(
+    query(collection(db, ALERTS_COLLECTION), where("region", "in", visibleRegions)),
+    (snap) => {
+      latestDocs = snap.docs.map((d) => toAlertDoc(d.id, d.data()));
+      emit();
+    }
+  );
   const reemitInterval = setInterval(emit, REEMIT_INTERVAL_MS);
   return () => {
     clearInterval(reemitInterval);

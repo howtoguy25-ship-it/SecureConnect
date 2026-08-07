@@ -64,8 +64,8 @@ it avoids a jarring navigation transition mid-route, matching Waze's own UX.
      `.env.example` for which var maps to which restriction)
    - Your Firebase project's web app config (Project Settings → General → Your apps)
 3. `npx expo start` — the map, search, routing, voice guidance, and community alerts all
-   work in Expo Go once those keys are set (`getNearbyAlerts`/`subscribeNearbyAlerts`
-   need a live Firestore project with `firestore.rules` deployed).
+   work in Expo Go once those keys are set (`subscribeVisibleAlerts` needs a live
+   Firestore project with `firestore.rules` deployed).
 4. Deploy Firebase pieces:
    ```
    firebase deploy --only firestore:rules,firestore:indexes,functions
@@ -109,7 +109,10 @@ their uid to `hiddenBy`, doc stays live for everyone else).
   fresh install loses "my alerts" ownership of anything reported before it.
 - `modules/yamnet-siren`'s native Kotlin/Swift files are a wired scaffold, not a
   compiled classifier — see the setup steps above.
-- `getNearbyAlerts`/`subscribeNearbyAlerts` query a 3x3 geohash-cell neighborhood sized
-  to the radius and then apply an exact haversine filter; at very large radii (near the
-  15km max) this does a few more Firestore reads than a tighter geo-index would, which
-  is an acceptable tradeoff for v1 given alerts self-expire and stay a small collection.
+- Alert visibility is real Australian state/territory selection, not a distance radius --
+  `reportAlert` classifies each alert's region client-side (`utils/auStates.ts`'s
+  `classifyAuRegion`, a longitude/latitude approximation of Australia's actual internal
+  borders, no bundled map data or network call), and `subscribeVisibleAlerts` queries
+  Firestore with a plain `where("region", "in", visibleRegions)`. The NSW/VIC border
+  (mostly the Murray River) and the remote SA/QLD desert corner are approximated as
+  straight lines; both are low-impact (a handful of border towns, and empty outback).
