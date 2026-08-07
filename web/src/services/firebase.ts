@@ -79,9 +79,17 @@ async function linkOrSignIn(provider: AuthProvider): Promise<User> {
   } catch (err) {
     const code = err instanceof Object && "code" in err ? String((err as any).code) : null;
     if (code === "auth/credential-already-in-use" || code === "auth/email-already-in-use") {
+      // Picked by the provider that was ACTUALLY used, not tried Google-first-always --
+      // Firebase's error payload here is a generic, provider-agnostic shape (oauthIdToken/
+      // oauthAccessToken), so GoogleAuthProvider.credentialFromError doesn't know or check
+      // which real IdP issued the token before happily wrapping it as a Google credential.
+      // Doing that for an Apple sign-in built a credential holding Apple's id_token but
+      // labeled as Google's, which Firebase then rejected with the confusing "id token is
+      // not issued by Google" error -- a real bug, not an Apple-config problem.
       const existingCred =
-        GoogleAuthProvider.credentialFromError(err as any) ??
-        OAuthProvider.credentialFromError(err as any);
+        provider.providerId === GoogleAuthProvider.PROVIDER_ID
+          ? GoogleAuthProvider.credentialFromError(err as any)
+          : OAuthProvider.credentialFromError(err as any);
       if (existingCred) {
         const cred = await signInWithCredential(auth, existingCred);
         return cred.user;

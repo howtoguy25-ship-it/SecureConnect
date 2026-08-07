@@ -658,7 +658,12 @@ export default function App() {
 
   const handleSignInGoogle = useCallback(async () => {
     try {
-      setUser(await signInWithGoogle());
+      const signedInUser = await signInWithGoogle();
+      setUser(signedInUser);
+      // A prior failed attempt's error otherwise sits in the banner forever -- authError was
+      // never cleared on success, so signing in fine on a retry still showed the earlier
+      // failure's message indefinitely.
+      setAuthError(null);
     } catch (err) {
       console.warn("[auth] Google sign-in failed", err);
       setAuthError(err instanceof Error ? err.message : "Google sign-in failed.");
@@ -667,7 +672,9 @@ export default function App() {
 
   const handleSignInApple = useCallback(async () => {
     try {
-      setUser(await signInWithApple());
+      const signedInUser = await signInWithApple();
+      setUser(signedInUser);
+      setAuthError(null);
     } catch (err) {
       console.warn("[auth] Apple sign-in failed", err);
       setAuthError(err instanceof Error ? err.message : "Apple sign-in failed.");
@@ -677,6 +684,7 @@ export default function App() {
   const handlePhoneSignedIn = useCallback((signedInUser: User) => {
     setUser(signedInUser);
     setPhoneAuthOpen(false);
+    setAuthError(null);
   }, []);
 
   const handleSignOut = useCallback(async () => {
