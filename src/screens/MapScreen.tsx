@@ -41,6 +41,8 @@ import { AlertReportSheet } from "@/screens/AlertReportSheet";
 import { AlertDetailSheet } from "@/screens/AlertDetailSheet";
 import { PlaceInfoSheet } from "@/screens/PlaceInfoSheet";
 import { OsmMarkerSheet, type OsmMarkerKind } from "@/screens/OsmMarkerSheet";
+import { LiveCameraSheet } from "@/screens/LiveCameraSheet";
+import { fetchLiveTrafficCameras, type LiveTrafficCamera } from "@/services/liveTrafficCameras";
 import {
   getDirections,
   getRouteOptions,
@@ -126,6 +128,7 @@ export function MapScreen() {
   const detailSheetRef = useRef<BottomSheet>(null);
   const placeInfoSheetRef = useRef<BottomSheet>(null);
   const osmMarkerSheetRef = useRef<BottomSheet>(null);
+  const liveCameraSheetRef = useRef<BottomSheet>(null);
   const directionsSheetRef = useRef<BottomSheet>(null);
   const navOptionsSheetRef = useRef<BottomSheet>(null);
 
@@ -230,12 +233,14 @@ export function MapScreen() {
   const [placeInfoSheetOpen, setPlaceInfoSheetOpen] = useState(false);
   const [directionsSheetOpen, setDirectionsSheetOpen] = useState(false);
   const [osmMarkerSheetOpen, setOsmMarkerSheetOpen] = useState(false);
+  const [liveCameraSheetOpen, setLiveCameraSheetOpen] = useState(false);
   const [navOptionsSheetOpen, setNavOptionsSheetOpen] = useState(false);
   const anySheetOpen =
     reportSheetOpen ||
     detailSheetOpen ||
     placeInfoSheetOpen ||
     osmMarkerSheetOpen ||
+    liveCameraSheetOpen ||
     directionsSheetOpen ||
     navOptionsSheetOpen;
   const [alertPlacementLatLng, setAlertPlacementLatLng] = useState<LatLng | null>(null);
@@ -271,6 +276,22 @@ export function MapScreen() {
     setOsmMarkerKind(kind);
     setOsmMarkerLocation(location);
     osmMarkerSheetRef.current?.expand();
+  }, []);
+
+  // Real NSW government live traffic camera feed -- see services/liveTrafficCameras.ts.
+  // Small (~197 camera), near-static dataset, so this fetches the full list once the layer is
+  // first turned on rather than re-querying per map pan. Mirrors web's App.tsx exactly.
+  const [liveCameras, setLiveCameras] = useState<LiveTrafficCamera[]>([]);
+  const [selectedLiveCamera, setSelectedLiveCamera] = useState<LiveTrafficCamera | null>(null);
+  useEffect(() => {
+    if (!settings.showLiveCameras || liveCameras.length > 0) return;
+    fetchLiveTrafficCameras()
+      .then(setLiveCameras)
+      .catch((err) => console.warn("[map] failed to load live traffic cameras", err));
+  }, [settings.showLiveCameras, liveCameras.length]);
+  const onLiveCameraPress = useCallback((camera: LiveTrafficCamera) => {
+    setSelectedLiveCamera(camera);
+    liveCameraSheetRef.current?.expand();
   }, []);
   const [bannerMessage, setBannerMessage] = useState("");
   const [detectionOpen, setDetectionOpen] = useState(false);
@@ -2108,6 +2129,23 @@ export function MapScreen() {
               </Marker>
             )
           )}
+        {settings.showLiveCameras &&
+          liveCameras.map((camera) => (
+            <Marker
+              key={`lc-${camera.id}`}
+              coordinate={{ latitude: camera.lat, longitude: camera.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+              onPress={(e) => {
+                e.stopPropagation();
+                onLiveCameraPress(camera);
+              }}
+            >
+              <View style={styles.osmIconBadgeLiveCamera}>
+                <Ionicons name="videocam" size={16} color="#FFFFFF" />
+              </View>
+            </Marker>
+          ))}
       </MapView>
       )}
 
@@ -2765,6 +2803,12 @@ export function MapScreen() {
         onClose={() => osmMarkerSheetRef.current?.close()}
         onSheetChange={(index) => setOsmMarkerSheetOpen(index >= 0)}
       />
+      <LiveCameraSheet
+        ref={liveCameraSheetRef}
+        camera={selectedLiveCamera}
+        onClose={() => liveCameraSheetRef.current?.close()}
+        onSheetChange={(index) => setLiveCameraSheetOpen(index >= 0)}
+      />
       <RouteDirectionsSheet
         ref={directionsSheetRef}
         route={route}
@@ -2947,6 +2991,19 @@ const styles = StyleSheet.create({
     height: SPEED_CAMERA_MARKER.badgeSize,
     borderRadius: SPEED_CAMERA_MARKER.badgeSize / 2,
     backgroundColor: SPEED_CAMERA_MARKER.color,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // Deliberately a different color from both OSM markers above (blue, not purple/teal) -- this
+  // is a real live NSW government camera feed, an entirely separate dataset from the mapped
+  // OSM traffic-light/speed-camera layer, and shouldn't visually read as a third variant of it.
+  osmIconBadgeLiveCamera: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.accent,
     borderWidth: 2,
     borderColor: "#FFFFFF",
     alignItems: "center",

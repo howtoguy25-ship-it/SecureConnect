@@ -219,6 +219,11 @@ export function SettingsScreen() {
     [updateSettings]
   );
 
+  const onShowLiveCamerasToggle = useCallback(
+    (value: boolean) => updateSettings({ showLiveCameras: value }),
+    [updateSettings]
+  );
+
   const onOsmRadiusChange = useCallback(
     (value: number) => updateSettings({ osmLayerRadiusKm: Math.round(value) }),
     [updateSettings]
@@ -587,6 +592,21 @@ export function SettingsScreen() {
           Every known traffic light and fixed speed camera location, mapped by OpenStreetMap's
           community — shown independently on the map, whether or not "Live alerts" is on, out to
           however far from your own location the radius above is set (1-200 km).
+        </Text>
+        <Row
+          label="Live traffic cameras (NSW)"
+          icon={<MaterialCommunityIcons name="cctv" size={18} color={settings.showLiveCameras ? colors.accent : colors.textMuted} />}
+        >
+          <Switch
+            value={settings.showLiveCameras}
+            onValueChange={onShowLiveCamerasToggle}
+            trackColor={{ true: colors.accent, false: colors.border }}
+          />
+        </Row>
+        <Text style={styles.helperText}>
+          Real, live-refreshing government road camera images (Transport for NSW's open
+          dataset) — separate from the mapped OSM layer above. NSW only for now; tap a camera
+          pin on the map to see its actual current image.
         </Text>
       </Section>
 

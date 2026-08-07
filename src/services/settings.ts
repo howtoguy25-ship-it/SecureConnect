@@ -35,6 +35,12 @@ export interface AppSettings {
   // reports above, which are temporary/mobile and user-submitted.
   showTrafficLights: boolean;
   showSpeedCameras: boolean;
+  // Real NSW government live traffic camera feed -- see services/liveTrafficCameras.ts.
+  // Entirely separate from the static OSM traffic-light/speed-camera layer above: this is a
+  // small (~197 camera), NSW-only dataset of actual live-refreshing road images, opt-in and
+  // off by default since it's a real, distinct, opt-in dataset rather than the always-on OSM
+  // infrastructure layer. Mirrors web's useSettings.ts default exactly.
+  showLiveCameras: boolean;
   // How far from the driver's own location that layer is fetched/shown -- independent of
   // visibleRegions above (community alerts), which is region-based rather than a radius.
   osmLayerRadiusKm: number; // 1-200km
@@ -61,6 +67,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultVoiceEnabled: true,
   showTrafficLights: true,
   showSpeedCameras: true,
+  showLiveCameras: false,
   osmLayerRadiusKm: 5,
   mapTheme: "normal",
   navCardTheme: "dark",
