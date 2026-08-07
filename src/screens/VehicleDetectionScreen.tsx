@@ -205,23 +205,31 @@ export function VehicleDetectionScreen({ onClose, isNavigating = false }: Props)
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
-  // Raised from 640x360 -- that resolution was chosen back when detection itself ran a JPEG
-  // decode + tfjs inference cycle on the JS thread every capture (see vehicleDetection.ts's
-  // history), where every extra pixel was directly a slower, more freeze-prone cycle. Now that
-  // detection runs through the Frame Processor (see frameProcessor below), the resize plugin
-  // downsamples straight from the native camera buffer to the model's 300x300 input entirely
-  // off the JS thread, so the source resolution barely affects detection cost at all -- what it
-  // DOES affect is how much real detail is actually in the frame a driver zooms into (see
-  // zoomFactor below) or a plate crop reads from, which was the real, confirmed complaint at
-  // 640x360: a "zoomed in" image with nothing more to see. 1280x720 gives meaningfully sharper
-  // detail for both without reintroducing the old freeze risk, since only the much lighter,
-  // occasional side capture loop (plate OCR/lightbar, not detection) still touches a JS-side
-  // JPEG decode at this resolution. videoResolution matches photoResolution so the Frame
-  // Processor's own frame coordinates and the side loop's takePhoto() stay close to the same
-  // pixel space (captureForPlateAndLightbar still rescales explicitly either way, since device
-  // format negotiation doesn't guarantee an exact match).
+  // photoResolution raised again, to real 4K (3840x2160) -- per explicit request for a
+  // meaningfully clearer source image for the plate/lightbar side capture loop
+  // (captureForPlateAndLightbar below). That loop's plate crop reads straight off this still
+  // photo via native, hardware-accelerated cropping (expo-image-manipulator, see plateOcr.ts) --
+  // not through the JS-thread JPEG decode -- so the full 4K detail genuinely reaches OCR on
+  // whatever small plate-sized region gets cropped out of it, real, meaningfully more pixels to
+  // read a plate from at real driving distance than 1280x720 gave.
+  //
+  // videoResolution deliberately NOT raised to match -- unlike the still-photo path above, the
+  // Frame Processor's video stream feeds the live TFLite model, which the resize plugin always
+  // downsamples to a FIXED 300x300 input (see TFLITE_INPUT_SIZE) no matter what the source
+  // resolution is. A 4K video buffer would mean the resize plugin (and the continuous native
+  // capture pipeline behind it) doing meaningfully more GPU/battery/thermal work on every single
+  // frame at the Frame Processor's own ~3fps cadence, for a fixed-size model input that can't
+  // use any of those extra pixels -- real, ongoing cost for zero detection-accuracy benefit.
+  // 1280x720 already gives the model everything it can actually use.
+  //
+  // Real, honest tradeoff on the photo side: a 4K still photo is a meaningfully bigger file for
+  // decodePhotoForDetection's pure-JS jpeg-js decode (used for lightbar flash sampling, not the
+  // plate crop) to churn through every ~0.9-1.4s cadence tick -- SIDE_DECODE_TIMEOUT_MS already
+  // bounds a slow decode to a graceful retry rather than a hang, but this genuinely needs a real
+  // device test pass (not just a simulator) to confirm it doesn't introduce visible stutter on
+  // older/lower-end hardware before treating it as final.
   const format = useCameraFormat(device, [
-    { photoResolution: { width: 1280, height: 720 } },
+    { photoResolution: { width: 3840, height: 2160 } },
     { videoResolution: { width: 1280, height: 720 } },
   ]);
   // Real camera zoom -- vision-camera's `zoom` prop drives the actual native capture session
