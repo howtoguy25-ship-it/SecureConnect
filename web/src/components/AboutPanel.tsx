@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { User } from "firebase/auth";
 import { BUSINESS_INFO } from "@/config/business";
 import { ADMIN_EMAILS, ADMIN_PHONE_NUMBERS } from "@/config/admin";
@@ -16,7 +16,7 @@ const APP_VERSION = "1.0.0";
 // propagation time on Apple's end rather than another config change.
 const APPLE_SIGNIN_ENABLED = true;
 
-type Tab = "account" | "about";
+type Tab = "account" | "settings" | "about";
 
 const THEME_OPTIONS: { value: WebSettings["theme"]; label: string }[] = [
   { value: "system", label: "System" },
@@ -46,6 +46,11 @@ interface Props {
   onSignOut: () => void;
   onOpenAdmin: () => void;
   onClose: () => void;
+  // The full "Alert & camera settings" content (AlertCameraSettingsPanel), rendered here
+  // instead of built inline -- App.tsx owns all of its actual state/handlers (map settings,
+  // OSM layer toggles, etc.), this panel just gives it a permanent home in a real Settings tab
+  // instead of floating directly on top of the map, per explicit request.
+  settingsPanel: ReactNode;
 }
 
 export function AboutPanel({
@@ -60,6 +65,7 @@ export function AboutPanel({
   onSignOut,
   onOpenAdmin,
   onClose,
+  settingsPanel,
 }: Props) {
   const isRealAccount = !!user && !user.isAnonymous;
   const isAdmin =
@@ -152,6 +158,9 @@ export function AboutPanel({
       <div className="about-tabs">
         <button className={tab === "account" ? "about-tab-active" : ""} onClick={() => setTab("account")}>
           Account
+        </button>
+        <button className={tab === "settings" ? "about-tab-active" : ""} onClick={() => setTab("settings")}>
+          Settings
         </button>
         <button className={tab === "about" ? "about-tab-active" : ""} onClick={() => setTab("about")}>
           About
@@ -271,6 +280,8 @@ export function AboutPanel({
           )}
         </div>
       )}
+
+      {tab === "settings" && <div className="about-tab-content">{settingsPanel}</div>}
 
       {tab === "about" && (
         <div className="about-tab-content">

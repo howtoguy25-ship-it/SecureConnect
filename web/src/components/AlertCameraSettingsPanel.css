@@ -1,0 +1,114 @@
+/* Content for the Settings tab (see AboutPanel.tsx) -- moved here from a small floating card
+   that used to sit directly on top of the map, per explicit request, so sizing is normal
+   panel-text size now instead of the cramped ~10-11px the old floating card needed. */
+.alert-camera-settings {
+  width: 100%;
+  text-align: left;
+}
+
+.alert-camera-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.alert-camera-settings input[type="range"] {
+  width: 100%;
+  margin: 2px 0 0;
+}
+
+.radius-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+/* Same icon the map pin itself uses (see trafficLightIcon/speedCameraIcon in App.tsx) -- muted
+   grey while the layer is off, full color once on, so the toggle previews what you're about to
+   see on the map instead of a plain, unrelated checkbox. */
+.radius-checkbox-icon {
+  height: 18px;
+  width: auto;
+  filter: grayscale(1) opacity(0.45);
+  transition: filter 150ms ease;
+}
+
+.radius-checkbox input:checked ~ .radius-checkbox-icon {
+  filter: none;
+}
+
+.radius-helper-text {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--surface-text-muted);
+}
+
+.alert-type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  margin-top: 8px;
+}
+
+.alert-type-checkbox {
+  margin-top: 4px;
+}
+
+.expiry-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.expiry-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  background: var(--input-bg);
+  color: var(--surface-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.expiry-chip-selected {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.custom-expiry-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.custom-expiry-input {
+  width: 0;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--surface-border);
+  background: var(--input-bg);
+  color: var(--surface-text);
+  font-size: 12.5px;
+}
+
+.custom-expiry-apply {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}

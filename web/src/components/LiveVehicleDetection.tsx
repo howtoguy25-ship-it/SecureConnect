@@ -50,12 +50,22 @@ const LOCK_FRAMES_THRESHOLD = 6;
 const PLATE_RETRY_INTERVAL_MS = 900;
 const MAX_PLATE_ATTEMPTS = 8;
 
-// Unlike mobile, this model isn't bundled into the app -- cocoSsd.load() fetches it over the
-// network on first use, so a slow/stalled connection can leave the view stuck on "Loading
-// detection model…" forever with no way out but Close. Same idea for getUserMedia, which can
-// hang indefinitely on some browsers/devices (e.g. a permission prompt that never resolves).
-// Both are raced against a generous-but-bounded timeout so a stall surfaces the existing
-// error+Retry UI instead of looking frozen.
+// Self-hosted, same-origin copy of the exact model coco-ssd's own load({base:
+// "lite_mobilenet_v2"}) would otherwise fetch from storage.googleapis.com -- real parity with
+// mobile's own "bundle the model, don't depend on a network fetch every open" fix (see
+// src/services/vehicleDetection.ts's loadModelSkippingWarmup). Served straight out of
+// web/public/models the same way the (currently-unused) vehicle-classifier model already was --
+// same origin as the rest of the site, so it rides the same CDN/caching Render already gives
+// every other asset, with no separate third-party domain in the loading path at all. Falls back
+// to Google's own hosted copy if the local one ever fails to load (a bad deploy, a path typo)
+// rather than hard-failing when the network fallback would still work fine.
+const LOCAL_MODEL_URL = "/models/ssdlite_mobilenet_v2/model.json";
+
+// A slow/stalled connection (whichever copy ends up being fetched) can still leave the view
+// stuck on "Loading detection model…" forever with no way out but Close. Same idea for
+// getUserMedia, which can hang indefinitely on some browsers/devices (e.g. a permission prompt
+// that never resolves). Both are raced against a generous-but-bounded timeout so a stall
+// surfaces the existing error+Retry UI instead of looking frozen.
 const MODEL_LOAD_TIMEOUT_MS = 20000;
 const CAMERA_TIMEOUT_MS = 12000;
 
@@ -365,11 +375,20 @@ export function LiveVehicleDetection({ onClose, navContext }: Props) {
       try {
         if (!modelRef.current) {
           await tf.ready();
-          modelRef.current = await withTimeout(
-            cocoSsd.load({ base: "lite_mobilenet_v2" }),
-            MODEL_LOAD_TIMEOUT_MS,
-            "Detection model load"
-          );
+          try {
+            modelRef.current = await withTimeout(
+              cocoSsd.load({ base: "lite_mobilenet_v2", modelUrl: LOCAL_MODEL_URL }),
+              MODEL_LOAD_TIMEOUT_MS,
+              "Detection model load"
+            );
+          } catch (localErr) {
+            console.warn("[detection] local model load failed, falling back to Google's CDN", localErr);
+            modelRef.current = await withTimeout(
+              cocoSsd.load({ base: "lite_mobilenet_v2" }),
+              MODEL_LOAD_TIMEOUT_MS,
+              "Detection model load"
+            );
+          }
           if (cancelled) return;
           warmUpPlateOcr();
         }
