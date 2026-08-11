@@ -231,11 +231,20 @@ export default function AudioCallScreen() {
     }
   };
 
-  const handleEndCall = () => {
-    haptics.heavy();
+  // Shared teardown with no navigation side effect — see handleMore below.
+  // handleEndCall's delayed goBack() previously raced against handleMore's
+  // own explicit navigate() call: 500ms after "Message" was tapped, that
+  // stale goBack() fired and popped whatever screen navigate() had just
+  // pushed, which is exactly what "Message just falls back" looked like.
+  const teardownCall = () => {
     livekitService.disconnect();
     endCall();
     setLocalStatus("ended");
+  };
+
+  const handleEndCall = () => {
+    haptics.heavy();
+    teardownCall();
     setTimeout(() => navigation.goBack(), 500);
   };
 
@@ -266,8 +275,8 @@ export default function AudioCallScreen() {
         { options, cancelButtonIndex: 2, title: receiverName },
         (idx) => {
           if (idx === 1) {
-            handleEndCall();
-            (navigation as any).navigate('Conversation', {
+            teardownCall();
+            (navigation as any).replace('Conversation', {
               conversationId: activeCall?.conversationId ?? '',
               otherUserId: receiverId,
               otherUserName: receiverName,
@@ -278,8 +287,8 @@ export default function AudioCallScreen() {
     } else {
       Alert.alert(receiverName, undefined, [
         { text: 'Message', onPress: () => {
-            handleEndCall();
-            (navigation as any).navigate('Conversation', {
+            teardownCall();
+            (navigation as any).replace('Conversation', {
               conversationId: activeCall?.conversationId ?? '',
               otherUserId: receiverId,
               otherUserName: receiverName,

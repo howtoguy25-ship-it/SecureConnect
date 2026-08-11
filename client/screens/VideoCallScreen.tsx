@@ -307,11 +307,24 @@ export default function VideoCallScreen() {
     }
   };
 
-  const handleEndCall = () => {
-    haptics.heavy();
+  // Shared teardown with no navigation side effect — handleEndCall (below)
+  // adds the delayed goBack() for the plain "hang up" case. handleMore's
+  // "Switch to Audio Call" / "Message" branches need to tear the call down
+  // and navigate somewhere ELSE of their own choosing; calling the full
+  // handleEndCall() there raced its own setTimeout(goBack) against the
+  // navigate() call right after it — 500ms later, that stale goBack() fired
+  // and popped whatever screen the explicit navigate had just pushed,
+  // which is exactly what "switch to audio / message just falls back"
+  // looked like.
+  const teardownCall = () => {
     livekitService.disconnect();
     endCall();
     setLocalStatus("ended");
+  };
+
+  const handleEndCall = () => {
+    haptics.heavy();
+    teardownCall();
     setTimeout(() => navigation.goBack(), 500);
   };
 
@@ -352,16 +365,16 @@ export default function VideoCallScreen() {
         { options, cancelButtonIndex: 2, title: receiverName },
         (idx) => {
           if (idx === 0) {
-            handleEndCall();
-            (navigation as any).navigate('AudioCall', {
+            teardownCall();
+            (navigation as any).replace('AudioCall', {
               callId: actualCallId.current,
               receiverId,
               receiverName,
               isIncoming: false,
             });
           } else if (idx === 1) {
-            handleEndCall();
-            (navigation as any).navigate('Conversation', {
+            teardownCall();
+            (navigation as any).replace('Conversation', {
               conversationId: activeCall?.conversationId ?? '',
               otherUserId: receiverId,
               otherUserName: receiverName,
@@ -374,12 +387,23 @@ export default function VideoCallScreen() {
         {
           text: 'Switch to Audio Call',
           onPress: () => {
-            handleEndCall();
-            (navigation as any).navigate('AudioCall', {
+            teardownCall();
+            (navigation as any).replace('AudioCall', {
               callId: actualCallId.current,
               receiverId,
               receiverName,
               isIncoming: false,
+            });
+          },
+        },
+        {
+          text: 'Message',
+          onPress: () => {
+            teardownCall();
+            (navigation as any).replace('Conversation', {
+              conversationId: activeCall?.conversationId ?? '',
+              otherUserId: receiverId,
+              otherUserName: receiverName,
             });
           },
         },
