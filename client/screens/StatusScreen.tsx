@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { View, StyleSheet, FlatList, Pressable, ActivityIndicator, Alert, Platform, Modal } from "react-native";
+import { View, StyleSheet, FlatList, Pressable, ActivityIndicator, Alert, Platform, Modal, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
@@ -358,8 +358,15 @@ function StatusVideoPlayer({ uri, style, onComplete }: { uri: string; style: any
     <VideoView
       player={player}
       style={style}
-      contentFit="contain"
-      nativeControls={true}
+      // Match the 9:16 cover-fit frame used everywhere else a video status
+      // renders (the create-time preview, feed thumbnails) — this was
+      // "contain" with native OS controls, so a video that wasn't already
+      // exactly 9:16 (the native video picker doesn't crop, only images
+      // get a real crop UI) letterboxed with black bars and showed a
+      // scrubber bar that doesn't match the rest of this screen's
+      // tap-to-pause / progress-bar UI.
+      contentFit="cover"
+      nativeControls={false}
     />
   );
 }
@@ -1157,7 +1164,17 @@ export default function StatusScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.modalContent}>
+          {/* Was a plain View — a 9:16 preview image alone (aspectRatio
+              9/16, width 100%) is taller than the viewport on most phones,
+              so the privacy selector ("Everyone"/"Friends"/"Custom") below
+              it got pushed off-screen with no way to scroll down and reach
+              it. A ScrollView makes the whole compose sheet reachable
+              regardless of preview size. */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.modalContent}
+            keyboardShouldPersistTaps="handled"
+          >
             {selectedImage ? (
               selectedMediaType === "video" ? (
                 <StatusVideoPreview 
@@ -1211,7 +1228,7 @@ export default function StatusScreen() {
                 </ThemedText>
               </View>
             )}
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -1229,7 +1246,7 @@ export default function StatusScreen() {
             <View style={{ width: 50 }} />
           </View>
 
-          <View style={styles.privacyOptions}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.privacyOptions}>
             {(["everyone", "friends", "custom"] as PrivacyOption[]).map((option) => (
               <Pressable
                 key={option}
@@ -1282,7 +1299,7 @@ export default function StatusScreen() {
                 ))}
               </View>
             ) : null}
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -1596,7 +1613,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalContent: {
-    flex: 1,
+    flexGrow: 1,
     padding: Spacing.lg,
   },
   previewImage: {
