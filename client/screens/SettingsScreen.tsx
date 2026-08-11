@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, StyleSheet, Pressable, Switch, Alert, ActivityIndicator, Platform, Linking, FlatList, Modal, TextInput } from "react-native";
+import { View, StyleSheet, Pressable, Switch, Alert, ActivityIndicator, Platform, Linking, FlatList, Modal, TextInput, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
@@ -794,21 +794,34 @@ export default function SettingsScreen() {
                   <ThemedText type="small" style={[styles.userCount, { color: theme.textSecondary }]}>
                     Total: {allUsers.length} users
                   </ThemedText>
-                  {allUsers.map((adminUser) => (
-                    <View key={adminUser.id} style={[styles.userItem, { borderBottomColor: theme.border }]}>
-                      <View style={styles.userInfo}>
-                        <ThemedText type="body" style={{ fontWeight: "500" }}>
-                          {adminUser.displayName}
-                        </ThemedText>
+                  {/* Was a plain View with a maxHeight and no scrolling/clipping —
+                      RN doesn't clip a View's own overflow just because a
+                      maxHeight is set, so once there were enough users to
+                      exceed 400px the list spilled straight over the
+                      sections rendered below it (SecureConnect Number,
+                      About, etc). A ScrollView actually clips to its bounds
+                      and lets you scroll the rest of the list instead. */}
+                  <ScrollView
+                    style={styles.userListScroll}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator
+                  >
+                    {allUsers.map((adminUser) => (
+                      <View key={adminUser.id} style={[styles.userItem, { borderBottomColor: theme.border }]}>
+                        <View style={styles.userInfo}>
+                          <ThemedText type="body" style={{ fontWeight: "500" }}>
+                            {adminUser.displayName}
+                          </ThemedText>
+                          <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                            {adminUser.phoneNumber}
+                          </ThemedText>
+                        </View>
                         <ThemedText type="small" style={{ color: theme.textSecondary }}>
-                          {adminUser.phoneNumber}
+                          {adminUser.createdAt ? new Date(adminUser.createdAt).toLocaleDateString() : 'N/A'}
                         </ThemedText>
                       </View>
-                      <ThemedText type="small" style={{ color: theme.textSecondary }}>
-                        {adminUser.createdAt ? new Date(adminUser.createdAt).toLocaleDateString() : 'N/A'}
-                      </ThemedText>
-                    </View>
-                  ))}
+                    ))}
+                  </ScrollView>
                 </>
               ) : (
                 <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: "center", padding: Spacing.lg }}>
@@ -1057,7 +1070,10 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     marginTop: Spacing.xs,
     padding: Spacing.md,
-    maxHeight: 400,
+    overflow: "hidden",
+  },
+  userListScroll: {
+    maxHeight: 340,
   },
   loadingContainer: {
     alignItems: "center",
