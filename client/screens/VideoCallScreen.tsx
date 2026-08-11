@@ -16,7 +16,7 @@ import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
 import { Feather } from "@expo/vector-icons";
 import { haptics } from "@/lib/haptics";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { useCameraPermissions } from "expo-camera";
 import { useCall } from "@/contexts/CallContext";
 import { getApiUrl } from "@/lib/query-client";
 import { getStoredToken } from "@/lib/auth";
@@ -52,8 +52,12 @@ interface CallTokenResponse {
 const SMALL_SIZE = { width: 120, height: 170 };
 const LARGE_SIZE = { width: 180, height: 250 };
 
-// Lazily-loaded LiveKit VideoView — only available in native EAS builds
-let LiveKitVideoView: React.ComponentType<{ trackSid: string; style?: any }> | null = null;
+// Lazily-loaded LiveKit VideoView — only available in native EAS builds.
+// Takes the actual track instance as `videoTrack` (NOT a trackSid string —
+// the real component destructures `videoTrack` and reads `.mediaStream` off
+// it; passing an id here left it permanently undefined, so remote AND local
+// video could never render regardless of network/connection state).
+let LiveKitVideoView: React.ComponentType<{ videoTrack: any; style?: any; mirror?: boolean }> | null = null;
 try {
   const lk = require('@livekit/react-native');
   if (lk && lk.VideoView) LiveKitVideoView = lk.VideoView;
@@ -82,6 +86,7 @@ export default function VideoCallScreen() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipantInfo[]>([]);
+  const [localVideoTrack, setLocalVideoTrack] = useState<any | null>(null);
   const actualCallId = useRef<string>(callId);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -149,6 +154,12 @@ export default function VideoCallScreen() {
       onReconnected: () => setCallState('connected'),
       onConnectionStateChanged: (state) => setCallState(state),
       onRemoteParticipantsChanged: (participants) => setRemoteParticipants(participants),
+      onLocalVideoTrackChanged: (track) => setLocalVideoTrack(track),
+      // The initial camera-enable (or a later toggle) can fail natively
+      // (permission denied, device busy) after the button already flipped
+      // state optimistically — this corrects isVideoEnabled to match what
+      // actually happened instead of showing "camera on" over a dead track.
+      onLocalVideoEnabledChanged: (enabled) => setIsVideoEnabled(enabled),
     });
 
     if (!isIncoming && !activeCall) {
@@ -316,10 +327,14 @@ export default function VideoCallScreen() {
     setIsVideoEnabled(enabled);
   };
 
-  const handleFlipCamera = () => {
+  const handleFlipCamera = async () => {
     haptics.light();
-    livekitService.flipCamera();
-    setIsFrontCamera(!isFrontCamera);
+    const flipped = await livekitService.flipCamera();
+    if (flipped) {
+      setIsFrontCamera((prev) => !prev);
+    } else {
+      haptics.warning();
+    }
   };
 
   const handleRetry = () => {
@@ -396,7 +411,13 @@ export default function VideoCallScreen() {
 
   const avatarSeed = receiverId ?? receiverName ?? 'sealed';
   const avatarColor = AVATAR_COLORS[Math.abs(avatarSeed.charCodeAt(0)) % AVATAR_COLORS.length];
-  const showLocalCamera = permission?.granted && localStatus === "connected" && isVideoEnabled;
+  // Render the ACTUAL published LiveKit local track, not a second
+  // independent expo-camera preview session. Two separate capture sessions
+  // fighting over the same physical camera device is what "camera doesn't
+  // load" looked like — the self-preview could show something (or nothing)
+  // with zero relation to whether video was actually being sent to the
+  // other side. Now what's on screen IS what's on the wire.
+  const showLocalCamera = localStatus === "connected" && isVideoEnabled && !!localVideoTrack && !!LiveKitVideoView;
   const isFullyConnected = localStatus === "connected" && callState === 'connected';
   const remoteVideoTrack = remoteParticipants[0]?.videoTrack ?? null;
   const remoteIsMuted = remoteParticipants[0]?.isMuted ?? false;
@@ -407,7 +428,7 @@ export default function VideoCallScreen() {
       <View style={[styles.remoteVideo, { backgroundColor: "#2a2a2a" }]}>
         {isFullyConnected && remoteVideoTrack && LiveKitVideoView ? (
           <LiveKitVideoView
-            trackSid={remoteVideoTrack.sid}
+            videoTrack={remoteVideoTrack}
             style={StyleSheet.absoluteFill}
           />
         ) : !isFullyConnected ? (
@@ -509,11 +530,11 @@ export default function VideoCallScreen() {
               animatedStyle,
             ]}
           >
-            {showLocalCamera ? (
-              <CameraView
+            {showLocalCamera && LiveKitVideoView ? (
+              <LiveKitVideoView
+                videoTrack={localVideoTrack}
                 style={StyleSheet.absoluteFill}
-                facing={isFrontCamera ? 'front' : 'back'}
-                mute={isMuted}
+                mirror={isFrontCamera}
               />
             ) : !isVideoEnabled ? (
               <View style={styles.videoOffContainer}>
@@ -530,6 +551,10 @@ export default function VideoCallScreen() {
                 </ThemedText>
               </Pressable>
             ) : (
+              // Video is on and permission is granted, but LiveKit hasn't
+              // reported a published local track yet (still starting the
+              // camera, or the native enable is in flight) — brief loading
+              // state rather than a silently blank preview.
               <Feather name="user" size={isExpanded ? 48 : 32} color={theme.textSecondary} />
             )}
 

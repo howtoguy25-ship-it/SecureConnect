@@ -347,7 +347,7 @@ export default function VirtualNumberScreen() {
           </ThemedText>
         </View>
         <ThemedText type="small" style={[styles.encryptionText, { color: theme.textSecondary }]}>
-          All calls and messages through your Pryvo number are protected with military-grade encryption. Your conversations are private and secure.
+          Calls and messages with other Pryvo users are end-to-end encrypted, the same as your personal number. Texts and calls to non-Pryvo phone numbers are encrypted in transit and at rest, since they have to cross the regular phone network to reach that person.
         </ThemedText>
         <View style={styles.encryptionFeatures}>
           <View style={styles.encryptionFeature}>

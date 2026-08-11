@@ -53,6 +53,14 @@ export interface RoomEventHandlers {
   onParticipantConnected?: (identity: string) => void;
   onParticipantDisconnected?: (identity: string) => void;
   onRemoteParticipantsChanged?: (participants: RemoteParticipantInfo[]) => void;
+  // Fired whenever the LOCAL camera track publishes/unpublishes/restarts
+  // (e.g. after flipCamera()) so the call screen can render the actual
+  // published track instead of guessing from UI state alone.
+  onLocalVideoTrackChanged?: (track: any | null) => void;
+  // Fired when an attempt to enable/disable the local camera actually
+  // resolves — lets the call screen correct an optimistic UI toggle if
+  // the real native call failed (e.g. camera permission denied, device busy).
+  onLocalVideoEnabledChanged?: (enabled: boolean) => void;
 }
 
 class LiveKitService {
@@ -295,6 +303,12 @@ class LiveKitService {
       this.room.on(RoomEvent.TrackUnmuted, (_pub: any, participant: any) => {
         this.trackRemoteParticipant(participant);
       });
+      if (RoomEvent.LocalTrackPublished) {
+        this.room.on(RoomEvent.LocalTrackPublished, () => this.emitLocalVideoTrack());
+      }
+      if (RoomEvent.LocalTrackUnpublished) {
+        this.room.on(RoomEvent.LocalTrackUnpublished, () => this.emitLocalVideoTrack());
+      }
 
       await this.room.connect(url, token);
 
@@ -323,8 +337,11 @@ class LiveKitService {
           await this.room.localParticipant.setCameraEnabled(true);
         } catch (e) {
           console.warn('[LiveKit web] camera enable failed:', e);
+          this.localVideoEnabled = false;
+          this.eventHandlers.onLocalVideoEnabledChanged?.(false);
         }
       }
+      this.emitLocalVideoTrack();
 
       const info: LiveKitRoom = {
         name: this.room.name || 'room',
@@ -447,6 +464,17 @@ class LiveKitService {
         this.trackRemoteParticipant(participant);
       });
 
+      // Local camera publish/unpublish can happen asynchronously relative
+      // to the setCameraEnabled() call below (and again later from
+      // toggleLocalVideo()/flipCamera()) — keep the call screen's view of
+      // "what's actually being sent" live rather than snapshotting it once.
+      if (RoomEvent.LocalTrackPublished) {
+        this.room.on(RoomEvent.LocalTrackPublished, () => this.emitLocalVideoTrack());
+      }
+      if (RoomEvent.LocalTrackUnpublished) {
+        this.room.on(RoomEvent.LocalTrackUnpublished, () => this.emitLocalVideoTrack());
+      }
+
       // CRITICAL: start the native audio session BEFORE connecting. Without
       // this, iOS never activates the PlayAndRecord/voiceChat AVAudioSession
       // and Android never grabs the WebRTC mic/speaker route — the room
@@ -475,10 +503,29 @@ class LiveKitService {
         }
       }
 
-      await this.room.localParticipant.setMicrophoneEnabled(this.localAudioEnabled);
-      if (this.localVideoEnabled) {
-        await this.room.localParticipant.setCameraEnabled(true);
+      try {
+        await this.room.localParticipant.setMicrophoneEnabled(this.localAudioEnabled);
+      } catch (e) {
+        console.error('[LiveKit] mic enable failed (permission denied?):', e);
+        throw new Error('Microphone permission denied. Allow microphone access in Settings and try again.');
       }
+      // A camera failure (permission denied, device busy, etc) must NOT
+      // tear down the whole call — audio-only is a legitimate fallback.
+      // Previously this call sat unguarded inside the same outer try as
+      // everything else, so any camera error threw, was caught by the
+      // outer catch below, and disconnected the entire room — audio
+      // included. This is very plausibly what "camera doesn't work" was
+      // actually reporting: the call itself was failing to connect.
+      if (this.localVideoEnabled) {
+        try {
+          await this.room.localParticipant.setCameraEnabled(true);
+        } catch (e) {
+          console.warn('[LiveKit] camera enable failed, continuing audio-only:', e);
+          this.localVideoEnabled = false;
+          this.eventHandlers.onLocalVideoEnabledChanged?.(false);
+        }
+      }
+      this.emitLocalVideoTrack();
 
       // Set initial audio routing
       await this.applyAudioMode();
@@ -512,6 +559,26 @@ class LiveKitService {
       } catch {}
       this.setState('disconnected');
       throw error;
+    }
+  }
+
+  // Reads whatever camera track LiveKit actually has published right now
+  // (or null) and notifies the call screen. This is the single source of
+  // truth for "what's on screen locally should be what's being sent" —
+  // previously the local self-preview was a totally separate expo-camera
+  // session that never reflected whether the real published track existed.
+  private emitLocalVideoTrack() {
+    this.eventHandlers.onLocalVideoTrackChanged?.(this.getLocalVideoTrack());
+  }
+
+  getLocalVideoTrack(): any | null {
+    try {
+      const pub = Array.from(
+        this.room?.localParticipant?.videoTrackPublications?.values() ?? []
+      )[0] as any;
+      return pub?.track ?? null;
+    } catch {
+      return null;
     }
   }
 
@@ -561,6 +628,7 @@ class LiveKitService {
     this.setState('disconnected');
     this.currentRoomInfo = null;
     this.remoteParticipants.clear();
+    this.emitLocalVideoTrack();
 
     // Web: rip down all <audio> sinks so the next call starts clean and
     // we don't leak DOM nodes (each call would otherwise leave a hidden
@@ -590,8 +658,19 @@ class LiveKitService {
 
   toggleLocalVideo(): boolean {
     this.localVideoEnabled = !this.localVideoEnabled;
+    const targetEnabled = this.localVideoEnabled;
     if (this.room?.localParticipant) {
-      this.room.localParticipant.setCameraEnabled(this.localVideoEnabled).catch(() => {});
+      this.room.localParticipant.setCameraEnabled(targetEnabled)
+        .then(() => this.emitLocalVideoTrack())
+        .catch((e: any) => {
+          console.warn('[LiveKit] toggleLocalVideo failed, reverting UI state:', e);
+          // The native call didn't actually take effect — correct the
+          // optimistic toggle instead of leaving the UI showing "camera
+          // on" while nothing is actually being captured/published.
+          this.localVideoEnabled = !targetEnabled;
+          this.eventHandlers.onLocalVideoEnabledChanged?.(this.localVideoEnabled);
+          this.emitLocalVideoTrack();
+        });
     }
     return this.localVideoEnabled;
   }
@@ -633,17 +712,31 @@ class LiveKitService {
     }
   }
 
-  flipCamera() {
-    this.usingFrontCamera = !this.usingFrontCamera;
-    if (this.room?.localParticipant) {
-      const videoTrackPub = Array.from(
-        this.room.localParticipant.videoTrackPublications.values()
-      )[0] as any;
-      if (videoTrackPub?.track) {
-        videoTrackPub.track.restartTrack({
-          facingMode: this.usingFrontCamera ? 'user' : 'environment',
-        }).catch(() => {});
-      }
+  // Returns true if a real published camera track was actually restarted
+  // with the flipped facing mode, false if there was nothing to flip (e.g.
+  // camera is off, or the initial publish never succeeded) — the caller
+  // should not flip its own "front/back" UI state on a false result, since
+  // nothing on the wire actually changed. Errors are surfaced (not silently
+  // swallowed) so a real restart failure isn't invisible.
+  async flipCamera(): Promise<boolean> {
+    const nextFacingFront = !this.usingFrontCamera;
+    const videoTrackPub = this.room?.localParticipant
+      ? (Array.from(this.room.localParticipant.videoTrackPublications.values())[0] as any)
+      : null;
+    if (!videoTrackPub?.track) {
+      console.warn('[LiveKit] flipCamera: no local camera track published, nothing to flip');
+      return false;
+    }
+    try {
+      await videoTrackPub.track.restartTrack({
+        facingMode: nextFacingFront ? 'user' : 'environment',
+      });
+      this.usingFrontCamera = nextFacingFront;
+      this.emitLocalVideoTrack();
+      return true;
+    } catch (e) {
+      console.warn('[LiveKit] flipCamera failed:', e);
+      return false;
     }
   }
 
