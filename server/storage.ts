@@ -1200,12 +1200,22 @@ export class DatabaseStorage implements IStorage {
     encryptedCaption?: string | null;
     captionNonce?: string | null;
     mediaKeyWraps?: Record<string, { wrappedKey: string; nonce: string }>;
+    trimStartMs?: number | null;
+    trimEndMs?: number | null;
   }): Promise<Status> {
     const [me] = await db.select().from(users).where(eq(users.id, userId));
     if (me && me.storiesEnabled === false) {
       throw new Error('STORIES_DISABLED');
     }
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    // Trim window only makes sense for videos, and only when both bounds
+    // are sane non-negative millisecond offsets with end after start —
+    // anything else is silently ignored rather than stored as a nonsense
+    // window that could hide a whole video behind a bad player state.
+    const hasValidTrim =
+      data.mediaType === 'video' &&
+      typeof data.trimStartMs === 'number' && Number.isFinite(data.trimStartMs) && data.trimStartMs >= 0 &&
+      typeof data.trimEndMs === 'number' && Number.isFinite(data.trimEndMs) && data.trimEndMs > data.trimStartMs;
     const [status] = await db.insert(statuses).values({
       userId,
       mediaUrl: data.mediaUrl,
@@ -1218,6 +1228,8 @@ export class DatabaseStorage implements IStorage {
       mediaKeyWraps: data.isEncrypted ? (data.mediaKeyWraps ?? {}) : null,
       privacy: data.privacy,
       expiresAt,
+      trimStartMs: hasValidTrim ? Math.round(data.trimStartMs!) : null,
+      trimEndMs: hasValidTrim ? Math.round(data.trimEndMs!) : null,
     }).returning();
     
     if (data.privacy === "custom" && data.customViewers?.length) {
