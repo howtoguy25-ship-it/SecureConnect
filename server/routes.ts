@@ -4825,7 +4825,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/statuses', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const { mediaUrl, mediaType, caption, privacy, customViewers, isEncrypted, encryptedCaption, captionNonce, mediaKeyWraps } = req.body;
+      const { mediaUrl, mediaType, caption, privacy, customViewers, isEncrypted, encryptedCaption, captionNonce, mediaKeyWraps, trimStartMs, trimEndMs } = req.body;
 
       let statusData: Parameters<typeof storage.createStatus>[1];
       if (isEncrypted === true) {
@@ -4861,9 +4861,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           encryptedCaption: encryptedCaption ?? null,
           captionNonce: captionNonce ?? null,
           mediaKeyWraps: wraps,
+          trimStartMs, trimEndMs,
         };
       } else {
-        statusData = { mediaUrl, mediaType, caption, privacy, customViewers };
+        statusData = { mediaUrl, mediaType, caption, privacy, customViewers, trimStartMs, trimEndMs };
       }
 
       const status = await storage.createStatus(req.userId!, statusData);

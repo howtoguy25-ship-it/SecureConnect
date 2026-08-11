@@ -391,6 +391,13 @@ export const statuses = pgTable("statuses", {
   privacy: text("privacy").default("everyone"), // 'everyone' | 'friends' | 'custom'
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
+  // Video trim window, set by the in-app trim editor at post time. Null for
+  // images and for videos posted without trimming (the full clip plays).
+  // The uploaded file itself is never re-encoded/cut server-side — these
+  // are playback boundaries the client seeks to and stops at, both in the
+  // poster's own preview and every viewer's story player.
+  trimStartMs: integer("trim_start_ms"),
+  trimEndMs: integer("trim_end_ms"),
 }, (table) => [
   index("idx_statuses_user_id").on(table.userId),
   index("idx_statuses_user_created").on(table.userId, table.createdAt),

@@ -14,6 +14,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Button } from "@/components/Button";
+import { StatusVideoTrimEditor } from "@/components/StatusVideoTrimEditor";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { Spacing, BorderRadius } from "@/constants/theme";
@@ -227,16 +228,18 @@ const viewerStyles = StyleSheet.create({
   },
 });
 
-function StatusVideoPreview({ 
-  uri, 
-  style, 
+function StatusVideoPreview({
+  uri,
+  style,
   onEditPress,
-  theme 
-}: { 
-  uri: string; 
+  theme,
+  trimmedLabel,
+}: {
+  uri: string;
   style: any;
   onEditPress?: () => void;
   theme: any;
+  trimmedLabel?: string | null;
 }) {
   const [isPlaying, setIsPlaying] = useState(true);
   const player = useVideoPlayer({ uri }, (p) => {
@@ -270,13 +273,19 @@ function StatusVideoPreview({
           <Feather name={isPlaying ? "pause" : "play"} size={32} color="#fff" />
         </Pressable>
         {onEditPress ? (
-          <Pressable 
+          <Pressable
             style={[videoPreviewStyles.editButton, { backgroundColor: theme.primary }]}
             onPress={onEditPress}
           >
-            <Feather name="crop" size={18} color="#fff" />
-            <ThemedText type="small" style={{ color: '#fff', marginLeft: 4 }}>Edit</ThemedText>
+            <Feather name="scissors" size={18} color="#fff" />
+            <ThemedText type="small" style={{ color: '#fff', marginLeft: 4 }}>Trim</ThemedText>
           </Pressable>
+        ) : null}
+        {trimmedLabel ? (
+          <View style={videoPreviewStyles.trimBadge}>
+            <Feather name="scissors" size={12} color="#fff" />
+            <ThemedText type="small" style={{ color: '#fff', marginLeft: 4 }}>{trimmedLabel}</ThemedText>
+          </View>
         ) : null}
       </View>
     </View>
@@ -305,6 +314,17 @@ const videoPreviewStyles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
+  },
+  trimBadge: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(0,0,0,0.6)',
   },
 });
 
@@ -340,19 +360,61 @@ function VideoThumb({ uri, style }: { uri: string; style: any }) {
   return <Image source={{ uri: thumb }} style={style} contentFit="cover" cachePolicy="memory-disk" />;
 }
 
-function StatusVideoPlayer({ uri, style, onComplete }: { uri: string; style: any; onComplete?: () => void }) {
+function StatusVideoPlayer({
+  uri,
+  style,
+  onComplete,
+  trimStartMs,
+  trimEndMs,
+}: {
+  uri: string;
+  style: any;
+  onComplete?: () => void;
+  trimStartMs?: number | null;
+  trimEndMs?: number | null;
+}) {
   const player = useVideoPlayer({ uri }, (p) => {
     p.loop = true;
     p.play();
   });
+  const completedRef = useRef(false);
+  const trimStartSec = trimStartMs != null ? trimStartMs / 1000 : null;
+  const trimEndSec = trimEndMs != null ? trimEndMs / 1000 : null;
+
+  // The uploaded file is the full, untrimmed clip — the player has to seek
+  // past whatever lead-in the poster cut and stop (looping back) at the
+  // trim-out point itself, rather than relying on the file's own end.
+  useEffect(() => {
+    if (trimStartSec == null) return;
+    const sub = player.addListener('sourceLoad', () => {
+      player.currentTime = trimStartSec;
+    });
+    return () => sub.remove();
+  }, [player, trimStartSec]);
 
   useEffect(() => {
-    if (!onComplete) return;
+    if (trimEndSec == null) return;
+    const sub = player.addListener('timeUpdate', (payload: { currentTime: number }) => {
+      if (payload.currentTime >= trimEndSec) {
+        if (!completedRef.current) {
+          completedRef.current = true;
+          onComplete?.();
+        }
+        player.currentTime = trimStartSec ?? 0;
+      }
+    });
+    return () => sub.remove();
+  }, [player, trimEndSec, trimStartSec, onComplete]);
+
+  useEffect(() => {
+    if (!onComplete || trimEndSec != null) return;
+    // No trim window — fall back to the file's own natural end, same as
+    // before trimming existed.
     // loop=true means this fires on every replay — the ref it sets is a
     // one-way latch, so re-firing on later loops is harmless.
     const sub = player.addListener('playToEnd', onComplete);
     return () => sub.remove();
-  }, [player, onComplete]);
+  }, [player, onComplete, trimEndSec]);
 
   return (
     <VideoView
@@ -392,6 +454,8 @@ interface Status {
   captionNonce?: string | null;
   /** This viewer's own slice of the story's key wraps — see server/storage.ts getStatuses. */
   mediaKeyWrap?: { wrappedKey: string; nonce: string } | null;
+  trimStartMs?: number | null;
+  trimEndMs?: number | null;
 }
 
 // Helper to resolve media URLs - handles both relative paths and full URLs
@@ -432,6 +496,9 @@ export default function StatusScreen() {
   const [viewingStatus, setViewingStatus] = useState<Status | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedMediaType, setSelectedMediaType] = useState<"image" | "video">("image");
+  const [trimStartMs, setTrimStartMs] = useState<number | null>(null);
+  const [trimEndMs, setTrimEndMs] = useState<number | null>(null);
+  const [showTrimEditor, setShowTrimEditor] = useState(false);
   const [selectedMimeType, setSelectedMimeType] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [privacy, setPrivacy] = useState<PrivacyOption>("everyone");
@@ -549,6 +616,8 @@ export default function StatusScreen() {
       encryptedCaption?: string | null;
       captionNonce?: string | null;
       mediaKeyWraps?: Record<string, { wrappedKey: string; nonce: string }>;
+      trimStartMs?: number | null;
+      trimEndMs?: number | null;
     }) => {
       return apiRequest("POST", "/api/statuses", data);
     },
@@ -567,6 +636,8 @@ export default function StatusScreen() {
     setCaption("");
     setPrivacy("everyone");
     setSelectedFriends([]);
+    setTrimStartMs(null);
+    setTrimEndMs(null);
   };
 
   const pickImage = async (shouldEdit: boolean = true) => {
@@ -584,6 +655,10 @@ export default function StatusScreen() {
       setSelectedImage(asset.uri);
       setSelectedMediaType(asset.type === "video" ? "video" : "image");
       setSelectedMimeType(asset.mimeType || null);
+      // A freshly picked video starts untrimmed — any trim window chosen
+      // for a previous selection has no meaning for different footage.
+      setTrimStartMs(null);
+      setTrimEndMs(null);
       setShowCreateModal(true);
     }
   };
@@ -715,6 +790,8 @@ export default function StatusScreen() {
           encryptedCaption: encrypted.encryptedCaption,
           captionNonce: encrypted.captionNonce,
           mediaKeyWraps: encrypted.mediaKeyWraps,
+          trimStartMs,
+          trimEndMs,
         });
         return;
       }
@@ -845,6 +922,8 @@ export default function StatusScreen() {
         caption,
         privacy,
         customViewers: privacy === "custom" ? selectedFriends : undefined,
+        trimStartMs,
+        trimEndMs,
       });
     } catch (error: any) {
       console.error("Status upload error:", error);
@@ -1177,11 +1256,16 @@ export default function StatusScreen() {
           >
             {selectedImage ? (
               selectedMediaType === "video" ? (
-                <StatusVideoPreview 
-                  uri={selectedImage} 
-                  style={styles.previewImage} 
+                <StatusVideoPreview
+                  uri={selectedImage}
+                  style={styles.previewImage}
                   theme={theme}
-                  onEditPress={() => pickImage(true)}
+                  onEditPress={() => setShowTrimEditor(true)}
+                  trimmedLabel={
+                    trimStartMs != null && trimEndMs != null
+                      ? `Trimmed to ${Math.round((trimEndMs - trimStartMs) / 1000)}s`
+                      : null
+                  }
                 />
               ) : (
                 <View style={styles.previewContainer}>
@@ -1231,6 +1315,22 @@ export default function StatusScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {selectedImage && selectedMediaType === "video" ? (
+        <StatusVideoTrimEditor
+          visible={showTrimEditor}
+          uri={selectedImage}
+          theme={theme}
+          initialTrimStartMs={trimStartMs}
+          initialTrimEndMs={trimEndMs}
+          onCancel={() => setShowTrimEditor(false)}
+          onConfirm={(trim) => {
+            setTrimStartMs(trim?.trimStartMs ?? null);
+            setTrimEndMs(trim?.trimEndMs ?? null);
+            setShowTrimEditor(false);
+          }}
+        />
+      ) : null}
 
       <Modal
         visible={showPrivacyModal}
@@ -1360,6 +1460,8 @@ export default function StatusScreen() {
                   uri={getDisplayMediaUri(viewingStatus) ?? ''}
                   style={styles.statusViewerImage}
                   onComplete={() => { viewCompletedRef.current = true; }}
+                  trimStartMs={viewingStatus.trimStartMs}
+                  trimEndMs={viewingStatus.trimEndMs}
                 />
               </View>
             ) : (
