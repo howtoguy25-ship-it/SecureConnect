@@ -196,7 +196,7 @@ export default function VirtualNumberScreen() {
         <>
           <View style={[styles.card, { backgroundColor: theme.backgroundDefault }]}>
             <ThemedText type="small" style={{ color: theme.textSecondary }}>
-              YOUR SECURECONNECT NUMBER
+              YOUR PRYVO DISPOSABLE NUMBER
             </ThemedText>
             <Pressable
               onPress={() => {

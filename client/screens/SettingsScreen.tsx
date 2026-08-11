@@ -836,7 +836,7 @@ export default function SettingsScreen() {
       {user?.isVip ? (
         <View style={styles.section}>
           <ThemedText type="small" style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            SECURECONNECT NUMBER
+            PRYVO DISPOSABLE NUMBER
           </ThemedText>
           
           <Pressable 
