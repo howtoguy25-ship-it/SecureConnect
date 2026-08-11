@@ -23,7 +23,9 @@ import { haptics } from "@/lib/haptics";
 export default function PeekDetectionSettingsScreen() {
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
-  const [permission, requestPermission] = useCameraPermissions();
+  // getPermission re-queries the OS fresh (unlike the hook's `permission`
+  // snapshot, which is only fetched once at mount) — see handleToggle.
+  const [, requestPermission, getPermission] = useCameraPermissions();
   const [enabled, setEnabled] = useState(false);
   const [cooldownSeconds, setCooldownSecondsState] = useState(60);
   const [customValue, setCustomValue] = useState("");
@@ -42,7 +44,15 @@ export default function PeekDetectionSettingsScreen() {
   const handleToggle = useCallback(
     async (next: boolean) => {
       if (next) {
-        let status = permission;
+        // Re-query the OS permission fresh every time the feature is
+        // turned on, rather than trusting `permission` from the hook's
+        // mount-time snapshot. If the user revoked camera access from
+        // device Settings while this screen (or the always-mounted
+        // ShoulderSurfingGuard) stayed alive, the stale in-memory value
+        // would still read "granted" and skip the real re-prompt —
+        // silently leaving the feature either stuck off or, worse,
+        // believed-on with no actual camera access.
+        let status = await getPermission();
         if (!status?.granted) {
           status = await requestPermission();
         }
@@ -68,7 +78,7 @@ export default function PeekDetectionSettingsScreen() {
         else Alert.alert("Error", msg);
       }
     },
-    [permission, requestPermission],
+    [requestPermission, getPermission],
   );
 
   const applyCooldown = useCallback(async (seconds: number) => {
