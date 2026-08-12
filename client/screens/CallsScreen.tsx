@@ -361,19 +361,24 @@ export default function CallsScreen() {
     const callIcon = getCallIcon(item);
     const missed = isMissedCall(item.status);
 
+    const initial = otherUserName.trim().charAt(0).toUpperCase() || "?";
+
     return (
       <AnimatedPressable
-        style={[styles.callItem, { borderBottomColor: theme.border }]}
+        style={[styles.callItem, { backgroundColor: theme.backgroundDefault }]}
         scaleValue={0.98}
         onPress={() => {
           setSelectedCall(item);
           setShowCallDetail(true);
         }}
       >
-        <View style={[styles.avatar, { backgroundColor: AVATAR_COLORS[avatarIndex] }]}>
-          <Feather name="user" size={20} color="#fff" />
+        <View style={styles.avatarWrap}>
+          <View style={[styles.avatar, { backgroundColor: AVATAR_COLORS[avatarIndex] }]}>
+            <ThemedText style={styles.avatarInitial}>{initial}</ThemedText>
+          </View>
+          {missed ? <View style={[styles.missedDot, { backgroundColor: theme.error, borderColor: theme.backgroundDefault }]} /> : null}
         </View>
-        
+
         <View style={styles.callContent}>
           <ThemedText
             type="body"
@@ -389,13 +394,13 @@ export default function CallsScreen() {
             </ThemedText>
           </View>
         </View>
-        
+
         <View style={styles.callMeta}>
           <ThemedText type="small" style={{ color: theme.textSecondary }}>
             {formatTime(item.createdAt)}
           </ThemedText>
           <AnimatedPressable
-            style={styles.callButton}
+            style={[styles.callButton, { backgroundColor: theme.primary + "15" }]}
             scaleValue={0.85}
             hapticType="light"
             onPress={async () => {
@@ -822,9 +827,24 @@ const styles = StyleSheet.create({
   callItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
     gap: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.05,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
+      },
+      android: { elevation: 1 },
+    }),
+  },
+  avatarWrap: {
+    position: "relative",
   },
   avatar: {
     width: 48,
@@ -832,6 +852,20 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     justifyContent: "center",
     alignItems: "center",
+  },
+  avatarInitial: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  missedDot: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
   },
   callContent: {
     flex: 1,
@@ -851,6 +885,7 @@ const styles = StyleSheet.create({
   },
   callButton: {
     padding: Spacing.sm,
+    borderRadius: BorderRadius.full,
   },
   emptyContainer: {
     flex: 1,

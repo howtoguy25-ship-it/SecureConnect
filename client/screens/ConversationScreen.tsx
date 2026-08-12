@@ -2660,8 +2660,22 @@ export default function ConversationScreen() {
   const handleDeleteMessage = async () => {
     if (!selectedMessage) return;
     const id = selectedMessage.id;
+    // A message still 'sending'/'queued' only exists as a local optimistic
+    // row — the server has never heard of this id yet (it's a client-side
+    // tempId, not a real row), so DELETE /api/messages/:id would 404. That
+    // 404 was being shown to the user as "check your connection," which is
+    // simply the wrong diagnosis: there's nothing to reach on the server at
+    // all yet. Just drop the local row — if the send is still in flight it
+    // gets abandoned; there's nothing server-side to clean up.
+    const stillLocalOnly = selectedMessage.status === 'sending' || selectedMessage.status === 'queued';
     setShowMessageOptions(false);
     setSelectedMessage(null);
+
+    if (stillLocalOnly) {
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+      haptics.success();
+      return;
+    }
 
     // Optimistic: remove from the list the instant the user confirms, instead
     // of waiting on the network round trip first. Only roll it back if the
@@ -2685,9 +2699,14 @@ export default function ConversationScreen() {
       });
 
       if (!response.ok) {
-        throw new Error('delete failed');
+        // Surface the server's actual reason (e.g. "Message not found or
+        // not allowed") instead of a hardcoded "check your connection" —
+        // that copy was wrong for every failure except a genuine dropped
+        // request, and a 404/403 has nothing to do with connectivity.
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || `Delete failed (${response.status})`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting message:', error);
       if (removedMessage) {
         const restored = removedMessage;
@@ -2699,7 +2718,11 @@ export default function ConversationScreen() {
           return next;
         });
       }
-      Alert.alert('Could Not Delete', 'Please check your connection and try again.');
+      const isNetworkError = error?.name === 'AbortError' || error?.message === 'Failed to fetch' || error instanceof TypeError;
+      Alert.alert(
+        'Could Not Delete',
+        isNetworkError ? 'Please check your connection and try again.' : (error?.message || 'Please try again.'),
+      );
     }
   };
 
@@ -2851,9 +2874,10 @@ export default function ConversationScreen() {
       });
 
       if (!response.ok) {
-        throw new Error('unsend failed');
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || `Unsend failed (${response.status})`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error unsending message:', error);
       if (removedMessage) {
         const restored = removedMessage;
@@ -2865,7 +2889,11 @@ export default function ConversationScreen() {
           return next;
         });
       }
-      Alert.alert('Could Not Unsend', 'Please check your connection and try again.');
+      const isNetworkError = error?.name === 'AbortError' || error?.message === 'Failed to fetch' || error instanceof TypeError;
+      Alert.alert(
+        'Could Not Unsend',
+        isNetworkError ? 'Please check your connection and try again.' : (error?.message || 'Please try again.'),
+      );
     }
   };
 
