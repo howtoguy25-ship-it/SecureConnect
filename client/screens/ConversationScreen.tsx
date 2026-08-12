@@ -2673,6 +2673,20 @@ export default function ConversationScreen() {
 
     if (stillLocalOnly) {
       setMessages((prev) => prev.filter((m) => m.id !== id));
+      // A 'queued' message is also mirrored into queuedTextSends/
+      // queuedMediaSends and persisted to AsyncStorage so it survives a
+      // screen unmount (see the comment on those state declarations above).
+      // Removing it only from `messages` left the AsyncStorage copy behind,
+      // so the next fetchMessages() (every screen focus) re-hydrated it
+      // from storage and re-appended it to the list — the deleted message
+      // reappearing the moment the chat was reopened. Filter it out of both
+      // queue arrays and re-persist here too.
+      setQueuedTextSends((prev) => {
+        const next = prev.filter((q) => q.tempId !== id);
+        persistQueuedSends(next, queuedMediaSends.filter((q) => q.tempId !== id));
+        return next;
+      });
+      setQueuedMediaSends((prev) => prev.filter((q) => q.tempId !== id));
       haptics.success();
       return;
     }
@@ -2986,6 +3000,25 @@ export default function ConversationScreen() {
     const original = selectedMessage;
     setShowDeleteSheet(false);
     setSelectedMessage(null);
+
+    // A still-'sending'/'queued' message only exists as a local optimistic
+    // row — the server has never persisted it, so "delete for everyone"
+    // (which POSTs /api/messages/:id/delete-for-everyone) would 404, and
+    // the catch block below would silently restore the original message —
+    // reading exactly like "delete for everyone doesn't delete." There's
+    // nothing "everyone" to delete it for yet, so just drop the local row,
+    // same as delete-for-me for a local-only message.
+    if (original.status === 'sending' || original.status === 'queued') {
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+      setQueuedTextSends((prev) => {
+        const next = prev.filter((q) => q.tempId !== id);
+        persistQueuedSends(next, queuedMediaSends.filter((q) => q.tempId !== id));
+        return next;
+      });
+      setQueuedMediaSends((prev) => prev.filter((q) => q.tempId !== id));
+      haptics.success();
+      return;
+    }
 
     // Optimistic: tombstone immediately, restore the original content only
     // if the request actually fails.
