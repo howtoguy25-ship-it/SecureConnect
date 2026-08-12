@@ -2723,10 +2723,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/messages/:id/delete-for-everyone', authenticateToken, async (req: AuthRequest, res) => {
     try {
       const messageId = req.params.id;
-      const updated = await storage.deleteMessageForEveryone(messageId, req.userId!);
-      if (!updated) {
-        return res.status(403).json({ error: 'Cannot delete this message for everyone' });
+      const result = await storage.deleteMessageForEveryone(messageId, req.userId!);
+      if ('error' in result) {
+        // Distinct, honest reasons instead of one generic "cannot delete" —
+        // a user hitting the 404 or the 1-hour-expiry case has no way to
+        // tell those apart from a real bug without this.
+        const messages: Record<typeof result.error, string> = {
+          not_found: 'This message no longer exists.',
+          not_sender: 'You can only delete your own messages for everyone.',
+          expired: 'Delete for everyone is only available within 1 hour of sending.',
+        };
+        return res.status(403).json({ error: messages[result.error], reason: result.error });
       }
+      const updated = result.message;
       const ioRef = getIO();
       if (ioRef) {
         ioRef.to(`conversation:${updated.conversationId}`).emit('message-deleted-for-everyone', {

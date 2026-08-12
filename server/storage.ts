@@ -91,7 +91,10 @@ export interface IStorage {
   unsaveMessage(userId: string, messageId: string): Promise<boolean>;
   getSavedMessageIds(userId: string, conversationId: string): Promise<string[]>;
   deleteMessageForMe(messageId: string, userId: string): Promise<boolean>;
-  deleteMessageForEveryone(messageId: string, userId: string): Promise<Message | undefined>;
+  deleteMessageForEveryone(
+    messageId: string,
+    userId: string,
+  ): Promise<{ message: Message } | { error: 'not_found' | 'not_sender' | 'expired' }>;
   forwardMessage(originalMessageId: string, targetConversationId: string, senderId: string, receiverId: string | null): Promise<Message | null>;
   sweepExpiredMessages(): Promise<Array<{ id: string; conversationId: string }>>;
 
@@ -634,13 +637,16 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  async deleteMessageForEveryone(messageId: string, userId: string): Promise<Message | undefined> {
+  async deleteMessageForEveryone(
+    messageId: string,
+    userId: string,
+  ): Promise<{ message: Message } | { error: 'not_found' | 'not_sender' | 'expired' }> {
     const msg = await this.getMessage(messageId);
-    if (!msg) return undefined;
-    if (msg.senderId !== userId) return undefined; // only sender can delete-for-everyone
+    if (!msg) return { error: 'not_found' };
+    if (msg.senderId !== userId) return { error: 'not_sender' }; // only sender can delete-for-everyone
     // Allow within sensible window: 1 hour
     const created = msg.createdAt ? new Date(msg.createdAt).getTime() : 0;
-    if (Date.now() - created > 60 * 60 * 1000) return undefined;
+    if (Date.now() - created > 60 * 60 * 1000) return { error: 'expired' };
     const [updated] = await db.update(messages)
       .set({
         deletedForEveryone: true,
@@ -656,7 +662,7 @@ export class DatabaseStorage implements IStorage {
     await db.update(conversations)
       .set({ pinnedMessageId: null })
       .where(and(eq(conversations.id, msg.conversationId), eq(conversations.pinnedMessageId, messageId)));
-    return updated;
+    return { message: updated };
   }
 
   async forwardMessage(

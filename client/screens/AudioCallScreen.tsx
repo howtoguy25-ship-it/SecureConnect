@@ -471,7 +471,10 @@ export default function AudioCallScreen() {
                 style={[styles.endButton, { backgroundColor: "#FF3B30" }]}
                 onPress={handleEndCall}
               >
-                <Feather name="phone-off" size={22} color="#fff" />
+                {/* See VideoCallScreen's End button for why: a rotated plain
+                    handset matches the standard hang-up glyph, "phone-off"
+                    reads as "muted" rather than "end call". */}
+                <Feather name="phone" size={22} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
               </Pressable>
               <ThemedText type="caption" style={[styles.buttonLabel, { color: theme.textSecondary }]}>
                 End
