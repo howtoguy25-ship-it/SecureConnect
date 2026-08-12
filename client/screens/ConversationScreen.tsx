@@ -324,6 +324,20 @@ export default function ConversationScreen() {
     return () => clearInterval(interval);
   }, [encryptionState, checkForRecipientKeys]);
 
+  // A queued message's bubble only ever showed a bare clock icon with no
+  // explanation — the only place that actually said "recipient hasn't set
+  // up encryption keys" was the banner up top, easy to miss if you sent the
+  // message and moved on. This ticks a re-render every few seconds while
+  // any message is queued so each bubble can show its own explicit label
+  // once it's been waiting a while, instead of looking indistinguishable
+  // from a permanently frozen send.
+  const [queuedTick, setQueuedTick] = useState(0);
+  useEffect(() => {
+    if (encryptionState !== "no_keys") return;
+    const interval = setInterval(() => setQueuedTick((t) => t + 1), 5000);
+    return () => clearInterval(interval);
+  }, [encryptionState]);
+
   // Loaded from the server (message_saves table) rather than local
   // AsyncStorage, so a saved/highlighted message survives reinstalls and
   // shows up the same way on any device the user logs into — it's still
@@ -2568,10 +2582,33 @@ export default function ConversationScreen() {
     }
   };
 
-  const closeHoldOverlay = () => {
+  // Root cause of "select a message and the whole chat freezes, requires
+  // force-quit": MessageHoldOverlay is a real native <Modal> (not just an
+  // absolutely-positioned view — RN Modals present as a separate native
+  // layer that captures all touches on iOS). Its `visible` prop flips to
+  // false the instant closeHoldOverlay() runs, but the Modal itself stays
+  // mounted for another ~180ms to play its own fade-out (see
+  // MessageHoldOverlay's cachedMessage/closeTimerRef). Every action below
+  // used to call closeHoldOverlay() and then IMMEDIATELY open a second
+  // native presentation (DeleteConfirmSheet's Modal, the message-info
+  // Modal, the OS share sheet, Hide-to-Locker's Alert) in the very same
+  // tick — so for that ~180ms window two native modals/alerts were
+  // simultaneously presented. That's a well-documented class of iOS bug
+  // (competing UIKit presentation transactions) that can leave the whole
+  // screen permanently unresponsive to touch with nothing visibly wrong
+  // on screen — indistinguishable from a real freeze, and unrecoverable
+  // without a force-quit. handleReportMessage already worked around this
+  // for its own flow with an ad hoc 250ms setTimeout; this generalizes
+  // that fix to every hold-menu action via an optional afterClose
+  // callback, so nothing opens a second native presentation before the
+  // first has actually finished closing.
+  const closeHoldOverlay = (afterClose?: () => void) => {
     holdRequestId.current++;
     setHoldMessage(null);
     setHoldLayout(null);
+    if (afterClose) {
+      setTimeout(afterClose, 200);
+    }
   };
 
   const handleReact = async (emoji: string, overrideMessageId?: string) => {
@@ -3743,7 +3780,19 @@ export default function ConversationScreen() {
             {item.status === 'sending' ? (
               <ActivityIndicator size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
             ) : item.status === 'queued' ? (
-              <Feather name="clock" size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
+              Date.now() - new Date(item.createdAt).getTime() > 30000 ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Feather name="clock" size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
+                  <ThemedText
+                    type="small"
+                    style={{ color: isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary, marginLeft: 4 }}
+                  >
+                    Waiting for {otherUserName} to finish setup
+                  </ThemedText>
+                </View>
+              ) : (
+                <Feather name="clock" size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
+              )
             ) : item.status === 'failed' ? (
               <AnimatedPressable 
                 onPress={() => {
@@ -3859,6 +3908,12 @@ export default function ConversationScreen() {
         data={messages}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
+        // queuedTick isn't part of `messages` itself (it's a standalone
+        // ticker for the "waiting on recipient setup" label — see below),
+        // so FlatList needs an explicit nudge via extraData to know a
+        // queued bubble's rendered text can be stale even though the
+        // underlying item object hasn't changed.
+        extraData={queuedTick}
         contentContainerStyle={[styles.messageList, { paddingTop: headerHeight + Spacing.md }]}
         showsVerticalScrollIndicator={false}
         onScrollToIndexFailed={() => {}}
@@ -4787,8 +4842,13 @@ export default function ConversationScreen() {
             <Pressable
               style={[styles.messageOption, { backgroundColor: theme.backgroundDefault }]}
               onPress={() => {
+                // Same fix as closeHoldOverlay's afterClose: don't open a
+                // second native Modal in the same tick this one closes —
+                // two simultaneously-presented native Modals is the freeze
+                // class this whole file has been chasing under "select a
+                // message and the chat locks up."
                 setShowMessageOptions(false);
-                setShowDeleteSheet(true);
+                setTimeout(() => setShowDeleteSheet(true), 200);
               }}
             >
               <View style={[styles.messageOptionIcon, { backgroundColor: '#FF3B30' }]}>
@@ -5337,13 +5397,11 @@ export default function ConversationScreen() {
       onReact={(emoji) => {
         if (!holdMessage) return;
         const id = holdMessage.id;
-        closeHoldOverlay();
-        handleReact(emoji, id);
+        closeHoldOverlay(() => handleReact(emoji, id));
       }}
       onOpenEmojiPicker={() => {
         // Reuse existing keyboard emoji picker as a fallback for "more emojis".
-        closeHoldOverlay();
-        setShowEmojiPicker(true);
+        closeHoldOverlay(() => setShowEmojiPicker(true));
       }}
       actions={(() => {
         if (!holdMessage) return [] as HoldAction[];
@@ -5351,37 +5409,37 @@ export default function ConversationScreen() {
         const isText = !!(holdMessage.content && !holdMessage.deletedForEveryone);
         const list: HoldAction[] = [
           { key: 'reply', label: 'Reply', icon: 'corner-up-left',
-            onPress: () => { closeHoldOverlay(); handleReplyToMessage(); } },
+            onPress: () => closeHoldOverlay(handleReplyToMessage) },
           { key: 'reply-camera', label: 'Reply with Camera', icon: 'camera',
-            onPress: () => { closeHoldOverlay(); handleReplyWithCamera(); } },
+            onPress: () => closeHoldOverlay(handleReplyWithCamera) },
           { key: 'forward', label: 'Forward', icon: 'corner-up-right',
-            onPress: () => { closeHoldOverlay(); handleForwardMessage(); } },
+            onPress: () => closeHoldOverlay(handleForwardMessage) },
         ];
         if (isText) list.push({ key: 'copy', label: 'Copy', icon: 'copy',
-          onPress: () => { closeHoldOverlay(); handleCopyMessage(); } });
+          onPress: () => closeHoldOverlay(handleCopyMessage) });
         list.push({ key: 'select', label: 'Select', icon: 'check-square',
-          onPress: () => { closeHoldOverlay(); handleEnterSelectMode(holdMessage); } });
+          onPress: () => closeHoldOverlay(() => handleEnterSelectMode(holdMessage)) });
         list.push({ key: 'pin', label: pinnedMessageId === holdMessage.id ? 'Unpin' : 'Pin',
           icon: 'bookmark',
-          onPress: () => { closeHoldOverlay(); handlePinMessage(); } });
+          onPress: () => closeHoldOverlay(handlePinMessage) });
         // Save is a device-local highlight+bookmark; it doesn't make sense
         // for messages that are about to disappear, so it's hidden entirely
         // when this conversation has a disappearing-messages timer active.
         if (conversationTimer === 0) {
           list.push({ key: 'save', label: savedMessageIds.has(holdMessage.id) ? 'Unsave' : 'Save',
             icon: savedMessageIds.has(holdMessage.id) ? 'star' : 'star',
-            onPress: () => { closeHoldOverlay(); handleToggleSaveMessage(holdMessage.id); } });
+            onPress: () => closeHoldOverlay(() => handleToggleSaveMessage(holdMessage.id)) });
         }
         list.push({ key: 'info', label: 'Message Info', icon: 'info',
-          onPress: () => { closeHoldOverlay(); handleShowMessageInfo(); } });
+          onPress: () => closeHoldOverlay(handleShowMessageInfo) });
         list.push({ key: 'share', label: 'Share', icon: 'share',
-          onPress: () => { closeHoldOverlay(); handleShareMessage(); } });
+          onPress: () => closeHoldOverlay(handleShareMessage) });
         if (!isMine) list.push({ key: 'report', label: 'Report', icon: 'flag',
-          onPress: () => { closeHoldOverlay(); handleReportMessage(); } });
+          onPress: () => closeHoldOverlay(handleReportMessage) });
         if (user?.isVip) list.push({ key: 'hide', label: 'Hide to Locker', icon: 'lock',
-          onPress: () => { closeHoldOverlay(); handleHideToLocker(); } });
+          onPress: () => closeHoldOverlay(handleHideToLocker) });
         list.push({ key: 'delete', label: 'Delete', icon: 'trash-2', destructive: true,
-          onPress: () => { closeHoldOverlay(); setShowDeleteSheet(true); } });
+          onPress: () => closeHoldOverlay(() => setShowDeleteSheet(true)) });
         return list;
       })()}
     />
