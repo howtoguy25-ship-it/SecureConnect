@@ -298,12 +298,15 @@ export default function ProfileScreen() {
                 <ActivityIndicator color="#fff" />
               </View>
             ) : (
-              <View style={[styles.editBadge, { backgroundColor: theme.primary }]}>
+              // borderColor matches the page background rather than a
+              // hardcoded white — a fixed white ring looked like a stray
+              // bright halo around the badge in dark mode.
+              <View style={[styles.editBadge, { backgroundColor: theme.primary, borderColor: theme.backgroundRoot }]}>
                 <Feather name="camera" size={14} color="#fff" />
               </View>
             )}
             {user?.isVip ? (
-              <View style={[styles.vipBadge, { backgroundColor: theme.accent }]}>
+              <View style={[styles.vipBadge, { backgroundColor: theme.accent, borderColor: theme.backgroundRoot }]}>
                 <Feather name="award" size={12} color="#fff" />
               </View>
             ) : null}
@@ -559,6 +562,15 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     justifyContent: "center",
     alignItems: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+      },
+      android: { elevation: 4 },
+    }),
   },
   avatarImage: {
     width: 100,
@@ -627,7 +639,7 @@ const styles = StyleSheet.create({
   vipIcon: {
     width: 52,
     height: 52,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.full,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -645,7 +657,7 @@ const styles = StyleSheet.create({
   menuIcon: {
     width: 44,
     height: 44,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.full,
     justifyContent: "center",
     alignItems: "center",
   },
