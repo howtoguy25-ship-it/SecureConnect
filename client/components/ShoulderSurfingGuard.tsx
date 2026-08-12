@@ -236,7 +236,12 @@ export function ShoulderSurfingGuard() {
         if (FaceDetection) {
           // Native path: real face-count detection. Capture to a temp file
           // (uri) rather than base64 — ML Kit's detect() takes a file URI.
-          const photo = await cam.takePictureAsync({ quality: 0.3, skipProcessing: true });
+          // shutterSound defaults to true — without disabling it, every
+          // single background sample (every 2.5s, silently, from a 2x2px
+          // offscreen camera) played the real iOS camera shutter click,
+          // which is exactly what surfaced as "I hear the screenshot sound
+          // inside chats." This capture is meant to be invisible.
+          const photo = await cam.takePictureAsync({ quality: 0.3, skipProcessing: true, shutterSound: false });
           if (photo?.uri) {
             const faces = await FaceDetection.detect(photo.uri, { performanceMode: 'fast' });
             const faceList = Array.isArray(faces) ? faces : [];
@@ -250,7 +255,7 @@ export function ShoulderSurfingGuard() {
           }
         } else {
           // Web fallback: no ML Kit binding, use the byte-size heuristic.
-          const photo = await cam.takePictureAsync({ quality: 0, base64: true, skipProcessing: true });
+          const photo = await cam.takePictureAsync({ quality: 0, base64: true, skipProcessing: true, shutterSound: false });
           const rawB64 = photo?.base64;
           const b64 = rawB64?.startsWith('data:') ? rawB64.slice(rawB64.indexOf(',') + 1) : rawB64;
           if (b64) {
