@@ -697,7 +697,12 @@ export default function VideoCallScreen() {
                 style={[styles.endButton, { backgroundColor: "#FF3B30" }]}
                 onPress={handleEndCall}
               >
-                <Feather name="phone-off" size={22} color="#fff" />
+                {/* The standard "hang up" glyph is a plain handset rotated
+                    ~135° (how FaceTime/WhatsApp/Android's own call-end
+                    button render it) — Feather has no dedicated call-end
+                    icon, and "phone-off" (a handset with a slash through
+                    it) reads as "muted/no phone" rather than "end call". */}
+                <Feather name="phone" size={22} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
               </Pressable>
               <ThemedText type="caption" style={styles.buttonLabel}>
                 End
