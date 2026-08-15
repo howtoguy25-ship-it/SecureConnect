@@ -1,0 +1,184 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // The account root doc (credits, plan) is server-managed only -- all writes go
+    // through Cloud Functions using the Admin SDK, which bypasses these rules entirely.
+    // Clients can read their own (for the credit balance UI) but never write directly, so
+    // nobody can grant themselves credits.
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Projects are fully owned/edited by the client.
+    match /users/{uid}/projects/{projectId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Account-level Products catalog -- fully owned/edited by the client, same as projects.
+    match /users/{uid}/products/{productId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    match /users/{uid}/collections/{collectionId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Other per-account meta docs are client-owned, EXCEPT unlockedThemes/sellerAccount
+    // below, which must not be client-writable.
+    match /users/{uid}/meta/{docId} {
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid) && docId != 'unlockedThemes' && docId != 'sellerAccount';
+    }
+    match /users/{uid}/meta/unlockedThemes {
+      // Now a real paid unlock (verifyApplePurchase) -- client-writable would let anyone
+      // grant themselves a $189/$399 theme for free.
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+    match /users/{uid}/meta/sellerAccount {
+      // Holds this seller's real Stripe Connect account id + charges_enabled/payouts_enabled
+      // flags -- client-writable would let anyone fake "charges enabled" to bypass
+      // createStoreCheckout's payout-readiness gate, or worse, redirect their own future
+      // payouts to an attacker-controlled Stripe account id.
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // AI builder generation sessions (progress, pause state, credit deductions) are
+    // written only by Cloud Functions -- the client reads for the live progress UI and
+    // requests pauses/resumes through callable functions instead of writing the doc
+    // directly, so nobody can fake a completed build or dodge credit deduction.
+    match /users/{uid}/generationSessions/{sessionId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Persistent assistant chat history -- just conversation text, not security-sensitive,
+    // so (unlike credits/sessions above) the client owns it directly like projects do.
+    match /users/{uid}/assistantMessages/{messageId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Real push-notification device tokens -- an opaque routing address (like a phone
+    // number for push), not a secret, so the client registers/removes its own directly
+    // rather than through a Cloud Function.
+    match /users/{uid}/pushTokens/{token} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Published-site content and custom-domain routing -- written only by Cloud Functions
+    // (publishProject/connectDomain) and read only by servePublishedSite, which uses the
+    // Admin SDK and so bypasses these rules entirely. No client, including the owning
+    // user, ever reads/writes these directly.
+    match /publishedSites/{slug} {
+      allow read, write: if false;
+    }
+    match /domainMappings/{hostname} {
+      allow read, write: if false;
+    }
+
+    // Domain purchase records (contain the real registrant contact + Stripe/Namecheap
+    // status) -- client can read its own for the purchase-progress UI, but only
+    // createDomainCheckout/stripeWebhook (Admin SDK) ever write one.
+    match /users/{uid}/domainPurchases/{purchaseId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Inbound domain transfer records -- same pattern as domainPurchases: client reads
+    // its own for the transfer-progress UI, only startDomainTransfer/getDomainTransferStatus
+    // (Admin SDK) ever write one.
+    match /users/{uid}/domainTransfers/{transferId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Idempotency ledger for verifyApplePurchase -- Admin SDK only, no client access.
+    match /processedAppleTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+
+    // Maps an Apple subscription's originalTransactionId back to the uid that owns it, so
+    // appStoreServerNotifications (which only ever sees Apple's own transaction IDs, never
+    // our uid) can find whose account a renewal-failure/renewal-success webhook is about.
+    // Admin SDK only -- a client being able to write this could redirect someone else's
+    // subscription events onto their own account.
+    match /appleOriginalTransactions/{originalTransactionId} {
+      allow read, write: if false;
+    }
+
+    // Same idea as appleOriginalTransactions, but for the web app's Stripe subscription
+    // billing path -- maps a Stripe subscription id back to the uid that owns it, so the
+    // webhook's renewal/payment-failure events (which only carry Stripe's own subscription
+    // id) know whose account to update. Admin SDK only.
+    match /stripeSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    // Idempotency ledger for the Stripe webhook -- same reasoning as
+    // processedAppleTransactions, guards against Stripe's own webhook retry redeliveries
+    // double-granting credits/a subscription. Admin SDK only.
+    match /processedStripeEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // Storefront (Phase 10) -- a published site's real inventory, the authoritative
+    // source createStoreCheckout validates price/stock against. Same pattern as
+    // publishedSites: written only by publishProject, read only by createStoreCheckout,
+    // both via the Admin SDK, which bypasses these rules entirely. No client ever reads or
+    // writes this directly -- a buyer's browser never talks to Firestore, only to the
+    // Cloud Function, and the app itself only ever edits a project's product elements,
+    // never this server-side mirror of them.
+    match /storeInventory/{slug}/products/{productId} {
+      allow read, write: if false;
+    }
+
+    // A seller's real order/payout record -- written only by the Stripe webhook
+    // (handleStoreOrderCompleted), since it's also their accounting record of what they
+    // were actually paid. Client reads its own for the Orders screen.
+    match /users/{uid}/orders/{orderId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // A seller's promo codes -- only ever created/edited through callables
+    // (createDiscountCode/setDiscountCodeActive/deleteDiscountCode), never client-writable,
+    // since redemptionCount has to be trustworthy (it's what enforces maxRedemptions) and a
+    // seller editing their own count client-side could let a code be reused past its limit.
+    match /users/{uid}/discountCodes/{code} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Reports submitted via a published page's "Report this site" link (App Store
+    // Review Guideline 1.2) -- written only by reportPublishedSite via the Admin SDK, from
+    // an unauthenticated visitor's browser talking to that Cloud Function, never directly
+    // to Firestore. No client (signed in or not) ever reads or writes this collection.
+    match /contentReports/{reportId} {
+      allow read, write: if false;
+    }
+
+    // Real-time multiplayer for published-site mini-games (Tic-Tac-Toe/Connect Four/Rock
+    // Paper Scissors) -- visitors on a published site are anonymous (no app account at all),
+    // so unlike everything above this talks to Firestore directly from that plain-JS page,
+    // not through a Cloud Function. Deliberately open read/write: these hold only a game
+    // board + two random per-browser player ids, never anything personal or of value, so the
+    // usual "only the owner can write" pattern doesn't apply and isn't worth the complexity
+    // of wiring anonymous auth just for this. A stray/abandoned lobby or room is harmless
+    // clutter, not a security problem -- `expiresAt` is set on every write so a Firestore TTL
+    // policy (configured once in the console, not via these rules) can sweep old ones.
+    match /gameLobbies/{lobbyId} {
+      allow read, write: if true;
+    }
+    match /gameRooms/{roomId} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.DS_Store
+ios/
+android/
+.env
+.env.local
+firebase/functions/lib/
+firebase/functions/.secret.local

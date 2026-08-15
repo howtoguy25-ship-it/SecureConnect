@@ -1,0 +1,101 @@
+import { File } from 'expo-file-system';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '@/services/firebase';
+import { requireFunctions } from '@/services/requireFunctions';
+
+export function isLocalUri(uri: string): boolean {
+  return !uri.startsWith('http://') && !uri.startsWith('https://');
+}
+
+// Moves a locally-picked photo (a device-only file:// URI) into Storage so it has a real
+// https:// URL a published static page can actually load -- see uploadProjectImage in
+// firebase/functions/src/index.ts.
+export async function uploadLocalImage(uri: string): Promise<string> {
+  const file = new File(uri);
+  const base64 = await file.base64();
+  const contentType = file.type || 'image/jpeg';
+
+  const call = httpsCallable<{ base64: string; contentType: string }, { url: string }>(
+    requireFunctions(functions),
+    'uploadProjectImage'
+  );
+  const result = await call({ base64, contentType });
+  return result.data.url;
+}
+
+// A large video's PUT to the signed URL is the one step in this whole flow with no retry of
+// its own (unlike the onCall above, which the Firebase SDK already retries/times-out
+// sensibly) -- on a real phone's flaky mobile connection a single dropped packet mid-upload
+// used to fail the entire publish immediately. Three attempts with a short backoff absorbs a
+// transient blip instead of surfacing "Upload failed" for something that would have gone
+// through on a second try.
+async function putWithRetry(url: string, contentType: string, body: Blob): Promise<Response> {
+  const attempts = 3;
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': contentType }, body });
+      if (res.ok) return res;
+      lastError = new Error(`Upload failed with status ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 800 * (i + 1)));
+  }
+  throw lastError instanceof Error ? lastError : new Error('Upload failed — try again.');
+}
+
+// Video/audio clips are typically too large for the base64-over-onCall approach above --
+// this instead gets a short-lived signed PUT URL from Cloud Functions and uploads the
+// file's bytes straight to Storage, sidestepping onCall's request-size ceiling.
+export async function uploadLocalVideo(uri: string): Promise<string> {
+  const file = new File(uri);
+  const contentType = file.type || 'video/mp4';
+  const extension = uri.split('.').pop()?.split('?')[0] || 'mp4';
+
+  const call = httpsCallable<{ contentType: string; extension: string }, { uploadUrl: string; readUrl: string }>(
+    requireFunctions(functions),
+    'createUploadUrl'
+  );
+  const { data } = await call({ contentType, extension });
+
+  const blob = await (await fetch(uri)).blob();
+  const putResult = await putWithRetry(data.uploadUrl, contentType, blob).catch(() => null);
+  if (!putResult || !putResult.ok) throw new Error('Upload failed — try again.');
+
+  return data.readUrl;
+}
+
+// An image element's `uri` might be a local file:// path (just picked) or an already-remote
+// https:// URL (AI-generated, or a previous edit) -- this covers both so callers never have
+// to know which they're holding.
+async function uriToBase64(uri: string): Promise<string> {
+  if (isLocalUri(uri)) {
+    const file = new File(uri);
+    return file.base64();
+  }
+  const blob = await (await fetch(uri)).blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the image.'));
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result.split(',')[1] ?? '');
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Real AI background remove/change for an image element already on the canvas -- see
+// editImageBackground in firebase/functions/src/index.ts (reuses the same OpenAI key
+// already paying for AI site imagery, no new vendor). Returns a new https:// URL; the
+// original image is left untouched so a failed/undesired edit never loses the source photo.
+export async function editImageBackground(uri: string, mode: 'remove' | 'change', prompt?: string): Promise<string> {
+  const base64 = await uriToBase64(uri);
+  const call = httpsCallable<{ base64: string; mode: 'remove' | 'change'; prompt?: string }, { url: string }>(
+    requireFunctions(functions),
+    'editImageBackground'
+  );
+  const result = await call({ base64, mode, prompt });
+  return result.data.url;
+}

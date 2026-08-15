@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // AI-generated images are written by Cloud Functions (Admin SDK, bypasses these
+    // rules) and read back by the app via time-limited signed URLs (also bypass these
+    // rules) -- so the bucket is locked down entirely to direct client access by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,69 @@
+name: Deploy SiteSpark (Firebase)
+
+# Manual only, on purpose -- no push trigger. Run this from the Actions tab
+# ("Run workflow") whenever you want the current state of a branch live:
+# pick the branch in the dropdown, then Run workflow.
+#
+# One-time setup required before this will work:
+#
+# 1. Create a deploy service account (once, from Google Cloud Shell or a
+#    machine with gcloud + firebase-tools installed and logged into the
+#    sitespark-a5817 project):
+#
+#      gcloud iam service-accounts create github-deploy \
+#        --project=sitespark-a5817 \
+#        --display-name="GitHub Actions deploy"
+#
+#      for ROLE in roles/firebasehosting.admin roles/cloudfunctions.developer \
+#                  roles/run.admin roles/iam.serviceAccountUser \
+#                  roles/firebaseauth.admin roles/datastore.owner \
+#                  roles/secretmanager.secretAccessor roles/storage.admin; do
+#        gcloud projects add-iam-policy-binding sitespark-a5817 \
+#          --member="serviceAccount:github-deploy@sitespark-a5817.iam.gserviceaccount.com" \
+#          --role="$ROLE"
+#      done
+#
+#      gcloud iam service-accounts keys create github-deploy-key.json \
+#        --iam-account=github-deploy@sitespark-a5817.iam.gserviceaccount.com
+#
+# 2. In the GitHub repo settings -> Secrets and variables -> Actions, add a
+#    new repository secret named FIREBASE_SERVICE_ACCOUNT containing the
+#    full contents of github-deploy-key.json. Then delete the local key
+#    file -- it's only needed to paste into that one secret.
+#
+# 3. Delete github-deploy-key.json from disk once it's pasted into GitHub --
+#    it's a real credential and shouldn't be left lying around or committed.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site-builder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Export web build
+        run: npx expo export -p web
+
+      - name: Install functions dependencies
+        working-directory: site-builder/firebase/functions
+        run: npm ci
+
+      - name: Deploy to Firebase (functions + hosting)
+        run: npx firebase-tools deploy --only functions,hosting --project sitespark-a5817 --non-interactive
