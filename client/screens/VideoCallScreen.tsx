@@ -293,7 +293,16 @@ export default function VideoCallScreen() {
       if (!response.ok) {
         let errorData: any = {};
         try { errorData = await response.json(); } catch {}
-        setConnectionError(errorData.error || 'Failed to connect');
+        // Verified live that /api/video/token itself responds correctly
+        // and returns a proper JSON error body on real failures (call not
+        // found, not authorized, LiveKit not configured) — a bare "Failed
+        // to connect" with no further detail means the response body
+        // wasn't parseable JSON at all (a gateway/proxy error page rather
+        // than the app's own response), which points at a network-layer
+        // issue rather than the app's own logic. Surface the HTTP status
+        // too so a repeat report is actually diagnosable instead of
+        // hitting the same dead-end string again.
+        setConnectionError(errorData.error || `Failed to connect (HTTP ${response.status})`);
 
         if (currentRetry < 3) {
           const next = currentRetry + 1;
