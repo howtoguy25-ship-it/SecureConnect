@@ -90,6 +90,11 @@ export default function VideoCallScreen() {
   const [localVideoTrack, setLocalVideoTrack] = useState<any | null>(null);
   const actualCallId = useRef<string>(callId);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Guards fetchCallToken (which joins the LiveKit room) against firing
+  // twice — it now starts as soon as a callId exists, not only once the
+  // call is "connected", so both effects that could kick it off share
+  // this ref.
+  const tokenFetchStartedRef = useRef(false);
 
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -191,6 +196,7 @@ export default function VideoCallScreen() {
       initCall();
     } else if (isIncoming) {
       setLocalStatus("connected");
+      tokenFetchStartedRef.current = true;
       fetchCallToken(callId);
     }
 
@@ -203,15 +209,25 @@ export default function VideoCallScreen() {
   useEffect(() => {
     if (activeCall?.status === "connected" && localStatus !== "connected") {
       setLocalStatus("connected");
-      if (activeCall.callId) {
-        actualCallId.current = activeCall.callId;
-        fetchCallToken(activeCall.callId);
-      }
     } else if (activeCall?.status === "ringing" && localStatus === "connecting") {
       setLocalStatus("ringing");
-      if (activeCall.callId) {
-        actualCallId.current = activeCall.callId;
-      }
+    }
+    // Join the LiveKit room (and publish our own camera) the moment we
+    // have a callId, not only once the other side answers. Previously an
+    // OUTGOING caller's own camera preview never appeared until
+    // activeCall.status flipped to "connected" — meaning if the other
+    // person never picked up (app closed, phone locked, etc.), the caller
+    // never saw their own video either, even though there's nothing
+    // stopping them from previewing themselves during ringback exactly
+    // like FaceTime/WhatsApp do. /api/video/token doesn't require the
+    // call to be accepted, just that the requester is a real participant,
+    // so this is safe to do immediately. tokenFetchStartedRef guards
+    // against double-connecting (this effect can re-run when status
+    // changes ringing -> connected for the same call).
+    if (activeCall?.callId && !tokenFetchStartedRef.current) {
+      tokenFetchStartedRef.current = true;
+      actualCallId.current = activeCall.callId;
+      fetchCallToken(activeCall.callId);
     }
   }, [activeCall?.status, activeCall?.callId]);
 
@@ -486,7 +502,13 @@ export default function VideoCallScreen() {
   // load" looked like — the self-preview could show something (or nothing)
   // with zero relation to whether video was actually being sent to the
   // other side. Now what's on screen IS what's on the wire.
-  const showLocalCamera = localStatus === "connected" && isVideoEnabled && !!localVideoTrack && !!LiveKitVideoView;
+  // Local preview widget is now visible during ringback too, not just once
+  // the other side answers — fetchCallToken() joins the LiveKit room (and
+  // publishes the camera) as soon as a callId exists, so there's a real
+  // track to show well before "connected". Matches FaceTime/WhatsApp: you
+  // see yourself the moment you start dialing.
+  const showLocalPreviewWidget = localStatus === "connected" || localStatus === "ringing";
+  const showLocalCamera = showLocalPreviewWidget && isVideoEnabled && !!localVideoTrack && !!LiveKitVideoView;
   const isFullyConnected = localStatus === "connected" && callState === 'connected';
   const remoteVideoTrack = remoteParticipants[0]?.videoTrack ?? null;
   const remoteIsMuted = remoteParticipants[0]?.isMuted ?? false;
@@ -586,7 +608,7 @@ export default function VideoCallScreen() {
       </View>
 
       {/* Draggable local camera preview */}
-      {localStatus === "connected" ? (
+      {showLocalPreviewWidget ? (
         <GestureDetector gesture={composedGesture}>
           <Animated.View
             style={[
