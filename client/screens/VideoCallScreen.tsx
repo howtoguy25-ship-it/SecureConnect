@@ -315,9 +315,15 @@ export default function VideoCallScreen() {
       setConnectionError(null);
       setRetryCount(0);
 
-      // Phase C.3: negotiate frame-encryption key. See AudioCallScreen
-      // for the security model — falls back to transport-only on
-      // failure rather than blocking the call.
+      // Phase C.3: negotiate frame-encryption key. Fail CLOSED, not open —
+      // this app promises end-to-end encrypted calls, so a call that
+      // couldn't establish the frame-encryption key must not silently
+      // connect transport-only (where LiveKit's servers could technically
+      // access the media). Two checks: the key exchange itself, and —
+      // separately — that the native layer actually activated E2EE with
+      // that key (connect() can silently fall back to transport-only on
+      // its own if RNKeyProvider/RNE2EEManager setup fails even with a
+      // valid key), so isE2EEActive() is checked after connecting too.
       const { negotiateCallKey } = await import('@/lib/callE2EE');
       const e2eeKey = await negotiateCallKey({
         callId: currentCallId,
@@ -325,11 +331,32 @@ export default function VideoCallScreen() {
         authToken,
       });
 
+      if (!e2eeKey) {
+        setConnectionError('Could not establish end-to-end encryption for this call.');
+        if (currentRetry < 3) {
+          const next = currentRetry + 1;
+          setRetryCount(next);
+          retryTimeoutRef.current = setTimeout(() => fetchCallToken(currentCallId, next), 2000);
+        }
+        return;
+      }
+
       await livekitService.connect(data.livekitUrl, data.token, {
         enableVideo: true,
         enableAudio: true,
-        e2eeKey: e2eeKey ?? undefined,
+        e2eeKey,
       });
+
+      if (!livekitService.isE2EEActive()) {
+        await livekitService.disconnect();
+        setConnectionError('Could not establish end-to-end encryption for this call.');
+        if (currentRetry < 3) {
+          const next = currentRetry + 1;
+          setRetryCount(next);
+          retryTimeoutRef.current = setTimeout(() => fetchCallToken(currentCallId, next), 2000);
+        }
+        return;
+      }
     } catch (error: any) {
       let msg = 'Connection failed. Please check your internet.';
       if (error?.name === 'AbortError') msg = 'Connection timed out. Please try again.';
