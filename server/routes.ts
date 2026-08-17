@@ -699,6 +699,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           safeCodeAcknowledged: user.safeCodeAcknowledged ?? false,
           hasSafeCode: !!user.safeCodeHash,
           hasSecurityQuestions: !!user.securityQ1Hash,
+          // Root cause of Apple's "unable to sign in when further
+          // verification was required" rejection (Guideline 2.1): the
+          // reviewer/demo account has security questions set from earlier
+          // testing, so after the OTP bypass succeeds it still hits the
+          // "Confirm It's You" second factor — answers nobody currently
+          // signing in with the demo code can know. The client exempts
+          // this account from both the setup and verify security-question
+          // gates using this flag rather than lying about
+          // hasSecurityQuestions, which stayed accurate but got
+          // overwritten by the next GET /api/auth/me and flapped between
+          // "needs setup" and "needs verify" mid-session.
+          isAppleReviewAccount: isAppleReviewTestNumber(user.phoneNumber),
         },
         isNewUser,
         isNewDevice,
@@ -1154,6 +1166,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         safeCodeAcknowledged: user.safeCodeAcknowledged ?? false,
         hasSafeCode: !!user.safeCodeHash,
         hasSecurityQuestions: !!user.securityQ1Hash,
+        // See the matching flag on /api/auth/verify-code — exempts the
+        // Apple reviewer/demo account from the security-questions gates.
+        isAppleReviewAccount: isAppleReviewTestNumber(user.phoneNumber),
         // Privacy & messaging preferences (build 59)
         readReceiptsEnabled: user.readReceiptsEnabled ?? true,
         typingIndicatorsEnabled: user.typingIndicatorsEnabled ?? true,
