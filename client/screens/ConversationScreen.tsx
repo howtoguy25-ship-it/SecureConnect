@@ -3430,11 +3430,16 @@ export default function ConversationScreen() {
     // surface it as a media bubble rather than printing the raw __SC_MEDIA_V1__
     // JSON. Envelope-bubbles never carry plaintext mediaUrl/mediaType from the
     // server, so we synthesize hasMedia from the envelope's mt field instead.
-    const mediaEnvelope: MediaEnvelope | null = parseMediaEnvelope(rawDisplayContent);
+    // Once a message is deletedForEveryone, decryptedCache[item.id] can still
+    // hold the plaintext/envelope decrypted before the delete happened (the
+    // cache is never purged on delete) — without this gate the old
+    // image/video/audio/file kept rendering right alongside "This message
+    // was deleted" instead of actually disappearing.
+    const mediaEnvelope: MediaEnvelope | null = item.deletedForEveryone ? null : parseMediaEnvelope(rawDisplayContent);
     const envelopeLocalUri = mediaEnvelope ? decryptedMediaUris[item.id] : null;
     const effectiveMediaUrl = mediaEnvelope ? envelopeLocalUri : item.mediaUrl;
     const effectiveMediaType = mediaEnvelope ? mediaEnvelope.mt : item.mediaType;
-    const hasMedia = !!(effectiveMediaUrl && effectiveMediaType);
+    const hasMedia = !item.deletedForEveryone && !!(effectiveMediaUrl && effectiveMediaType);
     // A status reply carries its quote inside the ciphertext (see
     // statusReplyEnvelope.ts) — mutually exclusive with a media envelope,
     // so only check for one if the other didn't match.
@@ -3663,10 +3668,12 @@ export default function ConversationScreen() {
 
           {item.replyToMessageId ? (() => {
             const original = messages.find(m => m.id === item.replyToMessageId);
-            const localPreview = decryptedCache[item.replyToMessageId]
-              ?? (original ? tryDecrypt(original.content, original.id) : null)
-              ?? (original?.mediaType ? `[${original.mediaType}]` : null)
-              ?? "Original message unavailable";
+            const localPreview = original?.deletedForEveryone
+              ? "This message was deleted"
+              : (decryptedCache[item.replyToMessageId]
+                  ?? (original ? tryDecrypt(original.content, original.id) : null)
+                  ?? (original?.mediaType ? `[${original.mediaType}]` : null)
+                  ?? "Original message unavailable");
             return (
               <Pressable
                 onPress={() => handleScrollToMessage(item.replyToMessageId!)}
