@@ -12,7 +12,7 @@ module.exports = () => {
       ios: {
         supportsTablet: true,
         requireFullScreen: false,
-        buildNumber: "121",
+        buildNumber: "122",
         bundleIdentifier: "com.adham.salameh.secureconnectchat",
         icon: "./assets/images/icon.png",
         privacyManifests: {
@@ -39,9 +39,7 @@ module.exports = () => {
           // App Store Guideline 2.5.4: only declare background modes we actually implement.
           // "voip" is added on top of this array by plugins/withCallKeepVoip.js
           // (real PushKit/CallKit ringing — see that file's header comment).
-          // NOTE: as of this build the VoIP push CERTIFICATE has not been
-          // provisioned server-side yet, so calls still fall back to the
-          // regular-push ringing path until that's wired up.
+          // APNS_VOIP_* server credentials are provisioned as of build 122.
           UIBackgroundModes: ["audio", "remote-notification"],
           // Pryvo uses standard encryption (Signal Protocol X3DH + Double Ratchet for
           // messages, X25519+HKDF for LiveKit call-frame E2EE) that qualifies for the
