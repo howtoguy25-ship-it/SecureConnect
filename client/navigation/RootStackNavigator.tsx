@@ -153,10 +153,15 @@ export default function RootStackNavigator() {
     user?.hasSafeCode === true &&
     user?.safeCodeAcknowledged === false;
   // First-time setup: shown once, right after the Account ID is acknowledged.
+  // Apple's reviewer/demo bypass account is exempted from both gates below
+  // — it's shared across every review cycle, so "set up new questions" and
+  // "answer the existing ones" are both dead ends nobody signing in with
+  // the demo code can get past (see server/routes.ts isAppleReviewAccount).
   const needsSecurityQuestionsSetup =
     isAuthenticated &&
     !!user?.displayName &&
     !needsSafeCode &&
+    !user?.isAppleReviewAccount &&
     user?.hasSecurityQuestions === false;
   // Every fresh login thereafter (2nd factor) — see AuthContext's
   // securityQuestionsPending doc comment for why persisted-session resume
@@ -165,6 +170,7 @@ export default function RootStackNavigator() {
     isAuthenticated &&
     !!user?.displayName &&
     !needsSafeCode &&
+    !user?.isAppleReviewAccount &&
     user?.hasSecurityQuestions === true &&
     securityQuestionsPending === true;
 

@@ -100,6 +100,10 @@ export interface User {
   safeCodeAcknowledged?: boolean;
   hasSafeCode?: boolean;
   hasSecurityQuestions?: boolean;
+  // Apple reviewer/demo bypass account — exempts it from the security
+  // questions setup/verify gates (see server/routes.ts verify-code and
+  // /api/auth/me for why).
+  isAppleReviewAccount?: boolean;
   // Story privacy — account-level audience gate (server also returns these;
   // see server/routes.ts GET /api/auth/me). Used client-side to decide
   // whether a new story's audience is bounded enough to E2EE.
