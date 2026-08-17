@@ -26,6 +26,11 @@ export const users = pgTable("users", {
   chatBackgroundUrl: text("chat_background_url"),
   lastNameChangeAt: timestamp("last_name_change_at"),
   pushToken: text("push_token"),
+  // Separate from pushToken (Expo's regular push service) — a PushKit VoIP
+  // token, which can only be delivered via a direct APNs VoIP push, not
+  // through Expo's push service. Real phone-call-style ringing (wakes the
+  // app via CallKit even when force-quit) depends on this being present.
+  voipPushToken: text("voip_push_token"),
   notificationsEnabled: boolean("notifications_enabled").default(true),
   lastSeenPrivacy: text("last_seen_privacy").default("everyone"), // 'everyone' | 'contacts' | 'vip' | 'nobody'
   readReceiptsEnabled: boolean("read_receipts_enabled").default(true),

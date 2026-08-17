@@ -37,8 +37,11 @@ module.exports = () => {
           NSLocationWhenInUseUsageDescription: "Pryvo uses your location only when you tap Share Location in a chat, so the friend you're messaging can see where you are.",
           NSUserTrackingUsageDescription: "Your data will be used to deliver ads that are more relevant to you. Pryvo shares your device identifier with ad partners only if you allow tracking.",
           // App Store Guideline 2.5.4: only declare background modes we actually implement.
-          // We rely on standard remote notifications + foreground signaling for calls.
-          // CallKit/PushKit (true VoIP) will be added in a future native dev build.
+          // "voip" is added on top of this array by plugins/withCallKeepVoip.js
+          // (real PushKit/CallKit ringing — see that file's header comment).
+          // NOTE: as of this build the VoIP push CERTIFICATE has not been
+          // provisioned server-side yet, so calls still fall back to the
+          // regular-push ringing path until that's wired up.
           UIBackgroundModes: ["audio", "remote-notification"],
           // Pryvo uses standard encryption (Signal Protocol X3DH + Double Ratchet for
           // messages, X25519+HKDF for LiveKit call-frame E2EE) that qualifies for the
@@ -78,6 +81,7 @@ module.exports = () => {
       },
       plugins: [
         "react-native-iap",
+        "./plugins/withCallKeepVoip.js",
         [
           "expo-build-properties",
           {
