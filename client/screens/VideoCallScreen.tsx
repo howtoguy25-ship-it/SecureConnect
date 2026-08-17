@@ -6,6 +6,7 @@ import {
   Platform,
   ActionSheetIOS,
   Alert,
+  Linking,
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -159,7 +160,31 @@ export default function VideoCallScreen() {
       // (permission denied, device busy) after the button already flipped
       // state optimistically — this corrects isVideoEnabled to match what
       // actually happened instead of showing "camera on" over a dead track.
-      onLocalVideoEnabledChanged: (enabled) => setIsVideoEnabled(enabled),
+      // Root cause of a real "no camera shows, ever" report: if the OS
+      // camera permission was previously denied, LiveKit's setCameraEnabled
+      // rejects immediately on every single call with zero explanation —
+      // the UI just quietly falls back to "Camera Off" and the user has no
+      // way to know it's a permission problem vs. them having toggled it
+      // off, since tapping the camera button just retries the same silently
+      // failing call forever. Surface it once so there's an actual path to
+      // fixing it (Settings), instead of a dead end that looks like a bug.
+      onLocalVideoEnabledChanged: (enabled) => {
+        setIsVideoEnabled(enabled);
+        if (!enabled) {
+          requestPermission().then((result) => {
+            if (!result.granted) {
+              Alert.alert(
+                'Camera Access Needed',
+                'Pryvo needs camera access to show your video on calls. Enable it in Settings, then rejoin the call.',
+                [
+                  { text: 'Not Now', style: 'cancel' },
+                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                ]
+              );
+            }
+          }).catch(() => {});
+        }
+      },
     });
 
     if (!isIncoming && !activeCall) {
@@ -334,8 +359,28 @@ export default function VideoCallScreen() {
     setIsMuted(!enabled);
   };
 
-  const handleToggleVideo = () => {
+  const handleToggleVideo = async () => {
     haptics.light();
+    const turningOn = !isVideoEnabled;
+    if (turningOn && permission && !permission.granted) {
+      // Ask (or re-check) before even attempting the native enable — avoids
+      // a silent LiveKit failure being the only signal something's wrong.
+      const result = await requestPermission();
+      if (!result.granted) {
+        haptics.warning();
+        if (!result.canAskAgain) {
+          Alert.alert(
+            'Camera Access Needed',
+            'Pryvo needs camera access to show your video on calls. Enable it in Settings, then rejoin the call.',
+            [
+              { text: 'Not Now', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+        }
+        return;
+      }
+    }
     const enabled = livekitService.toggleLocalVideo();
     setIsVideoEnabled(enabled);
   };
