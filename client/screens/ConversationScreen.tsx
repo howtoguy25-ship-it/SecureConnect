@@ -4250,15 +4250,21 @@ export default function ConversationScreen() {
       ) : (
         <View style={[styles.inputContainer, { backgroundColor: theme.backgroundRoot, paddingBottom: isKeyboardVisible ? 0 : insets.bottom + Spacing.md }]}>
           {/*
-            Build 63 Phase A — sealed-sender identity surface. Renders
-            only in app mode so personal-number users see no extra UI.
-            Three states:
-              · active VN  + recipient supports sealed: lock badge +
-                "End-to-end encrypted · sender identity not sent"
-              · active VN  + recipient on old build:   lock badge +
-                "End-to-end encrypted" (no sealed-sender claim)
-              · VN not active: amber banner explaining why the composer
-                is disabled.
+            Build 63 Phase A — sealed-sender identity surface, extended to
+            also cover personal-number senders. Previously this whole block
+            was gated on preferredNumberType === 'app', so anyone sending
+            from their Personal Number saw no indicator here at all — no
+            way to visually confirm which number was actually in use,
+            unlike the Pryvo Number case which at least showed a (generic,
+            numberless) encrypted-status line. Four states now:
+              · personal number: shows "Personal Number" so the active
+                identity is never silently unlabeled.
+              · active VN + recipient supports sealed: lock badge +
+                "Pryvo Number +1… · sender identity not sent"
+              · active VN + recipient on old build: lock badge +
+                "Pryvo Number +1…" (no sealed-sender claim)
+              · VN selected but not active: amber banner explaining why
+                the composer is disabled.
           */}
           {user?.preferredNumberType === 'app' ? (
             user?.virtualNumber && user.virtualNumber.status === 'active' ? (
@@ -4276,8 +4282,8 @@ export default function ConversationScreen() {
                   style={{ fontSize: 11, color: theme.textSecondary, flex: 1 }}
                 >
                   {otherUserData?.supportsSealedSender
-                    ? 'End-to-end encrypted · sender identity not sent to recipient'
-                    : 'End-to-end encrypted'}
+                    ? `Pryvo Number ${user.virtualNumber.phoneNumber} · sender identity not sent to recipient`
+                    : `Pryvo Number ${user.virtualNumber.phoneNumber}`}
                 </ThemedText>
               </View>
             ) : (
@@ -4297,7 +4303,24 @@ export default function ConversationScreen() {
                 </ThemedText>
               </View>
             )
-          ) : null}
+          ) : (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: Spacing.md,
+              paddingTop: Spacing.xs,
+              paddingBottom: 2,
+              gap: 6,
+            }}>
+              <Feather name="lock" size={11} color={theme.textSecondary} />
+              <ThemedText
+                numberOfLines={1}
+                style={{ fontSize: 11, color: theme.textSecondary, flex: 1 }}
+              >
+                Personal Number
+              </ThemedText>
+            </View>
+          )}
           {statusQuote ? (
             <View
               style={{
