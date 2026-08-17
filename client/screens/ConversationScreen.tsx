@@ -1483,6 +1483,12 @@ export default function ConversationScreen() {
       createdAt: new Date().toISOString(),
       isHidden: false,
       transcription: null,
+      // Without these the quoted-reply thread line only appeared once the
+      // server response replaced this optimistic row — a real (if brief)
+      // gap where hitting Send on a reply looked like the reply context
+      // silently vanished until the round trip finished.
+      replyToMessageId: replySnapshot?.id ?? null,
+      replyToSenderId: replySnapshot?.senderId ?? null,
     };
 
     setMessages((prev) => [...prev, optimisticMessage]);
