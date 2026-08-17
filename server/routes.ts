@@ -14,7 +14,7 @@ import { getAppBaseUrl, getAllowedOrigins } from "./publicUrl";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { getMockConversations, getMockMessages, isMockConversation, isMockUser, getMockUser, createMockBotReply, MOCK_USERS } from "./mock-data";
-import { sendPushNotification, sendCallNotification, sendMissedCallNotification, sendMessageNotification } from "./pushNotifications";
+import { sendPushNotification, sendCallNotification, sendMissedCallNotification, sendMessageNotification, sendVoipCallPush } from "./pushNotifications";
 
 // ─── Per-user in-memory rate limiters ────────────────────────────────────
 //
@@ -1583,6 +1583,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true });
     } catch (error) {
       console.error('Error saving push token:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // PushKit VoIP token — separate from the regular Expo pushToken above.
+  // Only ever consumed by sendVoipCallPush (real CallKit ringing); a
+  // missing/cleared token here just means that recipient falls back to
+  // the regular push notification for incoming calls.
+  app.post("/api/push-token/voip", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { voipPushToken } = req.body;
+      const tokenValue = voipPushToken || null;
+
+      await storage.updateUser(req.userId!, { voipPushToken: tokenValue });
+      console.log(`VoIP push token ${tokenValue ? 'registered' : 'cleared'} for user ${req.userId}`);
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error saving VoIP push token:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -5627,6 +5646,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             caller.id,
             undefined
           ).catch(err => console.error('Virtual number call push notification failed:', err));
+
+          if (receiver.voipPushToken) {
+            sendVoipCallPush(receiver.voipPushToken, {
+              uuid: call.id,
+              callerName,
+              handle: callerName,
+              hasVideo: false,
+              callId: call.id,
+              callerId: caller.id,
+            }).catch(err => console.error('Virtual number VoIP push notification failed:', err));
+          }
         }
 
         res.type('text/xml').send(`
@@ -6112,6 +6142,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           data.conversationId,
           { sealed },
         ).catch(err => console.error('Call push notification failed:', err));
+
+        // Real phone-call-style ringing (CallKit, via a PushKit VoIP push)
+        // when the recipient's device has registered one — see
+        // pushNotifications.ts for why this can't go through Expo's push
+        // service and is a safe no-op until APNs VoIP credentials are
+        // configured. Sent alongside, not instead of, the regular push
+        // above: the regular push still drives the in-app banner/history,
+        // this is what actually wakes the app to ring.
+        if (receiver.voipPushToken) {
+          sendVoipCallPush(receiver.voipPushToken, {
+            uuid: data.callId,
+            callerName: callerNameForPush,
+            handle: callerNameForPush,
+            hasVideo: data.type === 'video',
+            callId: data.callId,
+            callerId: sealed ? null : userId,
+            conversationId: data.conversationId,
+            sealedCall: sealed,
+          }).catch(err => console.error('VoIP push notification failed:', err));
+        }
       }
 
       // Per-call answered flag — shared between the missed-timeout, the

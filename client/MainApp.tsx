@@ -1,6 +1,8 @@
 import React, { ReactNode, useState, useEffect, useRef } from "react";
 import { StyleSheet, Platform, InteractionManager, AppState, useWindowDimensions, type AppStateStatus } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+import type { RootStackParamList } from "@/navigation/RootStackNavigator";
+import { initVoipCalling, setVoipNavigationRef } from "@/services/voipCallService";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -32,6 +34,12 @@ if (Platform.OS !== "web") {
       .catch((e) => logCheckpoint(`livekit_globals_skipped: ${String(e).slice(0, 80)}`));
   });
 }
+
+// Module-level ref (standard React Navigation pattern) so voipCallService
+// can navigate to the call screen from a CallKit answer event fired
+// entirely outside React's tree — see that module's header comment for
+// why this can't just go through CallContext's own useNavigation().
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 function SafeKeyboardProvider({ children }: { children: ReactNode }) {
   const [Provider, setProvider] = useState<React.ComponentType<{ children: ReactNode }> | null>(null);
@@ -185,6 +193,12 @@ export default function MainApp() {
         });
       });
     }
+
+    // Real CallKit/PushKit ringing — see voipCallService.ts header comment.
+    // No-op on Android/web and safely no-ops on iOS too if the native
+    // modules aren't present (e.g. an old build before this was added).
+    setVoipNavigationRef(navigationRef);
+    initVoipCalling();
   }, []);
 
   return (
@@ -196,6 +210,7 @@ export default function MainApp() {
             <GestureHandlerRootView style={rootStyle}>
               <SafeKeyboardProvider>
                 <NavigationContainer
+                  ref={navigationRef}
                   onReady={() => logCheckpoint('navigation_ready')}
                 >
                   <NotificationProvider>
