@@ -71,6 +71,7 @@ function headerContents() {
 function implContents() {
   return `${GENERATED_MARKER}
 #import "${HEADER_FILE_NAME}"
+#import <UIKit/UIKit.h>
 #import <PushKit/PushKit.h>
 #import "RNVoipPushNotificationManager.h"
 #import <RNCallKeep/RNCallKeep.h>
@@ -81,19 +82,39 @@ function implContents() {
 
 @implementation ${HANDLER_CLASS_NAME}
 
-// Runs automatically when the Objective-C runtime loads this class into
-// the process — earlier than applicationDidFinishLaunching, and without
-// needing any hook in AppDelegate. Apple recommends registering for VoIP
-// pushes as early as possible; this is about as early as it gets.
+// +load runs the moment the Objective-C runtime loads this class into the
+// process — before the app's run loop has started and before
+// UIApplicationMain returns. Apple's own docs warn against doing real
+// work that early (allocating system objects like PKPushRegistry here
+// caused a launch-time crash in build 122's first release). So +load only
+// does the one thing that's always safe at that point: registering for a
+// notification. The actual PushKit setup happens in response to
+// UIApplicationDidFinishLaunchingNotification, which fires only once the
+// app has fully launched and the main run loop is running — same safety
+// as doing it from AppDelegate's didFinishLaunchingWithOptions, without
+// needing to touch AppDelegate.swift at all.
 + (void)load {
-  static ${HANDLER_CLASS_NAME} *sharedHandler = nil;
+  [[NSNotificationCenter defaultCenter] addObserver:[self sharedHandler]
+                                            selector:@selector(handleAppDidFinishLaunching:)
+                                                name:UIApplicationDidFinishLaunchingNotification
+                                              object:nil];
+}
+
++ (instancetype)sharedHandler {
+  static ${HANDLER_CLASS_NAME} *instance = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    sharedHandler = [${HANDLER_CLASS_NAME} new];
-    sharedHandler.voipRegistry = [[PKPushRegistry alloc] initWithQueue:dispatch_get_main_queue()];
-    sharedHandler.voipRegistry.delegate = sharedHandler;
-    sharedHandler.voipRegistry.desiredPushTypes = [NSSet setWithObject:PKPushTypeVoIP];
+    instance = [${HANDLER_CLASS_NAME} new];
   });
+  return instance;
+}
+
+- (void)handleAppDidFinishLaunching:(NSNotification *)notification {
+  [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationDidFinishLaunchingNotification object:nil];
+
+  self.voipRegistry = [[PKPushRegistry alloc] initWithQueue:dispatch_get_main_queue()];
+  self.voipRegistry.delegate = self;
+  self.voipRegistry.desiredPushTypes = [NSSet setWithObject:PKPushTypeVoIP];
 }
 
 - (void)pushRegistry:(PKPushRegistry *)registry didUpdatePushCredentials:(PKPushCredentials *)credentials forType:(PKPushType)type {
