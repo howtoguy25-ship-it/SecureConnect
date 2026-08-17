@@ -1,4 +1,6 @@
-const { withAppDelegate, withInfoPlist, withEntitlementsPlist } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
+const { withAppDelegate, withInfoPlist, withEntitlementsPlist, withXcodeProject, withDangerousMod } = require('@expo/config-plugins');
 
 // Real PushKit + CallKit wiring for genuine phone-call-style ringing on
 // iOS — a regular remote push (what this app used before) cannot wake the
@@ -103,15 +105,15 @@ ${IMPORT_MARKER_END}
   const delegateExtension = `
 ${DELEGATE_MARKER}
 extension AppDelegate: PKPushRegistryDelegate {
-  func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials, for type: PKPushType) {
+  public func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials, for type: PKPushType) {
     RNVoipPushNotificationManager.didUpdate(credentials, forType: type.rawValue)
   }
 
-  func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
+  public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
     // No action needed — see react-native-voip-push-notification docs.
   }
 
-  func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload, for type: PKPushType, completion: @escaping () -> Void) {
+  public func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload, for type: PKPushType, completion: @escaping () -> Void) {
     let uuidString = (payload.dictionaryPayload["uuid"] as? String) ?? UUID().uuidString
     let callerName = (payload.dictionaryPayload["callerName"] as? String) ?? "Unknown"
     let handle = (payload.dictionaryPayload["handle"] as? String) ?? callerName
@@ -135,7 +137,7 @@ extension AppDelegate: PKPushRegistryDelegate {
       supportsUngrouping: false,
       fromPushKit: true,
       payload: payload.dictionaryPayload,
-      withCompletionHandler: nil
+      withCompletionHandler: nil as (() -> Void)?
     )
 
     completion()
@@ -220,9 +222,57 @@ ${DELEGATE_MARKER_END}
   return contents;
 }
 
+// RNVoipPushNotificationManager and RNCallKeep are Objective-C classes.
+// The Swift AppDelegate this Expo SDK generates has no visibility into
+// Objective-C-only pods (no module map / not built with use_frameworks!),
+// so referencing them by name from Swift fails with "cannot find X in
+// scope" unless they're exposed via a Swift Objective-C bridging header.
+// We generate our own header and point the target's
+// SWIFT_OBJC_BRIDGING_HEADER build setting at it.
+const BRIDGING_HEADER_NAME = 'CallKeepVoip-Bridging-Header.h';
+
+function withCallKeepBridgingHeaderFile(config) {
+  return withDangerousMod(config, [
+    'ios',
+    async (config) => {
+      const iosRoot = path.join(config.modRequest.platformProjectRoot, config.modRequest.projectName);
+      const headerPath = path.join(iosRoot, BRIDGING_HEADER_NAME);
+      const headerContents = `${IMPORT_MARKER}
+#import <PushKit/PushKit.h>
+#import "RNVoipPushNotificationManager.h"
+#import <RNCallKeep/RNCallKeep.h>
+${IMPORT_MARKER_END}
+`;
+      fs.mkdirSync(iosRoot, { recursive: true });
+      fs.writeFileSync(headerPath, headerContents);
+      return config;
+    },
+  ]);
+}
+
+function withCallKeepBridgingHeaderBuildSetting(config) {
+  return withXcodeProject(config, (config) => {
+    const project = config.modResults;
+    const relativeHeaderPath = `${config.modRequest.projectName}/${BRIDGING_HEADER_NAME}`;
+    const configurations = project.pbxXCBuildConfigurationSection();
+    for (const key in configurations) {
+      const entry = configurations[key];
+      const buildSettings = entry && entry.buildSettings;
+      // Only touch app-target build configs (they carry PRODUCT_NAME);
+      // Pods/aggregate targets in the same project file are unaffected.
+      if (buildSettings && buildSettings.PRODUCT_NAME && !buildSettings.SWIFT_OBJC_BRIDGING_HEADER) {
+        buildSettings.SWIFT_OBJC_BRIDGING_HEADER = `"${relativeHeaderPath}"`;
+      }
+    }
+    return config;
+  });
+}
+
 module.exports = function withCallKeepVoip(config) {
   config = withVoipBackgroundMode(config);
   config = withCallKeepEntitlements(config);
   config = withCallKeepAppDelegate(config);
+  config = withCallKeepBridgingHeaderFile(config);
+  config = withCallKeepBridgingHeaderBuildSetting(config);
   return config;
 };
