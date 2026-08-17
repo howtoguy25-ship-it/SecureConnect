@@ -191,15 +191,20 @@ export async function deriveCallKey(
 }
 
 // End-to-end glue for the call screen: generate a keypair, post our
-// public half, poll for the peer's, derive the LiveKit frame key. If
-// the peer never posts (older client without C.3 support, or network
-// failure), resolves to `null` — the call screen then connects in
-// transport-only mode and labels itself "Encrypted call" instead of
-// "End-to-end encrypted".
+// public half, poll for the peer's, derive the LiveKit frame key. If the
+// peer never posts (older client without C.3 support, or network
+// failure), resolves to `null` — the call screens (VideoCallScreen /
+// AudioCallScreen) now fail CLOSED on that: they refuse to connect the
+// call at all rather than silently falling back to a transport-only
+// connection, since this app promises calls are end-to-end encrypted.
 //
-// Timeout defaults to 8s (16 polls × 500ms) — long enough that a slow
+// Timeout defaults to 10s (20 polls × 500ms) — long enough that a slow
 // recipient pickup still completes the handshake, short enough that we
 // don't hold the call ringing forever if the peer can't participate.
+// Bumped from 8s now that a timeout here is a hard call failure (with a
+// retry) instead of a silent downgrade — worth a little more margin to
+// avoid failing calls that would have completed the handshake fine a
+// second or two later.
 export async function negotiateCallKey(opts: {
   callId: string;
   apiUrl: string;
@@ -207,7 +212,7 @@ export async function negotiateCallKey(opts: {
   timeoutMs?: number;
 }): Promise<Uint8Array | null> {
   const { callId, apiUrl, authToken } = opts;
-  const timeoutMs = opts.timeoutMs ?? 8000;
+  const timeoutMs = opts.timeoutMs ?? 10000;
 
   try {
     const myKp = generateCallKeyPair();
