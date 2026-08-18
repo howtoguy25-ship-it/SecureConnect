@@ -797,7 +797,29 @@ export default function ConversationScreen() {
         } catch {}
 
         setMessages(withQueued);
-        buildDecryptedCache(withQueued);
+        // buildDecryptedCache resolving is a real, known-good moment to be
+        // at the true bottom — every message's plaintext is now in place,
+        // so bubble heights are final for text (media thumbnails can still
+        // grow after this, which is what the onContentSizeChange settle
+        // logic below still covers). Chaining an explicit scroll here,
+        // instead of only relying on layout-change timing, means the jump
+        // to bottom doesn't depend on guessing how long decryption takes.
+        buildDecryptedCache(withQueued).then(() => {
+          requestAnimationFrame(() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+            // Re-open the settle window briefly so any media thumbnails
+            // still loading in get their own chance to extend it further,
+            // even if the layout-timer path had already locked in early.
+            didInitialScrollRef.current = false;
+            if (initialScrollSettleTimerRef.current) clearTimeout(initialScrollSettleTimerRef.current);
+            initialScrollDeadlineRef.current = Date.now() + 1500;
+            initialScrollSettleTimerRef.current = setTimeout(() => {
+              didInitialScrollRef.current = true;
+              initialScrollSettleTimerRef.current = null;
+              initialScrollDeadlineRef.current = null;
+            }, 1000);
+          });
+        });
         const initialReactions: Record<string, Record<string, string[]>> = {};
         filtered.forEach((msg: Message & { reactions?: Record<string, string[]> | null }) => {
           if (msg.reactions && typeof msg.reactions === 'object') {
@@ -1705,8 +1727,13 @@ export default function ConversationScreen() {
       allowsMultipleSelection: false,
     });
 
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets[0]?.uri) {
       await uploadAndSendMedia(result.assets[0].uri, 'video');
+    } else if (!result.canceled) {
+      // Picker reported "not canceled" but returned no usable asset — a
+      // real edge case on some devices/OS versions, previously silent.
+      console.error('Video picker returned no usable asset:', result);
+      Alert.alert('Couldn\'t Get Video', 'Please try selecting the video again.');
     }
   };
 
@@ -1760,6 +1787,13 @@ export default function ConversationScreen() {
 
       if (!result.canceled && result.assets && result.assets[0]?.uri) {
         await uploadAndSendMedia(result.assets[0].uri, 'image');
+      } else if (!result.canceled) {
+        // Camera reported "not canceled" but returned no usable asset — a
+        // real edge case on some devices/OS versions, previously silent:
+        // the shutter fires (haptic + click), the picker dismisses, and
+        // nothing ever gets sent with no visible error at all.
+        console.error('Camera returned no usable asset:', result);
+        Alert.alert('Couldn\'t Get Photo', 'Please try taking the photo again.');
       }
     } catch (error: any) {
       console.error('Camera error:', error);
@@ -1819,6 +1853,15 @@ export default function ConversationScreen() {
                 return next;
               });
               haptics.light();
+              // This queues silently on purpose for text (a "queued" bubble
+              // already appears in the message list as feedback), but media
+              // adds nothing to the visible message list at all — so
+              // without this, the whole send looked like it just did
+              // nothing. Now it's an explicit, visible state instead.
+              Alert.alert(
+                'Waiting to Send',
+                `${otherUserName || 'This contact'} hasn't finished setting up encryption yet. This will send automatically once they do.`,
+              );
               return;
             }
             throw encErr;
@@ -2148,11 +2191,20 @@ export default function ConversationScreen() {
       });
       
       const uri = audioRecorder.uri;
-      
+
       if (uri) {
         haptics.success();
         setPendingRecordingUri(uri);
         setPendingRecordingDuration(duration);
+      } else {
+        // audioRecorder.uri came back empty after a successful stop() — the
+        // recording is gone. This previously had no else branch at all: the
+        // record button's own haptic already fired on tap, then this ran
+        // silently and the whole recording vanished with zero feedback,
+        // which looks exactly like "click, vibrate, nothing sends."
+        console.error('Voice recording stopped but audioRecorder.uri is empty');
+        haptics.warning();
+        Alert.alert('Recording Failed', "Couldn't save that voice message. Please try recording again.");
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
