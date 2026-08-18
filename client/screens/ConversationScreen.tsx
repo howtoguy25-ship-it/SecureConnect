@@ -307,9 +307,16 @@ export default function ConversationScreen() {
   // drives the waveform preview after stopping — real captured amplitude,
   // not a random placeholder.
   const recorderState = useAudioRecorderState(audioRecorder, 100);
+  // Live waveform shown WHILE recording (not just in the after-stop
+  // preview). Recomputed from the full history captured so far on every
+  // metering tick, so it always reflects the whole recording's real
+  // shape — nothing gets truncated/"cut" as the recording gets longer,
+  // it just keeps reflowing across the same fixed bar count.
+  const [liveRecordingWaveform, setLiveRecordingWaveform] = useState<number[]>([]);
   useEffect(() => {
     if (!isRecording || typeof recorderState.metering !== 'number') return;
     recordingLevelsRef.current.push(recorderState.metering);
+    setLiveRecordingWaveform(downsampleWaveform(recordingLevelsRef.current));
   }, [isRecording, recorderState.metering]);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -317,6 +324,12 @@ export default function ConversationScreen() {
   const [playingMessageProgress, setPlayingMessageProgress] = useState(0);
   const messageSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const messageSoundSubRef = useRef<{ remove: () => void } | null>(null);
+  // Which message's audio is currently loaded into messageSoundRef — lets a
+  // press-and-hold release (pause) leave the player alive at its current
+  // position so the next hold on the SAME bubble resumes instead of
+  // restarting, while holding a DIFFERENT bubble still tears down and
+  // reloads. Cleared when playback reaches the end.
+  const loadedMessageIdRef = useRef<string | null>(null);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -2220,6 +2233,7 @@ export default function ConversationScreen() {
       }
 
       recordingLevelsRef.current = [];
+      setLiveRecordingWaveform([]);
       audioRecorder.record();
       setIsRecording(true);
       setRecordingDuration(0);
@@ -2642,12 +2656,16 @@ export default function ConversationScreen() {
     setShowEmojiPicker(true);
   };
 
-  const playVoiceMessage = async (messageId: string, mediaUrl: string) => {
+  // Snapchat-style hold-to-play: press and hold a voice-message bubble to
+  // listen, release to pause exactly where you are. Holding the SAME
+  // message again resumes from that position; holding a DIFFERENT message
+  // tears down the previous player and starts the new one from the top.
+  const handleVoicePressIn = async (messageId: string, mediaUrl: string) => {
     try {
-      if (playingMessageId === messageId && messageSoundRef.current) {
-        messageSoundRef.current.pause();
-        setPlayingMessageId(null);
-        setPlayingMessageProgress(0);
+      if (loadedMessageIdRef.current === messageId && messageSoundRef.current) {
+        messageSoundRef.current.play();
+        setPlayingMessageId(messageId);
+        haptics.light();
         return;
       }
 
@@ -2656,6 +2674,7 @@ export default function ConversationScreen() {
         messageSoundSubRef.current = null;
         messageSoundRef.current.release();
         messageSoundRef.current = null;
+        loadedMessageIdRef.current = null;
       }
 
       await setAudioModeAsync({
@@ -2679,23 +2698,22 @@ export default function ConversationScreen() {
       console.log('Playing voice message from URL:', audioUrl);
 
       const player = createAudioPlayer({ uri: audioUrl });
-      // Nothing reset playingMessageId when a voice note reached the end,
-      // so the button stayed stuck showing "pause" and the NEXT tap just
-      // paused an already-finished player (no audible effect) instead of
-      // replaying -- the reported "it just skips" bug. Reset on the real
-      // end-of-track event so the icon flips back and the following tap
-      // replays immediately.
       messageSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
         if (status.duration > 0) {
           setPlayingMessageProgress(Math.min(1, status.currentTime / status.duration));
         }
+        // Reached the end (not just a hold-release pause) — reset fully so
+        // the next hold starts over from the beginning instead of trying
+        // to "resume" a finished player.
         if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
           setPlayingMessageId((prev) => (prev === messageId ? null : prev));
           setPlayingMessageProgress(0);
+          loadedMessageIdRef.current = null;
         }
       });
       player.play();
       messageSoundRef.current = player;
+      loadedMessageIdRef.current = messageId;
       setPlayingMessageId(messageId);
       setPlayingMessageProgress(0);
       haptics.light();
@@ -2703,6 +2721,19 @@ export default function ConversationScreen() {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
       Alert.alert('Playback Error', 'Could not play the voice message.');
+    }
+  };
+
+  const handleVoicePressOut = (messageId: string) => {
+    // Only pause if this bubble is the one actually playing — an already-
+    // released touch on a bubble that never started (e.g. playback failed)
+    // has nothing to pause.
+    if (playingMessageId === messageId && messageSoundRef.current) {
+      messageSoundRef.current.pause();
+      setPlayingMessageId(null);
+      // Deliberately NOT resetting progress or releasing the player here —
+      // that's what makes the next hold on this same bubble resume instead
+      // of restarting.
     }
   };
 
@@ -3719,17 +3750,18 @@ export default function ConversationScreen() {
           
           {hasMedia && effectiveMediaType === 'audio' && effectiveMediaUrl ? (
             <View>
-              <View style={styles.voiceMessageContainer}>
-                <Pressable 
-                  style={[styles.playButton, { backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }]}
-                  onPress={() => playVoiceMessage(item.id, effectiveMediaUrl!)}
-                >
-                  <Feather 
-                    name={playingMessageId === item.id ? "pause" : "play"} 
-                    size={16} 
-                    color="#fff" 
+              <Pressable
+                style={styles.voiceMessageContainer}
+                onPressIn={() => handleVoicePressIn(item.id, effectiveMediaUrl!)}
+                onPressOut={() => handleVoicePressOut(item.id)}
+              >
+                <View style={[styles.playButton, { backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }]}>
+                  <Feather
+                    name={playingMessageId === item.id ? "pause" : "play"}
+                    size={16}
+                    color="#fff"
                   />
-                </Pressable>
+                </View>
                 <View style={styles.waveformPlaceholder}>
                   {(mediaEnvelope?.wf && mediaEnvelope.wf.length > 0 ? mediaEnvelope.wf : fallbackWaveformFor(item.id)).map((level, i, arr) => {
                     const isPlaying = playingMessageId === item.id;
@@ -3752,7 +3784,7 @@ export default function ConversationScreen() {
                 <ThemedText style={[styles.voiceDuration, { color: isOwn ? 'rgba(255,255,255,0.8)' : theme.textSecondary }]}>
                   {displayContent || '0:00'}
                 </ThemedText>
-              </View>
+              </Pressable>
               {item.transcription ? (
                 <ThemedText style={[styles.transcriptionText, { color: isOwn ? 'rgba(255,255,255,0.9)' : theme.text }]}>
                   {item.transcription}
@@ -4254,9 +4286,20 @@ export default function ConversationScreen() {
             <ThemedText style={[styles.recordingTime, { color: theme.text }]}>
               {formatRecordingTime(recordingDuration)}
             </ThemedText>
-            <ThemedText style={[styles.recordingLabel, { color: theme.textSecondary }]}>
-              Recording...
-            </ThemedText>
+            <View style={styles.previewWaveform}>
+              {(liveRecordingWaveform.length > 0 ? liveRecordingWaveform : new Array(WAVEFORM_BAR_COUNT).fill(0.15)).map((level, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.waveformBar,
+                    {
+                      height: 4 + level * 16,
+                      backgroundColor: theme.primary,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
           </View>
           
           <Pressable style={[styles.stopRecordingButton, { backgroundColor: theme.primary }]} onPress={stopVoiceRecording}>
