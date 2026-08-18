@@ -17,7 +17,7 @@ import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
 import { Feather } from "@expo/vector-icons";
 import { haptics } from "@/lib/haptics";
-import { useCameraPermissions } from "expo-camera";
+import { useCameraPermissions, CameraView } from "expo-camera";
 import { useCall } from "@/contexts/CallContext";
 import { getApiUrl } from "@/lib/query-client";
 import { getStoredToken } from "@/lib/auth";
@@ -438,6 +438,13 @@ export default function VideoCallScreen() {
 
   const handleFlipCamera = async () => {
     haptics.light();
+    if (localStatus !== "connected") {
+      // No LiveKit track published yet (still dialing/ringing) — flip the
+      // raw pre-connect camera preview directly instead of going through
+      // LiveKit, which has nothing to flip yet.
+      setIsFrontCamera((prev) => !prev);
+      return;
+    }
     const flipped = await livekitService.flipCamera();
     if (flipped) {
       setIsFrontCamera((prev) => !prev);
@@ -531,16 +538,23 @@ export default function VideoCallScreen() {
 
   const avatarSeed = receiverId ?? receiverName ?? 'sealed';
   const avatarColor = AVATAR_COLORS[Math.abs(avatarSeed.charCodeAt(0)) % AVATAR_COLORS.length];
-  // Render the ACTUAL published LiveKit local track, not a second
-  // independent expo-camera preview session. Two separate capture sessions
-  // fighting over the same physical camera device is what "camera doesn't
-  // load" looked like — the self-preview could show something (or nothing)
-  // with zero relation to whether video was actually being sent to the
-  // other side. Now what's on screen IS what's on the wire.
-  // REVERTED the ringback preview (build 119) along with the early-connect
-  // effect above — see that effect's comment for why.
-  const showLocalPreviewWidget = localStatus === "connected";
-  const showLocalCamera = showLocalPreviewWidget && isVideoEnabled && !!localVideoTrack && !!LiveKitVideoView;
+  // Once actually connected, render the ACTUAL published LiveKit local
+  // track — not a second independent expo-camera preview session. Two
+  // separate capture sessions fighting over the same physical camera
+  // device is what "camera doesn't load" looked like — the self-preview
+  // could show something (or nothing) with zero relation to whether video
+  // was actually being sent to the other side. Once connected, what's on
+  // screen IS what's on the wire.
+  // Before connecting (dialing/ringing), there IS no LiveKit room/track
+  // yet — build 119 tried to work around that by starting the LiveKit
+  // connection during ringback, which blocked the E2EE key exchange and
+  // broke calls outright (reverted). The two capture sessions never
+  // overlap: showRawCameraPreview only applies before localStatus flips to
+  // "connected", at which point it stops rendering in the same tick that
+  // showLocalCamera's LiveKit branch becomes eligible.
+  const showLocalPreviewWidget = localStatus !== "ended";
+  const showLocalCamera = localStatus === "connected" && isVideoEnabled && !!localVideoTrack && !!LiveKitVideoView;
+  const showRawCameraPreview = localStatus !== "connected" && localStatus !== "ended" && isVideoEnabled && !!permission?.granted;
   const isFullyConnected = localStatus === "connected" && callState === 'connected';
   const remoteVideoTrack = remoteParticipants[0]?.videoTrack ?? null;
   const remoteIsMuted = remoteParticipants[0]?.isMuted ?? false;
@@ -658,6 +672,14 @@ export default function VideoCallScreen() {
                 videoTrack={localVideoTrack}
                 style={StyleSheet.absoluteFill}
                 mirror={isFrontCamera}
+              />
+            ) : showRawCameraPreview ? (
+              // Pre-connect self-view: the real device camera, shown
+              // directly — not tied to LiveKit/the E2EE key exchange in any
+              // way, so it can't reintroduce the build 119 regression.
+              <CameraView
+                style={StyleSheet.absoluteFill}
+                facing={isFrontCamera ? 'front' : 'back'}
               />
             ) : !isVideoEnabled ? (
               <View style={styles.videoOffContainer}>
