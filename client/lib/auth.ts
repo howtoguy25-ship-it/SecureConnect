@@ -38,9 +38,9 @@ export interface SendCodeResult {
   error?: string;
 }
 
-export async function sendVerificationCode(phoneNumber: string): Promise<SendCodeResult> {
+export async function sendVerificationCode(phoneNumber: string, channel: 'sms' | 'whatsapp' = 'sms'): Promise<SendCodeResult> {
   try {
-    await apiRequest('POST', '/api/auth/send-code', { phoneNumber });
+    await apiRequest('POST', '/api/auth/send-code', { phoneNumber, channel });
     return { success: true };
   } catch (error: any) {
     console.error('Failed to send code:', error);
@@ -92,7 +92,11 @@ export async function sendVerificationCode(phoneNumber: string): Promise<SendCod
   }
 }
 
-export async function verifyCode(phoneNumber: string, code: string): Promise<{ success: boolean; token?: string; user?: User; isNewUser?: boolean; isNewDevice?: boolean }> {
+export async function verifyCode(
+  phoneNumber: string,
+  code: string,
+  oauthLinkToken?: string,
+): Promise<{ success: boolean; token?: string; user?: User; isNewUser?: boolean; isNewDevice?: boolean; error?: string }> {
   try {
     // Best-effort: send device fingerprint so the server can detect new-device logins.
     let deviceId: string | undefined;
@@ -120,7 +124,7 @@ export async function verifyCode(phoneNumber: string, code: string): Promise<{ s
     }
 
     const response = await apiRequest('POST', '/api/auth/verify-code', {
-      phoneNumber, code, deviceId, deviceName, platform,
+      phoneNumber, code, deviceId, deviceName, platform, oauthLinkToken,
     });
     const data = await response.json();
 
@@ -146,11 +150,86 @@ export async function verifyCode(phoneNumber: string, code: string): Promise<{ s
       };
     }
 
-    return { success: false };
-  } catch (error) {
+    return { success: false, error: data.error };
+  } catch (error: any) {
     console.error('Failed to verify code:', error);
-    return { success: false };
+    return { success: false, error: error?.message };
   }
+}
+
+export interface OAuthConfig {
+  appleEnabled: boolean;
+  googleEnabled: boolean;
+}
+
+export async function fetchOAuthConfig(): Promise<OAuthConfig> {
+  try {
+    const baseUrl = getApiUrl();
+    const response = await fetch(new URL('/api/auth/oauth-config', baseUrl).toString());
+    if (!response.ok) return { appleEnabled: false, googleEnabled: false };
+    return await response.json();
+  } catch {
+    return { appleEnabled: false, googleEnabled: false };
+  }
+}
+
+export interface OAuthSignInResult {
+  // Existing account already linked to this Apple/Google identity — logged
+  // straight in, no phone step needed.
+  linked: true;
+  success: boolean;
+  token?: string;
+  user?: User;
+}
+
+export interface OAuthNeedsPhoneLinkResult {
+  // First time seeing this identity — client must run the normal phone/SMS
+  // flow and pass linkToken through to verifyCode() to attach it.
+  linked: false;
+  needsPhoneLink: true;
+  linkToken: string;
+  email: string | null;
+}
+
+async function postOAuthIdentity(path: string, body: Record<string, string>): Promise<OAuthSignInResult | OAuthNeedsPhoneLinkResult> {
+  const response = await apiRequest('POST', path, body);
+  const data = await response.json();
+  if (data.linked) {
+    if (data.success && data.token && data.user) {
+      await storeAuth(data.token, data.user);
+    }
+    return data as OAuthSignInResult;
+  }
+  return data as OAuthNeedsPhoneLinkResult;
+}
+
+export async function signInWithApple(): Promise<OAuthSignInResult | OAuthNeedsPhoneLinkResult> {
+  const AppleAuthentication = await import('expo-apple-authentication');
+  const credential = await AppleAuthentication.signInAsync({
+    requestedScopes: [
+      AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+      AppleAuthentication.AppleAuthenticationScope.EMAIL,
+    ],
+  });
+  if (!credential.identityToken) {
+    throw new Error("Apple didn't return an identity token. Please try again.");
+  }
+  return postOAuthIdentity('/api/auth/oauth/apple', { identityToken: credential.identityToken });
+}
+
+export async function signInWithGoogle(webClientId: string): Promise<OAuthSignInResult | OAuthNeedsPhoneLinkResult> {
+  const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
+  GoogleSignin.configure({ webClientId });
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: false });
+  const response = await GoogleSignin.signIn();
+  if (response.type === 'cancelled') {
+    throw new Error('__CANCELLED__');
+  }
+  const idToken = response.data?.idToken;
+  if (!idToken) {
+    throw new Error("Google didn't return an ID token. Please try again.");
+  }
+  return postOAuthIdentity('/api/auth/oauth/google', { idToken });
 }
 
 export async function updateProfile(displayName: string, avatarIndex: number): Promise<User | null> {

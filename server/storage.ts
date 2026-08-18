@@ -7,6 +7,8 @@ import { eq, and, desc, sql, or, inArray, ne, isNull } from "drizzle-orm";
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByPhone(phoneNumber: string): Promise<User | undefined>;
+  getUserByAppleId(appleUserId: string): Promise<User | undefined>;
+  getUserByGoogleId(googleUserId: string): Promise<User | undefined>;
   getUserBySafeCodeLookupHash(hash: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
@@ -137,6 +139,22 @@ export class DatabaseStorage implements IStorage {
     // somebody passes the tombstoned value.
     const [user] = await db.select().from(users).where(and(
       eq(users.phoneNumber, phoneNumber),
+      or(isNull(users.isDeletedPlaceholder), eq(users.isDeletedPlaceholder, false)),
+    ));
+    return user || undefined;
+  }
+
+  async getUserByAppleId(appleUserId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(and(
+      eq(users.appleUserId, appleUserId),
+      or(isNull(users.isDeletedPlaceholder), eq(users.isDeletedPlaceholder, false)),
+    ));
+    return user || undefined;
+  }
+
+  async getUserByGoogleId(googleUserId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(and(
+      eq(users.googleUserId, googleUserId),
       or(isNull(users.isDeletedPlaceholder), eq(users.isDeletedPlaceholder, false)),
     ));
     return user || undefined;

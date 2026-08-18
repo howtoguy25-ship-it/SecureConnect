@@ -166,28 +166,48 @@ export interface SendSMSResult {
   userMessage?: string;
 }
 
-export async function sendVerificationSMS(phoneNumber: string, code: string): Promise<SendSMSResult> {
+export async function sendVerificationSMS(
+  phoneNumber: string,
+  code: string,
+  channel: 'sms' | 'whatsapp' = 'sms',
+): Promise<SendSMSResult> {
   try {
     const client = getTwilioClient();
     const fromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number;
 
     if (!fromNumber) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: 'TWILIO_PHONE_NUMBER not set',
         userMessage: 'SMS service is not configured. Please contact support.',
       };
     }
 
-    await client.messages.create({
-      body: `Your Pryvo verification code is: ${code}. This code expires in 10 minutes.`,
-      from: fromNumber,
-      to: phoneNumber,
-    });
+    // A WhatsApp-enabled Twilio sender is a separate resource from the plain
+    // SMS "from" number — it must be its own approved WhatsApp Business
+    // sender (or Twilio's sandbox number in dev). Falls back to the SMS
+    // number so this doesn't hard-fail on deployments that haven't
+    // provisioned WhatsApp yet; Twilio will just reject the send with a
+    // clear error in that case, surfaced via userMessage below.
+    const whatsappFrom = process.env.TWILIO_WHATSAPP_NUMBER || fromNumber;
+
+    if (channel === 'whatsapp') {
+      await client.messages.create({
+        body: `Your Pryvo verification code is: ${code}. This code expires in 10 minutes.`,
+        from: `whatsapp:${whatsappFrom}`,
+        to: `whatsapp:${phoneNumber}`,
+      });
+    } else {
+      await client.messages.create({
+        body: `Your Pryvo verification code is: ${code}. This code expires in 10 minutes.`,
+        from: fromNumber,
+        to: phoneNumber,
+      });
+    }
 
     return { success: true };
   } catch (error: any) {
-    console.error('Failed to send SMS:', error);
+    console.error(`Failed to send ${channel} verification:`, error);
     
     const twilioCode = error?.code;
     let userMessage = 'Failed to send verification code. Please try again.';
@@ -208,10 +228,12 @@ export async function sendVerificationSMS(phoneNumber: string, code: string): Pr
       userMessage = 'Message too long. Please contact support.';
     } else if (twilioCode === 20003 || twilioCode === 20404) {
       userMessage = 'SMS service is temporarily unavailable. Please try again later.';
+    } else if (channel === 'whatsapp' && (twilioCode === 63016 || twilioCode === 63007 || twilioCode === 63018)) {
+      userMessage = "Couldn't send via WhatsApp. Please try SMS instead.";
     }
-    
-    return { 
-      success: false, 
+
+    return {
+      success: false,
       error: error?.message || 'Unknown error',
       userMessage,
     };

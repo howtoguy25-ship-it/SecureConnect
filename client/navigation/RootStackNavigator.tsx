@@ -52,7 +52,7 @@ import { useTheme } from "@/hooks/useTheme";
 export type RootStackParamList = {
   Welcome: undefined;
   PhoneInput: undefined;
-  VerifyCode: { phoneNumber: string; demoCode?: string };
+  VerifyCode: { phoneNumber: string; demoCode?: string; oauthLinkToken?: string };
   RecoverAccount: undefined;
   AdminLogin: undefined;
   AdminDashboard: { token: string };

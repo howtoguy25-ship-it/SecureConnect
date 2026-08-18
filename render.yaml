@@ -74,6 +74,24 @@ services:
         sync: false
       - key: TWILIO_PHONE_NUMBER
         sync: false
+      # Optional: a WhatsApp-enabled Twilio sender (separate resource from
+      # TWILIO_PHONE_NUMBER — needs its own Meta/WhatsApp Business approval).
+      # Falls back to TWILIO_PHONE_NUMBER if unset, which will fail sends
+      # until a real WhatsApp sender is provisioned.
+      - key: TWILIO_WHATSAPP_NUMBER
+        sync: false
+      # Optional: enables Google Sign-In. Must be a "Web application" OAuth
+      # client ID from Google Cloud Console (used as GoogleSignin's
+      # webClientId client-side so the idToken it returns is verifiable
+      # here). Google Sign-In stays hidden in the app until this is set —
+      # see GET /api/auth/oauth-config.
+      - key: GOOGLE_WEB_CLIENT_ID
+        sync: false
+      # Optional: only needed if APP_BUNDLE_ID ever differs from
+      # com.adham.salameh.secureconnectchat (the default baked into
+      # server/oauthVerify.ts).
+      - key: APPLE_BUNDLE_ID
+        sync: false
       - key: LIVEKIT_URL
         sync: false
       - key: LIVEKIT_API_KEY

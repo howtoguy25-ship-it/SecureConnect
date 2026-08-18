@@ -24,7 +24,7 @@ export default function VerifyCodeScreen() {
   // Defensive: if navigation state is ever restored/corrupted without params
   // (a rare but real production crash vector), fall back to empty values and
   // show the error path instead of hard-crashing on undefined destructuring.
-  const { phoneNumber = "", demoCode } = route.params ?? {};
+  const { phoneNumber = "", demoCode, oauthLinkToken } = route.params ?? {};
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -114,7 +114,7 @@ export default function VerifyCodeScreen() {
     setError("");
 
     try {
-      const result = await verifyCode(phoneNumber, fullCode);
+      const result = await verifyCode(phoneNumber, fullCode, oauthLinkToken);
 
       if (result.success && result.token && result.user) {
         setToken(result.token);

@@ -9,6 +9,7 @@ import fs from "fs";
 import path from "path";
 import { storage } from "./storage";
 import { sendVerificationSMS, generateVerificationCode, getEnabledSmsCountries, isTwilioConfigured, searchAvailableNumbers, provisionPhoneNumber, releasePhoneNumber, validateTwilioWebhookSignature } from "./twilioClient";
+import { verifyAppleIdentityToken, verifyGoogleIdToken, isGoogleSignInConfigured, signOAuthLinkToken, verifyOAuthLinkToken } from "./oauthVerify";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { getAppBaseUrl, getAllowedOrigins } from "./publicUrl";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
@@ -461,9 +462,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return process.env.REPLIT_DEPLOYMENT !== '1' && process.env.NODE_ENV !== 'production';
   };
 
+  // Lets the client hide sign-in buttons for providers that aren't
+  // configured on this deployment instead of showing a button that 500s.
+  app.get('/api/auth/oauth-config', (req, res) => {
+    res.json({ appleEnabled: true, googleEnabled: isGoogleSignInConfigured() });
+  });
+
+  // Shared by both /api/auth/oauth/apple and /api/auth/oauth/google below.
+  // If this identity is already linked to an account, log straight in (no
+  // phone/SMS needed). Otherwise hand back a short-lived link token — the
+  // client carries it through the normal phone-verification flow so the
+  // OAuth identity gets attached to whichever account comes out the other
+  // end (new signup or an existing phone-based account).
+  async function handleOAuthSignIn(
+    req: Request,
+    res: Response,
+    provider: 'apple' | 'google',
+    lookup: (sub: string) => Promise<any>,
+    identity: { sub: string; email?: string },
+  ) {
+    const existingUser = await lookup(identity.sub);
+    if (existingUser) {
+      const tokenVersion = existingUser.tokenVersion ?? 0;
+      const token = jwt.sign({ userId: existingUser.id, tv: tokenVersion }, JWT_SECRET, { expiresIn: '30d' });
+      const ipAddress = getClientIp(req);
+      storage.recordLoginEvent({
+        userId: existingUser.id,
+        deviceId: null,
+        deviceName: null,
+        platform: null,
+        ipAddress,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null,
+        isNewDevice: false,
+      }).catch(err => console.error('Failed to record login event:', err));
+
+      return res.json({
+        linked: true,
+        success: true,
+        token,
+        user: {
+          id: existingUser.id,
+          phoneNumber: existingUser.phoneNumber,
+          displayName: existingUser.displayName,
+          avatarIndex: existingUser.avatarIndex,
+          avatarUrl: existingUser.avatarUrl,
+          isVip: existingUser.isVip,
+          isAdFree: existingUser.isAdFree,
+          vipStartedAt: existingUser.vipStartedAt,
+          lastNameChangeAt: existingUser.lastNameChangeAt,
+          notificationsEnabled: existingUser.notificationsEnabled ?? false,
+          safeCodeAcknowledged: existingUser.safeCodeAcknowledged ?? false,
+          hasSafeCode: !!existingUser.safeCodeHash,
+          hasSecurityQuestions: !!existingUser.securityQ1Hash,
+          isAppleReviewAccount: isAppleReviewTestNumber(existingUser.phoneNumber),
+        },
+      });
+    }
+
+    // Not linked to any account yet — the client must complete phone
+    // verification and pass this token to /api/auth/verify-code to link it.
+    const linkToken = signOAuthLinkToken(provider, identity, JWT_SECRET);
+    res.json({ linked: false, needsPhoneLink: true, linkToken, email: identity.email ?? null });
+  }
+
+  app.post('/api/auth/oauth/apple', async (req, res) => {
+    try {
+      const { identityToken } = req.body;
+      if (!identityToken || typeof identityToken !== 'string') {
+        return res.status(400).json({ error: 'Missing Apple identity token' });
+      }
+      const identity = await verifyAppleIdentityToken(identityToken);
+      await handleOAuthSignIn(req, res, 'apple', (sub) => storage.getUserByAppleId(sub), identity);
+    } catch (error) {
+      console.error('Apple sign-in verification failed:', error);
+      res.status(401).json({ error: "Couldn't verify Sign in with Apple. Please try again." });
+    }
+  });
+
+  app.post('/api/auth/oauth/google', async (req, res) => {
+    try {
+      const { idToken } = req.body;
+      if (!idToken || typeof idToken !== 'string') {
+        return res.status(400).json({ error: 'Missing Google ID token' });
+      }
+      const identity = await verifyGoogleIdToken(idToken);
+      await handleOAuthSignIn(req, res, 'google', (sub) => storage.getUserByGoogleId(sub), identity);
+    } catch (error) {
+      console.error('Google sign-in verification failed:', error);
+      res.status(401).json({ error: "Couldn't verify Google sign-in. Please try again." });
+    }
+  });
+
   app.post('/api/auth/send-code', async (req, res) => {
     try {
-      const { phoneNumber: rawPhone } = req.body;
+      const { phoneNumber: rawPhone, channel } = req.body;
+      const deliveryChannel: 'sms' | 'whatsapp' = channel === 'whatsapp' ? 'whatsapp' : 'sms';
 
       if (!rawPhone || typeof rawPhone !== 'string') {
         return res.status(400).json({ error: 'Please enter your phone number.' });
@@ -511,14 +604,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                                (process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number);
       
       if (twilioConfigured) {
-        const result = await sendVerificationSMS(phoneNumber, code);
+        const result = await sendVerificationSMS(phoneNumber, code, deliveryChannel);
         if (!result.success) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: result.userMessage || 'Failed to send verification code',
           });
         }
       } else {
-        console.log(`[DEV MODE] Verification code for ${phoneNumber}: ${code}`);
+        console.log(`[DEV MODE] Verification code for ${phoneNumber} (${deliveryChannel}): ${code}`);
       }
 
       res.json({ success: true, message: 'Verification code sent' });
@@ -530,10 +623,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/auth/verify-code', async (req, res) => {
     try {
-      const { phoneNumber: rawPhone, code, deviceId, deviceName, platform } = req.body;
+      const { phoneNumber: rawPhone, code, deviceId, deviceName, platform, oauthLinkToken } = req.body;
 
       if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
         return res.status(400).json({ error: 'Phone number and code are required' });
+      }
+
+      // Validate the OAuth link token (if the client is completing a "Sign
+      // in with Apple/Google, then verify this phone to link it" flow)
+      // BEFORE touching the DB, so a bad/expired token fails fast with a
+      // clear error instead of silently skipping the link after the phone
+      // verification already succeeded.
+      let oauthLinkClaims: { provider: 'apple' | 'google'; sub: string; email?: string } | null = null;
+      if (oauthLinkToken && typeof oauthLinkToken === 'string') {
+        try {
+          oauthLinkClaims = verifyOAuthLinkToken(oauthLinkToken, JWT_SECRET);
+        } catch {
+          return res.status(400).json({ error: 'Your sign-in session expired. Please try again.' });
+        }
       }
 
       // Normalize to match what /send-code stored (E.164 with leading "+").
@@ -597,6 +704,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (grantVip && !user.isVip) {
         user = await storage.updateUser(user.id, { isVip: true, vipStartedAt: new Date() }) || user;
         console.log(`[AUTO VIP] Granted VIP access to: ${phoneNumber}`);
+      }
+
+      // Attach the verified Apple/Google identity to whichever account this
+      // phone verification landed on (new signup or pre-existing account).
+      // Best-effort: a failed link (e.g. that identity got linked to a
+      // different account in the meantime) should never block the phone
+      // login itself, which already succeeded.
+      if (oauthLinkClaims) {
+        try {
+          const field = oauthLinkClaims.provider === 'apple' ? 'appleUserId' : 'googleUserId';
+          const alreadyLinkedElsewhere = user[field] && user[field] !== oauthLinkClaims.sub;
+          if (!alreadyLinkedElsewhere && user[field] !== oauthLinkClaims.sub) {
+            user = await storage.updateUser(user.id, { [field]: oauthLinkClaims.sub } as any) || user;
+          }
+        } catch (e) {
+          console.error('Failed to link OAuth identity to user:', e);
+        }
       }
 
       const tokenVersion = user.tokenVersion ?? 0;

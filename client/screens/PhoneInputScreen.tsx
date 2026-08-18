@@ -13,15 +13,19 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
-import { Feather } from "@expo/vector-icons";
+import { Feather, AntDesign } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { ThemedText } from "@/components/ThemedText";
 import { Button } from "@/components/Button";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
-import { sendVerificationCode } from "@/lib/auth";
+import { sendVerificationCode, fetchOAuthConfig, signInWithApple, signInWithGoogle, OAuthConfig } from "@/lib/auth";
+import { useAuth, ensureE2EEKeys } from "@/contexts/AuthContext";
 import { ALL_COUNTRIES as SHARED_COUNTRIES } from "@/constants/countries";
+
+const GOOGLE_WEB_CLIENT_ID = (Constants.expoConfig?.extra as any)?.GOOGLE_WEB_CLIENT_ID || "";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, "PhoneInput">;
 
@@ -63,6 +67,7 @@ export default function PhoneInputScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { setUser, setToken, setSecurityQuestionsPending } = useAuth();
 
   const [countries] = useState<Country[]>(DEFAULT_COUNTRIES);
   const [selectedCountry, setSelectedCountry] = useState<Country>(US_COUNTRY);
@@ -72,9 +77,22 @@ export default function PhoneInputScreen() {
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isConfigured, setIsConfigured] = useState(false);
+  const [sendViaWhatsApp, setSendViaWhatsApp] = useState(false);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<"apple" | "google" | null>(null);
+  // Set once a first-time Apple/Google sign-in comes back "not linked to any
+  // account yet" — the user still has to verify a phone number below, but
+  // this token rides along so /api/auth/verify-code attaches that identity
+  // to whichever account the phone verification produces.
+  const [pendingOAuthLink, setPendingOAuthLink] = useState<{ provider: "apple" | "google"; token: string; email: string | null } | null>(null);
 
   const { data: geoData, isLoading: isLoadingGeo } = useQuery<GeoPermissionsResponse>({
     queryKey: ['/api/auth/geo-permissions'],
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+
+  const { data: oauthConfig } = useQuery<OAuthConfig>({
+    queryKey: ['/api/auth/oauth-config'],
+    queryFn: fetchOAuthConfig,
     staleTime: 6 * 60 * 60 * 1000,
   });
 
@@ -83,6 +101,68 @@ export default function PhoneInputScreen() {
     queryKey: ['/api/review-mode'],
   });
   const isReviewMode = reviewModeData?.reviewMode ?? false;
+
+  const finishOAuthLogin = async (token: string, user: any) => {
+    setToken(token);
+    try {
+      await ensureE2EEKeys(token);
+    } catch (e) {
+      console.log("E2EE setup failed:", e);
+    }
+    if (user.hasSecurityQuestions) {
+      setSecurityQuestionsPending(true);
+    }
+    setUser(user);
+  };
+
+  const handleAppleSignIn = async () => {
+    if (oauthLoadingProvider) return;
+    setOauthLoadingProvider("apple");
+    setError("");
+    try {
+      const result = await signInWithApple();
+      if (result.linked) {
+        if (result.success && result.token && result.user) {
+          await finishOAuthLogin(result.token, result.user);
+        } else {
+          setError("Couldn't sign in with Apple. Please try again.");
+        }
+      } else {
+        setPendingOAuthLink({ provider: "apple", token: result.linkToken, email: result.email });
+      }
+    } catch (e: any) {
+      if (e?.code !== "ERR_REQUEST_CANCELED") {
+        setError(e?.message || "Couldn't sign in with Apple. Please try again.");
+      }
+    } finally {
+      setOauthLoadingProvider(null);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (oauthLoadingProvider) return;
+    if (!GOOGLE_WEB_CLIENT_ID) return;
+    setOauthLoadingProvider("google");
+    setError("");
+    try {
+      const result = await signInWithGoogle(GOOGLE_WEB_CLIENT_ID);
+      if (result.linked) {
+        if (result.success && result.token && result.user) {
+          await finishOAuthLogin(result.token, result.user);
+        } else {
+          setError("Couldn't sign in with Google. Please try again.");
+        }
+      } else {
+        setPendingOAuthLink({ provider: "google", token: result.linkToken, email: result.email });
+      }
+    } catch (e: any) {
+      if (e?.message !== "__CANCELLED__") {
+        setError(e?.message || "Couldn't sign in with Google. Please try again.");
+      }
+    } finally {
+      setOauthLoadingProvider(null);
+    }
+  };
 
   useEffect(() => {
     if (geoData) {
@@ -137,7 +217,7 @@ export default function PhoneInputScreen() {
     // the identical fix + explanation in WelcomeScreen.tsx's handleContinue.
     const nationalNumber = trimmed.replace(/^0+/, "");
     const fullNumber = `${selectedCountry.dial}${nationalNumber}`;
-    const result = await sendVerificationCode(fullNumber);
+    const result = await sendVerificationCode(fullNumber, sendViaWhatsApp ? "whatsapp" : "sms");
 
     setIsLoading(false);
 
@@ -147,6 +227,7 @@ export default function PhoneInputScreen() {
       navigation.navigate("VerifyCode", {
         phoneNumber: fullNumber,
         ...(isTestNumber ? { demoCode: "123456" } : {}),
+        ...(pendingOAuthLink ? { oauthLinkToken: pendingOAuthLink.token } : {}),
       });
     } else {
       setError(result.error || "Couldn't send verification code. Please check your number and try again.");
@@ -200,6 +281,65 @@ export default function PhoneInputScreen() {
             We'll send you a verification code to confirm your identity
           </ThemedText>
 
+          {(oauthConfig?.appleEnabled || (oauthConfig?.googleEnabled && GOOGLE_WEB_CLIENT_ID)) ? (
+            <View style={styles.oauthSection}>
+              {oauthConfig?.appleEnabled ? (
+                <Pressable
+                  style={[styles.oauthButton, styles.appleButton]}
+                  onPress={handleAppleSignIn}
+                  disabled={!!oauthLoadingProvider}
+                >
+                  {oauthLoadingProvider === "apple" ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <AntDesign name="apple" size={18} color="#fff" />
+                      <ThemedText type="body" style={styles.oauthButtonText}>
+                        Continue with Apple
+                      </ThemedText>
+                    </>
+                  )}
+                </Pressable>
+              ) : null}
+
+              {oauthConfig?.googleEnabled && GOOGLE_WEB_CLIENT_ID ? (
+                <Pressable
+                  style={[styles.oauthButton, styles.googleButton, { borderColor: theme.border }]}
+                  onPress={handleGoogleSignIn}
+                  disabled={!!oauthLoadingProvider}
+                >
+                  {oauthLoadingProvider === "google" ? (
+                    <ActivityIndicator color={theme.text} />
+                  ) : (
+                    <>
+                      <AntDesign name="google" size={18} color="#4285F4" />
+                      <ThemedText type="body" style={{ color: theme.text, fontWeight: "600" }}>
+                        Continue with Google
+                      </ThemedText>
+                    </>
+                  )}
+                </Pressable>
+              ) : null}
+
+              <View style={styles.dividerRow}>
+                <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+                <ThemedText type="small" style={{ color: theme.textSecondary, marginHorizontal: Spacing.sm }}>
+                  or use your phone number
+                </ThemedText>
+                <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+              </View>
+            </View>
+          ) : null}
+
+          {pendingOAuthLink ? (
+            <View style={[styles.warningContainer, { backgroundColor: theme.primary + '20' }]}>
+              <Feather name="check-circle" size={16} color={theme.primary} />
+              <ThemedText type="small" style={{ color: theme.primary, flex: 1, marginLeft: Spacing.sm }}>
+                Signed in with {pendingOAuthLink.provider === "apple" ? "Apple" : "Google"}. Verify your phone number below to finish setup.
+              </ThemedText>
+            </View>
+          ) : null}
+
           {isLoadingGeo ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color={theme.primary} />
@@ -238,6 +378,21 @@ export default function PhoneInputScreen() {
               editable={!isLoading}
             />
           </View>
+
+          <Pressable
+            style={styles.whatsappToggle}
+            onPress={() => setSendViaWhatsApp((v) => !v)}
+            disabled={isLoading}
+          >
+            <Feather
+              name={sendViaWhatsApp ? "check-square" : "square"}
+              size={18}
+              color={sendViaWhatsApp ? theme.primary : theme.textSecondary}
+            />
+            <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: Spacing.sm }}>
+              Send code via WhatsApp instead of SMS
+            </ThemedText>
+          </Pressable>
 
           {error ? (
             <ThemedText type="small" style={[styles.error, { color: theme.error }]}>
@@ -380,6 +535,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: Spacing.sm,
+  },
+  oauthSection: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  oauthButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: Spacing.inputHeight,
+    borderRadius: BorderRadius.sm,
+    gap: Spacing.sm,
+  },
+  appleButton: {
+    backgroundColor: "#000",
+  },
+  googleButton: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+  },
+  oauthButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: Spacing.xs,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  whatsappToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: Spacing.xs,
   },
   inputContainer: {
     flexDirection: "row",

@@ -1,4 +1,13 @@
 module.exports = () => {
+  // Google Sign-In's config plugin hard-throws during prebuild if
+  // iosUrlScheme is missing (it won't fall back to "just don't add the
+  // native module"), so the plugin is only wired in once a real iOS OAuth
+  // client id is provisioned in Google Cloud Console and set here. Until
+  // then every other feature (including Apple Sign-In and WhatsApp OTP)
+  // keeps building normally — Google Sign-In just stays hidden client-side
+  // (see GET /api/auth/oauth-config).
+  const googleIosUrlScheme = process.env.GOOGLE_IOS_URL_SCHEME;
+
   return {
     expo: {
       name: "Pryvo",
@@ -12,7 +21,7 @@ module.exports = () => {
       ios: {
         supportsTablet: true,
         requireFullScreen: false,
-        buildNumber: "131",
+        buildNumber: "132",
         bundleIdentifier: "com.adham.salameh.secureconnectchat",
         icon: "./assets/images/icon.png",
         privacyManifests: {
@@ -80,6 +89,10 @@ module.exports = () => {
       plugins: [
         "react-native-iap",
         "./plugins/withCallKeepVoip.js",
+        "expo-apple-authentication",
+        ...(googleIosUrlScheme
+          ? [["@react-native-google-signin/google-signin", { iosUrlScheme: googleIosUrlScheme }]]
+          : []),
         [
           "expo-build-properties",
           {
@@ -234,6 +247,13 @@ module.exports = () => {
           ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
           : "https://pryvoapp.com",
         OWNER_PHONE_NUMBER: process.env.OWNER_PHONE_NUMBER || "",
+        // Public OAuth client id (not a secret — ships in every native app
+        // binary using Google Sign-In). Must be the SAME "Web application"
+        // client id as the server's GOOGLE_WEB_CLIENT_ID so the idToken
+        // GoogleSignin returns has the right audience for the backend to
+        // verify. Empty until provisioned in Google Cloud Console — the
+        // client hides the Google button while this is empty.
+        GOOGLE_WEB_CLIENT_ID: process.env.GOOGLE_WEB_CLIENT_ID || "",
       },
     },
   };

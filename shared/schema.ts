@@ -20,6 +20,15 @@ export const users = pgTable("users", {
   lockerFailedAttempts: integer("locker_failed_attempts").default(0),
   lockerLockedUntil: timestamp("locker_locked_until"),
   publicKey: text("public_key"),
+  // ── Third-party sign-in linking (build 132) ─────────────────────────────
+  // Phone number stays the account's real identity (contact discovery,
+  // recovery, and virtual numbers all key off it) — these just let a
+  // returning user skip SMS by proving they're the same Apple/Google
+  // account that was linked during a prior phone verification. Each
+  // provider's stable subject id, unique so two Pryvo accounts can never
+  // claim the same external identity.
+  appleUserId: text("apple_user_id").unique(),
+  googleUserId: text("google_user_id").unique(),
   messageRequestSetting: text("message_request_setting").default("everyone"),
   preferredNumberType: text("preferred_number_type").default("personal"), // 'personal' | 'app'
   virtualNumberId: varchar("virtual_number_id"),
