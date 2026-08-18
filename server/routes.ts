@@ -621,8 +621,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post('/api/auth/verify-code', async (req, res) => {
+    // TEMP DEBUG (remove after diagnosing the prod 500): only ever exposes
+    // detail for the reserved Apple-reviewer test number, which can never
+    // belong to a real subscriber, so no real user's error detail leaks.
+    let debugRawPhone: string | undefined;
     try {
       const { phoneNumber: rawPhone, code, deviceId, deviceName, platform, oauthLinkToken } = req.body;
+      debugRawPhone = typeof rawPhone === 'string' ? rawPhone : undefined;
 
       if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
         return res.status(400).json({ error: 'Phone number and code are required' });
@@ -841,8 +846,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // SecureStore until the user acknowledges saving it.
         pendingSafeCode,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error verifying code:', error);
+      if (debugRawPhone && isAppleReviewTestNumber(debugRawPhone)) {
+        return res.status(500).json({ error: 'Internal server error', debug: error?.message || String(error), stack: error?.stack });
+      }
       res.status(500).json({ error: 'Internal server error' });
     }
   });
