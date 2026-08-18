@@ -77,7 +77,6 @@ export default function PhoneInputScreen() {
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isConfigured, setIsConfigured] = useState(false);
-  const [sendViaWhatsApp, setSendViaWhatsApp] = useState(false);
   const [oauthLoadingProvider, setOauthLoadingProvider] = useState<"apple" | "google" | null>(null);
   // Set once a first-time Apple/Google sign-in comes back "not linked to any
   // account yet" — the user still has to verify a phone number below, but
@@ -217,7 +216,7 @@ export default function PhoneInputScreen() {
     // the identical fix + explanation in WelcomeScreen.tsx's handleContinue.
     const nationalNumber = trimmed.replace(/^0+/, "");
     const fullNumber = `${selectedCountry.dial}${nationalNumber}`;
-    const result = await sendVerificationCode(fullNumber, sendViaWhatsApp ? "whatsapp" : "sms");
+    const result = await sendVerificationCode(fullNumber);
 
     setIsLoading(false);
 
@@ -378,21 +377,6 @@ export default function PhoneInputScreen() {
               editable={!isLoading}
             />
           </View>
-
-          <Pressable
-            style={styles.whatsappToggle}
-            onPress={() => setSendViaWhatsApp((v) => !v)}
-            disabled={isLoading}
-          >
-            <Feather
-              name={sendViaWhatsApp ? "check-square" : "square"}
-              size={18}
-              color={sendViaWhatsApp ? theme.primary : theme.textSecondary}
-            />
-            <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: Spacing.sm }}>
-              Send code via WhatsApp instead of SMS
-            </ThemedText>
-          </Pressable>
 
           {error ? (
             <ThemedText type="small" style={[styles.error, { color: theme.error }]}>
@@ -567,11 +551,6 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: StyleSheet.hairlineWidth,
-  },
-  whatsappToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: Spacing.xs,
   },
   inputContainer: {
     flexDirection: "row",

@@ -555,8 +555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/auth/send-code', async (req, res) => {
     try {
-      const { phoneNumber: rawPhone, channel } = req.body;
-      const deliveryChannel: 'sms' | 'whatsapp' = channel === 'whatsapp' ? 'whatsapp' : 'sms';
+      const { phoneNumber: rawPhone } = req.body;
 
       if (!rawPhone || typeof rawPhone !== 'string') {
         return res.status(400).json({ error: 'Please enter your phone number.' });
@@ -604,14 +603,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                                (process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number);
       
       if (twilioConfigured) {
-        const result = await sendVerificationSMS(phoneNumber, code, deliveryChannel);
+        const result = await sendVerificationSMS(phoneNumber, code);
         if (!result.success) {
           return res.status(400).json({
             error: result.userMessage || 'Failed to send verification code',
           });
         }
       } else {
-        console.log(`[DEV MODE] Verification code for ${phoneNumber} (${deliveryChannel}): ${code}`);
+        console.log(`[DEV MODE] Verification code for ${phoneNumber}: ${code}`);
       }
 
       res.json({ success: true, message: 'Verification code sent' });

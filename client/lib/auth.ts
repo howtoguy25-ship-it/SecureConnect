@@ -38,9 +38,9 @@ export interface SendCodeResult {
   error?: string;
 }
 
-export async function sendVerificationCode(phoneNumber: string, channel: 'sms' | 'whatsapp' = 'sms'): Promise<SendCodeResult> {
+export async function sendVerificationCode(phoneNumber: string): Promise<SendCodeResult> {
   try {
-    await apiRequest('POST', '/api/auth/send-code', { phoneNumber, channel });
+    await apiRequest('POST', '/api/auth/send-code', { phoneNumber });
     return { success: true };
   } catch (error: any) {
     console.error('Failed to send code:', error);
