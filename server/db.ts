@@ -36,6 +36,24 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS users_safe_code_lookup_hash_unique
         ON users (safe_code_lookup_hash);
     `);
+    // Same class of incident as above, this time for the Apple/Google
+    // sign-in columns: `drizzle-kit push --force` in the Render
+    // preDeployCommand silently didn't add these, and every verify-code
+    // request (i.e. every login) started 500ing on
+    // `column "apple_user_id" does not exist`.
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS apple_user_id text,
+        ADD COLUMN IF NOT EXISTS google_user_id text;
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS users_apple_user_id_unique
+        ON users (apple_user_id);
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS users_google_user_id_unique
+        ON users (google_user_id);
+    `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
         key text PRIMARY KEY,
