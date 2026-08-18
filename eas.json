@@ -19,7 +19,8 @@
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "pryvoapp.com",
-        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.137130058437-alpg6bog33cte4okdba0b295k98l44pt"
+        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.137130058437-alpg6bog33cte4okdba0b295k98l44pt",
+        "GOOGLE_WEB_CLIENT_ID": "137130058437-kf1ij0aisrmejrs8imgpktantqc1d97n.apps.googleusercontent.com"
       }
     }
   },

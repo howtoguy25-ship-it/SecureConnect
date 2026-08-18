@@ -121,7 +121,7 @@ export default function SafetyNumberScreen() {
       ) : (
         <>
           <View style={[styles.iconWrap, { backgroundColor: (verified ? "#4CD964" : theme.warning) + "18" }]}>
-            <Feather name={verified ? "shield" : "shield"} size={32} color={verified ? "#4CD964" : theme.warning} />
+            <Feather name={verified ? "shield" : "alert-triangle"} size={32} color={verified ? "#4CD964" : theme.warning} />
           </View>
 
           <ThemedText type="h3" style={{ textAlign: "center", marginTop: Spacing.md, fontWeight: "700" }}>
