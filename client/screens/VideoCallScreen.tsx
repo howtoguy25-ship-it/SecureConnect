@@ -777,12 +777,19 @@ export default function VideoCallScreen() {
 
       {/* Top status bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + Spacing.md }]}>
-        <View style={styles.statusBadge}>
+        <Pressable
+          style={styles.statusBadge}
+          disabled={!receiverId}
+          onPress={() => {
+            if (!receiverId) return;
+            (navigation as any).navigate("SafetyNumber", { userId: receiverId, userName: receiverName });
+          }}
+        >
           <Feather name="lock" size={12} color="#4CD964" />
           <ThemedText type="small" style={{ color: "#fff" }}>
             Encrypted
           </ThemedText>
-        </View>
+        </Pressable>
 
         {callState === 'reconnecting' ? (
           <View style={[styles.statusBadge, { backgroundColor: "rgba(255, 193, 7, 0.4)" }]}>

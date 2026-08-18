@@ -43,6 +43,7 @@ import DisappearingMessagesScreen from "@/screens/DisappearingMessagesScreen";
 import StorySettingsScreen from "@/screens/StorySettingsScreen";
 import StoryPrivacyScreen from "@/screens/StoryPrivacyScreen";
 import StoryContactPickerScreen from "@/screens/StoryContactPickerScreen";
+import SafetyNumberScreen from "@/screens/SafetyNumberScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { useAuth } from "@/contexts/AuthContext";
 import { View } from "react-native";
@@ -101,6 +102,7 @@ export type RootStackParamList = {
   StorySettings: undefined;
   StoryPrivacy: undefined;
   StoryContactPicker: { kind: "except" | "only" };
+  SafetyNumber: { userId: string; userName: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -440,6 +442,11 @@ export default function RootStackNavigator() {
             name="StoryContactPicker"
             component={StoryContactPickerScreen}
             options={{ headerTitle: "Select Contacts" }}
+          />
+          <Stack.Screen
+            name="SafetyNumber"
+            component={SafetyNumberScreen}
+            options={{ headerTitle: "Encryption" }}
           />
         </>
       )}

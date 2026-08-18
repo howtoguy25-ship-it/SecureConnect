@@ -5170,6 +5170,27 @@ export default function ConversationScreen() {
 
               <AnimatedPressable
                 style={[styles.settingsOption, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}
+                onPress={() => {
+                  setShowChatSettings(false);
+                  navigation.navigate("SafetyNumber", { userId: otherUserId, userName: otherUserName });
+                }}
+              >
+                <View style={[styles.settingsOptionIcon, { backgroundColor: "#4CD964" }]}>
+                  <Feather name="shield" size={20} color="#fff" />
+                </View>
+                <View style={styles.settingsOptionText}>
+                  <ThemedText type="body" style={{ fontWeight: "600" }} numberOfLines={1}>
+                    Verify Encryption
+                  </ThemedText>
+                  <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 2 }} numberOfLines={2}>
+                    Compare safety numbers to confirm no one is intercepting this chat
+                  </ThemedText>
+                </View>
+                <Feather name="chevron-right" size={18} color={theme.textSecondary} />
+              </AnimatedPressable>
+
+              <AnimatedPressable
+                style={[styles.settingsOption, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}
                 onPress={handleFriendAction}
                 disabled={
                   sendFriendRequestMutation.isPending ||

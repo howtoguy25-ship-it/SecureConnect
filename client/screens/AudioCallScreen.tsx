@@ -396,9 +396,17 @@ export default function AudioCallScreen() {
           </View>
 
           {isFullyConnected ? (
-            <ThemedText type="small" style={{ color: theme.success, marginTop: Spacing.xs }}>
-              {livekitService.isE2EEActive() ? 'End-to-end encrypted' : 'Encrypted call'}
-            </ThemedText>
+            <Pressable
+              disabled={!receiverId}
+              onPress={() => {
+                if (!receiverId) return;
+                (navigation as any).navigate("SafetyNumber", { userId: receiverId, userName: receiverName });
+              }}
+            >
+              <ThemedText type="small" style={{ color: theme.success, marginTop: Spacing.xs }}>
+                {livekitService.isE2EEActive() ? 'End-to-end encrypted' : 'Encrypted call'}
+              </ThemedText>
+            </Pressable>
           ) : null}
 
           {connectionError ? (
