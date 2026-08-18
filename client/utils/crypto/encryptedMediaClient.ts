@@ -53,6 +53,32 @@ export const MEDIA_ENVELOPE_PREFIX = "__SC_MEDIA_V1__";
 
 const CACHE_SUBDIR = "decrypted-media";
 
+// None of the three network calls in uploadEncryptedMedia had a timeout —
+// a hung request (e.g. GCS PUT stalling on a flaky connection) would leave
+// the promise pending forever: no error, no thrown exception, just a send
+// that silently never completes. That's indistinguishable from "nothing
+// happened" from the user's side. Timeouts are generous (large media
+// legitimately takes a while to upload) but guarantee the send eventually
+// either succeeds or surfaces a real, catchable error instead of hanging.
+async function fetchWithUploadTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Upload timed out. Please check your connection and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export interface MediaEnvelope {
   v: 1;
   /** Base64 mediaKey (32 bytes). Must never leave the encrypted message body. */
@@ -147,23 +173,25 @@ export async function uploadEncryptedMedia(args: {
   const { ciphertext } = encryptMedia(plaintext, mediaKey);
 
   // 3. Get signed PUT URL.
-  const uploadUrlRes = await fetch(new URL("/api/objects/upload", apiBaseUrl).toString(), {
+  const uploadUrlRes = await fetchWithUploadTimeout(new URL("/api/objects/upload", apiBaseUrl).toString(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-  });
+  }, 15000);
   if (!uploadUrlRes.ok) throw new Error("Failed to get upload URL");
   const { uploadURL } = (await uploadUrlRes.json()) as { uploadURL: string };
 
   // 4. Upload the ciphertext. Use application/octet-stream — the body is
   // opaque to GCS / the server; the SCM1 magic identifies it on download.
-  const putRes = await fetch(uploadURL, {
+  // 60s cap — generous for a 50MiB (MAX_FILE_SIZE) upload on a slow
+  // connection, but not infinite.
+  const putRes = await fetchWithUploadTimeout(uploadURL, {
     method: "PUT",
     headers: { "Content-Type": "application/octet-stream" },
     body: ciphertext as BodyInit,
-  });
+  }, 60000);
   if (!putRes.ok) {
     throw new Error(`Ciphertext upload failed (${putRes.status})`);
   }
@@ -173,14 +201,14 @@ export async function uploadEncryptedMedia(args: {
   // /api/media/encrypted/<path> endpoint is a defense-in-depth privacy gate,
   // not the primary access control.
   const mediaUrlOnly = uploadURL.split("?")[0];
-  const aclRes = await fetch(new URL("/api/objects/media", apiBaseUrl).toString(), {
+  const aclRes = await fetchWithUploadTimeout(new URL("/api/objects/media", apiBaseUrl).toString(), {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ mediaURL: mediaUrlOnly }),
-  });
+  }, 15000);
   if (!aclRes.ok) throw new Error("Failed to register encrypted object");
   const { objectPath } = (await aclRes.json()) as { objectPath: string };
 

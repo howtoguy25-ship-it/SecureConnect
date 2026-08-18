@@ -234,9 +234,23 @@ export default function ConversationScreen() {
   // wrap, media thumbnails loading in). A one-shot "scroll once then stop"
   // guard landed above the true bottom because that first report wasn't
   // the final size. Instead keep re-scrolling on every size change and
-  // only mark the initial scroll "done" once 200ms pass with no further
-  // change — i.e. once layout has actually settled.
+  // only mark the initial scroll "done" once layout has actually settled.
+  //
+  // Decryption is the real source of late size changes here: messages
+  // render as placeholders first, then buildDecryptedCache() resolves
+  // (one Signal Protocol decrypt per message, sequentially) and swaps in
+  // real text/heights — and encrypted media bubbles fetch+decrypt+render
+  // their thumbnail even later than that. Both routinely take well over
+  // 200ms on a real device with more than a couple of messages, so a flat
+  // 200ms settle window was marking the scroll "done" while content was
+  // still growing underneath it — landing the viewport mid-history with
+  // no further auto-correction, exactly matching "opens on old messages,
+  // have to scroll down". Settle window is now 1200ms of no further
+  // growth, re-armed on every actual size change, with a 5s hard cap from
+  // the first growth so a conversation whose content keeps changing can't
+  // hold the auto-scroll open indefinitely.
   const initialScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialScrollDeadlineRef = useRef<number | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTypingEmit = useRef<number>(0);
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
@@ -807,6 +821,7 @@ export default function ConversationScreen() {
           clearTimeout(initialScrollSettleTimerRef.current);
           initialScrollSettleTimerRef.current = null;
         }
+        initialScrollDeadlineRef.current = null;
         didInitialScrollRef.current = false;
       }
       try {
@@ -3996,10 +4011,15 @@ export default function ConversationScreen() {
           if (didInitialScrollRef.current) return;
           flatListRef.current?.scrollToEnd({ animated: false });
           if (initialScrollSettleTimerRef.current) clearTimeout(initialScrollSettleTimerRef.current);
+          if (initialScrollDeadlineRef.current === null) {
+            initialScrollDeadlineRef.current = Date.now() + 5000;
+          }
+          const settleDelay = Math.max(0, Math.min(1200, initialScrollDeadlineRef.current - Date.now()));
           initialScrollSettleTimerRef.current = setTimeout(() => {
             didInitialScrollRef.current = true;
             initialScrollSettleTimerRef.current = null;
-          }, 200);
+            initialScrollDeadlineRef.current = null;
+          }, settleDelay);
         }}
         ListHeaderComponent={
           <View style={styles.encryptionBannerWrapper}>
