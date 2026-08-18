@@ -17,17 +17,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
-import { Feather } from "@expo/vector-icons";
+import { Feather, AntDesign } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import Constants from "expo-constants";
 import { ThemedText } from "@/components/ThemedText";
 import { Button } from "@/components/Button";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
-import { sendVerificationCode } from "@/lib/auth";
+import { sendVerificationCode, fetchOAuthConfig, signInWithApple, signInWithGoogle, OAuthConfig } from "@/lib/auth";
+import { useAuth, ensureE2EEKeys } from "@/contexts/AuthContext";
 import { getApiUrl } from "@/lib/query-client";
 import { ALL_COUNTRIES } from "@/constants/countries";
+
+const GOOGLE_WEB_CLIENT_ID = (Constants.expoConfig?.extra as any)?.GOOGLE_WEB_CLIENT_ID || "";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, "Welcome">;
 
@@ -93,6 +97,7 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
+  const { setUser, setToken, setSecurityQuestionsPending } = useAuth();
 
   const [countries, setCountries] = useState<Country[]>(DEFAULT_COUNTRIES);
   const [selectedCountry, setSelectedCountry] = useState<Country>(DEFAULT_COUNTRIES[0]);
@@ -102,6 +107,12 @@ export default function WelcomeScreen() {
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentQuoteIndex, setCurrentQuoteIndex] = useState(0);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<"apple" | "google" | null>(null);
+  // Set once a first-time Apple/Google sign-in comes back "not linked to any
+  // account yet" — the user still verifies a phone number below, but this
+  // token rides along so /api/auth/verify-code attaches that identity to
+  // whichever account the phone verification produces.
+  const [pendingOAuthLink, setPendingOAuthLink] = useState<{ provider: "apple" | "google"; token: string; email: string | null } | null>(null);
 
   const quoteOpacity = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -122,6 +133,74 @@ export default function WelcomeScreen() {
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
   });
+
+  const { data: oauthConfig } = useQuery<OAuthConfig>({
+    queryKey: ['/api/auth/oauth-config'],
+    queryFn: fetchOAuthConfig,
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+
+  const finishOAuthLogin = async (token: string, user: any) => {
+    setToken(token);
+    try {
+      await ensureE2EEKeys(token);
+    } catch (e) {
+      console.log("E2EE setup failed:", e);
+    }
+    if (user.hasSecurityQuestions) {
+      setSecurityQuestionsPending(true);
+    }
+    setUser(user);
+  };
+
+  const handleAppleSignIn = async () => {
+    if (oauthLoadingProvider) return;
+    setOauthLoadingProvider("apple");
+    setError("");
+    try {
+      const result = await signInWithApple();
+      if (result.linked) {
+        if (result.success && result.token && result.user) {
+          await finishOAuthLogin(result.token, result.user);
+        } else {
+          setError("Couldn't sign in with Apple. Please try again.");
+        }
+      } else {
+        setPendingOAuthLink({ provider: "apple", token: result.linkToken, email: result.email });
+      }
+    } catch (e: any) {
+      if (e?.code !== "ERR_REQUEST_CANCELED") {
+        setError(e?.message || "Couldn't sign in with Apple. Please try again.");
+      }
+    } finally {
+      setOauthLoadingProvider(null);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (oauthLoadingProvider) return;
+    if (!GOOGLE_WEB_CLIENT_ID) return;
+    setOauthLoadingProvider("google");
+    setError("");
+    try {
+      const result = await signInWithGoogle(GOOGLE_WEB_CLIENT_ID);
+      if (result.linked) {
+        if (result.success && result.token && result.user) {
+          await finishOAuthLogin(result.token, result.user);
+        } else {
+          setError("Couldn't sign in with Google. Please try again.");
+        }
+      } else {
+        setPendingOAuthLink({ provider: "google", token: result.linkToken, email: result.email });
+      }
+    } catch (e: any) {
+      if (e?.message !== "__CANCELLED__") {
+        setError(e?.message || "Couldn't sign in with Google. Please try again.");
+      }
+    } finally {
+      setOauthLoadingProvider(null);
+    }
+  };
 
   useEffect(() => {
     if (geoData?.countries && geoData.countries.length > 0) {
@@ -219,7 +298,10 @@ export default function WelcomeScreen() {
     setIsLoading(false);
 
     if (result.success) {
-      navigation.navigate("VerifyCode", { phoneNumber: fullNumber });
+      navigation.navigate("VerifyCode", {
+        phoneNumber: fullNumber,
+        ...(pendingOAuthLink ? { oauthLinkToken: pendingOAuthLink.token } : {}),
+      });
     } else {
       setError(result.error || "Couldn't send verification code. Please check your number and try again.");
     }
@@ -345,6 +427,65 @@ export default function WelcomeScreen() {
                   <ActivityIndicator size="small" color={theme.primary} />
                   <ThemedText type="small" style={{ color: "rgba(255,255,255,0.6)", marginLeft: Spacing.sm }}>
                     Loading countries...
+                  </ThemedText>
+                </View>
+              ) : null}
+
+              {(oauthConfig?.appleEnabled || (oauthConfig?.googleEnabled && GOOGLE_WEB_CLIENT_ID)) ? (
+                <View style={styles.oauthSection}>
+                  {oauthConfig?.appleEnabled ? (
+                    <Pressable
+                      style={[styles.oauthButton, styles.appleButton]}
+                      onPress={handleAppleSignIn}
+                      disabled={!!oauthLoadingProvider}
+                    >
+                      {oauthLoadingProvider === "apple" ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <>
+                          <AntDesign name="apple" size={18} color="#fff" />
+                          <ThemedText type="body" style={styles.oauthButtonText}>
+                            Continue with Apple
+                          </ThemedText>
+                        </>
+                      )}
+                    </Pressable>
+                  ) : null}
+
+                  {oauthConfig?.googleEnabled && GOOGLE_WEB_CLIENT_ID ? (
+                    <Pressable
+                      style={[styles.oauthButton, styles.googleButton]}
+                      onPress={handleGoogleSignIn}
+                      disabled={!!oauthLoadingProvider}
+                    >
+                      {oauthLoadingProvider === "google" ? (
+                        <ActivityIndicator color="#1a1a1a" />
+                      ) : (
+                        <>
+                          <AntDesign name="google" size={18} color="#4285F4" />
+                          <ThemedText type="body" style={styles.googleButtonText}>
+                            Continue with Google
+                          </ThemedText>
+                        </>
+                      )}
+                    </Pressable>
+                  ) : null}
+
+                  <View style={styles.dividerRow}>
+                    <View style={styles.dividerLine} />
+                    <ThemedText type="small" style={{ color: "rgba(255,255,255,0.5)", marginHorizontal: Spacing.sm }}>
+                      or use your phone number
+                    </ThemedText>
+                    <View style={styles.dividerLine} />
+                  </View>
+                </View>
+              ) : null}
+
+              {pendingOAuthLink ? (
+                <View style={styles.pendingLinkBanner}>
+                  <Feather name="check-circle" size={16} color={theme.primary} />
+                  <ThemedText type="small" style={{ color: "rgba(255,255,255,0.8)", flex: 1, marginLeft: Spacing.sm }}>
+                    Signed in with {pendingOAuthLink.provider === "apple" ? "Apple" : "Google"}. Verify your phone number below to finish setup.
                   </ThemedText>
                 </View>
               ) : null}
@@ -633,6 +774,52 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: Spacing.lg,
+  },
+  oauthSection: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  oauthButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: Spacing.inputHeight,
+    borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+  },
+  appleButton: {
+    backgroundColor: "#000",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+  },
+  googleButton: {
+    backgroundColor: "#fff",
+  },
+  oauthButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  googleButtonText: {
+    color: "#1a1a1a",
+    fontWeight: "600",
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: Spacing.xs,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  pendingLinkBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(124,92,252,0.15)",
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
     marginBottom: Spacing.lg,
   },
   inputContainer: {

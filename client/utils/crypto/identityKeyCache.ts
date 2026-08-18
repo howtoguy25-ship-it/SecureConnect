@@ -31,8 +31,14 @@ async function fetchIdentityKeys(userId: string): Promise<CachedIdentityKeys> {
     const res = await fetch(new URL(`/api/e2ee/identity-key/${userId}`, baseUrl), {
       headers: { Authorization: `Bearer ${token}` },
     });
+    // A failed fetch (non-2xx — e.g. a transient server error) is never
+    // cached. This used to cache `empty` here unconditionally, which meant
+    // one bad response (a deploy in progress, a network blip) permanently
+    // poisoned this user's entry for the rest of the app session: every
+    // later call, including the user tapping "Retry" on the safety-number
+    // screen, hit this cached `empty` from memory and never touched the
+    // network again until the app was force-quit and reopened.
     if (!res.ok) {
-      identityKeyCache.set(userId, empty);
       return empty;
     }
     const { identityPublicKey, signingPublicKey } = await res.json();
@@ -40,15 +46,12 @@ async function fetchIdentityKeys(userId: string): Promise<CachedIdentityKeys> {
       identityPublicKey: typeof identityPublicKey === "string" ? naclUtil.decodeBase64(identityPublicKey) : null,
       signingPublicKey: typeof signingPublicKey === "string" ? naclUtil.decodeBase64(signingPublicKey) : null,
     };
-    // signingPublicKey is a NOT NULL column server-side for every
-    // registered device — the only way we'd get identityPublicKey back
-    // without it is a server that hasn't deployed the route returning it
-    // yet (see server/routes.ts), not a real "no signing key" state. Don't
-    // cache that half-answer: caching it would make every future call
-    // (including a user tapping "Retry") return this same stale null from
-    // memory forever, even after the server catches up, until the app is
-    // force-quit and reopened.
-    if (result.identityPublicKey && !result.signingPublicKey) {
+    // Only cache a genuinely complete answer. Anything partial or empty
+    // (missing signing key, missing identity key, or both) means either
+    // the peer hasn't finished registering their keys yet or the server
+    // hit a transient error — neither should stick around in memory and
+    // block a retry from ever seeing fresh data.
+    if (!result.identityPublicKey || !result.signingPublicKey) {
       return result;
     }
     identityKeyCache.set(userId, result);

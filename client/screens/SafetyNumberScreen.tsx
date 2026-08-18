@@ -94,10 +94,18 @@ export default function SafetyNumberScreen() {
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.backgroundRoot }}
       contentContainerStyle={{
+        flexGrow: 1,
         paddingTop: headerHeight + Spacing.lg,
         paddingBottom: insets.bottom + Spacing.xl,
         paddingHorizontal: Spacing.lg,
         alignItems: "center",
+        // Loading/error states are short and look stranded pinned to the
+        // top with a large empty gap below on most screens — center them
+        // in the available space instead. The "ready" state has enough
+        // content to fill the screen on its own and should stay
+        // top-anchored so it scrolls naturally instead of jumping around
+        // as its height changes.
+        justifyContent: state === "ready" ? "flex-start" : "center",
       }}
     >
       {state === "loading" ? (
