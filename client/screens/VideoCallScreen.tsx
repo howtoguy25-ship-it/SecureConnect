@@ -51,7 +51,6 @@ interface CallTokenResponse {
 }
 
 const SMALL_SIZE = { width: 120, height: 170 };
-const LARGE_SIZE = { width: 180, height: 250 };
 
 // Lazily-loaded LiveKit VideoView — only available in native EAS builds.
 // Takes the actual track instance as `videoTrack` (NOT a trackSid string —
@@ -84,10 +83,16 @@ export default function VideoCallScreen() {
   const [callState, setCallState] = useState<ConnectionState>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Which feed is full-screen vs the small draggable PiP — swapped by
+  // tapping the PiP, same as FaceTime. Only meaningful once actually
+  // connected (see isFullyConnected below); computed early so the tap
+  // gesture (defined further down) can read it without a temporal-dead-zone
+  // reference error.
+  const [isSwapped, setIsSwapped] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipantInfo[]>([]);
   const [localVideoTrack, setLocalVideoTrack] = useState<any | null>(null);
+  const isFullyConnected = localStatus === "connected" && callState === 'connected';
   const actualCallId = useRef<string>(callId);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -95,7 +100,12 @@ export default function VideoCallScreen() {
   const translateY = useSharedValue(0);
   const context = useSharedValue({ x: 0, y: 0 });
 
-  const currentSize = isExpanded ? LARGE_SIZE : SMALL_SIZE;
+  // The PiP box is always the same fixed size now — it no longer grows in
+  // place on tap. That "grow in place" behavior is what could push the box
+  // off the right edge of the screen when it was docked there; tapping now
+  // swaps which feed is full-screen instead (see isSwapped), which needs no
+  // resize at all and can't overflow.
+  const currentSize = SMALL_SIZE;
   const safeArea = {
     minX: Spacing.lg,
     maxX: screenWidth - currentSize.width - Spacing.lg,
@@ -108,8 +118,8 @@ export default function VideoCallScreen() {
     translateY.value = safeArea.minY;
   }, []);
 
-  const updateExpanded = (expanded: boolean) => {
-    setIsExpanded(expanded);
+  const toggleSwap = () => {
+    setIsSwapped((prev) => !prev);
     haptics.light();
   };
 
@@ -129,7 +139,12 @@ export default function VideoCallScreen() {
     });
 
   const tapGesture = Gesture.Tap().onEnd(() => {
-    runOnJS(updateExpanded)(!isExpanded);
+    // Swapping which feed is full-screen only makes sense once the call has
+    // actually connected — before that there's only your own ringback
+    // preview to show, nothing to swap it with yet.
+    if (isFullyConnected) {
+      runOnJS(toggleSwap)();
+    }
   });
 
   const composedGesture = Gesture.Race(panGesture, tapGesture);
@@ -555,15 +570,42 @@ export default function VideoCallScreen() {
   const showLocalPreviewWidget = localStatus !== "ended";
   const showLocalCamera = localStatus === "connected" && isVideoEnabled && !!localVideoTrack && !!LiveKitVideoView;
   const showRawCameraPreview = localStatus !== "connected" && localStatus !== "ended" && isVideoEnabled && !!permission?.granted;
-  const isFullyConnected = localStatus === "connected" && callState === 'connected';
   const remoteVideoTrack = remoteParticipants[0]?.videoTrack ?? null;
   const remoteIsMuted = remoteParticipants[0]?.isMuted ?? false;
+  // The actual local camera feed node, reused in whichever slot (main or
+  // PiP) currently holds it — null means "nothing to show yet", and each
+  // slot falls back to its own placeholder for that case.
+  const localFeedVideo = showLocalCamera && LiveKitVideoView ? (
+    <LiveKitVideoView videoTrack={localVideoTrack} style={StyleSheet.absoluteFill} mirror={isFrontCamera} />
+  ) : showRawCameraPreview ? (
+    <CameraView style={StyleSheet.absoluteFill} facing={isFrontCamera ? 'front' : 'back'} />
+  ) : null;
+  const isSwappedToLocal = isFullyConnected && isSwapped;
 
   return (
     <View style={[styles.container, { backgroundColor: "#1a1a1a" }]}>
-      {/* Remote video / placeholder */}
+      {/* Remote video / placeholder, unless swapped to show local full-screen */}
       <View style={[styles.remoteVideo, { backgroundColor: "#2a2a2a" }]}>
-        {isFullyConnected && remoteVideoTrack && LiveKitVideoView ? (
+        {isSwappedToLocal ? (
+          localFeedVideo ?? (
+            <View style={styles.videoPlaceholder}>
+              <View style={[styles.largeAvatar, { backgroundColor: theme.primary }]}>
+                <Feather name={!permission?.granted ? "camera" : "video-off"} size={64} color="#fff" />
+              </View>
+              <ThemedText type="body" style={{ color: "rgba(255,255,255,0.8)", marginTop: Spacing.md }}>
+                {!permission?.granted ? "Camera access needed" : "Your camera is off"}
+              </ThemedText>
+              {!permission?.granted ? (
+                <Pressable style={styles.retryButton} onPress={requestPermission}>
+                  <Feather name="camera" size={16} color="#fff" />
+                  <ThemedText type="small" style={{ color: "#fff", marginLeft: 8 }}>
+                    Enable Camera
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
+          )
+        ) : isFullyConnected && remoteVideoTrack && LiveKitVideoView ? (
           <LiveKitVideoView
             videoTrack={remoteVideoTrack}
             style={StyleSheet.absoluteFill}
@@ -667,7 +709,19 @@ export default function VideoCallScreen() {
               animatedStyle,
             ]}
           >
-            {showLocalCamera && LiveKitVideoView ? (
+            {isSwappedToLocal ? (
+              // Swapped: the PiP now shows the OTHER person instead of you.
+              isFullyConnected && remoteVideoTrack && LiveKitVideoView ? (
+                <LiveKitVideoView videoTrack={remoteVideoTrack} style={StyleSheet.absoluteFill} />
+              ) : (
+                <View style={styles.videoOffContainer}>
+                  <Feather name="user" size={24} color={theme.textSecondary} />
+                  {remoteIsMuted ? (
+                    <Feather name="mic-off" size={12} color={theme.textSecondary} style={{ marginTop: 4 }} />
+                  ) : null}
+                </View>
+              )
+            ) : showLocalCamera && LiveKitVideoView ? (
               <LiveKitVideoView
                 videoTrack={localVideoTrack}
                 style={StyleSheet.absoluteFill}
@@ -683,7 +737,7 @@ export default function VideoCallScreen() {
               />
             ) : !isVideoEnabled ? (
               <View style={styles.videoOffContainer}>
-                <Feather name="video-off" size={isExpanded ? 32 : 24} color={theme.textSecondary} />
+                <Feather name="video-off" size={24} color={theme.textSecondary} />
                 <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: Spacing.xs }}>
                   Camera Off
                 </ThemedText>
@@ -700,12 +754,14 @@ export default function VideoCallScreen() {
               // reported a published local track yet (still starting the
               // camera, or the native enable is in flight) — brief loading
               // state rather than a silently blank preview.
-              <Feather name="user" size={isExpanded ? 48 : 32} color={theme.textSecondary} />
+              <Feather name="user" size={32} color={theme.textSecondary} />
             )}
 
-            <View style={styles.selfViewHint}>
-              <Feather name={isExpanded ? "minimize-2" : "maximize-2"} size={14} color="rgba(255,255,255,0.8)" />
-            </View>
+            {isFullyConnected ? (
+              <View style={styles.selfViewHint}>
+                <Feather name="repeat" size={14} color="rgba(255,255,255,0.8)" />
+              </View>
+            ) : null}
 
             <View style={styles.dragHandle}>
               <View style={styles.dragDots}>
