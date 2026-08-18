@@ -344,6 +344,7 @@ export default function VideoCallScreen() {
         callId: currentCallId,
         apiUrl,
         authToken,
+        peerUserId: receiverId ?? undefined,
       });
 
       if (!e2eeKey) {

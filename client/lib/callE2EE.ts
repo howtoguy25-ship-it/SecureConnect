@@ -1,4 +1,6 @@
 // Phase C.3 — media-frame E2EE key derivation for calls.
+// Phase C.4 — authenticate the exchange against each side's long-term
+// identity (closes an unauthenticated-DH gap — see negotiateCallKey).
 //
 // Each side generates a fresh X25519 keypair when the call screen mounts,
 // posts its public key to the server via `POST /api/calls/:id/e2ee-key`,
@@ -10,9 +12,23 @@
 // The server stores only the public halves; it cannot derive the shared
 // secret because it never holds the private scalars. Even with a full
 // server compromise, an attacker can read signaling but not call media.
+//
+// That said, an unauthenticated ECDH exchange like the one above is still
+// vulnerable to a MITM if the party relaying the public keys is malicious:
+// a compromised server could substitute its own X25519 public key for the
+// real peer's on the way through, derive a shared secret with each side
+// separately, and decrypt/re-encrypt frames in the middle. To close that
+// gap, each side also signs its ephemeral public key with its long-term
+// Ed25519 identity signing key (the same one that signs X3DH's signed
+// prekey for messages) and the receiving side verifies that signature
+// against the peer's already-established signing identity before deriving
+// anything. A server substituting keys would need to forge that signature,
+// which it cannot do without the peer's private signing key.
 
 import nacl from "tweetnacl";
 import naclUtil from "tweetnacl-util";
+import { ensureSigningKeyPair } from "@/utils/crypto/prekeyManager";
+import { getCachedSigningPublicKey } from "@/utils/crypto/identityKeyCache";
 
 export interface CallKeyPair {
   publicKey: Uint8Array;
@@ -209,20 +225,33 @@ export async function negotiateCallKey(opts: {
   callId: string;
   apiUrl: string;
   authToken: string;
+  // The other participant's user id. When present, the peer's ephemeral
+  // call pubkey MUST carry a valid signature from their long-term identity
+  // signing key or the handshake fails closed (see the module doc comment
+  // for why — this is what stops a compromised server from substituting
+  // its own key into the exchange). Omit only when there's genuinely no
+  // user identity to verify against (e.g. a sealed virtual-number call) —
+  // that case keeps the pre-C.4 unauthenticated-but-still-E2E behavior.
+  peerUserId?: string;
   timeoutMs?: number;
 }): Promise<Uint8Array | null> {
-  const { callId, apiUrl, authToken } = opts;
+  const { callId, apiUrl, authToken, peerUserId } = opts;
   const timeoutMs = opts.timeoutMs ?? 10000;
 
   try {
     const myKp = generateCallKeyPair();
+    const mySigningKp = await ensureSigningKeyPair();
+    const mySignatureB64 = naclUtil.encodeBase64(
+      nacl.sign.detached(myKp.publicKey, mySigningKp.secretKey),
+    );
 
-    // 1. Post our public half. Per architect review: a 4xx response was
-    // previously treated as success because we only caught network errors.
-    // Now we explicitly check `res.ok` and fail fast on auth-class errors
-    // (401/403/404) — those are permanent for the duration of this call,
-    // so further polling is wasted and the transport-only fallback should
-    // be entered immediately so the caller surfaces an accurate label.
+    // 1. Post our public half (+ signature). Per architect review: a 4xx
+    // response was previously treated as success because we only caught
+    // network errors. Now we explicitly check `res.ok` and fail fast on
+    // auth-class errors (401/403/404) — those are permanent for the
+    // duration of this call, so further polling is wasted and the
+    // transport-only fallback should be entered immediately so the caller
+    // surfaces an accurate label.
     try {
       const postRes = await fetch(`${apiUrl}/api/calls/${callId}/e2ee-key`, {
         method: "POST",
@@ -230,7 +259,7 @@ export async function negotiateCallKey(opts: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ publicKey: myKp.publicKeyB64 }),
+        body: JSON.stringify({ publicKey: myKp.publicKeyB64, signature: mySignatureB64 }),
       });
       if (!postRes.ok) {
         if (
@@ -275,6 +304,7 @@ export async function negotiateCallKey(opts: {
           const body = (await res.json()) as {
             myPublicKey: string | null;
             peerPublicKey: string | null;
+            peerPublicKeySig: string | null;
           };
           // Per architect review: bind derivation to the server's echo of
           // our own pubkey. If the server stored a stale/different value
@@ -291,7 +321,7 @@ export async function negotiateCallKey(opts: {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${authToken}`,
                 },
-                body: JSON.stringify({ publicKey: myKp.publicKeyB64 }),
+                body: JSON.stringify({ publicKey: myKp.publicKeyB64, signature: mySignatureB64 }),
               });
             } catch {
               // re-POST is best-effort; next poll re-checks.
@@ -301,6 +331,33 @@ export async function negotiateCallKey(opts: {
             if (peerPub.length !== 32) {
               console.warn("[callE2EE] peer pubkey wrong length, aborting");
               return null;
+            }
+            // Authenticate the peer's ephemeral key against their
+            // long-term identity before deriving anything from it — see
+            // the module doc comment. A server relaying a substituted key
+            // cannot produce a valid signature without the peer's private
+            // signing key, so this is what actually stops that MITM.
+            if (peerUserId) {
+              const peerSigningPub = await getCachedSigningPublicKey(peerUserId);
+              if (!peerSigningPub) {
+                console.warn("[callE2EE] Could not fetch peer's signing identity — aborting (fail closed)");
+                return null;
+              }
+              if (!body.peerPublicKeySig) {
+                console.warn("[callE2EE] Peer call key has no signature — aborting (fail closed)");
+                return null;
+              }
+              let sigBytes: Uint8Array;
+              try {
+                sigBytes = naclUtil.decodeBase64(body.peerPublicKeySig);
+              } catch {
+                console.warn("[callE2EE] Peer call key signature isn't valid base64 — aborting");
+                return null;
+              }
+              if (sigBytes.length !== 64 || !nacl.sign.detached.verify(peerPub, sigBytes, peerSigningPub)) {
+                console.warn("[callE2EE] Peer call key signature INVALID — possible MITM, aborting");
+                return null;
+              }
             }
             return await deriveCallKey(myKp.secretKey, peerPub, callId);
           }

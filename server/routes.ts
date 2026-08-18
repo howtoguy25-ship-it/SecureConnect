@@ -1358,7 +1358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const device = await storage.getDeviceForUser(req.params.userId);
       if (!device) return res.status(404).json({ error: "no_keys" });
-      res.json({ identityPublicKey: device.identityPublicKey });
+      res.json({ identityPublicKey: device.identityPublicKey, signingPublicKey: device.signingPublicKey });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch identity key" });
     }
@@ -3365,7 +3365,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.userId!;
       const callId = req.params.id;
-      const { publicKey } = req.body as { publicKey?: string };
+      const { publicKey, signature } = req.body as { publicKey?: string; signature?: string };
 
       // 32 bytes of base64 is always 44 chars (incl. one '=' pad).
       if (typeof publicKey !== 'string' || publicKey.length < 43 || publicKey.length > 48) {
@@ -3380,6 +3380,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch {
         return res.status(400).json({ error: 'publicKey must be base64' });
       }
+      // Optional Ed25519 detached signature (64 bytes) over the pubkey
+      // above — lets the peer verify it actually came from this device's
+      // identity, not a substituted key from a compromised server.
+      if (signature !== undefined) {
+        try {
+          const decodedSig = Buffer.from(signature, 'base64');
+          if (decodedSig.length !== 64) {
+            return res.status(400).json({ error: 'signature must decode to 64 bytes' });
+          }
+        } catch {
+          return res.status(400).json({ error: 'signature must be base64' });
+        }
+      }
 
       const call = await storage.getCall(callId);
       if (!call) return res.status(404).json({ error: 'Call not found' });
@@ -3389,8 +3402,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const isCaller = call.callerId === userId;
       const patch: any = isCaller
-        ? { callerE2eePubkey: publicKey }
-        : { receiverE2eePubkey: publicKey };
+        ? { callerE2eePubkey: publicKey, callerE2eeSig: signature ?? null }
+        : { receiverE2eePubkey: publicKey, receiverE2eeSig: signature ?? null };
       await storage.updateCall(callId, patch);
 
       res.json({ ok: true });
@@ -3419,8 +3432,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const myPublicKey = isCaller
         ? call.callerE2eePubkey ?? null
         : call.receiverE2eePubkey ?? null;
+      const peerPublicKeySig = isCaller
+        ? call.receiverE2eeSig ?? null
+        : call.callerE2eeSig ?? null;
 
-      res.json({ myPublicKey, peerPublicKey });
+      res.json({ myPublicKey, peerPublicKey, peerPublicKeySig });
     } catch (error) {
       console.error('Error reading call e2ee key:', error);
       res.status(500).json({ error: 'Internal server error' });

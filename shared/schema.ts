@@ -283,6 +283,14 @@ export const calls = pgTable("calls", {
   // private scalars. Base64-encoded raw 32-byte pubkeys.
   callerE2eePubkey: text("caller_e2ee_pubkey"),
   receiverE2eePubkey: text("receiver_e2ee_pubkey"),
+  // Ed25519 detached signatures over the pubkeys above, signed with each
+  // participant's long-term identity signing key (the same one used to
+  // sign X3DH's signed prekey for messages). Lets the receiving side
+  // verify the ephemeral call pubkey actually came from the peer's device
+  // — not from a compromised/malicious server relaying a substituted key
+  // into the exchange (an unauthenticated-DH MITM). Base64-encoded.
+  callerE2eeSig: text("caller_e2ee_sig"),
+  receiverE2eeSig: text("receiver_e2ee_sig"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

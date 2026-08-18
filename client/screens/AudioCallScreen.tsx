@@ -204,6 +204,7 @@ export default function AudioCallScreen() {
         callId: currentCallId,
         apiUrl,
         authToken,
+        peerUserId: receiverId ?? undefined,
       });
 
       if (!e2eeKey) {
