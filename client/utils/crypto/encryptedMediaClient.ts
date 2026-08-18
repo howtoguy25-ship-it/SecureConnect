@@ -94,6 +94,11 @@ export interface MediaEnvelope {
   /** Original filename — "file" kind only, used to render the bubble and to
    * name the saved copy when the recipient opens/exports it. */
   name?: string;
+  /** "audio" kind only — real amplitude bars captured from the recorder's
+   * actual metering while recording (0-1 normalized, fixed-length array).
+   * Travels inside the E2EE envelope like everything else here, so both
+   * sender and recipient render the true waveform, not a placeholder. */
+  wf?: number[];
 }
 
 export function buildMediaEnvelope(env: MediaEnvelope): string {
@@ -149,6 +154,8 @@ export async function uploadEncryptedMedia(args: {
   ext?: string;
   /** Original filename — "file" kind only, carried through to the envelope. */
   name?: string;
+  /** "audio" kind only — real waveform bars captured while recording. */
+  waveform?: number[];
   /**
    * Caller-supplied 32-byte key instead of a freshly generated one. Used by
    * Stories, where one key is shared across the media blob AND wrapped
@@ -157,7 +164,7 @@ export async function uploadEncryptedMedia(args: {
    */
   mediaKey?: Uint8Array;
 }): Promise<UploadResult> {
-  const { uri, mediaType, token, apiBaseUrl, ext, name } = args;
+  const { uri, mediaType, token, apiBaseUrl, ext, name, waveform } = args;
 
   // 1. Read plaintext bytes.
   const plaintext = await readFileBytes(uri);
@@ -220,6 +227,7 @@ export async function uploadEncryptedMedia(args: {
     size: plaintext.length,
     ext,
     name,
+    wf: waveform,
   };
 
   return { envelope, size: plaintext.length };

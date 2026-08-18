@@ -19,7 +19,7 @@ import { Image } from "expo-image";
 import * as Location from "expo-location";
 import * as Contacts from "expo-contacts";
 import * as DocumentPicker from "expo-document-picker";
-import { useAudioRecorder, RecordingPresets, AudioModule, setAudioModeAsync, createAudioPlayer } from 'expo-audio';
+import { useAudioRecorder, useAudioRecorderState, RecordingPresets, AudioModule, setAudioModeAsync, createAudioPlayer } from 'expo-audio';
 import * as Clipboard from "expo-clipboard";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
@@ -98,6 +98,46 @@ interface Message {
   expiresAt?: string | null;
 }
 
+// Bucket-average real recorder metering samples (dBFS, roughly -50 silence
+// to 0 loudest on-device) into a fixed number of 0-1 normalized bars for
+// the voice-message waveform preview — real captured amplitude, not a
+// random placeholder.
+const WAVEFORM_BAR_COUNT = 20;
+const WAVEFORM_FLOOR_DB = -50;
+function downsampleWaveform(levels: number[]): number[] {
+  if (levels.length === 0) return new Array(WAVEFORM_BAR_COUNT).fill(0.15);
+  const normalized = levels.map((db) => {
+    const clamped = Math.max(WAVEFORM_FLOOR_DB, Math.min(0, db));
+    return (clamped - WAVEFORM_FLOOR_DB) / -WAVEFORM_FLOOR_DB;
+  });
+  const bars: number[] = [];
+  for (let i = 0; i < WAVEFORM_BAR_COUNT; i++) {
+    const start = Math.floor((i / WAVEFORM_BAR_COUNT) * normalized.length);
+    const end = Math.max(start + 1, Math.floor(((i + 1) / WAVEFORM_BAR_COUNT) * normalized.length));
+    const bucket = normalized.slice(start, end);
+    const avg = bucket.reduce((sum, v) => sum + v, 0) / bucket.length;
+    // Floor at 0.15 so silent stretches still render a visible sliver
+    // instead of a fully collapsed bar.
+    bars.push(Math.max(0.15, avg));
+  }
+  return bars;
+}
+
+// Fallback for voice messages sent before waveform capture existed (no `wf`
+// in their envelope) — deterministic per message id, so it stays fixed
+// across re-renders instead of jittering with a new random shape every
+// frame like the old Math.random() version did.
+function fallbackWaveformFor(messageId: string): number[] {
+  let seed = 0;
+  for (let i = 0; i < messageId.length; i++) seed = (seed * 31 + messageId.charCodeAt(i)) >>> 0;
+  const bars: number[] = [];
+  for (let i = 0; i < WAVEFORM_BAR_COUNT; i++) {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    bars.push(0.25 + (seed % 1000) / 1000 * 0.6);
+  }
+  return bars;
+}
+
 export default function ConversationScreen() {
   const route = useRoute<RouteProps>();
   const navigation = useNavigation<NavigationProp>();
@@ -153,6 +193,12 @@ export default function ConversationScreen() {
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
   const previewSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const previewSoundSubRef = useRef<{ remove: () => void } | null>(null);
+  // Real waveform data — captured from the recorder's actual metering
+  // (audio level) readings while recording, not a placeholder. Downsampled
+  // to a fixed number of bars on stop; see stopVoiceRecording.
+  const recordingLevelsRef = useRef<number[]>([]);
+  const [pendingRecordingWaveform, setPendingRecordingWaveform] = useState<number[]>([]);
+  const [previewPlaybackProgress, setPreviewPlaybackProgress] = useState(0);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [showMessageOptions, setShowMessageOptions] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -256,9 +302,19 @@ export default function ConversationScreen() {
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  // Polls the recorder's real audio level (metering, in dBFS — roughly
+  // -50 silence to 0 loudest) every 100ms while recording. This is what
+  // drives the waveform preview after stopping — real captured amplitude,
+  // not a random placeholder.
+  const recorderState = useAudioRecorderState(audioRecorder, 100);
+  useEffect(() => {
+    if (!isRecording || typeof recorderState.metering !== 'number') return;
+    recordingLevelsRef.current.push(recorderState.metering);
+  }, [isRecording, recorderState.metering]);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [playingMessageProgress, setPlayingMessageProgress] = useState(0);
   const messageSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const messageSoundSubRef = useRef<{ remove: () => void } | null>(null);
   const [showGifPicker, setShowGifPicker] = useState(false);
@@ -1801,7 +1857,7 @@ export default function ConversationScreen() {
     }
   };
 
-  const uploadAndSendMedia = async (uri: string, type: 'image' | 'video' | 'audio' | 'file', fileName?: string) => {
+  const uploadAndSendMedia = async (uri: string, type: 'image' | 'video' | 'audio' | 'file', fileName?: string, waveform?: number[]) => {
     setIsSending(true);
     haptics.medium();
 
@@ -1822,6 +1878,7 @@ export default function ConversationScreen() {
             token,
             apiBaseUrl: baseUrl,
             name: fileName,
+            waveform,
           });
           const envelopeText = buildMediaEnvelope(envelope);
 
@@ -2149,7 +2206,10 @@ export default function ConversationScreen() {
       }
 
       try {
-        await audioRecorder.prepareToRecordAsync(RecordingPresets.HIGH_QUALITY);
+        // isMeteringEnabled turns on real-time audio-level readings
+        // (recorderState.metering below) — what the waveform preview is
+        // built from after stopping.
+        await audioRecorder.prepareToRecordAsync({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
       } catch (e: any) {
         console.error('prepareToRecordAsync failed:', e);
         Alert.alert(
@@ -2159,6 +2219,7 @@ export default function ConversationScreen() {
         return;
       }
 
+      recordingLevelsRef.current = [];
       audioRecorder.record();
       setIsRecording(true);
       setRecordingDuration(0);
@@ -2194,6 +2255,7 @@ export default function ConversationScreen() {
 
       if (uri) {
         haptics.success();
+        setPendingRecordingWaveform(downsampleWaveform(recordingLevelsRef.current));
         setPendingRecordingUri(uri);
         setPendingRecordingDuration(duration);
       } else {
@@ -2230,8 +2292,14 @@ export default function ConversationScreen() {
 
       const player = createAudioPlayer({ uri: pendingRecordingUri });
       previewSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
+        // Real playback position, not a guess — drives the waveform's
+        // "played so far" fill as the recording actually plays.
+        if (status.duration > 0) {
+          setPreviewPlaybackProgress(Math.min(1, status.currentTime / status.duration));
+        }
         if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
           setIsPlayingPreview(false);
+          setPreviewPlaybackProgress(0);
         }
       });
       previewSoundRef.current = player;
@@ -2264,6 +2332,8 @@ export default function ConversationScreen() {
       setPendingRecordingUri(null);
       setPendingRecordingDuration(0);
       setRecordingDuration(0);
+      setPendingRecordingWaveform([]);
+      setPreviewPlaybackProgress(0);
       haptics.warning();
     } catch (error) {
       console.error('Failed to delete preview:', error);
@@ -2289,13 +2359,16 @@ export default function ConversationScreen() {
       setIsPlayingPreview(false);
 
       const uri = pendingRecordingUri;
+      const waveform = pendingRecordingWaveform;
       console.log('Sending voice message from URI:', uri);
-      
+
       setPendingRecordingUri(null);
       setPendingRecordingDuration(0);
       setRecordingDuration(0);
+      setPendingRecordingWaveform([]);
+      setPreviewPlaybackProgress(0);
 
-      await uploadAndSendMedia(uri, 'audio');
+      await uploadAndSendMedia(uri, 'audio', undefined, waveform);
       haptics.success();
     } catch (error) {
       console.error('Failed to send recording:', error);
@@ -2574,6 +2647,7 @@ export default function ConversationScreen() {
       if (playingMessageId === messageId && messageSoundRef.current) {
         messageSoundRef.current.pause();
         setPlayingMessageId(null);
+        setPlayingMessageProgress(0);
         return;
       }
 
@@ -2612,13 +2686,18 @@ export default function ConversationScreen() {
       // end-of-track event so the icon flips back and the following tap
       // replays immediately.
       messageSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
+        if (status.duration > 0) {
+          setPlayingMessageProgress(Math.min(1, status.currentTime / status.duration));
+        }
         if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
           setPlayingMessageId((prev) => (prev === messageId ? null : prev));
+          setPlayingMessageProgress(0);
         }
       });
       player.play();
       messageSoundRef.current = player;
       setPlayingMessageId(messageId);
+      setPlayingMessageProgress(0);
       haptics.light();
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
@@ -3652,19 +3731,23 @@ export default function ConversationScreen() {
                   />
                 </Pressable>
                 <View style={styles.waveformPlaceholder}>
-                  {[...Array(20)].map((_, i) => (
-                    <View
-                      key={i}
-                      style={[
-                        styles.waveformBar,
-                        {
-                          height: 8 + Math.random() * 16,
-                          backgroundColor: isOwn ? 'rgba(255,255,255,0.5)' : theme.textSecondary,
-                          opacity: playingMessageId === item.id ? 1 : 0.6,
-                        },
-                      ]}
-                    />
-                  ))}
+                  {(mediaEnvelope?.wf && mediaEnvelope.wf.length > 0 ? mediaEnvelope.wf : fallbackWaveformFor(item.id)).map((level, i, arr) => {
+                    const isPlaying = playingMessageId === item.id;
+                    const played = isPlaying && i / arr.length <= playingMessageProgress;
+                    return (
+                      <View
+                        key={i}
+                        style={[
+                          styles.waveformBar,
+                          {
+                            height: 8 + level * 16,
+                            backgroundColor: isOwn ? 'rgba(255,255,255,0.5)' : theme.textSecondary,
+                            opacity: isPlaying ? (played ? 1 : 0.4) : 0.6,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
                 </View>
                 <ThemedText style={[styles.voiceDuration, { color: isOwn ? 'rgba(255,255,255,0.8)' : theme.textSecondary }]}>
                   {displayContent || '0:00'}
@@ -4191,19 +4274,26 @@ export default function ConversationScreen() {
               <Feather name={isPlayingPreview ? "pause" : "play"} size={20} color="#fff" />
             </Pressable>
             <View style={styles.previewWaveform}>
-              {[...Array(20)].map((_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.waveformBar,
-                    {
-                      height: 4 + Math.random() * 16,
-                      backgroundColor: theme.primary,
-                      opacity: isPlayingPreview ? 1 : 0.5,
-                    },
-                  ]}
-                />
-              ))}
+              {(pendingRecordingWaveform.length > 0 ? pendingRecordingWaveform : new Array(WAVEFORM_BAR_COUNT).fill(0.3)).map((level, i, arr) => {
+                // Real amplitude captured while recording. Played bars fill
+                // solid; not-yet-played bars stay dim — a genuine progress
+                // indicator tied to actual playback position, not a static
+                // dim/bright toggle.
+                const played = isPlayingPreview && i / arr.length <= previewPlaybackProgress;
+                return (
+                  <View
+                    key={i}
+                    style={[
+                      styles.waveformBar,
+                      {
+                        height: 4 + level * 16,
+                        backgroundColor: theme.primary,
+                        opacity: isPlayingPreview ? (played ? 1 : 0.35) : 0.5,
+                      },
+                    ]}
+                  />
+                );
+              })}
             </View>
             <ThemedText style={[styles.previewDuration, { color: theme.text }]}>
               {formatRecordingTime(pendingRecordingDuration)}
