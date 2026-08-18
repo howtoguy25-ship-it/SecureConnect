@@ -210,7 +210,15 @@ export default function VerifyCodeScreen() {
               onKeyPress={(e) => handleKeyPress(e, index)}
               keyboardType="number-pad"
               maxLength={6}
-              selectTextOnFocus
+              // No selectTextOnFocus: on a single already-filled digit box,
+              // it triggered iOS's native text-selection UI (blue drag
+              // handles + copy/paste callout) on tap -- looked like a
+              // broken "copy" popup on what's meant to be a simple
+              // auto-advancing OTP box. handleCodeChange already replaces
+              // the digit outright, so selecting-before-typing was never
+              // needed. contextMenuHidden suppresses the long-press
+              // select/copy/paste menu for the same reason.
+              contextMenuHidden
               editable={!isLoading}
               autoFocus={index === 0}
             />
