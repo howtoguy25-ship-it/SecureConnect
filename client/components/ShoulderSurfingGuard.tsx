@@ -357,17 +357,27 @@ export function ShoulderSurfingGuard() {
 }
 
 const styles = StyleSheet.create({
+  // A camera view positioned thousands of pixels off-screen at a near-zero
+  // (2x2) size is a real risk on iOS: AVFoundation's capture session can
+  // fail to attach/start properly for a view that never gets a normal
+  // layout pass, which would make every sample silently fail (swallowed by
+  // the try/catch below) with zero visible symptom — exactly what "tested
+  // with someone in frame, nothing happened" looks like. A normal-sized
+  // view kept on-screen but invisible (opacity 0, no pointer events, drawn
+  // behind everything else) still can't be seen or interacted with, but
+  // gets the same layout/attach behavior as any other camera preview.
   hiddenCameraWrap: {
     position: 'absolute',
-    top: -2000,
-    left: -2000,
-    width: 2,
-    height: 2,
+    top: 0,
+    left: 0,
+    width: 100,
+    height: 100,
     opacity: 0,
+    zIndex: -1,
   },
   hiddenCamera: {
-    width: 2,
-    height: 2,
+    width: 100,
+    height: 100,
   },
   peekBanner: {
     position: 'absolute',

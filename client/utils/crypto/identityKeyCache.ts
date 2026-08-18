@@ -40,6 +40,17 @@ async function fetchIdentityKeys(userId: string): Promise<CachedIdentityKeys> {
       identityPublicKey: typeof identityPublicKey === "string" ? naclUtil.decodeBase64(identityPublicKey) : null,
       signingPublicKey: typeof signingPublicKey === "string" ? naclUtil.decodeBase64(signingPublicKey) : null,
     };
+    // signingPublicKey is a NOT NULL column server-side for every
+    // registered device — the only way we'd get identityPublicKey back
+    // without it is a server that hasn't deployed the route returning it
+    // yet (see server/routes.ts), not a real "no signing key" state. Don't
+    // cache that half-answer: caching it would make every future call
+    // (including a user tapping "Retry") return this same stale null from
+    // memory forever, even after the server catches up, until the app is
+    // force-quit and reopened.
+    if (result.identityPublicKey && !result.signingPublicKey) {
+      return result;
+    }
     identityKeyCache.set(userId, result);
     return result;
   } catch {
