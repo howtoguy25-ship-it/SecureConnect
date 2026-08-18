@@ -167,7 +167,22 @@ export function initVoipCalling() {
     answeredCalls.delete(callUUID);
   });
 
-  VoipPush.registerVoipToken();
+  // Deliberately NOT calling VoipPush.registerVoipToken() here. That
+  // method (react-native-voip-push-notification's own legacy API) creates
+  // its OWN PKPushRegistry and points its delegate straight at
+  // `RCTSharedApplication().delegate` — i.e. the app's actual
+  // UIApplicationDelegate (AppDelegate.swift), on the assumption that
+  // AppDelegate itself was hand-edited to conform to PKPushRegistryDelegate.
+  // Ours isn't — plugins/withCallKeepVoip.js registers PushKit itself via a
+  // self-contained native Objective-C handler instead (see that file), and
+  // that handler already forwards credentials/pushes to
+  // RNVoipPushNotificationManager's class methods, which is what actually
+  // drives the "register"/"notification" JS events above. Calling
+  // registerVoipToken() too creates a second, competing PKPushRegistry
+  // whose delegate (AppDelegate) doesn't implement the protocol — Apple's
+  // very first didUpdatePushCredentials callback on it throws
+  // "unrecognized selector" and crashes the app on launch. This crashed
+  // build 123 in production; do not re-add this call.
 }
 
 async function registerVoipTokenWithServer(voipPushToken: string) {
