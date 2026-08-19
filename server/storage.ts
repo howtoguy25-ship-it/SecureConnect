@@ -221,6 +221,7 @@ export class DatabaseStorage implements IStorage {
       unreadCount: conversationParticipants.unreadCount,
       isArchived: conversationParticipants.isArchived,
       isMuted: conversationParticipants.isMuted,
+      isLocked: conversationParticipants.isLocked,
       folder: conversationParticipants.folder,
       convId: conversations.id,
       convNumberType: conversations.numberType,
@@ -306,6 +307,7 @@ export class DatabaseStorage implements IStorage {
       // the decliner) actually removes it from their main list.
       isArchived: p.isArchived ?? false,
       isMuted: p.isMuted ?? false,
+      isLocked: p.isLocked ?? false,
       folder: p.folder || 'none',
     }));
 
@@ -960,6 +962,56 @@ export class DatabaseStorage implements IStorage {
     await db.update(users)
       .set({ lockerPin: null, lockerSalt: null, lockerFailedAttempts: 0, lockerLockedUntil: null })
       .where(eq(users.id, userId));
+  }
+
+  // ─── Locked Chats (build 133) ────────────────────────────────────────────
+  // A separate PIN from Hidden Locker's — gates visibility of individually
+  // locked conversations rather than a re-encrypted vault, so the lockout
+  // ladder here is non-destructive (no wipe tier).
+  async setChatLockPin(userId: string, pinHash: string): Promise<void> {
+    await db.update(users)
+      .set({ chatLockPinHash: pinHash, chatLockFailedAttempts: 0, chatLockLockedUntil: null })
+      .where(eq(users.id, userId));
+  }
+
+  async bumpChatLockFailedAttempts(userId: string): Promise<{ attempts: number; lockedUntil: Date | null }> {
+    const [user] = await db.select({
+      a: users.chatLockFailedAttempts,
+    }).from(users).where(eq(users.id, userId));
+    const attempts = (user?.a ?? 0) + 1;
+    // Ladder: 5 → 30s, 10 → 5min, 15 → 30min, 20+ → 24h (capped, non-destructive).
+    let lockedUntil: Date | null = null;
+    if (attempts >= 20) lockedUntil = new Date(Date.now() + 24 * 60 * 60_000);
+    else if (attempts >= 15) lockedUntil = new Date(Date.now() + 30 * 60_000);
+    else if (attempts >= 10) lockedUntil = new Date(Date.now() + 5 * 60_000);
+    else if (attempts >= 5) lockedUntil = new Date(Date.now() + 30_000);
+    await db.update(users)
+      .set({ chatLockFailedAttempts: attempts, chatLockLockedUntil: lockedUntil })
+      .where(eq(users.id, userId));
+    return { attempts, lockedUntil };
+  }
+
+  async resetChatLockFailedAttempts(userId: string): Promise<void> {
+    await db.update(users)
+      .set({ chatLockFailedAttempts: 0, chatLockLockedUntil: null })
+      .where(eq(users.id, userId));
+  }
+
+  async getChatLockLockoutState(userId: string): Promise<{ attempts: number; lockedUntil: Date | null }> {
+    const [user] = await db.select({
+      a: users.chatLockFailedAttempts,
+      u: users.chatLockLockedUntil,
+    }).from(users).where(eq(users.id, userId));
+    return { attempts: user?.a ?? 0, lockedUntil: user?.u ?? null };
+  }
+
+  async lockConversation(conversationId: string, userId: string, locked: boolean): Promise<void> {
+    await db.update(conversationParticipants)
+      .set({ isLocked: locked })
+      .where(and(
+        eq(conversationParticipants.conversationId, conversationId),
+        eq(conversationParticipants.userId, userId)
+      ));
   }
 
   async getAnnouncementStats(): Promise<{ activeUsers: number; totalUsers: number; recentMessage: string }> {

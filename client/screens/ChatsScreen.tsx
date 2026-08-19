@@ -45,6 +45,7 @@ interface Conversation {
   unreadCount: number;
   isArchived?: boolean;
   isMuted?: boolean;
+  isLocked?: boolean;
   folder?: string;
   isPendingRequest?: boolean;
 }
@@ -212,6 +213,9 @@ export default function ChatsScreen() {
   }, [user?.id]);
 
   const filteredConversations = conversations.filter((conv) => {
+    // Locked chats never appear in the main list or Archived view — only
+    // inside the PIN-gated Locked Chats screen.
+    if (conv.isLocked) return false;
     if (showArchived) return conv.isArchived === true;
     if (conv.isArchived) return false;
     if (showUnreadOnly && conv.unreadCount <= 0) return false;
@@ -219,9 +223,10 @@ export default function ChatsScreen() {
     return conv.folder === activeFolder;
   });
 
-  const unreadTotal = conversations.filter((c) => !c.isArchived && c.unreadCount > 0).length;
+  const unreadTotal = conversations.filter((c) => !c.isArchived && !c.isLocked && c.unreadCount > 0).length;
 
-  const archivedCount = conversations.filter((c) => c.isArchived).length;
+  const archivedCount = conversations.filter((c) => c.isArchived && !c.isLocked).length;
+  const lockedCount = conversations.filter((c) => c.isLocked).length;
 
   // Hide the floating "compose" button only on the true empty welcome state —
   // i.e. user has zero conversations at all (not just an empty filter view).
@@ -305,6 +310,11 @@ export default function ChatsScreen() {
     setActionSheetConv(conv);
   }, []);
 
+  const handleLockChat = useCallback((conv: Conversation) => {
+    setActionSheetConv(null);
+    navigation.navigate("LockedChats", { lockConversationId: conv.id });
+  }, [navigation]);
+
   const renderConversation = useCallback(({ item }: { item: Conversation }) => (
     <ConversationItem
       item={item}
@@ -376,13 +386,25 @@ export default function ChatsScreen() {
               </ThemedText>
             </Pressable>
           </View>
-          {archivedCount > 0 && (
-            <Pressable style={styles.archivedButton} onPress={() => setShowArchived(true)}>
-              <Feather name="archive" size={16} color={theme.textSecondary} />
-              <ThemedText style={{ color: theme.textSecondary, marginLeft: Spacing.xs }}>
-                Archived ({archivedCount})
-              </ThemedText>
-            </Pressable>
+          {(archivedCount > 0 || lockedCount > 0) && (
+            <View style={styles.secondaryRow}>
+              {archivedCount > 0 && (
+                <Pressable style={styles.archivedButton} onPress={() => setShowArchived(true)}>
+                  <Feather name="archive" size={16} color={theme.textSecondary} />
+                  <ThemedText style={{ color: theme.textSecondary, marginLeft: Spacing.xs }}>
+                    Archived ({archivedCount})
+                  </ThemedText>
+                </Pressable>
+              )}
+              {lockedCount > 0 && (
+                <Pressable style={styles.archivedButton} onPress={() => navigation.navigate("LockedChats", {})}>
+                  <Feather name="lock" size={16} color={theme.textSecondary} />
+                  <ThemedText style={{ color: theme.textSecondary, marginLeft: Spacing.xs }}>
+                    Locked ({lockedCount})
+                  </ThemedText>
+                </Pressable>
+              )}
+            </View>
           )}
         </>
       )}
@@ -594,6 +616,16 @@ export default function ChatsScreen() {
                     <Feather name={sheetConv.isArchived ? "arrow-up-circle" : "archive"} size={16} color="#fff" />
                   </View>
                   <ThemedText type="body">{sheetConv.isArchived ? "Unarchive Chat" : "Archive Chat"}</ThemedText>
+                </Pressable>
+
+                <Pressable
+                  style={styles.sheetRow}
+                  onPress={() => handleLockChat(sheetConv)}
+                >
+                  <View style={[styles.sheetIconBg, { backgroundColor: "#5856D6" }]}>
+                    <Feather name="lock" size={16} color="#fff" />
+                  </View>
+                  <ThemedText type="body">Lock Chat</ThemedText>
                 </Pressable>
               </>
             ) : null}
@@ -836,6 +868,11 @@ const styles = StyleSheet.create({
   folderTabText: {
     fontSize: 13,
     fontWeight: "500",
+  },
+  secondaryRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: Spacing.lg,
   },
   archivedButton: {
     flexDirection: "row",

@@ -45,6 +45,7 @@ import StoryPrivacyScreen from "@/screens/StoryPrivacyScreen";
 import StoryContactPickerScreen from "@/screens/StoryContactPickerScreen";
 import SafetyNumberScreen from "@/screens/SafetyNumberScreen";
 import AppLockSettingsScreen from "@/screens/AppLockSettingsScreen";
+import LockedChatsScreen from "@/screens/LockedChatsScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { useAuth } from "@/contexts/AuthContext";
 import { View } from "react-native";
@@ -105,6 +106,7 @@ export type RootStackParamList = {
   StoryContactPicker: { kind: "except" | "only" };
   SafetyNumber: { userId: string; userName: string };
   AppLockSettings: undefined;
+  LockedChats: { lockConversationId?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -454,6 +456,11 @@ export default function RootStackNavigator() {
             name="AppLockSettings"
             component={AppLockSettingsScreen}
             options={{ headerTitle: "App Lock" }}
+          />
+          <Stack.Screen
+            name="LockedChats"
+            component={LockedChatsScreen}
+            options={{ headerTitle: "Locked Chats" }}
           />
         </>
       )}

@@ -19,6 +19,14 @@ export const users = pgTable("users", {
   lockerSalt: text("locker_salt"),
   lockerFailedAttempts: integer("locker_failed_attempts").default(0),
   lockerLockedUntil: timestamp("locker_locked_until"),
+  // ── Locked Chats (build 133) ────────────────────────────────────────────
+  // A separate PIN from Hidden Locker's — this one just gates *visibility*
+  // of individually-locked conversations (conversationParticipants.isLocked
+  // below), not a re-encrypted vault, so no client-derived-key salt is
+  // needed here.
+  chatLockPinHash: text("chat_lock_pin_hash"),
+  chatLockFailedAttempts: integer("chat_lock_failed_attempts").default(0),
+  chatLockLockedUntil: timestamp("chat_lock_locked_until"),
   publicKey: text("public_key"),
   // ── Third-party sign-in linking (build 132) ─────────────────────────────
   // Phone number stays the account's real identity (contact discovery,
@@ -166,6 +174,7 @@ export const conversationParticipants = pgTable("conversation_participants", {
   unreadCount: integer("unread_count").default(0),
   isArchived: boolean("is_archived").default(false),
   isMuted: boolean("is_muted").default(false),
+  isLocked: boolean("is_locked").default(false),
   folder: text("folder").default("none"), // 'none' | 'randoms' | 'friends' | 'family'
   joinedAt: timestamp("joined_at").defaultNow(),
 }, (table) => [

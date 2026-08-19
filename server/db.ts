@@ -104,6 +104,18 @@ export async function ensureUserRecoverySchema(): Promise<void> {
     await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users (username);
     `);
+    // Locked Chats (build 133): per-chat lock flag + a separate chat-lock
+    // PIN from Hidden Locker's.
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS chat_lock_pin_hash text,
+        ADD COLUMN IF NOT EXISTS chat_lock_failed_attempts integer DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS chat_lock_locked_until timestamp;
+    `);
+    await pool.query(`
+      ALTER TABLE conversation_participants
+        ADD COLUMN IF NOT EXISTS is_locked boolean DEFAULT false;
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

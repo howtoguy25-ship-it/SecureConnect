@@ -4153,6 +4153,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Locked Chats (build 133) ────────────────────────────────────────────
+  // A separate PIN from Hidden Locker's — no VIP gate, no salt/derive-key
+  // step, since it only controls whether individually-locked conversations
+  // are visible, not an encrypted vault.
+  app.get('/api/chat-lock/has-pin', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      res.json({ hasPin: !!user?.chatLockPinHash });
+    } catch (error) {
+      console.error('Error checking chat-lock pin:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/chat-lock/pin', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (user?.chatLockPinHash) {
+        return res.status(409).json({ error: 'PIN already configured — use /api/chat-lock/change-pin' });
+      }
+      const { pin } = req.body ?? {};
+      if (typeof pin !== 'string' || pin.length < 4) {
+        return res.status(400).json({ error: 'PIN must be at least 4 characters' });
+      }
+      const hashedPin = await bcrypt.hash(pin, 10);
+      await storage.setChatLockPin(req.userId!, hashedPin);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error setting chat-lock pin:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/chat-lock/verify-pin', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user?.chatLockPinHash) {
+        return res.json({ valid: false, hasPin: false });
+      }
+      const lockState = await storage.getChatLockLockoutState(req.userId!);
+      if (lockState.lockedUntil && lockState.lockedUntil.getTime() > Date.now()) {
+        return res.status(429).json({
+          valid: false,
+          hasPin: true,
+          lockedUntil: lockState.lockedUntil.toISOString(),
+          error: 'Locked Chats is temporarily locked due to failed attempts',
+        });
+      }
+      const { pin } = req.body ?? {};
+      if (!pin) {
+        return res.json({ valid: false, hasPin: true });
+      }
+      const valid = await bcrypt.compare(pin, user.chatLockPinHash);
+      if (!valid) {
+        const bump = await storage.bumpChatLockFailedAttempts(req.userId!);
+        return res.status(401).json({
+          valid: false,
+          hasPin: true,
+          attempts: bump.attempts,
+          lockedUntil: bump.lockedUntil?.toISOString() ?? null,
+        });
+      }
+      await storage.resetChatLockFailedAttempts(req.userId!);
+      res.json({ valid: true, hasPin: true });
+    } catch (error) {
+      console.error('Error verifying chat-lock pin:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/chat-lock/change-pin', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { currentPin, newPin } = req.body ?? {};
+      if (typeof newPin !== 'string' || newPin.length < 4) {
+        return res.status(400).json({ error: 'New PIN must be at least 4 characters' });
+      }
+      const user = await storage.getUser(req.userId!);
+      if (!user?.chatLockPinHash) {
+        return res.status(400).json({ error: 'No PIN is currently configured' });
+      }
+      const lockState = await storage.getChatLockLockoutState(req.userId!);
+      if (lockState.lockedUntil && lockState.lockedUntil.getTime() > Date.now()) {
+        return res.status(429).json({
+          error: 'Locked Chats is temporarily locked due to failed attempts',
+          lockedUntil: lockState.lockedUntil.toISOString(),
+        });
+      }
+      const valid = await bcrypt.compare(currentPin, user.chatLockPinHash);
+      if (!valid) {
+        const bump = await storage.bumpChatLockFailedAttempts(req.userId!);
+        return res.status(401).json({
+          error: 'Current PIN is incorrect',
+          attempts: bump.attempts,
+          lockedUntil: bump.lockedUntil?.toISOString() ?? null,
+        });
+      }
+      await storage.resetChatLockFailedAttempts(req.userId!);
+      const hashedPin = await bcrypt.hash(newPin, 10);
+      await storage.setChatLockPin(req.userId!, hashedPin);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error changing chat-lock pin:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/conversations/:conversationId/lock', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { conversationId } = req.params;
+      await storage.lockConversation(conversationId, req.userId!, true);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error locking conversation:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/conversations/:conversationId/unlock', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { conversationId } = req.params;
+      await storage.lockConversation(conversationId, req.userId!, false);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error unlocking conversation:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // Re-encrypt a legacy plaintext item under the user's master key.  Client
   // sends ciphertext+nonce, server atomically swaps the plaintext columns to
   // null.  Bounded by the same VIP + ownership check as add.
