@@ -9,6 +9,7 @@ import {
   Platform,
   Switch,
   RefreshControl,
+  TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -32,11 +33,26 @@ function showAlert(title: string, message: string) {
   Alert.alert(title, message);
 }
 
+function showConfirm(title: string, message: string, onConfirm: () => void, confirmLabel = "Confirm") {
+  if (Platform.OS === "web") {
+    try {
+      if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+    } catch {}
+    return;
+  }
+  Alert.alert(title, message, [
+    { text: "Cancel", style: "cancel" },
+    { text: confirmLabel, style: "destructive", onPress: onConfirm },
+  ]);
+}
+
 interface AdminUser {
   id: string;
   phoneNumber: string;
   displayName: string;
   createdAt: string;
+  isSuspended: boolean;
+  suspensionReason: string | null;
 }
 
 interface AdminReport {
@@ -86,6 +102,11 @@ export default function AdminDashboardScreen() {
   const [reports, setReports] = useState<AdminReport[] | null>(null);
   const [loadingReports, setLoadingReports] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [reportsFilter, setReportsFilter] = useState<"pending" | "all">("pending");
+
+  const [broadcastText, setBroadcastText] = useState("");
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [suspendingUserId, setSuspendingUserId] = useState<string | null>(null);
 
   const loadReviewMode = useCallback(async () => {
     try {
@@ -99,10 +120,12 @@ export default function AdminDashboardScreen() {
     }
   }, []);
 
-  const loadReports = useCallback(async () => {
+  const loadReports = useCallback(async (filter: "pending" | "all") => {
+    setLoadingReports(true);
     try {
+      const statusParam = filter === "pending" ? "&status=pending" : "";
       const res = await fetchWithTimeout(
-        new URL("/api/admin/reports?status=pending&limit=100", getApiUrl()).toString(),
+        new URL(`/api/admin/reports?limit=100${statusParam}`, getApiUrl()).toString(),
         { headers: authHeaders },
       );
       if (res.ok) {
@@ -117,12 +140,13 @@ export default function AdminDashboardScreen() {
 
   useEffect(() => {
     loadReviewMode();
-    loadReports();
-  }, [loadReviewMode, loadReports]);
+    loadReports(reportsFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportsFilter]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadReviewMode(), loadReports()]);
+    await Promise.all([loadReviewMode(), loadReports(reportsFilter)]);
     setRefreshing(false);
   };
 
@@ -170,13 +194,84 @@ export default function AdminDashboardScreen() {
         body: JSON.stringify({ action }),
       });
       if (res.ok) {
-        setReports((prev) => (prev ? prev.filter((r) => r.id !== report.id) : prev));
+        const { report: updated } = await res.json();
+        // Pending view: the report no longer belongs there, drop it. All
+        // view: keep it visible with its new status/action reflected.
+        setReports((prev) => {
+          if (!prev) return prev;
+          if (reportsFilter === "pending") return prev.filter((r) => r.id !== report.id);
+          return prev.map((r) => (r.id === report.id ? { ...r, ...updated } : r));
+        });
       } else {
         showAlert("Error", "Failed to update the report");
       }
     } catch {
       showAlert("Error", "Failed to update the report");
     }
+  };
+
+  const handleSuspendUser = (targetUser: AdminUser) => {
+    const willSuspend = !targetUser.isSuspended;
+    showConfirm(
+      willSuspend ? "Suspend user?" : "Unsuspend user?",
+      willSuspend
+        ? `${targetUser.displayName} (${targetUser.phoneNumber}) will be logged out on every device and unable to sign back in until unsuspended.`
+        : `${targetUser.displayName} (${targetUser.phoneNumber}) will be able to sign in again.`,
+      async () => {
+        setSuspendingUserId(targetUser.id);
+        try {
+          const path = willSuspend ? "suspend" : "unsuspend";
+          const res = await fetchWithTimeout(
+            new URL(`/api/admin/users/${targetUser.id}/${path}`, getApiUrl()).toString(),
+            { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders }, body: JSON.stringify({}) },
+          );
+          if (res.ok) {
+            setUsers((prev) =>
+              prev ? prev.map((u) => (u.id === targetUser.id ? { ...u, isSuspended: willSuspend } : u)) : prev,
+            );
+          } else {
+            showAlert("Error", `Failed to ${willSuspend ? "suspend" : "unsuspend"} user`);
+          }
+        } catch {
+          showAlert("Error", `Failed to ${willSuspend ? "suspend" : "unsuspend"} user`);
+        } finally {
+          setSuspendingUserId(null);
+        }
+      },
+      willSuspend ? "Suspend" : "Unsuspend",
+    );
+  };
+
+  const handleSendBroadcast = () => {
+    const text = broadcastText.trim();
+    if (!text) return;
+    showConfirm(
+      "Send to all users?",
+      `This sends "${text}" as a message from Pryvo Team into every user's chat list. It disappears after 10 minutes (or sooner if they delete it).`,
+      async () => {
+        setSendingBroadcast(true);
+        try {
+          const res = await fetchWithTimeout(new URL("/api/admin/broadcast", getApiUrl()).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            body: JSON.stringify({ message: text }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setBroadcastText("");
+            showAlert("Sent", `Delivered to ${data.sent} of ${data.total} users.`);
+          } else {
+            const data = await res.json().catch(() => ({}));
+            showAlert("Error", data?.error || "Failed to send broadcast");
+          }
+        } catch {
+          showAlert("Error", "Failed to send broadcast");
+        } finally {
+          setSendingBroadcast(false);
+        }
+      },
+      "Send",
+    );
   };
 
   const handleSignOut = () => {
@@ -250,13 +345,35 @@ export default function AdminDashboardScreen() {
           ) : users && users.length > 0 ? (
             users.map((u) => (
               <View key={u.id} style={[styles.userItem, { borderTopColor: theme.border }]}>
-                <View>
-                  <ThemedText type="body" style={{ fontWeight: "500" }}>{u.displayName}</ThemedText>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <ThemedText type="body" style={{ fontWeight: "500" }}>{u.displayName}</ThemedText>
+                    {u.isSuspended ? (
+                      <View style={styles.suspendedBadge}>
+                        <ThemedText type="small" style={{ color: "#FF3B30", fontWeight: "700", fontSize: 10 }}>
+                          SUSPENDED
+                        </ThemedText>
+                      </View>
+                    ) : null}
+                  </View>
                   <ThemedText type="small" style={{ color: theme.textSecondary }}>{u.phoneNumber}</ThemedText>
+                  <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                    Joined {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "N/A"}
+                  </ThemedText>
                 </View>
-                <ThemedText type="small" style={{ color: theme.textSecondary }}>
-                  {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "N/A"}
-                </ThemedText>
+                <Pressable
+                  style={[styles.actionBtn, { backgroundColor: u.isSuspended ? theme.backgroundSecondary : "#FF3B3020" }]}
+                  onPress={() => handleSuspendUser(u)}
+                  disabled={suspendingUserId === u.id}
+                >
+                  {suspendingUserId === u.id ? (
+                    <ActivityIndicator size="small" color={theme.textSecondary} />
+                  ) : (
+                    <ThemedText type="small" style={{ color: u.isSuspended ? theme.text : "#FF3B30" }}>
+                      {u.isSuspended ? "Unsuspend" : "Suspend"}
+                    </ThemedText>
+                  )}
+                </Pressable>
               </View>
             ))
           ) : (
@@ -267,9 +384,29 @@ export default function AdminDashboardScreen() {
         ) : null}
       </View>
 
-      <ThemedText type="small" style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.xl }]}>
-        MODERATION QUEUE — PENDING
-      </ThemedText>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: Spacing.xl, marginBottom: Spacing.sm }}>
+        <ThemedText type="small" style={[styles.sectionTitle, { color: theme.textSecondary, marginBottom: 0 }]}>
+          MODERATION QUEUE
+        </ThemedText>
+        <View style={styles.filterToggle}>
+          <Pressable
+            style={[styles.filterOption, reportsFilter === "pending" && { backgroundColor: theme.primary }]}
+            onPress={() => setReportsFilter("pending")}
+          >
+            <ThemedText type="small" style={{ color: reportsFilter === "pending" ? "#fff" : theme.textSecondary }}>
+              Pending
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            style={[styles.filterOption, reportsFilter === "all" && { backgroundColor: theme.primary }]}
+            onPress={() => setReportsFilter("all")}
+          >
+            <ThemedText type="small" style={{ color: reportsFilter === "all" ? "#fff" : theme.textSecondary }}>
+              All
+            </ThemedText>
+          </Pressable>
+        </View>
+      </View>
       <View style={[styles.card, { backgroundColor: theme.backgroundDefault, paddingVertical: Spacing.sm }]}>
         {loadingReports ? (
           <View style={styles.loadingBlock}>
@@ -278,9 +415,16 @@ export default function AdminDashboardScreen() {
         ) : reports && reports.length > 0 ? (
           reports.map((report) => (
             <View key={report.id} style={[styles.reportItem, { borderTopColor: theme.border }]}>
-              <ThemedText type="body" style={{ fontWeight: "600" }}>
-                {REASON_LABELS[report.reason] || report.reason}
-              </ThemedText>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <ThemedText type="body" style={{ fontWeight: "600" }}>
+                  {REASON_LABELS[report.reason] || report.reason}
+                </ThemedText>
+                {reportsFilter === "all" ? (
+                  <ThemedText type="small" style={{ color: theme.textSecondary, textTransform: "uppercase" }}>
+                    {report.status}
+                  </ThemedText>
+                ) : null}
+              </View>
               <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 2 }}>
                 Reported: {report.reported?.displayName || report.reported?.phoneNumber || "Unknown"}
               </ThemedText>
@@ -292,24 +436,63 @@ export default function AdminDashboardScreen() {
                   "{report.details}"
                 </ThemedText>
               ) : null}
-              <View style={styles.actionRow}>
-                <Pressable style={[styles.actionBtn, { backgroundColor: theme.backgroundSecondary }]} onPress={() => handleReportAction(report, "dismiss")}>
-                  <ThemedText type="small">Dismiss</ThemedText>
-                </Pressable>
-                <Pressable style={[styles.actionBtn, { backgroundColor: theme.backgroundSecondary }]} onPress={() => handleReportAction(report, "warn")}>
-                  <ThemedText type="small">Warn</ThemedText>
-                </Pressable>
-                <Pressable style={[styles.actionBtn, { backgroundColor: "#FF3B3020" }]} onPress={() => handleReportAction(report, "suspend")}>
-                  <ThemedText type="small" style={{ color: "#FF3B30" }}>Suspend</ThemedText>
-                </Pressable>
-              </View>
+              {report.actionTaken ? (
+                <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 4, fontStyle: "italic" }}>
+                  {report.actionTaken}
+                </ThemedText>
+              ) : null}
+              {report.status === "pending" ? (
+                <View style={styles.actionRow}>
+                  <Pressable style={[styles.actionBtn, { backgroundColor: theme.backgroundSecondary }]} onPress={() => handleReportAction(report, "dismiss")}>
+                    <ThemedText type="small">Dismiss</ThemedText>
+                  </Pressable>
+                  <Pressable style={[styles.actionBtn, { backgroundColor: theme.backgroundSecondary }]} onPress={() => handleReportAction(report, "warn")}>
+                    <ThemedText type="small">Warn</ThemedText>
+                  </Pressable>
+                  <Pressable style={[styles.actionBtn, { backgroundColor: "#FF3B3020" }]} onPress={() => handleReportAction(report, "suspend")}>
+                    <ThemedText type="small" style={{ color: "#FF3B30" }}>Suspend</ThemedText>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           ))
         ) : (
           <ThemedText type="small" style={{ color: theme.textSecondary, padding: Spacing.md }}>
-            No pending reports.
+            {reportsFilter === "pending" ? "No pending reports." : "No reports."}
           </ThemedText>
         )}
+      </View>
+
+      <ThemedText type="small" style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.xl }]}>
+        BROADCAST MESSAGE
+      </ThemedText>
+      <View style={[styles.card, { backgroundColor: theme.backgroundDefault, padding: Spacing.md }]}>
+        <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.sm }}>
+          Sends as "Pryvo Team" into every user's chat list. Not end-to-end encrypted -- clearly labeled as an official
+          message, and disappears after 10 minutes (or sooner if the user deletes it).
+        </ThemedText>
+        <TextInput
+          value={broadcastText}
+          onChangeText={setBroadcastText}
+          placeholder="Write an announcement..."
+          placeholderTextColor={theme.textSecondary}
+          multiline
+          maxLength={1000}
+          style={[styles.broadcastInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.backgroundSecondary }]}
+        />
+        <Pressable
+          style={[styles.sendBroadcastBtn, { backgroundColor: theme.primary, opacity: broadcastText.trim() && !sendingBroadcast ? 1 : 0.5 }]}
+          onPress={handleSendBroadcast}
+          disabled={!broadcastText.trim() || sendingBroadcast}
+        >
+          {sendingBroadcast ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <ThemedText type="body" style={{ color: "#fff", fontWeight: "600" }}>
+              Send to All Users
+            </ThemedText>
+          )}
+        </Pressable>
       </View>
 
       <Pressable onPress={handleSignOut} style={styles.signOutLink}>
@@ -378,5 +561,34 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginTop: Spacing.xl,
     padding: Spacing.sm,
+  },
+  suspendedBadge: {
+    backgroundColor: "#FF3B3020",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  filterToggle: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  filterOption: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+  },
+  broadcastInput: {
+    minHeight: 80,
+    borderWidth: 1,
+    borderRadius: BorderRadius.sm,
+    padding: Spacing.md,
+    textAlignVertical: "top",
+    marginBottom: Spacing.sm,
+  },
+  sendBroadcastBtn: {
+    height: Spacing.inputHeight,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

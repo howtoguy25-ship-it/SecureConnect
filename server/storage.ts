@@ -68,7 +68,7 @@ export interface IStorage {
   declineMessageRequest(requestId: string, userId: string): Promise<void>;
   getPendingRequestForRecipient(conversationId: string, receiverUserId: string): Promise<string | null>;
   findUsersByPhoneNumbers(phoneNumbers: string[], excludeUserId: string): Promise<User[]>;
-  listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt'>[]>;
+  listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt' | 'isSuspended' | 'suspensionReason' | 'pushToken' | 'notificationsEnabled'>[]>;
   deleteUserAccount(userId: string): Promise<void>;
 
   // Account deletion (build 62) — two-phase: request → 30-day grace → tombstone.
@@ -1184,12 +1184,16 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt'>[]> {
+  async listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt' | 'isSuspended' | 'suspensionReason' | 'pushToken' | 'notificationsEnabled'>[]> {
     const allUsers = await db.select({
       id: users.id,
       phoneNumber: users.phoneNumber,
       displayName: users.displayName,
       createdAt: users.createdAt,
+      isSuspended: users.isSuspended,
+      suspensionReason: users.suspensionReason,
+      pushToken: users.pushToken,
+      notificationsEnabled: users.notificationsEnabled,
     })
       .from(users)
       .orderBy(desc(users.createdAt));

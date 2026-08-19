@@ -3605,6 +3605,48 @@ export default function ConversationScreen() {
       );
     }
 
+    // ── Admin broadcast bubble ───────────────────────────────────────────
+    // Server-authored, unencrypted (encryptionVersion='none') announcement
+    // from the "Pryvo Team" system account, same mechanism as the
+    // call-event row above. Deliberately NOT rendered like a normal
+    // message bubble -- the megaphone icon + label make clear this is an
+    // official, non-E2EE system message, never mistaken for a real
+    // end-to-end encrypted chat message. Long-press still works for
+    // deleting it early; it also auto-expires via the server's
+    // disappearing-message sweep (set to 10 minutes at send time).
+    if (item.mediaType === 'admin_broadcast') {
+      return (
+        <Pressable
+          onLongPress={() => handleLongPressMessage(item)}
+          delayLongPress={350}
+          style={{
+            alignSelf: 'center',
+            maxWidth: '85%',
+            marginVertical: 6,
+            borderRadius: BorderRadius.lg,
+            paddingHorizontal: Spacing.md,
+            paddingVertical: Spacing.sm,
+            backgroundColor: theme.primary + '18',
+            borderWidth: 1,
+            borderColor: theme.primary + '40',
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <Feather name="volume-2" size={12} color={theme.primary} />
+            <ThemedText style={{ color: theme.primary, fontSize: 11, fontWeight: '700' }}>
+              PRYVO TEAM
+            </ThemedText>
+          </View>
+          <ThemedText style={{ color: theme.text, fontSize: 14, textAlign: 'center' }}>
+            {item.content}
+          </ThemedText>
+          <ThemedText style={{ color: theme.textSecondary, fontSize: 10, textAlign: 'center', marginTop: 4 }}>
+            {formatTime(item.createdAt)}
+          </ThemedText>
+        </Pressable>
+      );
+    }
+
     const rawDisplayContent = isOwn && (item.status === 'sending' || item.status === 'queued')
       ? item.content
       : (decryptedCache[item.id] ?? tryDecrypt(item.content, item.id));

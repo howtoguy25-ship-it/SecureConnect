@@ -2022,6 +2022,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phoneNumber: user.phoneNumber,
         displayName: user.displayName || 'Not set',
         createdAt: user.createdAt,
+        isSuspended: !!user.isSuspended,
+        suspensionReason: user.suspensionReason ?? null,
       })));
     } catch (error) {
       console.error('Error fetching admin users:', error);
@@ -2116,6 +2118,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, report: updated });
     } catch (error) {
       console.error('[ADMIN] action on report failed:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ─── Admin: direct suspend/unsuspend (not tied to a report) ───────────────
+  app.post('/api/admin/users/:id/suspend', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const requestingUser = await storage.getUser(req.userId!);
+      if (!requestingUser || !isOwnerPhone(requestingUser.phoneNumber)) {
+        return res.status(403).json({ error: 'Unauthorized - Owner access only' });
+      }
+      const { id } = req.params;
+      const { reason } = req.body || {};
+      if (reason !== undefined && (typeof reason !== 'string' || reason.length > 500)) {
+        return res.status(400).json({ error: 'reason must be a string of 500 characters or fewer' });
+      }
+      const target = await storage.getUser(id);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      await storage.suspendUser(id, reason || 'Suspended by admin');
+      // Force-disconnect all live sockets for the suspended user (Apple 1.2 ejection).
+      try {
+        if (socketIO) {
+          const sockets = await socketIO.in(id).fetchSockets();
+          for (const s of sockets) {
+            try { s.emit('account-suspended', { reason: reason || 'Suspended by admin' }); } catch {}
+            try { s.disconnect(true); } catch {}
+          }
+        }
+      } catch (e) {
+        console.error('[ADMIN] Failed to disconnect suspended user sockets:', e);
+      }
+      console.log(`[ADMIN][SUSPEND] user=${id} by=${req.userId} (direct, no report)`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[ADMIN] direct suspend failed:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/admin/users/:id/unsuspend', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const requestingUser = await storage.getUser(req.userId!);
+      if (!requestingUser || !isOwnerPhone(requestingUser.phoneNumber)) {
+        return res.status(403).json({ error: 'Unauthorized - Owner access only' });
+      }
+      const { id } = req.params;
+      const target = await storage.getUser(id);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+
+      await storage.unsuspendUser(id);
+      console.log(`[ADMIN][UNSUSPEND] user=${id} by=${req.userId} (direct, no report)`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[ADMIN] direct unsuspend failed:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ─── Admin: broadcast a message from "Pryvo Team" to every user ───────────
+  // Sent as a plaintext (encryptionVersion='none'), server-authored system
+  // message -- same mechanism already used for missed-call event rows, NOT
+  // a substitute for real E2EE chat: it's explicitly labeled and rendered
+  // as an official/system bubble client-side (mediaType='admin_broadcast'),
+  // never pretending to be end-to-end encrypted. Auto-expires 10 minutes
+  // after send via the existing disappearing-message sweep; recipients can
+  // also delete it immediately like any other message.
+  const PRYVO_TEAM_PHONE = '+10000000000';
+  async function getOrCreatePryvoTeamUser() {
+    let team = await storage.getUserByPhone(PRYVO_TEAM_PHONE);
+    if (!team) {
+      team = await storage.createUser({ phoneNumber: PRYVO_TEAM_PHONE, displayName: 'Pryvo Team' } as any);
+    }
+    return team;
+  }
+
+  app.post('/api/admin/broadcast', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const requestingUser = await storage.getUser(req.userId!);
+      if (!requestingUser || !isOwnerPhone(requestingUser.phoneNumber)) {
+        return res.status(403).json({ error: 'Unauthorized - Owner access only' });
+      }
+      const { message } = req.body || {};
+      if (typeof message !== 'string' || !message.trim()) {
+        return res.status(400).json({ error: 'message is required' });
+      }
+      if (message.length > 1000) {
+        return res.status(400).json({ error: 'message must be 1000 characters or fewer' });
+      }
+
+      const team = await getOrCreatePryvoTeamUser();
+      const allUsers = await storage.listAllUsers();
+      const recipients = allUsers.filter((u) => u.id !== team.id && !u.isSuspended);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      let sent = 0;
+      for (const recipient of recipients) {
+        try {
+          const conversation = await storage.getOrCreateConversation(team.id, recipient.id);
+          const broadcastMessage = await storage.createMessage(
+            {
+              conversationId: conversation.id,
+              senderId: team.id,
+              receiverId: recipient.id,
+              content: message.trim(),
+              mediaType: 'admin_broadcast',
+              mediaUrl: null,
+              isHidden: false,
+            } as any,
+            { isEncrypted: false, encryptionVersion: 'none', expiresAt },
+          );
+          if (socketIO) {
+            socketIO.to(`conversation:${conversation.id}`).emit('new-message', broadcastMessage);
+            socketIO.to(recipient.id).emit('new-message', broadcastMessage);
+          }
+          // Notification content is deliberately generic, same policy as
+          // every other push in this app -- never the message body.
+          if (recipient.pushToken && recipient.notificationsEnabled !== false) {
+            sendPushNotification(
+              recipient.pushToken,
+              'Pryvo Team',
+              'New announcement',
+              { type: 'message', conversationId: conversation.id },
+              'message',
+            ).catch(() => {});
+          }
+          sent++;
+        } catch (e) {
+          console.error(`[ADMIN][BROADCAST] failed for user ${recipient.id}:`, e);
+        }
+      }
+
+      console.log(`[ADMIN][BROADCAST] by=${req.userId} sent=${sent}/${recipients.length}`);
+      res.json({ success: true, sent, total: recipients.length });
+    } catch (error) {
+      console.error('[ADMIN] broadcast failed:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
