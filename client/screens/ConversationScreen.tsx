@@ -3998,7 +3998,17 @@ export default function ConversationScreen() {
             // correct once the box actually matches the image's own aspect
             // ratio, since there's no longer any mismatched space to fill.
             <Pressable
-              onPress={() => setFullscreenImageUri(effectiveMediaUrl)}
+              onPress={() => {
+                // A nested Pressable inside the row's own Pressable — without
+                // this check, tapping a photo bubble while selecting messages
+                // opened the fullscreen viewer instead of (de)selecting it,
+                // since this handler fired instead of the row's onPress.
+                if (isSelectMode) {
+                  toggleMessageSelection(item.id);
+                  return;
+                }
+                setFullscreenImageUri(effectiveMediaUrl);
+              }}
               style={[
                 styles.mediaContainer,
                 { backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary },
@@ -4035,7 +4045,16 @@ export default function ConversationScreen() {
             <View>
               <Pressable
                 style={styles.voiceMessageContainer}
-                onPress={() => handleVoicePress(item.id, effectiveMediaUrl!)}
+                onPress={() => {
+                  // Same nested-Pressable issue as the photo viewer above —
+                  // without this, tapping a voice bubble while selecting
+                  // messages started playing it instead of (de)selecting it.
+                  if (isSelectMode) {
+                    toggleMessageSelection(item.id);
+                    return;
+                  }
+                  handleVoicePress(item.id, effectiveMediaUrl!);
+                }}
               >
                 <View style={[styles.playButton, { backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }]}>
                   {loadingVoiceId === item.id ? (
@@ -4150,7 +4169,13 @@ export default function ConversationScreen() {
                   ?? "Original message unavailable");
             return (
               <Pressable
-                onPress={() => handleScrollToMessage(item.replyToMessageId!)}
+                onPress={() => {
+                  if (isSelectMode) {
+                    toggleMessageSelection(item.id);
+                    return;
+                  }
+                  handleScrollToMessage(item.replyToMessageId!);
+                }}
                 style={{
                   borderLeftWidth: 3,
                   borderLeftColor: isOwn ? 'rgba(255,255,255,0.7)' : theme.primary,
