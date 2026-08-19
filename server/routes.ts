@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import fs from "fs";
 import path from "path";
 import { storage } from "./storage";
-import { sendVerificationSMS, generateVerificationCode, getEnabledSmsCountries, isTwilioConfigured, searchAvailableNumbers, provisionPhoneNumber, releasePhoneNumber, validateTwilioWebhookSignature } from "./twilioClient";
+import { sendVerificationSMS, sendPhoneChangeNoticeSMS, generateVerificationCode, getEnabledSmsCountries, isTwilioConfigured, searchAvailableNumbers, provisionPhoneNumber, releasePhoneNumber, validateTwilioWebhookSignature } from "./twilioClient";
 import { verifyAppleIdentityToken, verifyGoogleIdToken, isGoogleSignInConfigured, signOAuthLinkToken, verifyOAuthLinkToken } from "./oauthVerify";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { getAppBaseUrl, getAllowedOrigins } from "./publicUrl";
@@ -1464,6 +1464,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ error: 'That username is already taken.' });
       }
       console.error('Error updating username:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ─── Change Phone Number (build 133) ───────────────────────────────────
+  // The account's real identity is its phone number, so this is a real SMS
+  // OTP proof of ownership of the NEW number — same rate limiting and
+  // verification-code machinery as sign-in — gated behind the caller
+  // already being authenticated as the account being changed.
+  app.post('/api/auth/change-phone/send-code', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { newPhoneNumber: rawPhone } = req.body ?? {};
+      if (!rawPhone || typeof rawPhone !== 'string') {
+        return res.status(400).json({ error: 'Please enter a phone number.' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Please enter a valid phone number with country code.' });
+      }
+      const newPhoneNumber = `+${digitsOnly}`;
+
+      const currentUser = await storage.getUser(req.userId!);
+      if (!currentUser) return res.status(404).json({ error: 'User not found' });
+      if (newPhoneNumber === currentUser.phoneNumber) {
+        return res.status(400).json({ error: 'That\'s already your current phone number.' });
+      }
+
+      const existing = await storage.getUserByPhone(newPhoneNumber);
+      if (existing) {
+        return res.status(409).json({ error: 'That phone number is already registered to another account.' });
+      }
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = sendCodeRateLimit(() => `change-phone|${ipKey}|${req.userId}|${newPhoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const code = generateVerificationCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      await storage.createVerificationCode(newPhoneNumber, code, expiresAt);
+
+      if (isTwilioConfigured()) {
+        const result = await sendVerificationSMS(newPhoneNumber, code);
+        if (!result.success) {
+          return res.status(400).json({ error: result.userMessage || 'Failed to send verification code' });
+        }
+      } else {
+        console.log(`[CHANGE PHONE] Code for ${newPhoneNumber}: ${code}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error sending change-phone code:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/auth/change-phone/verify', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { newPhoneNumber: rawPhone, code } = req.body ?? {};
+      if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
+        return res.status(400).json({ error: 'Phone number and code are required' });
+      }
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      const newPhoneNumber = `+${digitsOnly}`;
+
+      const ipKey = getClientIp(req) ?? "unknown-ip";
+      const allowed = verifyCodeRateLimit(() => `change-phone|${ipKey}|${req.userId}|${newPhoneNumber}`, req, res);
+      if (!allowed) return;
+
+      const vc = await storage.getVerificationCode(newPhoneNumber, code);
+      if (!vc || new Date(vc.expiresAt).getTime() < Date.now()) {
+        return res.status(400).json({ error: 'Invalid or expired verification code' });
+      }
+
+      // Re-check uniqueness right before committing — closes the race where
+      // someone else claimed the number between send-code and now.
+      const existing = await storage.getUserByPhone(newPhoneNumber);
+      if (existing) {
+        return res.status(409).json({ error: 'That phone number is already registered to another account.' });
+      }
+
+      const oldUser = await storage.getUser(req.userId!);
+      if (!oldUser) return res.status(404).json({ error: 'User not found' });
+
+      await storage.markCodeVerified(vc.id);
+      const updated = await storage.updateUser(req.userId!, { phoneNumber: newPhoneNumber });
+      if (!updated) return res.status(404).json({ error: 'User not found' });
+
+      // Best-effort security notice to the number being replaced — never
+      // blocks the change itself on SMS delivery.
+      if (isTwilioConfigured() && oldUser.phoneNumber && !oldUser.phoneNumber.startsWith('deleted:')) {
+        sendPhoneChangeNoticeSMS(oldUser.phoneNumber).catch((e) => {
+          console.error('Error sending phone-change notice:', e);
+        });
+      }
+
+      res.json({ success: true, phoneNumber: updated.phoneNumber });
+    } catch (error) {
+      console.error('Error verifying change-phone code:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

@@ -80,6 +80,12 @@ export default function SecurityScreen() {
 
       <View style={styles.section}>
         <Row
+          icon="phone"
+          label="Change Phone Number"
+          subtitle="Update the number linked to your account"
+          onPress={() => navigation.navigate("ChangePhoneNumber")}
+        />
+        <Row
           icon="shield"
           label="Safe Code"
           subtitle="Personal recovery code for your account"

@@ -218,6 +218,28 @@ export async function sendVerificationSMS(phoneNumber: string, code: string): Pr
   }
 }
 
+// Security notice to the OLD number when a phone-number change completes —
+// best-effort only (caller swallows failures) so a delivery hiccup here
+// never blocks the actual number change.
+export async function sendPhoneChangeNoticeSMS(oldPhoneNumber: string): Promise<SendSMSResult> {
+  try {
+    const client = getTwilioClient();
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.Twilio_Phone_Number;
+    if (!fromNumber) {
+      return { success: false, error: 'TWILIO_PHONE_NUMBER not set' };
+    }
+    await client.messages.create({
+      body: `Your Pryvo account's phone number was just changed. If this wasn't you, contact support immediately.`,
+      from: fromNumber,
+      to: oldPhoneNumber,
+    });
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to send phone-change notice SMS:', error);
+    return { success: false, error: error?.message || 'Unknown error' };
+  }
+}
+
 export function generateVerificationCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
