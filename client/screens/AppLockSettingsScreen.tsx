@@ -54,6 +54,13 @@ export default function AppLockSettingsScreen() {
   const [firstPin, setFirstPin] = useState("");
   const [pinInput, setPinInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // PIN hashing on-device is a synchronous CPU-bound loop (Hermes has no
+  // WebCrypto to offload it to) that can take a visible moment — without
+  // this, a double-tap during that window fires handleVerifyCurrent /
+  // handleConfirmPin twice concurrently, racing two writes to the same
+  // SecureStore record and reading as the screen "freezing" or the button
+  // "not working" when really it's just mid-verify.
+  const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
     const settings = await getAppLockSettings();
@@ -99,25 +106,31 @@ export default function AppLockSettingsScreen() {
   };
 
   const handleVerifyCurrent = async (pin: string) => {
-    const ok = await verifyAppLockPin(pin);
-    if (!ok) {
-      // verifyAppLockPin() itself returns false without penalty while
-      // locked out, so a stale "Incorrect PIN" would mislead someone whose
-      // PIN is actually right but is mid-cooldown from earlier failed
-      // attempts — check lockout state to give the honest reason.
-      const remaining = await getLockoutSecondsRemaining();
-      setError(remaining > 0 ? `Too many attempts. Try again in ${remaining}s.` : "Incorrect PIN");
-      setCurrentPinInput("");
-      return;
+    if (busy) return;
+    setBusy(true);
+    try {
+      const ok = await verifyAppLockPin(pin);
+      if (!ok) {
+        // verifyAppLockPin() itself returns false without penalty while
+        // locked out, so a stale "Incorrect PIN" would mislead someone whose
+        // PIN is actually right but is mid-cooldown from earlier failed
+        // attempts — check lockout state to give the honest reason.
+        const remaining = await getLockoutSecondsRemaining();
+        setError(remaining > 0 ? `Too many attempts. Try again in ${remaining}s.` : "Incorrect PIN");
+        setCurrentPinInput("");
+        return;
+      }
+      if (intent === "disable") {
+        await clearAppLockPin();
+        await refresh();
+        resetFlow();
+        showAlert("App Lock Off", "App Lock has been turned off on this device.");
+        return;
+      }
+      setStep("chooseMode");
+    } finally {
+      setBusy(false);
     }
-    if (intent === "disable") {
-      await clearAppLockPin();
-      await refresh();
-      resetFlow();
-      showAlert("App Lock Off", "App Lock has been turned off on this device.");
-      return;
-    }
-    setStep("chooseMode");
   };
 
   const handleFirstPinDone = (pin: string) => {
@@ -132,6 +145,7 @@ export default function AppLockSettingsScreen() {
   };
 
   const handleConfirmPin = async (pin: string) => {
+    if (busy) return;
     if (pin !== firstPin) {
       setError("Codes don't match. Try again.");
       setFirstPin("");
@@ -139,13 +153,18 @@ export default function AppLockSettingsScreen() {
       setStep("enterPin");
       return;
     }
-    await setAppLockPin(firstPin, pendingMode, timeoutSeconds);
-    await refresh();
-    resetFlow();
-    if (intent === "change") {
-      showAlert("PIN Changed", "Your app-unlock PIN has been updated.");
-    } else {
-      showAlert("App Lock On", "Your app-unlock PIN has been set.");
+    setBusy(true);
+    try {
+      await setAppLockPin(firstPin, pendingMode, timeoutSeconds);
+      await refresh();
+      resetFlow();
+      if (intent === "change") {
+        showAlert("PIN Changed", "Your app-unlock PIN has been updated.");
+      } else {
+        showAlert("App Lock On", "Your app-unlock PIN has been set.");
+      }
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -242,21 +261,22 @@ export default function AppLockSettingsScreen() {
               }}
               maxLength={12}
               theme={theme}
+              disabled={busy}
             />
           ) : (
             <SimpleTextEntry value={currentPinInput} onChange={setCurrentPinInput} theme={theme} />
           )}
           {error ? <ThemedText type="small" style={{ color: theme.error, marginTop: Spacing.md }}>{error}</ThemedText> : null}
           <View style={styles.stepButtonRow}>
-            <Pressable style={styles.cancelButton} onPress={resetFlow}>
-              <ThemedText type="body" style={{ color: theme.textSecondary }}>Cancel</ThemedText>
+            <Pressable style={styles.cancelButton} onPress={resetFlow} disabled={busy}>
+              <ThemedText type="body" style={{ color: busy ? theme.border : theme.textSecondary }}>Cancel</ThemedText>
             </Pressable>
             <Pressable
-              style={[styles.confirmButton, { backgroundColor: currentPinInput.length >= MIN_PIN_LENGTH ? theme.primary : theme.border }]}
-              disabled={currentPinInput.length < MIN_PIN_LENGTH}
+              style={[styles.confirmButton, { backgroundColor: currentPinInput.length >= MIN_PIN_LENGTH && !busy ? theme.primary : theme.border }]}
+              disabled={currentPinInput.length < MIN_PIN_LENGTH || busy}
               onPress={() => handleVerifyCurrent(currentPinInput)}
             >
-              <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>Continue</ThemedText>
+              <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Verifying…" : "Continue"}</ThemedText>
             </Pressable>
           </View>
         </View>
@@ -331,22 +351,22 @@ export default function AppLockSettingsScreen() {
             Re-enter to confirm
           </ThemedText>
           {pendingMode === "numeric" ? (
-            <PinPad value={pinInput} onChange={(v) => { setError(null); setPinInput(v); }} maxLength={8} theme={theme} />
+            <PinPad value={pinInput} onChange={(v) => { setError(null); setPinInput(v); }} maxLength={8} theme={theme} disabled={busy} />
           ) : (
             <SimpleTextEntry value={pinInput} onChange={setPinInput} theme={theme} />
           )}
           {error ? <ThemedText type="small" style={{ color: theme.error, marginTop: Spacing.md }}>{error}</ThemedText> : null}
           <View style={styles.stepButtonRow}>
-            <Pressable style={styles.cancelButton} onPress={resetFlow}>
-              <ThemedText type="body" style={{ color: theme.textSecondary }}>Cancel</ThemedText>
+            <Pressable style={styles.cancelButton} onPress={resetFlow} disabled={busy}>
+              <ThemedText type="body" style={{ color: busy ? theme.border : theme.textSecondary }}>Cancel</ThemedText>
             </Pressable>
             <Pressable
-              style={[styles.confirmButton, { backgroundColor: pinInput.length >= MIN_PIN_LENGTH ? theme.primary : theme.border }]}
-              disabled={pinInput.length < MIN_PIN_LENGTH}
+              style={[styles.confirmButton, { backgroundColor: pinInput.length >= MIN_PIN_LENGTH && !busy ? theme.primary : theme.border }]}
+              disabled={pinInput.length < MIN_PIN_LENGTH || busy}
               onPress={() => handleConfirmPin(pinInput)}
             >
               <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>
-                {intent === "change" ? "Save" : "Turn On"}
+                {busy ? "Saving…" : intent === "change" ? "Save" : "Turn On"}
               </ThemedText>
             </Pressable>
           </View>

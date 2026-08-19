@@ -2851,6 +2851,10 @@ export default function ConversationScreen() {
   // audibly started at all. onPress has no such race — it always resolves
   // to a single complete action.
   const isLoadingVoiceRef = useRef(false);
+  // Separate from isLoadingVoiceRef (a same-tick guard) — this drives the
+  // spinner so a slow network fetch during createAudioPlayer() reads as
+  // "loading," not as the app being frozen when a repeat tap is ignored.
+  const [loadingVoiceId, setLoadingVoiceId] = useState<string | null>(null);
 
   const handleVoicePress = async (messageId: string, mediaUrl: string) => {
     // Toggle: tapping the currently-playing bubble pauses it in place.
@@ -2873,6 +2877,7 @@ export default function ConversationScreen() {
     // overlapping createAudioPlayer calls racing each other.
     if (isLoadingVoiceRef.current) return;
     isLoadingVoiceRef.current = true;
+    setLoadingVoiceId(messageId);
 
     try {
       // Switching from a different message — tear down its player first.
@@ -2930,6 +2935,7 @@ export default function ConversationScreen() {
       Alert.alert('Playback Error', 'Could not play the voice message.');
     } finally {
       isLoadingVoiceRef.current = false;
+      setLoadingVoiceId(null);
     }
   };
 
@@ -4032,11 +4038,15 @@ export default function ConversationScreen() {
                 onPress={() => handleVoicePress(item.id, effectiveMediaUrl!)}
               >
                 <View style={[styles.playButton, { backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }]}>
-                  <Feather
-                    name={playingMessageId === item.id ? "pause" : "play"}
-                    size={16}
-                    color="#fff"
-                  />
+                  {loadingVoiceId === item.id ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Feather
+                      name={playingMessageId === item.id ? "pause" : "play"}
+                      size={16}
+                      color="#fff"
+                    />
+                  )}
                 </View>
                 <View style={styles.waveformPlaceholder}>
                   {(mediaEnvelope?.wf && mediaEnvelope.wf.length > 0 ? mediaEnvelope.wf : fallbackWaveformFor(item.id)).map((level, i, arr) => {
@@ -6098,7 +6108,7 @@ export default function ConversationScreen() {
     </KeyboardAvoidingView>
 
     {screenshotDetected ? (
-      <View style={styles.screenshotBlackout}>
+      <View style={styles.screenshotBlackout} pointerEvents="none">
         <Feather name="shield" size={48} color="#fff" />
         <ThemedText style={styles.screenshotBlackoutText}>
           Screenshots are not allowed

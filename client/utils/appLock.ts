@@ -88,9 +88,21 @@ async function hashPin(pin: string, saltB64: string): Promise<string> {
   combined.set(pinBytes);
   combined.set(salt, pinBytes.length);
   let derived: Uint8Array = combined;
+  // Hermes has no crypto.subtle, so this fallback runs on EVERY PIN
+  // submit on every device (not just as a rare fallback). Run tight, it
+  // blocks the JS thread for the whole loop — no touch handling, no state
+  // flush, nothing — for as long as it takes, which reads as the app
+  // "freezing" mid-tap. Yielding back to the event loop every YIELD_EVERY
+  // iterations keeps the total work (and therefore the resulting hash)
+  // identical while letting RN actually paint the "checking..." state and
+  // process queued touches between chunks instead of locking up.
+  const YIELD_EVERY = 2000;
   for (let i = 0; i < FALLBACK_ITERATIONS; i++) {
     const hashed = nacl.hash(derived);
     derived = new Uint8Array(hashed.buffer, hashed.byteOffset, hashed.byteLength);
+    if (i % YIELD_EVERY === YIELD_EVERY - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
   return naclUtil.encodeBase64(derived.slice(0, 32));
 }
