@@ -123,6 +123,31 @@ function downsampleWaveform(levels: number[]): number[] {
   return bars;
 }
 
+// A queued photo/voice message (recipient hasn't published encryption keys
+// yet) previously showed nothing at all in the message list -- only a
+// one-time "Waiting to Send" alert at the moment it queued, with no lasting
+// trace. Reopening the conversation later gave zero indication anything was
+// still pending. This builds the same kind of "queued" placeholder bubble
+// text sends already get, pointing mediaUrl straight at the local file URI
+// (RN's <Image>/audio player both load file:// URIs directly, no server
+// round-trip needed for a not-yet-uploaded local file).
+function buildQueuedMediaPlaceholder(
+  item: { tempId: string; uri: string; mediaType: 'image' | 'video' | 'audio' | 'file'; createdAt: string },
+  senderId: string,
+): Message {
+  return {
+    id: item.tempId,
+    senderId,
+    content: null,
+    mediaUrl: item.uri,
+    mediaType: item.mediaType,
+    status: 'queued',
+    createdAt: item.createdAt,
+    isHidden: false,
+    transcription: null,
+  };
+}
+
 // Fallback for voice messages sent before waveform capture existed (no `wf`
 // in their envelope) — deterministic per message id, so it stays fixed
 // across re-renders instead of jittering with a new random shape every
@@ -241,6 +266,8 @@ export default function ConversationScreen() {
     uri: string;
     mediaType: 'image' | 'video' | 'audio' | 'file';
     fileName?: string;
+    waveform?: number[];
+    createdAt: string;
   }>>([]);
   const isFlushingQueueRef = useRef(false);
   const queuedSendsStorageKey = `queued_sends_${conversationId}`;
@@ -860,7 +887,15 @@ export default function ConversationScreen() {
               withQueued = [...filtered, ...queuedMessages];
             }
             if (Array.isArray(parsed.media) && parsed.media.length > 0) {
-              setQueuedMediaSends(parsed.media);
+              // Backfill createdAt for anything persisted before this field
+              // existed, so old queued items don't crash the placeholder
+              // builder below.
+              const media = parsed.media.map((item) => ({ ...item, createdAt: item.createdAt || new Date().toISOString() }));
+              setQueuedMediaSends(media);
+              withQueued = [
+                ...withQueued,
+                ...media.map((item) => buildQueuedMediaPlaceholder(item, user?.id ?? "")),
+              ];
             }
           }
         } catch {}
@@ -1917,17 +1952,22 @@ export default function ConversationScreen() {
               // acceptable, same trade-off already made for the ordinary
               // send-fails-after-upload case a few lines down).
               setEncryptionState("no_keys");
+              const queuedTempId = `temp-media-${Date.now()}`;
+              const queuedCreatedAt = new Date().toISOString();
+              const queuedItem = { tempId: queuedTempId, uri, mediaType: type, fileName, waveform, createdAt: queuedCreatedAt };
               setQueuedMediaSends(prev => {
-                const next = [...prev, { tempId: `temp-media-${Date.now()}`, uri, mediaType: type, fileName }];
+                const next = [...prev, queuedItem];
                 persistQueuedSends(queuedTextSends, next);
                 return next;
               });
+              // A queued photo/voice message previously left no trace in the
+              // message list at all (only the one-time alert below) — this
+              // gives it the same lasting "queued" bubble text sends already
+              // get, so it's still visibly pending if the user reopens this
+              // conversation later, and doesn't look like it silently
+              // vanished.
+              setMessages(prev => [...prev, buildQueuedMediaPlaceholder(queuedItem, user?.id ?? "")]);
               haptics.light();
-              // This queues silently on purpose for text (a "queued" bubble
-              // already appears in the message list as feedback), but media
-              // adds nothing to the visible message list at all — so
-              // without this, the whole send looked like it just did
-              // nothing. Now it's an explicit, visible state instead.
               Alert.alert(
                 'Waiting to Send',
                 `${otherUserName || 'This contact'} hasn't finished setting up encryption yet. This will send automatically once they do.`,
@@ -2138,7 +2178,17 @@ export default function ConversationScreen() {
         setQueuedMediaSends([]);
         for (const item of mediaBatch) {
           if (cancelled) break;
-          await uploadAndSendMedia(item.uri, item.mediaType, item.fileName);
+          // Drop the "queued" placeholder bubble right before retrying —
+          // uploadAndSendMedia appends the real sent message on success (or
+          // uses its own Alert on failure), so leaving the placeholder in
+          // place would either duplicate the bubble or strand a "queued"
+          // message that never resolves if the retry itself fails.
+          setMessages(prev => prev.filter(m => m.id !== item.tempId));
+          // Waveform was captured once at recording time and can't be
+          // recomputed from the file alone — carry it through the retry so
+          // a queued voice message doesn't lose its real waveform and fall
+          // back to the generic pattern.
+          await uploadAndSendMedia(item.uri, item.mediaType, item.fileName, item.waveform);
         }
       } finally {
         isFlushingQueueRef.current = false;
