@@ -209,6 +209,7 @@ export class DatabaseStorage implements IStorage {
       conversationId: conversationParticipants.conversationId,
       unreadCount: conversationParticipants.unreadCount,
       isArchived: conversationParticipants.isArchived,
+      isMuted: conversationParticipants.isMuted,
       folder: conversationParticipants.folder,
       convId: conversations.id,
       convNumberType: conversations.numberType,
@@ -291,6 +292,7 @@ export class DatabaseStorage implements IStorage {
       // needed now so declining a message request (which archives it for
       // the decliner) actually removes it from their main list.
       isArchived: p.isArchived ?? false,
+      isMuted: p.isMuted ?? false,
       folder: p.folder || 'none',
     }));
 
@@ -575,7 +577,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserPrivacy(
     userId: string,
-    patch: { readReceiptsEnabled?: boolean; typingIndicatorsEnabled?: boolean; showNotificationPreview?: boolean; defaultDisappearingTimer?: number }
+    patch: { readReceiptsEnabled?: boolean; typingIndicatorsEnabled?: boolean; showNotificationPreview?: boolean; defaultDisappearingTimer?: number; keepMutedChatsArchived?: boolean }
   ): Promise<User | undefined> {
     const set: Partial<User> = {};
     if (typeof patch.readReceiptsEnabled === 'boolean') set.readReceiptsEnabled = patch.readReceiptsEnabled;
@@ -584,8 +586,20 @@ export class DatabaseStorage implements IStorage {
     if (typeof patch.defaultDisappearingTimer === 'number' && patch.defaultDisappearingTimer >= 0) {
       set.defaultDisappearingTimer = patch.defaultDisappearingTimer;
     }
+    if (typeof patch.keepMutedChatsArchived === 'boolean') set.keepMutedChatsArchived = patch.keepMutedChatsArchived;
     if (Object.keys(set).length === 0) return await this.getUser(userId);
     const [updated] = await db.update(users).set(set).where(eq(users.id, userId)).returning();
+    // Turning the setting ON retroactively archives chats already muted —
+    // otherwise the toggle would silently do nothing until the user
+    // re-muted each chat by hand.
+    if (updated && patch.keepMutedChatsArchived === true) {
+      await db.update(conversationParticipants)
+        .set({ isArchived: true })
+        .where(and(
+          eq(conversationParticipants.userId, userId),
+          eq(conversationParticipants.isMuted, true)
+        ));
+    }
     return updated || undefined;
   }
 
@@ -2210,6 +2224,27 @@ export class DatabaseStorage implements IStorage {
   async unarchiveConversation(conversationId: string, userId: string): Promise<void> {
     await db.update(conversationParticipants)
       .set({ isArchived: false })
+      .where(and(
+        eq(conversationParticipants.conversationId, conversationId),
+        eq(conversationParticipants.userId, userId)
+      ));
+  }
+
+  // Mute/Unmute a conversation. When the user has "Keep Muted Chats
+  // Archived" on, muting also archives the chat (real toggle, not
+  // decorative — see updateUserPrivacy's keepMutedChatsArchived field).
+  // Unmuting never auto-unarchives: the user may have archived it on
+  // purpose separately, so that stays a deliberate, explicit action.
+  async muteConversation(conversationId: string, userId: string, muted: boolean): Promise<void> {
+    const set: { isMuted: boolean; isArchived?: boolean } = { isMuted: muted };
+    if (muted) {
+      const user = await this.getUser(userId);
+      if (user?.keepMutedChatsArchived) {
+        set.isArchived = true;
+      }
+    }
+    await db.update(conversationParticipants)
+      .set(set)
       .where(and(
         eq(conversationParticipants.conversationId, conversationId),
         eq(conversationParticipants.userId, userId)

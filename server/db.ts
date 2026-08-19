@@ -85,6 +85,16 @@ export async function ensureUserRecoverySchema(): Promise<void> {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS message_saves_user_id_idx ON message_saves (user_id);
     `);
+    // Chat mute + "keep muted chats archived" (build 133): same
+    // push-can-silently-no-op risk as every other column added here.
+    await pool.query(`
+      ALTER TABLE conversation_participants
+        ADD COLUMN IF NOT EXISTS is_muted boolean DEFAULT false;
+    `);
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS keep_muted_chats_archived boolean DEFAULT false;
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

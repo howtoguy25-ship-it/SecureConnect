@@ -46,6 +46,10 @@ export const users = pgTable("users", {
   typingIndicatorsEnabled: boolean("typing_indicators_enabled").default(true),
   showNotificationPreview: boolean("show_notification_preview").default(true),
   defaultDisappearingTimer: integer("default_disappearing_timer").default(0),
+  // When on, muting a chat also archives it (and it stays archived while
+  // muted) — a real toggle for the Chats screen's "Keep Muted Chats
+  // Archived" setting.
+  keepMutedChatsArchived: boolean("keep_muted_chats_archived").default(false),
   storiesEnabled: boolean("stories_enabled").default(true),
   storyPrivacyMode: text("story_privacy_mode").default("everyone"), // 'everyone' | 'contacts' | 'except' | 'only'
   storyPrivacyExceptIds: jsonb("story_privacy_except_ids").$type<string[]>().default([]),
@@ -155,6 +159,7 @@ export const conversationParticipants = pgTable("conversation_participants", {
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   unreadCount: integer("unread_count").default(0),
   isArchived: boolean("is_archived").default(false),
+  isMuted: boolean("is_muted").default(false),
   folder: text("folder").default("none"), // 'none' | 'randoms' | 'friends' | 'family'
   joinedAt: timestamp("joined_at").defaultNow(),
 }, (table) => [

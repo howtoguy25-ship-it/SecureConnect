@@ -49,6 +49,31 @@ export default function SettingsScreen() {
   const { notificationsEnabled, requestPermissions, disableNotifications } = useNotifications();
 
   const [readReceipts, setReadReceipts] = useState(true);
+  const [keepMutedArchived, setKeepMutedArchived] = useState(!!user?.keepMutedChatsArchived);
+  const [isSavingKeepMutedArchived, setIsSavingKeepMutedArchived] = useState(false);
+  useEffect(() => {
+    setKeepMutedArchived(!!user?.keepMutedChatsArchived);
+  }, [user?.keepMutedChatsArchived]);
+
+  const handleToggleKeepMutedArchived = async () => {
+    const next = !keepMutedArchived;
+    setKeepMutedArchived(next);
+    setIsSavingKeepMutedArchived(true);
+    try {
+      await apiRequest("PATCH", "/api/users/me/privacy", { keepMutedChatsArchived: next });
+      await refreshUser?.();
+    } catch (e) {
+      console.log("[Settings] keepMutedChatsArchived toggle failed:", e);
+      setKeepMutedArchived(!next);
+      if (Platform.OS === "web") {
+        window.alert("Couldn't update this setting. Please try again.");
+      } else {
+        Alert.alert("Error", "Couldn't update this setting. Please try again.");
+      }
+    } finally {
+      setIsSavingKeepMutedArchived(false);
+    }
+  };
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const { data: pendingFriendRequests } = useQuery<any[]>({
     queryKey: ['/api/friends/requests'],
@@ -459,6 +484,30 @@ export default function SettingsScreen() {
             trackColor={{ false: theme.border, true: theme.primary }}
           />
         </View>
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={handleToggleKeepMutedArchived}
+          disabled={isSavingKeepMutedArchived}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#FF9500" }]}>
+              <Feather name="bell-off" size={16} color="#fff" />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <ThemedText type="body">Keep Muted Chats Archived</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={2}>
+                Muting a chat also archives it
+              </ThemedText>
+            </View>
+          </View>
+          <View pointerEvents="none" style={styles.switchSlot}>
+            <Switch
+              value={keepMutedArchived}
+              trackColor={{ false: theme.border, true: theme.primary }}
+            />
+          </View>
+        </Pressable>
 
         <Pressable
           style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}

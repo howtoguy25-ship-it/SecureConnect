@@ -1297,6 +1297,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         typingIndicatorsEnabled: user.typingIndicatorsEnabled ?? true,
         showNotificationPreview: user.showNotificationPreview ?? true,
         defaultDisappearingTimer: user.defaultDisappearingTimer ?? 0,
+        keepMutedChatsArchived: user.keepMutedChatsArchived ?? false,
         // Stories preferences
         storiesEnabled: user.storiesEnabled ?? true,
         storyPrivacyMode: user.storyPrivacyMode ?? 'everyone',
@@ -3262,12 +3263,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // User privacy settings (read receipts, typing, notification preview, default disappearing timer).
   app.patch('/api/users/me/privacy', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const { readReceiptsEnabled, typingIndicatorsEnabled, showNotificationPreview, defaultDisappearingTimer } = req.body ?? {};
+      const { readReceiptsEnabled, typingIndicatorsEnabled, showNotificationPreview, defaultDisappearingTimer, keepMutedChatsArchived } = req.body ?? {};
       const updated = await storage.updateUserPrivacy(req.userId!, {
         readReceiptsEnabled: typeof readReceiptsEnabled === 'boolean' ? readReceiptsEnabled : undefined,
         typingIndicatorsEnabled: typeof typingIndicatorsEnabled === 'boolean' ? typingIndicatorsEnabled : undefined,
         showNotificationPreview: typeof showNotificationPreview === 'boolean' ? showNotificationPreview : undefined,
         defaultDisappearingTimer: typeof defaultDisappearingTimer === 'number' ? defaultDisappearingTimer : undefined,
+        keepMutedChatsArchived: typeof keepMutedChatsArchived === 'boolean' ? keepMutedChatsArchived : undefined,
       });
       if (!updated) return res.status(404).json({ error: 'User not found' });
       res.json({
@@ -3275,6 +3277,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         typingIndicatorsEnabled: updated.typingIndicatorsEnabled,
         showNotificationPreview: updated.showNotificationPreview,
         defaultDisappearingTimer: updated.defaultDisappearingTimer,
+        keepMutedChatsArchived: updated.keepMutedChatsArchived,
       });
     } catch (error) {
       console.error('Error updating privacy:', error);
@@ -4937,6 +4940,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       console.error('Error unarchiving conversation:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Mute/Unmute conversations
+  app.post('/api/conversations/:conversationId/mute', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { conversationId } = req.params;
+      await storage.muteConversation(conversationId, req.userId!, true);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error muting conversation:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/conversations/:conversationId/unmute', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { conversationId } = req.params;
+      await storage.muteConversation(conversationId, req.userId!, false);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error unmuting conversation:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
