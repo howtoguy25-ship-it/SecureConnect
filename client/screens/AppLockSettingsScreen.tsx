@@ -12,6 +12,7 @@ import {
   setAppLockPin,
   setAppLockTimeout,
   verifyAppLockPin,
+  getLockoutSecondsRemaining,
   clearAppLockPin,
   type AppLockMode,
 } from "@/utils/appLock";
@@ -82,6 +83,9 @@ export default function AppLockSettingsScreen() {
 
   const startChange = () => {
     setIntent("change");
+    // Default to whatever mode is already configured — the user is far
+    // more likely to be keeping the same PIN type than switching it.
+    setPendingMode(currentMode ?? "numeric");
     setCurrentPinInput("");
     setError(null);
     setStep("verifyCurrent");
@@ -97,7 +101,12 @@ export default function AppLockSettingsScreen() {
   const handleVerifyCurrent = async (pin: string) => {
     const ok = await verifyAppLockPin(pin);
     if (!ok) {
-      setError("Incorrect PIN");
+      // verifyAppLockPin() itself returns false without penalty while
+      // locked out, so a stale "Incorrect PIN" would mislead someone whose
+      // PIN is actually right but is mid-cooldown from earlier failed
+      // attempts — check lockout state to give the honest reason.
+      const remaining = await getLockoutSecondsRemaining();
+      setError(remaining > 0 ? `Too many attempts. Try again in ${remaining}s.` : "Incorrect PIN");
       setCurrentPinInput("");
       return;
     }
@@ -108,7 +117,6 @@ export default function AppLockSettingsScreen() {
       showAlert("App Lock Off", "App Lock has been turned off on this device.");
       return;
     }
-    setPendingMode("numeric");
     setStep("chooseMode");
   };
 
@@ -134,7 +142,11 @@ export default function AppLockSettingsScreen() {
     await setAppLockPin(firstPin, pendingMode, timeoutSeconds);
     await refresh();
     resetFlow();
-    showAlert("App Lock On", "Your app-unlock PIN has been set.");
+    if (intent === "change") {
+      showAlert("PIN Changed", "Your app-unlock PIN has been updated.");
+    } else {
+      showAlert("App Lock On", "Your app-unlock PIN has been set.");
+    }
   };
 
   const handleChangeTimeout = async (seconds: number) => {

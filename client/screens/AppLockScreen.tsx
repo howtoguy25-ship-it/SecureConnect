@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, StyleSheet, TextInput, Pressable, Alert, Platform, Animated } from "react-native";
+import { View, StyleSheet, TextInput, Pressable, Alert, Platform, Animated, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/ThemedText";
 import { PinPad } from "@/components/PinPad";
@@ -26,7 +26,13 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
   const { theme } = useTheme();
   const { logout } = useAuth();
   const [mode, setMode] = useState<AppLockMode>("numeric");
-  const [pinLength, setPinLength] = useState(4);
+  // Null (not a default of 4) until getAppLockSettings() actually resolves —
+  // otherwise a real PIN longer than 4 digits could auto-submit on just its
+  // first 4 digits if SecureStore is slow to answer (plausible right after
+  // launch, while PreKeyMaintenanceGuard is also hitting the keychain),
+  // wasting a real lockout attempt on an incomplete entry.
+  const [pinLength, setPinLength] = useState<number | null>(null);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [entered, setEntered] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
@@ -42,6 +48,7 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
       }
       const remaining = await getLockoutSecondsRemaining();
       setLockoutSeconds(remaining);
+      setSettingsLoaded(true);
     })();
   }, []);
 
@@ -84,7 +91,7 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
   };
 
   useEffect(() => {
-    if (mode === "numeric" && entered.length === pinLength) {
+    if (mode === "numeric" && pinLength !== null && entered.length === pinLength) {
       attemptUnlock(entered);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,7 +142,9 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
           },
         ]}
       >
-        {lockoutSeconds > 0 ? (
+        {!settingsLoaded ? (
+          <ActivityIndicator size="large" color={theme.primary} />
+        ) : lockoutSeconds > 0 ? (
           <View style={styles.lockoutBox}>
             <Feather name="clock" size={22} color={theme.error} />
             <ThemedText type="body" style={{ color: theme.error, marginTop: Spacing.sm, textAlign: "center" }}>
@@ -149,7 +158,7 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
               setError(null);
               setEntered(v);
             }}
-            maxLength={pinLength}
+            maxLength={pinLength ?? 8}
             theme={theme}
             disabled={isChecking}
           />
