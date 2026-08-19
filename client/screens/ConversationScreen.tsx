@@ -4275,6 +4275,38 @@ export default function ConversationScreen() {
           }
           const settleDelay = Math.max(0, Math.min(1200, initialScrollDeadlineRef.current - Date.now()));
           initialScrollSettleTimerRef.current = setTimeout(() => {
+            // The flat 5s cap could lock in BEFORE encrypted media
+            // thumbnails (fetched + decrypted individually over the
+            // network, one nacl.secretbox open each) actually finish
+            // resolving — a conversation ending in a few photos/voice
+            // messages routinely takes longer than that on a real
+            // connection. Their heights only land after
+            // decryptedMediaUris updates, which fires its own
+            // onContentSizeChange — but if that arrives after this timer
+            // already locked things, the resulting size change was
+            // silently ignored (`if (didInitialScrollRef.current) return`
+            // above), landing the viewport above the true bottom. Extend
+            // the window instead of locking while any media is still
+            // genuinely in flight, up to a hard safety ceiling so a
+            // permanently-stuck fetch can't hold this open forever.
+            const stillFetchingMedia = Array.from(mediaFetchState.current.values()).includes('loading');
+            const hardCeiling = Date.now() > (initialScrollDeadlineRef.current ?? 0) + 10000;
+            if (stillFetchingMedia && !hardCeiling) {
+              initialScrollDeadlineRef.current = Date.now() + 1200;
+              initialScrollSettleTimerRef.current = setTimeout(function recheck() {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                const stillGoing = Array.from(mediaFetchState.current.values()).includes('loading');
+                const pastCeiling = Date.now() > (initialScrollDeadlineRef.current ?? 0) + 10000;
+                if (stillGoing && !pastCeiling) {
+                  initialScrollSettleTimerRef.current = setTimeout(recheck, 1200);
+                } else {
+                  didInitialScrollRef.current = true;
+                  initialScrollSettleTimerRef.current = null;
+                  initialScrollDeadlineRef.current = null;
+                }
+              }, 1200);
+              return;
+            }
             didInitialScrollRef.current = true;
             initialScrollSettleTimerRef.current = null;
             initialScrollDeadlineRef.current = null;
