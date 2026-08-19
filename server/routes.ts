@@ -1567,6 +1567,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Account Data Export (build 133) ───────────────────────────────────
+  // Right-to-access style export of everything the server holds about the
+  // caller. Deliberately excludes message CONTENT — Pryvo's messages are
+  // end-to-end encrypted so the server never has plaintext to hand back
+  // anyway, and the raw ciphertext blobs are useless without the client-
+  // held keys (and would drag other people's messages into one person's
+  // export). The client encrypts this payload with a passphrase only the
+  // user has before saving it to disk — see ExportDataScreen.
+  app.get('/api/account/export-data', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const [personalConvos, appConvos, friendsList, blocked] = await Promise.all([
+        storage.getConversations(req.userId!, 'personal'),
+        storage.getConversations(req.userId!, 'app'),
+        storage.getFriends(req.userId!),
+        storage.getBlockedUsers(req.userId!),
+      ]);
+
+      const virtualNumber = user.virtualNumberId ? await storage.getVirtualNumber(user.virtualNumberId) : null;
+
+      const conversationSummaries = [...personalConvos, ...appConvos].map((c: any) => ({
+        withDisplayName: c.otherUser?.displayName ?? null,
+        withPhoneNumber: c.otherUser?.phoneNumber ?? null,
+        numberType: c.numberType,
+        lastMessageAt: c.lastMessageAt,
+        createdAt: c.createdAt,
+        folder: c.folder,
+        isArchived: c.isArchived,
+        isMuted: c.isMuted,
+        isLocked: c.isLocked,
+        note: 'Message content is end-to-end encrypted and is not included — Pryvo\'s servers cannot read it.',
+      }));
+
+      const exportPayload = {
+        exportedAt: new Date().toISOString(),
+        profile: {
+          id: user.id,
+          phoneNumber: user.phoneNumber,
+          displayName: user.displayName,
+          username: user.username,
+          avatarUrl: user.avatarUrl,
+          isVip: !!user.isVip,
+          vipStartedAt: user.vipStartedAt,
+          isAdFree: !!user.isAdFree,
+        },
+        settings: {
+          readReceiptsEnabled: user.readReceiptsEnabled ?? true,
+          typingIndicatorsEnabled: user.typingIndicatorsEnabled ?? true,
+          showNotificationPreview: user.showNotificationPreview ?? true,
+          defaultDisappearingTimer: user.defaultDisappearingTimer ?? 0,
+          keepMutedChatsArchived: !!user.keepMutedChatsArchived,
+          lastSeenPrivacy: user.lastSeenPrivacy ?? 'everyone',
+          notificationsEnabled: !!user.notificationsEnabled,
+          preferredNumberType: user.preferredNumberType ?? 'personal',
+          storiesEnabled: user.storiesEnabled ?? true,
+          storyPrivacyMode: user.storyPrivacyMode ?? 'everyone',
+        },
+        security: {
+          hasSafeCode: !!user.safeCodeHash,
+          hasSecurityQuestions: !!user.securityQ1Hash,
+          appleSignInLinked: !!user.appleUserId,
+          googleSignInLinked: !!user.googleUserId,
+        },
+        virtualNumber: virtualNumber ? {
+          phoneNumber: virtualNumber.phoneNumber,
+          status: virtualNumber.status,
+          countryCode: virtualNumber.countryCode,
+        } : null,
+        friends: friendsList.map((f: any) => ({ displayName: f.displayName })),
+        blockedContacts: blocked.map((b: any) => ({ displayName: b.displayName })),
+        conversations: conversationSummaries,
+      };
+
+      res.json(exportPayload);
+    } catch (error) {
+      console.error('Error building account data export:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.post("/api/keys", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const { publicKey } = req.body;

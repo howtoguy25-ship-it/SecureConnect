@@ -47,6 +47,7 @@ import SafetyNumberScreen from "@/screens/SafetyNumberScreen";
 import AppLockSettingsScreen from "@/screens/AppLockSettingsScreen";
 import LockedChatsScreen from "@/screens/LockedChatsScreen";
 import ChangePhoneNumberScreen from "@/screens/ChangePhoneNumberScreen";
+import ExportDataScreen from "@/screens/ExportDataScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { useAuth } from "@/contexts/AuthContext";
 import { View } from "react-native";
@@ -109,6 +110,7 @@ export type RootStackParamList = {
   AppLockSettings: undefined;
   LockedChats: { lockConversationId?: string };
   ChangePhoneNumber: undefined;
+  ExportData: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -468,6 +470,11 @@ export default function RootStackNavigator() {
             name="ChangePhoneNumber"
             component={ChangePhoneNumberScreen}
             options={{ headerTitle: "Phone Number" }}
+          />
+          <Stack.Screen
+            name="ExportData"
+            component={ExportDataScreen}
+            options={{ headerTitle: "Download Your Data" }}
           />
         </>
       )}

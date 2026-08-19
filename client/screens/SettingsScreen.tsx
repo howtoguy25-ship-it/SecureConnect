@@ -972,13 +972,31 @@ export default function SettingsScreen() {
           <Feather name="chevron-right" size={20} color={theme.textSecondary} />
         </Pressable>
         
-        <Pressable 
+        <Pressable
           style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
           onPress={openSupport}
         >
           <View style={styles.settingInfo}>
             <Feather name="help-circle" size={20} color={theme.text} />
             <ThemedText type="body">Support</ThemedText>
+          </View>
+          <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+        </Pressable>
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={() => navigation.navigate("ExportData")}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#34C759" }]}>
+              <Feather name="download" size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">Download Your Data</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Get an encrypted copy of your account data
+              </ThemedText>
+            </View>
           </View>
           <Feather name="chevron-right" size={20} color={theme.textSecondary} />
         </Pressable>
