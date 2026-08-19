@@ -48,6 +48,15 @@ export const users = pgTable("users", {
   // displayName, tracked separately since the two aren't changed together.
   username: text("username").unique(),
   lastUsernameChangeAt: timestamp("last_username_change_at"),
+  // ── Payment link-out (build 133) ────────────────────────────────────────
+  // Pryvo never touches money or holds custody of funds — these are just
+  // receive-only identifiers the user chooses to share with people they
+  // chat with, the same way anyone would paste a PayPal.me link or a BTC
+  // address into a conversation. Sending happens entirely in the external
+  // provider's own app/site via a deep link; Pryvo has no payment records.
+  paymentPaypalMeHandle: text("payment_paypal_me_handle"),
+  paymentPayId: text("payment_pay_id"),
+  paymentBtcAddress: text("payment_btc_address"),
   pushToken: text("push_token"),
   // Separate from pushToken (Expo's regular push service) — a PushKit VoIP
   // token, which can only be delivered via a direct APNs VoIP push, not

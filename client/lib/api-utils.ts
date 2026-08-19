@@ -117,6 +117,9 @@ export interface User {
   keepMutedChatsArchived?: boolean;
   username?: string | null;
   lastUsernameChangeAt?: string | null;
+  paymentPaypalMeHandle?: string | null;
+  paymentPayId?: string | null;
+  paymentBtcAddress?: string | null;
   // Build 63 Phase A — sealed-sender client UI fields. `virtualNumber` is
   // the joined VN row (status, phoneNumber, ...) so the composer can
   // disable itself when the number is released/suspended without a

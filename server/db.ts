@@ -116,6 +116,13 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       ALTER TABLE conversation_participants
         ADD COLUMN IF NOT EXISTS is_locked boolean DEFAULT false;
     `);
+    // Payment link-out identifiers (build 133) — receive-only, no custody.
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS payment_paypal_me_handle text,
+        ADD COLUMN IF NOT EXISTS payment_pay_id text,
+        ADD COLUMN IF NOT EXISTS payment_btc_address text;
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

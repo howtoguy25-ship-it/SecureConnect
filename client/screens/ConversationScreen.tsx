@@ -254,6 +254,7 @@ export default function ConversationScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [pendingRecordingUri, setPendingRecordingUri] = useState<string | null>(null);
@@ -575,6 +576,9 @@ export default function ConversationScreen() {
     virtualNumber?: string;
     preferredNumberType?: string;
     supportsSealedSender?: boolean;
+    paymentPaypalMeHandle?: string | null;
+    paymentPayId?: string | null;
+    paymentBtcAddress?: string | null;
   }>({
     queryKey: [`/api/users/${otherUserId}/contact-info`],
     enabled: !!otherUserId,
@@ -2514,6 +2518,45 @@ export default function ConversationScreen() {
     } catch (error) {
       console.error('Failed to cancel recording:', error);
     }
+  };
+
+  const handleOpenPayment = () => {
+    setShowAttachmentMenu(false);
+    setShowPaymentModal(true);
+  };
+
+  const handlePayViaPaypal = () => {
+    const handle = otherUserData?.paymentPaypalMeHandle;
+    if (!handle) return;
+    setShowPaymentModal(false);
+    Linking.openURL(`https://paypal.me/${encodeURIComponent(handle)}`).catch(() => {
+      Alert.alert("Couldn't Open PayPal", "Please make sure you have the PayPal app or a browser installed.");
+    });
+  };
+
+  const handleCopyPayId = async () => {
+    const payId = otherUserData?.paymentPayId;
+    if (!payId) return;
+    await Clipboard.setStringAsync(payId);
+    setShowPaymentModal(false);
+    Alert.alert("PayID Copied", `Paste "${payId}" into your banking app's Pay Anyone / PayID transfer screen to send ${otherUserName} money.`);
+  };
+
+  const handlePayViaBtc = () => {
+    const address = otherUserData?.paymentBtcAddress;
+    if (!address) return;
+    setShowPaymentModal(false);
+    Linking.canOpenURL(`bitcoin:${address}`).then((canOpen) => {
+      if (canOpen) {
+        Linking.openURL(`bitcoin:${address}`);
+      } else {
+        Clipboard.setStringAsync(address);
+        Alert.alert("Bitcoin Address Copied", `No Bitcoin wallet app was found, so we copied ${otherUserName}'s address instead. Paste it into your wallet app to send BTC.`);
+      }
+    }).catch(() => {
+      Clipboard.setStringAsync(address);
+      Alert.alert("Bitcoin Address Copied", `We copied ${otherUserName}'s address. Paste it into your wallet app to send BTC.`);
+    });
   };
 
   const handleShareLocation = async () => {
@@ -4991,7 +5034,105 @@ export default function ConversationScreen() {
                   File
                 </ThemedText>
               </Pressable>
+
+              <Pressable style={styles.attachmentOption} onPress={handleOpenPayment}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#F7931A' }]}>
+                  <Feather name="dollar-sign" size={24} color="#fff" />
+                </View>
+                <ThemedText style={[styles.attachmentLabel, { color: theme.text }]}>
+                  Payment
+                </ThemedText>
+              </Pressable>
             </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showPaymentModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPaymentModal(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowPaymentModal(false)}>
+          <View style={[styles.attachmentMenu, { backgroundColor: theme.backgroundSecondary, paddingBottom: insets.bottom + Spacing.lg }]}>
+            <View style={styles.attachmentHeader}>
+              <ThemedText style={[styles.attachmentTitle, { color: theme.text }]}>
+                Send Payment to {otherUserName}
+              </ThemedText>
+              <Pressable onPress={() => setShowPaymentModal(false)}>
+                <Feather name="x" size={24} color={theme.textSecondary} />
+              </Pressable>
+            </View>
+
+            {!otherUserData?.paymentPaypalMeHandle && !otherUserData?.paymentPayId && !otherUserData?.paymentBtcAddress ? (
+              <View style={{ paddingVertical: Spacing.xl, alignItems: "center" }}>
+                <Feather name="dollar-sign" size={32} color={theme.textSecondary} />
+                <ThemedText type="body" style={{ color: theme.textSecondary, textAlign: "center", marginTop: Spacing.md }}>
+                  {otherUserName} hasn't added a payment method yet.
+                </ThemedText>
+              </View>
+            ) : (
+              <View style={{ gap: Spacing.sm, paddingBottom: Spacing.md }}>
+                {otherUserData?.paymentPaypalMeHandle ? (
+                  <Pressable
+                    style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault }]}
+                    onPress={handlePayViaPaypal}
+                  >
+                    <View style={[styles.attachmentIcon, { backgroundColor: '#003087' }]}>
+                      <Feather name="dollar-sign" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="body" style={{ fontWeight: "600" }}>PayPal</ThemedText>
+                      <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                        paypal.me/{otherUserData.paymentPaypalMeHandle}
+                      </ThemedText>
+                    </View>
+                    <Feather name="external-link" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                ) : null}
+
+                {otherUserData?.paymentPayId ? (
+                  <Pressable
+                    style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault }]}
+                    onPress={handleCopyPayId}
+                  >
+                    <View style={[styles.attachmentIcon, { backgroundColor: '#E4002B' }]}>
+                      <Feather name="credit-card" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="body" style={{ fontWeight: "600" }}>PayID (Australia)</ThemedText>
+                      <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={1}>
+                        {otherUserData.paymentPayId}
+                      </ThemedText>
+                    </View>
+                    <Feather name="copy" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                ) : null}
+
+                {otherUserData?.paymentBtcAddress ? (
+                  <Pressable
+                    style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault }]}
+                    onPress={handlePayViaBtc}
+                  >
+                    <View style={[styles.attachmentIcon, { backgroundColor: '#F7931A' }]}>
+                      <Feather name="hash" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="body" style={{ fontWeight: "600" }}>Bitcoin</ThemedText>
+                      <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={1}>
+                        {otherUserData.paymentBtcAddress}
+                      </ThemedText>
+                    </View>
+                    <Feather name="external-link" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                ) : null}
+
+                <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: "center", marginTop: Spacing.sm }}>
+                  Pryvo doesn't process payments — this opens the provider's own app.
+                </ThemedText>
+              </View>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -6490,6 +6631,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingTop: Spacing.md,
     paddingHorizontal: Spacing.md,
+  },
+  paymentOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
   },
   attachmentHeader: {
     flexDirection: "row",

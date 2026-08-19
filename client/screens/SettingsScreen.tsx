@@ -1000,6 +1000,24 @@ export default function SettingsScreen() {
           </View>
           <Feather name="chevron-right" size={20} color={theme.textSecondary} />
         </Pressable>
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={() => navigation.navigate("PaymentMethods")}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#F7931A" }]}>
+              <Feather name="dollar-sign" size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">Payment Methods</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                PayPal, PayID, and Bitcoin — share with people you chat with
+              </ThemedText>
+            </View>
+          </View>
+          <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+        </Pressable>
       </View>
 
       <Pressable

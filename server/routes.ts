@@ -1306,6 +1306,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         keepMutedChatsArchived: user.keepMutedChatsArchived ?? false,
         username: user.username ?? null,
         lastUsernameChangeAt: user.lastUsernameChangeAt ?? null,
+        paymentPaypalMeHandle: user.paymentPaypalMeHandle ?? null,
+        paymentPayId: user.paymentPayId ?? null,
+        paymentBtcAddress: user.paymentBtcAddress ?? null,
         // Stories preferences
         storiesEnabled: user.storiesEnabled ?? true,
         storyPrivacyMode: user.storyPrivacyMode ?? 'everyone',
@@ -1645,6 +1648,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(exportPayload);
     } catch (error) {
       console.error('Error building account data export:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ─── Payment link-out (build 133) ───────────────────────────────────────
+  // Receive-only identifiers the user shares with chat partners — Pryvo
+  // never touches money, holds custody, or records transactions. Sending
+  // happens entirely in the external provider's own app/site.
+  app.patch('/api/users/me/payment-methods', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { paypalMeHandle, payId, btcAddress } = req.body ?? {};
+      const update: Record<string, string | null> = {};
+
+      if (paypalMeHandle !== undefined) {
+        const trimmed = String(paypalMeHandle ?? '').trim();
+        if (trimmed && !/^[a-zA-Z0-9_-]{1,50}$/.test(trimmed)) {
+          return res.status(400).json({ error: 'Invalid PayPal.me handle.' });
+        }
+        update.paymentPaypalMeHandle = trimmed || null;
+      }
+      if (payId !== undefined) {
+        const trimmed = String(payId ?? '').trim();
+        if (trimmed.length > 100) {
+          return res.status(400).json({ error: 'PayID is too long.' });
+        }
+        update.paymentPayId = trimmed || null;
+      }
+      if (btcAddress !== undefined) {
+        const trimmed = String(btcAddress ?? '').trim();
+        if (trimmed && !/^[a-zA-Z0-9]{20,90}$/.test(trimmed)) {
+          return res.status(400).json({ error: 'That doesn\'t look like a valid Bitcoin address.' });
+        }
+        update.paymentBtcAddress = trimmed || null;
+      }
+
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({ error: 'No payment method fields provided.' });
+      }
+
+      const updated = await storage.updateUser(req.userId!, update as any);
+      if (!updated) return res.status(404).json({ error: 'User not found' });
+
+      res.json({
+        paymentPaypalMeHandle: updated.paymentPaypalMeHandle,
+        paymentPayId: updated.paymentPayId,
+        paymentBtcAddress: updated.paymentBtcAddress,
+      });
+    } catch (error) {
+      console.error('Error updating payment methods:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -2561,6 +2613,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         username: user.username ?? null,
         virtualNumber: virtualNumber?.phoneNumber,
         preferredNumberType: user.preferredNumberType || 'personal',
+        // Receive-only payment identifiers this person has chosen to share
+        // with people they chat with — see the payment-methods endpoint
+        // header comment for why this carries no custody/processing risk.
+        paymentPaypalMeHandle: user.paymentPaypalMeHandle ?? null,
+        paymentPayId: user.paymentPayId ?? null,
+        paymentBtcAddress: user.paymentBtcAddress ?? null,
         // Build 63 Phase A — the sender's client reads this to decide
         // whether to call /api/messages/send-sealed (recipient is on a
         // new build) or fall back to /api/messages (recipient is on an
