@@ -123,6 +123,11 @@ export async function ensureUserRecoverySchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS payment_pay_id text,
         ADD COLUMN IF NOT EXISTS payment_btc_address text;
     `);
+    // Real-time "Active Now" presence toggle (build 133).
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS show_active_status boolean DEFAULT true;
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

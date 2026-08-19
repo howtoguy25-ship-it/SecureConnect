@@ -120,6 +120,7 @@ export interface User {
   paymentPaypalMeHandle?: string | null;
   paymentPayId?: string | null;
   paymentBtcAddress?: string | null;
+  showActiveStatus?: boolean;
   // Build 63 Phase A — sealed-sender client UI fields. `virtualNumber` is
   // the joined VN row (status, phoneNumber, ...) so the composer can
   // disable itself when the number is released/suspended without a

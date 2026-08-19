@@ -65,6 +65,11 @@ export const users = pgTable("users", {
   voipPushToken: text("voip_push_token"),
   notificationsEnabled: boolean("notifications_enabled").default(true),
   lastSeenPrivacy: text("last_seen_privacy").default("everyone"), // 'everyone' | 'contacts' | 'vip' | 'nobody'
+  // Real-time "Active Now" presence toggle (build 133) — independent of
+  // lastSeenPrivacy, which only gates the historical last-seen timestamp.
+  // Backed by the server's live connectedUsers socket map, not a fake/
+  // hardcoded indicator.
+  showActiveStatus: boolean("show_active_status").default(true),
   readReceiptsEnabled: boolean("read_receipts_enabled").default(true),
   typingIndicatorsEnabled: boolean("typing_indicators_enabled").default(true),
   showNotificationPreview: boolean("show_notification_preview").default(true),

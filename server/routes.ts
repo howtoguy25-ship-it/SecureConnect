@@ -1309,6 +1309,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paymentPaypalMeHandle: user.paymentPaypalMeHandle ?? null,
         paymentPayId: user.paymentPayId ?? null,
         paymentBtcAddress: user.paymentBtcAddress ?? null,
+        showActiveStatus: user.showActiveStatus ?? true,
         // Stories preferences
         storiesEnabled: user.storiesEnabled ?? true,
         storyPrivacyMode: user.storyPrivacyMode ?? 'everyone',
@@ -5365,6 +5366,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Real-time "Active Now" presence (build 133) — independent on/off toggle
+  // from last-seen privacy. Backed by the live connectedUsers socket map
+  // (see the io.on('connection') handler), never a fake/hardcoded status.
+  app.put('/api/privacy/active-status', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { enabled } = req.body ?? {};
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: 'enabled (boolean) is required' });
+      }
+      await storage.updateUser(req.userId!, { showActiveStatus: enabled });
+      res.json({ success: true, showActiveStatus: enabled });
+    } catch (error) {
+      console.error('Error updating active-status privacy:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/users/:userId/active-status', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const target = await storage.getUser(userId);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+      if (target.showActiveStatus === false) {
+        return res.json({ active: false, hidden: true });
+      }
+      const blocked = await storage.isBlockedByEither(req.userId!, userId).catch(() => true);
+      if (blocked) {
+        return res.json({ active: false, hidden: true });
+      }
+      const active = connectedUsers.has(userId) && connectedUsers.get(userId)!.size > 0;
+      res.json({ active, hidden: false });
+    } catch (error) {
+      console.error('Error getting active status:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // Archive/Unarchive conversations
   app.post('/api/conversations/:conversationId/archive', authenticateToken, async (req: AuthRequest, res) => {
     try {
@@ -6472,6 +6510,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // (see /api/auth/verify-code) can tell "same device reconnecting" apart
       // from "a genuinely different device just logged in".
       (socket as any).deviceId = decoded.did ?? null;
+      // Snapshot at connect time so the presence broadcast below doesn't need
+      // an extra DB round trip per connect/disconnect. Can go briefly stale
+      // if the user flips the setting mid-session without reconnecting — the
+      // REST active-status endpoint always re-checks fresh, so that's a
+      // self-correcting worst case, not a real leak.
+      const u2 = await storage.getUser(decoded.userId);
+      (socket as any).showActiveStatus = u2?.showActiveStatus ?? true;
       next();
     } catch (error) {
       next(new Error('Invalid token'));
@@ -6482,10 +6527,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const userId = (socket as any).userId;
     console.log(`User ${userId} connected`);
 
+    const wasAlreadyOnline = connectedUsers.has(userId) && connectedUsers.get(userId)!.size > 0;
     if (!connectedUsers.has(userId)) connectedUsers.set(userId, new Set());
     connectedUsers.get(userId)!.add(socket.id);
 
     socket.join(userId);
+
+    // Real-time "Active Now" (build 133): only the first socket for a user
+    // going online is a real state transition worth telling watchers about
+    // — a second tab/device connecting doesn't change whether they're
+    // active. Gated on the privacy toggle snapshotted at auth time.
+    if (!wasAlreadyOnline && (socket as any).showActiveStatus) {
+      io.to(`presence:${userId}`).emit('user-active-changed', { userId, active: true });
+    }
 
     socket.on('join-conversation', (conversationId: string) => {
       socket.join(`conversation:${conversationId}`);
@@ -6493,6 +6547,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     socket.on('leave-conversation', (conversationId: string) => {
       socket.leave(`conversation:${conversationId}`);
+    });
+
+    // Presence watching: mirrors join/leave-conversation. A client opens
+    // this exactly while a ConversationScreen with that peer is mounted —
+    // see ConversationScreen's presence effect.
+    socket.on('watch-presence', (targetUserId: string) => {
+      if (typeof targetUserId === 'string' && targetUserId) {
+        socket.join(`presence:${targetUserId}`);
+      }
+    });
+
+    socket.on('unwatch-presence', (targetUserId: string) => {
+      if (typeof targetUserId === 'string' && targetUserId) {
+        socket.leave(`presence:${targetUserId}`);
+      }
     });
 
     socket.on('send-message', async (data) => {
@@ -7056,11 +7125,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     socket.on('disconnect', async () => {
       console.log(`User ${userId} disconnected`);
       const sockets = connectedUsers.get(userId);
+      let wentFullyOffline = false;
       if (sockets) {
         sockets.delete(socket.id);
-        if (sockets.size === 0) connectedUsers.delete(userId);
+        if (sockets.size === 0) {
+          connectedUsers.delete(userId);
+          wentFullyOffline = true;
+        }
       }
       await storage.updateUser(userId, { lastSeen: new Date() });
+      // Only the LAST socket disconnecting is a real "went offline" —
+      // losing one of several tabs/devices shouldn't flip this.
+      if (wentFullyOffline && (socket as any).showActiveStatus) {
+        io.to(`presence:${userId}`).emit('user-active-changed', { userId, active: false });
+      }
     });
   });
 

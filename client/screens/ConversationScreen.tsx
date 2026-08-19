@@ -593,6 +593,56 @@ export default function ConversationScreen() {
     }
   }, [otherUserData]);
 
+  // Real "Active Now" presence — backed by the server's live socket
+  // connection map, not a hardcoded indicator. Initial value comes from the
+  // REST endpoint; live updates arrive over the socket while this screen
+  // has the peer's presence "watched" (see the effect below), so it flips
+  // within moments of them actually connecting or disconnecting.
+  const activeStatusQueryKey = [`/api/users/${otherUserId}/active-status`];
+  const { data: activeStatusData } = useQuery<{ active: boolean; hidden: boolean }>({
+    queryKey: activeStatusQueryKey,
+    enabled: !!otherUserId,
+  });
+  const isPeerActive = !!activeStatusData?.active && !activeStatusData.hidden;
+
+  useEffect(() => {
+    if (!otherUserId) return;
+    let socket = getSocket();
+    let activeChangedHandler: ((data: { userId: string; active: boolean }) => void) | null = null;
+    const rewatch = () => socket?.emit('watch-presence', otherUserId);
+
+    const setup = async () => {
+      if (!socket) {
+        try {
+          socket = await connectSocket();
+        } catch {
+          return;
+        }
+      }
+      socket.emit('watch-presence', otherUserId);
+      activeChangedHandler = (data) => {
+        if (data.userId !== otherUserId) return;
+        queryClient.setQueryData(activeStatusQueryKey, { active: data.active, hidden: false });
+      };
+      socket.on('user-active-changed', activeChangedHandler);
+      // Room membership lives on the socket connection, not the account —
+      // a reconnect after a network blip drops it silently unless something
+      // re-subscribes. connectSocket() only wires its own one-time 'connect'
+      // listener for the initial handshake, so this effect adds its own.
+      socket.on('connect', rewatch);
+    };
+    setup();
+
+    return () => {
+      if (socket) {
+        socket.emit('unwatch-presence', otherUserId);
+        socket.off('connect', rewatch);
+        if (activeChangedHandler) socket.off('user-active-changed', activeChangedHandler);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherUserId]);
+
   const { data: blockStatus } = useQuery<{ isBlocked: boolean; blockedByThem: boolean }>({
     queryKey: [`/api/blocks/check/${otherUserId}`],
     enabled: !!otherUserId,
@@ -4350,18 +4400,18 @@ export default function ConversationScreen() {
             <ThemedText type="body" style={styles.headerName}>
               {otherUserName}
             </ThemedText>
-            {otherUserData?.username ? (
-              <ThemedText style={[styles.onlineText, { color: theme.primary, fontWeight: "600" }]} numberOfLines={1}>
-                @{otherUserData.username}
-              </ThemedText>
-            ) : (
+            {isPeerActive ? (
               <View style={styles.onlineIndicator}>
                 <View style={[styles.onlineDot, { backgroundColor: "#25D366" }]} />
                 <ThemedText style={[styles.onlineText, { color: theme.textSecondary }]}>
-                  Online
+                  Active now
                 </ThemedText>
               </View>
-            )}
+            ) : otherUserData?.username ? (
+              <ThemedText style={[styles.onlineText, { color: theme.primary, fontWeight: "600" }]} numberOfLines={1}>
+                @{otherUserData.username}
+              </ThemedText>
+            ) : null}
           </View>
         </View>
       ),
@@ -4387,7 +4437,7 @@ export default function ConversationScreen() {
         </View>
       ),
     });
-  }, [navigation, theme, otherUserName, otherUserId, user?.isVip, setShowCallOptions, otherUserData?.username]);
+  }, [navigation, theme, otherUserName, otherUserId, user?.isVip, setShowCallOptions, otherUserData?.username, isPeerActive]);
 
   if (isLoading) {
     return (

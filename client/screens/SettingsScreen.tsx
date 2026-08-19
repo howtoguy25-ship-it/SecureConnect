@@ -57,6 +57,31 @@ export default function SettingsScreen() {
     }, [])
   );
   const [keepMutedArchived, setKeepMutedArchived] = useState(!!user?.keepMutedChatsArchived);
+  const [showActiveStatus, setShowActiveStatus] = useState(user?.showActiveStatus !== false);
+  const [isSavingActiveStatus, setIsSavingActiveStatus] = useState(false);
+  useEffect(() => {
+    setShowActiveStatus(user?.showActiveStatus !== false);
+  }, [user?.showActiveStatus]);
+
+  const handleToggleActiveStatus = async () => {
+    const next = !showActiveStatus;
+    setShowActiveStatus(next);
+    setIsSavingActiveStatus(true);
+    try {
+      await apiRequest("PUT", "/api/privacy/active-status", { enabled: next });
+      await refreshUser?.();
+    } catch (e) {
+      console.log("[Settings] Active Now toggle failed:", e);
+      setShowActiveStatus(!next);
+      if (Platform.OS === "web") {
+        window.alert("Couldn't update this setting. Please try again.");
+      } else {
+        Alert.alert("Error", "Couldn't update this setting. Please try again.");
+      }
+    } finally {
+      setIsSavingActiveStatus(false);
+    }
+  };
   const [isSavingKeepMutedArchived, setIsSavingKeepMutedArchived] = useState(false);
   useEffect(() => {
     setKeepMutedArchived(!!user?.keepMutedChatsArchived);
@@ -640,6 +665,30 @@ export default function SettingsScreen() {
             </View>
           </View>
           <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+        </Pressable>
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={handleToggleActiveStatus}
+          disabled={isSavingActiveStatus}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: showActiveStatus ? "#34C759" : theme.textSecondary }]}>
+              <Feather name="radio" size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">Active Now</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Let people you chat with see when you're active
+              </ThemedText>
+            </View>
+          </View>
+          <View pointerEvents="none" style={styles.switchSlot}>
+            <Switch
+              value={showActiveStatus}
+              trackColor={{ false: theme.border, true: theme.primary }}
+            />
+          </View>
         </Pressable>
 
         <Pressable

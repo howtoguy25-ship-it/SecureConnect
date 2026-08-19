@@ -70,6 +70,18 @@ export default function SafetyNumberScreen() {
     }, [load]),
   );
 
+  // If the peer hasn't finished setting up encryption yet, don't leave the
+  // user stuck on the error screen forever with only a manual Retry button —
+  // poll the same way ConversationScreen's no_keys banner does, so this
+  // resolves on its own within seconds of the peer verifying and logging in.
+  useEffect(() => {
+    if (state !== "error") return;
+    const interval = setInterval(() => {
+      load();
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [state, load]);
+
   const handleToggleVerified = async () => {
     haptics.medium();
     if (verified) {
