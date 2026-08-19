@@ -7,6 +7,7 @@ import { registerDeviceAndUploadPrekeys, replenishOneTimePreKeysIfNeeded } from 
 import * as Application from "expo-application";
 import { Platform, Alert } from "react-native";
 import { setSuspensionListener } from "@/lib/api-utils";
+import { clearAppLockPin } from "@/utils/appLock";
 
 const API_BASE = getApiUrl();
 
@@ -196,6 +197,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try { queryClient.clear(); } catch {}
     try { disconnectSocket(); } catch {}
     try { await clearAuth(); } catch {}
+    // A device-only PIN from a previous account shouldn't carry over to
+    // whoever signs in next on this device.
+    try { await clearAppLockPin(); } catch {}
     // State change LAST so the navigator only swaps once the cleanup is done.
     setUser(null);
     setToken(null);

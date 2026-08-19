@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { View, StyleSheet, Pressable, Switch, Alert, ActivityIndicator, Platform, Linking, FlatList, Modal, TextInput, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ThemedText } from "@/components/ThemedText";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -19,6 +19,7 @@ import * as Application from "expo-application";
 import Constants from "expo-constants";
 import { useQuery } from "@tanstack/react-query";
 import { iapService } from "@/services/InAppPurchaseService";
+import { hasAppLockPin } from "@/utils/appLock";
 
 interface AdminUser {
   id: string;
@@ -49,6 +50,12 @@ export default function SettingsScreen() {
   const { notificationsEnabled, requestPermissions, disableNotifications } = useNotifications();
 
   const [readReceipts, setReadReceipts] = useState(true);
+  const [appLockEnabled, setAppLockEnabled] = useState(false);
+  useFocusEffect(
+    React.useCallback(() => {
+      hasAppLockPin().then(setAppLockEnabled);
+    }, [])
+  );
   const [keepMutedArchived, setKeepMutedArchived] = useState(!!user?.keepMutedChatsArchived);
   const [isSavingKeepMutedArchived, setIsSavingKeepMutedArchived] = useState(false);
   useEffect(() => {
@@ -461,6 +468,24 @@ export default function SettingsScreen() {
               <ThemedText type="body">Security</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Encryption, recovery code, trusted devices
+              </ThemedText>
+            </View>
+          </View>
+          <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+        </Pressable>
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={() => navigation.navigate("AppLockSettings")}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: appLockEnabled ? theme.primary : theme.textSecondary }]}>
+              <Feather name={appLockEnabled ? "lock" : "unlock"} size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">App Lock</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                {appLockEnabled ? "On — PIN required to open Pryvo" : "Off — require a PIN to open Pryvo"}
               </ThemedText>
             </View>
           </View>

@@ -44,6 +44,7 @@ import StorySettingsScreen from "@/screens/StorySettingsScreen";
 import StoryPrivacyScreen from "@/screens/StoryPrivacyScreen";
 import StoryContactPickerScreen from "@/screens/StoryContactPickerScreen";
 import SafetyNumberScreen from "@/screens/SafetyNumberScreen";
+import AppLockSettingsScreen from "@/screens/AppLockSettingsScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { useAuth } from "@/contexts/AuthContext";
 import { View } from "react-native";
@@ -103,6 +104,7 @@ export type RootStackParamList = {
   StoryPrivacy: undefined;
   StoryContactPicker: { kind: "except" | "only" };
   SafetyNumber: { userId: string; userName: string };
+  AppLockSettings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -447,6 +449,11 @@ export default function RootStackNavigator() {
             name="SafetyNumber"
             component={SafetyNumberScreen}
             options={{ headerTitle: "Encryption" }}
+          />
+          <Stack.Screen
+            name="AppLockSettings"
+            component={AppLockSettingsScreen}
+            options={{ headerTitle: "App Lock" }}
           />
         </>
       )}
