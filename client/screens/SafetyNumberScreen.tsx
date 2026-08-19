@@ -11,13 +11,41 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
-import { computeSafetyNumber } from "@/utils/crypto/safetyNumber";
+import { computeSafetyNumber, type SafetyNumberFailureReason } from "@/utils/crypto/safetyNumber";
 import { haptics } from "@/lib/haptics";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type RouteProps = RouteProp<RootStackParamList, "SafetyNumber">;
 
 const VERIFIED_KEY_PREFIX = "safety_number_verified_";
+
+// One honest, specific message per failure reason instead of a single
+// generic guess — "peer hasn't set up encryption" used to be shown even
+// when the real cause was a network error or (rarely) this device's own
+// keys still being generated.
+const ERROR_COPY: Record<
+  SafetyNumberFailureReason,
+  { icon: React.ComponentProps<typeof Feather>["name"]; title: string; message: (peerName: string) => string }
+> = {
+  peer_no_keys: {
+    icon: "clock",
+    title: "Waiting on the Other Side",
+    message: (peerName) =>
+      `${peerName} hasn't finished setting up encryption on their device yet. This screen will update on its own the moment they do — no need to keep checking.`,
+  },
+  network_error: {
+    icon: "wifi-off",
+    title: "Connection Problem",
+    message: () =>
+      "Couldn't reach the server to check encryption keys. Check your connection and try again.",
+  },
+  my_keys_missing: {
+    icon: "key",
+    title: "Finishing Your Setup",
+    message: () =>
+      "Your device is still finishing its own encryption setup. This should resolve in a moment — try again shortly.",
+  },
+};
 
 export default function SafetyNumberScreen() {
   const navigation = useNavigation<Nav>();
@@ -33,13 +61,20 @@ export default function SafetyNumberScreen() {
   const [number, setNumber] = useState<string>("");
   const [digestId, setDigestId] = useState<string>("");
   const [verified, setVerified] = useState(false);
+  const [failureReason, setFailureReason] = useState<SafetyNumberFailureReason>("network_error");
+  const [retrying, setRetrying] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isBackgroundRetry = false) => {
     if (!user?.id) return;
-    setState("loading");
+    if (isBackgroundRetry) {
+      setRetrying(true);
+    } else {
+      setState("loading");
+    }
     try {
       const result = await computeSafetyNumber(user.id, peerUserId);
-      if (!result) {
+      if (!result.ok) {
+        setFailureReason(result.reason);
         setState("error");
         return;
       }
@@ -54,7 +89,10 @@ export default function SafetyNumberScreen() {
       setVerified(storedDigest === result.digestId);
       setState("ready");
     } catch {
+      setFailureReason("network_error");
       setState("error");
+    } finally {
+      setRetrying(false);
     }
   }, [user?.id, peerUserId]);
 
@@ -76,8 +114,11 @@ export default function SafetyNumberScreen() {
   // resolves on its own within seconds of the peer verifying and logging in.
   useEffect(() => {
     if (state !== "error") return;
+    // Background — not load(), which would flip the screen back to the
+    // full-screen spinner every 8s and flash the error card in and out
+    // from under the user for as long as the peer hasn't set up encryption.
     const interval = setInterval(() => {
-      load();
+      load(true);
     }, 8000);
     return () => clearInterval(interval);
   }, [state, load]);
@@ -125,17 +166,38 @@ export default function SafetyNumberScreen() {
           <ActivityIndicator size="large" color={theme.primary} />
         </View>
       ) : state === "error" ? (
-        <View style={{ alignItems: "center", paddingTop: Spacing.xl * 2, gap: Spacing.md }}>
-          <Feather name="alert-triangle" size={40} color={theme.warning} />
-          <ThemedText type="body" style={{ textAlign: "center", color: theme.textSecondary }}>
-            Couldn't compute a safety number right now — {peerUserName} may not have finished setting up
-            encryption on their device yet, or there's a network problem. Try again shortly.
+        <View style={[styles.errorCard, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
+          <View style={[styles.iconWrap, { backgroundColor: theme.warning + "18" }]}>
+            <Feather name={ERROR_COPY[failureReason].icon} size={32} color={theme.warning} />
+          </View>
+
+          <ThemedText type="h3" style={{ textAlign: "center", marginTop: Spacing.md, fontWeight: "700" }}>
+            {ERROR_COPY[failureReason].title}
           </ThemedText>
+
+          <ThemedText type="body" style={{ color: theme.textSecondary, textAlign: "center", marginTop: Spacing.sm }}>
+            {ERROR_COPY[failureReason].message(peerUserName)}
+          </ThemedText>
+
+          {failureReason === "peer_no_keys" ? (
+            <View style={styles.autoCheckRow}>
+              <ActivityIndicator size="small" color={theme.textSecondary} />
+              <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: Spacing.sm }}>
+                Checking again automatically
+              </ThemedText>
+            </View>
+          ) : null}
+
           <Pressable
-            onPress={load}
-            style={[styles.verifyButton, { backgroundColor: theme.primary, marginTop: Spacing.md }]}
+            onPress={() => load(false)}
+            disabled={retrying}
+            style={[styles.verifyButton, { backgroundColor: theme.primary, marginTop: Spacing.lg, opacity: retrying ? 0.7 : 1 }]}
           >
-            <ThemedText style={{ color: "#fff", fontWeight: "700" }}>Retry</ThemedText>
+            {retrying ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <ThemedText style={{ color: "#fff", fontWeight: "700" }}>Retry Now</ThemedText>
+            )}
           </Pressable>
         </View>
       ) : (
@@ -210,6 +272,19 @@ const styles = StyleSheet.create({
     borderRadius: 36,
     alignItems: "center",
     justifyContent: "center",
+  },
+  errorCard: {
+    width: "100%",
+    maxWidth: 380,
+    alignItems: "center",
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.xl,
+  },
+  autoCheckRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: Spacing.lg,
   },
   numberCard: {
     width: "100%",

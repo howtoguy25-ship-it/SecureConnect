@@ -24,9 +24,10 @@
 
 import nacl from "tweetnacl";
 import { getIdentityKeyPair, getSigningKeyPair } from "./prekeyManager";
-import { getCachedIdentityPublicKey, getCachedSigningPublicKey } from "./identityKeyCache";
+import { getPeerIdentityKeys } from "./identityKeyCache";
 
 export interface SafetyNumberResult {
+  ok: true;
   // 60 digits, formatted as 12 space-separated groups of 5 — long enough
   // that a coincidental collision between two different key-pairs is
   // vanishingly unlikely, short enough to read aloud or compare by eye.
@@ -37,6 +38,22 @@ export interface SafetyNumberResult {
   // changes and this hash no longer matches — so verification status
   // resets automatically instead of staying stuck on stale trust.
   digestId: string;
+}
+
+// Distinguishes WHY the number couldn't be computed so the screen can show
+// an honest, specific message instead of one generic guess that's wrong
+// two times out of three:
+//  - "my_keys_missing": this device's own identity/signing keys aren't in
+//    SecureStore yet — vanishingly rare outside a fresh install mid-setup.
+//  - "peer_no_keys": the server has no device on file for the peer at all
+//    (they've genuinely never finished E2EE setup).
+//  - "network_error": the peer lookup itself failed (offline, server
+//    error, timeout) — nothing conclusive about the peer either way.
+export type SafetyNumberFailureReason = "my_keys_missing" | "peer_no_keys" | "network_error";
+
+export interface SafetyNumberFailure {
+  ok: false;
+  reason: SafetyNumberFailureReason;
 }
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
@@ -80,15 +97,15 @@ function bytesToDigitGroups(digest: Uint8Array): string {
 export async function computeSafetyNumber(
   myUserId: string,
   peerUserId: string,
-): Promise<SafetyNumberResult | null> {
+): Promise<SafetyNumberResult | SafetyNumberFailure> {
   const [myIdentity, mySigning] = await Promise.all([getIdentityKeyPair(), getSigningKeyPair()]);
-  if (!myIdentity || !mySigning) return null;
+  if (!myIdentity || !mySigning) return { ok: false, reason: "my_keys_missing" };
 
-  const [peerIdentity, peerSigning] = await Promise.all([
-    getCachedIdentityPublicKey(peerUserId),
-    getCachedSigningPublicKey(peerUserId),
-  ]);
-  if (!peerIdentity || !peerSigning) return null;
+  const peer = await getPeerIdentityKeys(peerUserId);
+  if (!peer.identityPublicKey || !peer.signingPublicKey) {
+    return { ok: false, reason: peer.status === "no_keys" ? "peer_no_keys" : "network_error" };
+  }
+  const { identityPublicKey: peerIdentity, signingPublicKey: peerSigning } = peer;
 
   const mine = userBlock(myUserId, myIdentity.publicKey, mySigning.publicKey);
   const theirs = userBlock(peerUserId, peerIdentity, peerSigning);
@@ -106,5 +123,5 @@ export async function computeSafetyNumber(
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  return { formatted, digestId };
+  return { ok: true, formatted, digestId };
 }
