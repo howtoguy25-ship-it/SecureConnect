@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Modal, Platform, Animated, Alert, ImageBackground, KeyboardAvoidingView, Keyboard, Linking } from "react-native";
+import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Modal, Platform, Animated, Alert, ImageBackground, KeyboardAvoidingView, Keyboard, Linking, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, RouteProp, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { NativeStackNavigationProp, NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -123,6 +123,38 @@ function downsampleWaveform(levels: number[]): number[] {
   return bars;
 }
 
+// Bounded, aspect-ratio-preserving display size for an image bubble, given
+// its real natural pixel dimensions. Replaces the old fixed 200x200 square
+// + contentFit="contain", which shrank every non-square photo down inside
+// a large empty letterboxed frame.
+const MAX_IMAGE_BUBBLE_WIDTH = 240;
+const MAX_IMAGE_BUBBLE_HEIGHT = 320;
+const MIN_IMAGE_BUBBLE_DIMENSION = 120;
+function computeImageBubbleSize(natural?: { width: number; height: number }): { width: number; height: number } {
+  if (!natural || !natural.width || !natural.height) {
+    return { width: MAX_IMAGE_BUBBLE_WIDTH, height: MAX_IMAGE_BUBBLE_WIDTH };
+  }
+  const aspect = natural.width / natural.height;
+  let width = MAX_IMAGE_BUBBLE_WIDTH;
+  let height = width / aspect;
+  if (height > MAX_IMAGE_BUBBLE_HEIGHT) {
+    height = MAX_IMAGE_BUBBLE_HEIGHT;
+    width = height * aspect;
+  }
+  // A very thin/tall or wide/short image (panorama, cropped screenshot)
+  // could otherwise shrink below a sensible tap target on its short axis —
+  // re-derive from the SAME aspect ratio rather than clamping width/height
+  // independently, which would distort the image.
+  if (width < MIN_IMAGE_BUBBLE_DIMENSION) {
+    width = MIN_IMAGE_BUBBLE_DIMENSION;
+    height = width / aspect;
+  } else if (height < MIN_IMAGE_BUBBLE_DIMENSION) {
+    height = MIN_IMAGE_BUBBLE_DIMENSION;
+    width = height * aspect;
+  }
+  return { width, height };
+}
+
 // A queued photo/voice message (recipient hasn't published encryption keys
 // yet) previously showed nothing at all in the message list -- only a
 // one-time "Waiting to Send" alert at the moment it queued, with no lasting
@@ -175,6 +207,17 @@ export default function ConversationScreen() {
   const headerHeight = useHeaderHeight();
   const { theme, isDark } = useTheme();
   const { user } = useAuth();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  // Real (natural) pixel dimensions of each image bubble, captured once via
+  // <Image onLoad>. Without this every photo rendered inside a fixed 200x200
+  // square with contentFit="contain", which for any non-square photo (i.e.
+  // almost every phone photo) left large empty letterboxed bars and made
+  // the actual picture look much smaller than the bubble around it.
+  const [imageNaturalSizes, setImageNaturalSizes] = useState<Record<string, { width: number; height: number }>>({});
+  // Local uri of the image currently shown in the full-screen viewer, or
+  // null when closed. Tapping a photo bubble previously did nothing at all.
+  const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
   
   const { conversationId, otherUserId, otherUserName } = route.params;
   const queryClient = useQueryClient();
@@ -2710,12 +2753,27 @@ export default function ConversationScreen() {
   // listen, release to pause exactly where you are. Holding the SAME
   // message again resumes from that position; holding a DIFFERENT message
   // tears down the previous player and starts the new one from the top.
+  //
+  // handleVoicePressIn does real async work before audio can start
+  // (setAudioModeAsync, createAudioPlayer) — tracked here so a release
+  // that lands before that finishes can cancel the pending play instead
+  // of either being silently dropped (audio never audibly starts even
+  // though the user held it) or firing anyway after the finger already
+  // lifted (audio starts playing on its own with no way to stop it).
+  const voicePressActiveIdRef = useRef<string | null>(null);
+
   const handleVoicePressIn = async (messageId: string, mediaUrl: string) => {
+    voicePressActiveIdRef.current = messageId;
     try {
       if (loadedMessageIdRef.current === messageId && messageSoundRef.current) {
         messageSoundRef.current.play();
-        setPlayingMessageId(messageId);
-        haptics.light();
+        if (voicePressActiveIdRef.current === messageId) {
+          setPlayingMessageId(messageId);
+          haptics.light();
+        } else {
+          // Released before this synchronous branch even finished running.
+          messageSoundRef.current.pause();
+        }
         return;
       }
 
@@ -2761,12 +2819,18 @@ export default function ConversationScreen() {
           loadedMessageIdRef.current = null;
         }
       });
-      player.play();
       messageSoundRef.current = player;
       loadedMessageIdRef.current = messageId;
-      setPlayingMessageId(messageId);
-      setPlayingMessageProgress(0);
-      haptics.light();
+      if (voicePressActiveIdRef.current === messageId) {
+        player.play();
+        setPlayingMessageId(messageId);
+        setPlayingMessageProgress(0);
+        haptics.light();
+      }
+      // else: the user already released while this was loading — leave it
+      // primed (loadedMessageIdRef set) but don't audibly start it; the
+      // next hold on this same bubble resumes instantly via the branch
+      // above instead of reloading from scratch.
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
@@ -2775,6 +2839,9 @@ export default function ConversationScreen() {
   };
 
   const handleVoicePressOut = (messageId: string) => {
+    if (voicePressActiveIdRef.current === messageId) {
+      voicePressActiveIdRef.current = null;
+    }
     // Only pause if this bubble is the one actually playing — an already-
     // released touch on a bubble that never started (e.g. playback failed)
     // has nothing to pause.
@@ -3816,20 +3883,37 @@ export default function ConversationScreen() {
           ) : null}
 
           {hasMedia && (effectiveMediaType === 'image' || effectiveMediaType === 'gif') && effectiveMediaUrl ? (
-            // contentFit="contain" (not "cover") -- the box below is a fixed
-            // square, and "cover" scales+crops non-square media to fill it,
-            // silently cutting off edges. Most GIFs are wide/landscape, so
-            // this was cropping roughly half of every GIF sent. "contain"
-            // guarantees the whole image is always visible; any letterboxing
-            // is filled with the bubble's own background so it blends in
-            // rather than showing as a visible gap.
-            <View style={[styles.mediaContainer, { backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary }]}>
+            // Sized from the image's own natural dimensions (captured via
+            // onLoad below) instead of a fixed 200x200 square. The old fixed
+            // square + contentFit="contain" made every non-square photo (the
+            // vast majority of real camera shots) render tiny inside a big
+            // empty letterboxed frame. contentFit stays "contain" -- still
+            // correct once the box actually matches the image's own aspect
+            // ratio, since there's no longer any mismatched space to fill.
+            <Pressable
+              onPress={() => setFullscreenImageUri(effectiveMediaUrl)}
+              style={[
+                styles.mediaContainer,
+                { backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary },
+                computeImageBubbleSize(imageNaturalSizes[item.id]),
+              ]}
+            >
               <Image
                 source={{ uri: effectiveMediaUrl }}
-                style={styles.mediaImage}
+                style={styles.mediaImageFill}
                 contentFit="contain"
+                onLoad={(e) => {
+                  const { width, height } = e.source;
+                  if (width && height) {
+                    setImageNaturalSizes((prev) =>
+                      prev[item.id]?.width === width && prev[item.id]?.height === height
+                        ? prev
+                        : { ...prev, [item.id]: { width, height } },
+                    );
+                  }
+                }}
               />
-            </View>
+            </Pressable>
           ) : null}
           
           {hasMedia && effectiveMediaType === 'video' ? (
@@ -5890,6 +5974,26 @@ export default function ConversationScreen() {
         return list;
       })()}
     />
+
+    <Modal
+      visible={!!fullscreenImageUri}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setFullscreenImageUri(null)}
+    >
+      <Pressable style={styles.fullscreenImageBackdrop} onPress={() => setFullscreenImageUri(null)}>
+        <Pressable style={styles.fullscreenImageClose} onPress={() => setFullscreenImageUri(null)} hitSlop={12}>
+          <Feather name="x" size={22} color="#fff" />
+        </Pressable>
+        {fullscreenImageUri ? (
+          <Image
+            source={{ uri: fullscreenImageUri }}
+            style={{ width: screenWidth, height: screenHeight * 0.85 }}
+            contentFit="contain"
+          />
+        ) : null}
+      </Pressable>
+    </Modal>
     </View>
   );
 }
@@ -6065,6 +6169,28 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderRadius: 12,
+  },
+  mediaImageFill: {
+    width: "100%",
+    height: "100%",
+  },
+  fullscreenImageBackdrop: {
+    flex: 1,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullscreenImageClose: {
+    position: "absolute",
+    top: 0,
+    right: Spacing.lg,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
   },
   videoPlaceholder: {
     width: 200,
