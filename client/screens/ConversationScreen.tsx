@@ -2843,34 +2843,39 @@ export default function ConversationScreen() {
     setShowEmojiPicker(true);
   };
 
-  // Snapchat-style hold-to-play: press and hold a voice-message bubble to
-  // listen, release to pause exactly where you are. Holding the SAME
-  // message again resumes from that position; holding a DIFFERENT message
-  // tears down the previous player and starts the new one from the top.
-  //
-  // handleVoicePressIn does real async work before audio can start
-  // (setAudioModeAsync, createAudioPlayer) — tracked here so a release
-  // that lands before that finishes can cancel the pending play instead
-  // of either being silently dropped (audio never audibly starts even
-  // though the user held it) or firing anyway after the finger already
-  // lifted (audio starts playing on its own with no way to stop it).
-  const voicePressActiveIdRef = useRef<string | null>(null);
+  // Tap-to-play / tap-to-pause, matching every mainstream messaging app
+  // (WhatsApp, Telegram, iMessage, Signal) — a plain onPress toggle, not
+  // press-and-hold. A prior hold-to-play version raced onPressIn's async
+  // setup (setAudioModeAsync, createAudioPlayer) against onPressOut: a
+  // normal quick tap released before that finished, so the audio never
+  // audibly started at all. onPress has no such race — it always resolves
+  // to a single complete action.
+  const isLoadingVoiceRef = useRef(false);
 
-  const handleVoicePressIn = async (messageId: string, mediaUrl: string) => {
-    voicePressActiveIdRef.current = messageId;
+  const handleVoicePress = async (messageId: string, mediaUrl: string) => {
+    // Toggle: tapping the currently-playing bubble pauses it in place.
+    if (playingMessageId === messageId && messageSoundRef.current) {
+      messageSoundRef.current.pause();
+      setPlayingMessageId(null);
+      return;
+    }
+
+    // Already loaded (paused mid-way, or finished loading from a previous
+    // tap) — resume from that position instead of reloading from scratch.
+    if (loadedMessageIdRef.current === messageId && messageSoundRef.current) {
+      messageSoundRef.current.play();
+      setPlayingMessageId(messageId);
+      haptics.light();
+      return;
+    }
+
+    // Ignore a second tap while a load is already in flight — prevents two
+    // overlapping createAudioPlayer calls racing each other.
+    if (isLoadingVoiceRef.current) return;
+    isLoadingVoiceRef.current = true;
+
     try {
-      if (loadedMessageIdRef.current === messageId && messageSoundRef.current) {
-        messageSoundRef.current.play();
-        if (voicePressActiveIdRef.current === messageId) {
-          setPlayingMessageId(messageId);
-          haptics.light();
-        } else {
-          // Released before this synchronous branch even finished running.
-          messageSoundRef.current.pause();
-        }
-        return;
-      }
-
+      // Switching from a different message — tear down its player first.
       if (messageSoundRef.current) {
         messageSoundSubRef.current?.remove();
         messageSoundSubRef.current = null;
@@ -2904,9 +2909,9 @@ export default function ConversationScreen() {
         if (status.duration > 0) {
           setPlayingMessageProgress(Math.min(1, status.currentTime / status.duration));
         }
-        // Reached the end (not just a hold-release pause) — reset fully so
-        // the next hold starts over from the beginning instead of trying
-        // to "resume" a finished player.
+        // Reached the end (not just a tap-to-pause) — reset fully so the
+        // next tap starts over from the beginning instead of trying to
+        // "resume" a finished player.
         if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
           setPlayingMessageId((prev) => (prev === messageId ? null : prev));
           setPlayingMessageProgress(0);
@@ -2915,36 +2920,16 @@ export default function ConversationScreen() {
       });
       messageSoundRef.current = player;
       loadedMessageIdRef.current = messageId;
-      if (voicePressActiveIdRef.current === messageId) {
-        player.play();
-        setPlayingMessageId(messageId);
-        setPlayingMessageProgress(0);
-        haptics.light();
-      }
-      // else: the user already released while this was loading — leave it
-      // primed (loadedMessageIdRef set) but don't audibly start it; the
-      // next hold on this same bubble resumes instantly via the branch
-      // above instead of reloading from scratch.
+      player.play();
+      setPlayingMessageId(messageId);
+      setPlayingMessageProgress(0);
+      haptics.light();
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
       Alert.alert('Playback Error', 'Could not play the voice message.');
-    }
-  };
-
-  const handleVoicePressOut = (messageId: string) => {
-    if (voicePressActiveIdRef.current === messageId) {
-      voicePressActiveIdRef.current = null;
-    }
-    // Only pause if this bubble is the one actually playing — an already-
-    // released touch on a bubble that never started (e.g. playback failed)
-    // has nothing to pause.
-    if (playingMessageId === messageId && messageSoundRef.current) {
-      messageSoundRef.current.pause();
-      setPlayingMessageId(null);
-      // Deliberately NOT resetting progress or releasing the player here —
-      // that's what makes the next hold on this same bubble resume instead
-      // of restarting.
+    } finally {
+      isLoadingVoiceRef.current = false;
     }
   };
 
@@ -4044,8 +4029,7 @@ export default function ConversationScreen() {
             <View>
               <Pressable
                 style={styles.voiceMessageContainer}
-                onPressIn={() => handleVoicePressIn(item.id, effectiveMediaUrl!)}
-                onPressOut={() => handleVoicePressOut(item.id)}
+                onPress={() => handleVoicePress(item.id, effectiveMediaUrl!)}
               >
                 <View style={[styles.playButton, { backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }]}>
                   <Feather
