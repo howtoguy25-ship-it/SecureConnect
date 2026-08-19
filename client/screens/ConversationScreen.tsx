@@ -3298,23 +3298,35 @@ export default function ConversationScreen() {
 
   const handleShareMessage = async () => {
     if (!selectedMessage) return;
-    
-    try {
-      if (selectedMessage.mediaUrl && await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(selectedMessage.mediaUrl);
-      } else if (selectedMessage.content) {
-        const decryptedShareContent = decryptedCache[selectedMessage.id] ?? tryDecrypt(selectedMessage.content, selectedMessage.id);
-        if (Platform.OS === 'web') {
-          if (navigator.share && decryptedShareContent) {
-            await navigator.share({ text: decryptedShareContent });
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error sharing message:', error);
-    }
+    const message = selectedMessage;
     setShowMessageOptions(false);
     setSelectedMessage(null);
+
+    // Same "competing native presentations" iOS bug documented on
+    // closeHoldOverlay/handleReportMessage above — this used to call
+    // Sharing.shareAsync() (which presents the native OS share sheet)
+    // BEFORE closing the showMessageOptions Modal, so the share sheet was
+    // presented while that Modal was still fully up. Two simultaneous
+    // native presentations on iOS is a well-documented way to leave the
+    // whole screen permanently unresponsive to touch with nothing
+    // visibly wrong — indistinguishable from a real freeze, and the most
+    // likely explanation for "sharing a message freezes the chat."
+    setTimeout(async () => {
+      try {
+        if (message.mediaUrl && await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(message.mediaUrl);
+        } else if (message.content) {
+          const decryptedShareContent = decryptedCache[message.id] ?? tryDecrypt(message.content, message.id);
+          if (Platform.OS === 'web') {
+            if (navigator.share && decryptedShareContent) {
+              await navigator.share({ text: decryptedShareContent });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error sharing message:', error);
+      }
+    }, 250);
   };
 
   const handleForwardMessage = () => {
@@ -3326,7 +3338,13 @@ export default function ConversationScreen() {
     const mediaType = selectedMessage.mediaType ?? null;
     setShowMessageOptions(false);
     setSelectedMessage(null);
-    navigation.navigate("ForwardPicker", { messageId: id, plaintext, originalSenderId, mediaUrl, mediaType });
+    // ForwardPicker is a native "modal" presentation (RootStackNavigator) —
+    // presenting it in the same tick this screen's own Modal starts
+    // closing is the same competing-native-presentations issue documented
+    // above on handleShareMessage/closeHoldOverlay.
+    setTimeout(() => {
+      navigation.navigate("ForwardPicker", { messageId: id, plaintext, originalSenderId, mediaUrl, mediaType });
+    }, 250);
   };
 
   const handleReplyToMessage = () => {
@@ -3343,7 +3361,12 @@ export default function ConversationScreen() {
     setShowMessageOptions(false);
     setSelectedMessage(null);
     haptics.light();
-    handleTakePhoto();
+    // handleTakePhoto() launches the native camera — same
+    // competing-native-presentations issue as handleShareMessage above if
+    // it fires before this screen's own Modal has actually finished
+    // closing (when camera permission is already granted, the request
+    // resolves almost instantly, leaving no natural gap).
+    setTimeout(handleTakePhoto, 250);
   };
 
   const handlePinMessage = async () => {
@@ -3376,7 +3399,11 @@ export default function ConversationScreen() {
 
   const handleShowMessageInfo = () => {
     setShowMessageOptions(false);
-    setShowMessageInfo(true);
+    // MessageInfoSheet is its own native Modal — opening it in the same
+    // render pass that closes showMessageOptions's Modal starts both
+    // native transitions at once, the same competing-presentations issue
+    // documented above on handleShareMessage.
+    setTimeout(() => setShowMessageInfo(true), 250);
   };
 
   const handleDeleteForEveryone = async () => {
