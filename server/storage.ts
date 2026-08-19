@@ -160,6 +160,17 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
+  // usernameLower must already be lowercased by the caller — the column
+  // stores the canonical lowercase form, so an exact eq() match works
+  // without an extra LOWER() on every lookup.
+  async getUserByUsername(usernameLower: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(and(
+      eq(users.username, usernameLower),
+      or(isNull(users.isDeletedPlaceholder), eq(users.isDeletedPlaceholder, false)),
+    ));
+    return user || undefined;
+  }
+
   async getUserBySafeCodeLookupHash(hash: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(and(
       eq(users.safeCodeLookupHash, hash),
@@ -239,6 +250,7 @@ export class DatabaseStorage implements IStorage {
       userId: users.id,
       phoneNumber: users.phoneNumber,
       displayName: users.displayName,
+      username: users.username,
       avatarIndex: users.avatarIndex,
       avatarUrl: users.avatarUrl,
       isVip: users.isVip,
@@ -258,6 +270,7 @@ export class DatabaseStorage implements IStorage {
         id: p.userId,
         phoneNumber: p.phoneNumber,
         displayName: p.displayName,
+        username: p.username,
         avatarIndex: p.avatarIndex,
         avatarUrl: p.avatarUrl,
         isVip: p.isVip,

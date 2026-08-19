@@ -34,6 +34,12 @@ export const users = pgTable("users", {
   virtualNumberId: varchar("virtual_number_id"),
   chatBackgroundUrl: text("chat_background_url"),
   lastNameChangeAt: timestamp("last_name_change_at"),
+  // Public @handle, distinct from displayName/phone — lets people find and
+  // recognize this user without exposing their phone number. Stored
+  // lowercase (the canonical/unique form); same 30-day change cadence as
+  // displayName, tracked separately since the two aren't changed together.
+  username: text("username").unique(),
+  lastUsernameChangeAt: timestamp("last_username_change_at"),
   pushToken: text("push_token"),
   // Separate from pushToken (Expo's regular push service) — a PushKit VoIP
   // token, which can only be delivered via a direct APNs VoIP push, not

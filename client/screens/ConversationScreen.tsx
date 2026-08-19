@@ -571,6 +571,7 @@ export default function ConversationScreen() {
 
   const { data: otherUserData } = useQuery<{
     phoneNumber?: string;
+    username?: string | null;
     virtualNumber?: string;
     preferredNumberType?: string;
     supportsSealedSender?: boolean;
@@ -4284,12 +4285,18 @@ export default function ConversationScreen() {
             <ThemedText type="body" style={styles.headerName}>
               {otherUserName}
             </ThemedText>
-            <View style={styles.onlineIndicator}>
-              <View style={[styles.onlineDot, { backgroundColor: "#25D366" }]} />
-              <ThemedText style={[styles.onlineText, { color: theme.textSecondary }]}>
-                Online
+            {otherUserData?.username ? (
+              <ThemedText style={[styles.onlineText, { color: theme.primary, fontWeight: "600" }]} numberOfLines={1}>
+                @{otherUserData.username}
               </ThemedText>
-            </View>
+            ) : (
+              <View style={styles.onlineIndicator}>
+                <View style={[styles.onlineDot, { backgroundColor: "#25D366" }]} />
+                <ThemedText style={[styles.onlineText, { color: theme.textSecondary }]}>
+                  Online
+                </ThemedText>
+              </View>
+            )}
           </View>
         </View>
       ),
@@ -4315,7 +4322,7 @@ export default function ConversationScreen() {
         </View>
       ),
     });
-  }, [navigation, theme, otherUserName, otherUserId, user?.isVip, setShowCallOptions]);
+  }, [navigation, theme, otherUserName, otherUserId, user?.isVip, setShowCallOptions, otherUserData?.username]);
 
   if (isLoading) {
     return (

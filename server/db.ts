@@ -95,6 +95,15 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS keep_muted_chats_archived boolean DEFAULT false;
     `);
+    // Username / @handle (build 133).
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS username text,
+        ADD COLUMN IF NOT EXISTS last_username_change_at timestamp;
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users (username);
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

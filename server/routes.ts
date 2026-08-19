@@ -300,6 +300,12 @@ function isValidTwoWordAnswer(answer: string): boolean {
 const SECURITY_Q_MAX_ATTEMPTS = 5;
 const SECURITY_Q_LOCKOUT_MS = 30 * 60_000; // 30 minutes
 
+// 3-20 chars, must start with a letter, lowercase letters/digits/underscore
+// only. Stored/compared lowercase — the unique index and every lookup here
+// assume the canonical form.
+const USERNAME_REGEX = /^[a-z][a-z0-9_]{2,19}$/;
+const USERNAME_CHANGE_COOLDOWN_DAYS = 30;
+
 export async function registerRoutes(app: Express): Promise<Server> {
   const connectedUsers = new Map<string, Set<string>>();
 
@@ -1298,6 +1304,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         showNotificationPreview: user.showNotificationPreview ?? true,
         defaultDisappearingTimer: user.defaultDisappearingTimer ?? 0,
         keepMutedChatsArchived: user.keepMutedChatsArchived ?? false,
+        username: user.username ?? null,
+        lastUsernameChangeAt: user.lastUsernameChangeAt ?? null,
         // Stories preferences
         storiesEnabled: user.storiesEnabled ?? true,
         storyPrivacyMode: user.storyPrivacyMode ?? 'everyone',
@@ -1393,6 +1401,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error('Error updating profile:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Username availability check (used for live validation while typing).
+  app.get('/api/users/username-available', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const raw = String(req.query.username || '').trim().toLowerCase();
+      if (!USERNAME_REGEX.test(raw)) {
+        return res.json({ available: false, reason: 'invalid' });
+      }
+      const existing = await storage.getUserByUsername(raw);
+      const available = !existing || existing.id === req.userId;
+      res.json({ available, reason: available ? null : 'taken' });
+    } catch (error) {
+      console.error('Error checking username availability:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.patch('/api/users/me/username', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const raw = String(req.body?.username || '').trim().toLowerCase();
+      if (!USERNAME_REGEX.test(raw)) {
+        return res.status(400).json({
+          error: 'Username must be 3-20 characters, start with a letter, and use only lowercase letters, numbers, and underscores.',
+        });
+      }
+
+      const oldUser = await storage.getUser(req.userId!);
+      if (!oldUser) return res.status(404).json({ error: 'User not found' });
+
+      if (oldUser.username === raw) {
+        return res.json({ username: oldUser.username, lastUsernameChangeAt: oldUser.lastUsernameChangeAt });
+      }
+
+      if (oldUser.username && oldUser.lastUsernameChangeAt) {
+        const lastChange = new Date(oldUser.lastUsernameChangeAt);
+        const daysSinceChange = (Date.now() - lastChange.getTime()) / (1000 * 60 * 60 * 24);
+        if (daysSinceChange < USERNAME_CHANGE_COOLDOWN_DAYS) {
+          const daysRemaining = Math.ceil(USERNAME_CHANGE_COOLDOWN_DAYS - daysSinceChange);
+          return res.status(400).json({
+            error: `You can change your username again in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`,
+            daysRemaining,
+            nextChangeDate: new Date(lastChange.getTime() + USERNAME_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+          });
+        }
+      }
+
+      const existing = await storage.getUserByUsername(raw);
+      if (existing && existing.id !== req.userId) {
+        return res.status(409).json({ error: 'That username is already taken.' });
+      }
+
+      const updated = await storage.updateUser(req.userId!, { username: raw, lastUsernameChangeAt: new Date() });
+      if (!updated) return res.status(404).json({ error: 'User not found' });
+      res.json({ username: updated.username, lastUsernameChangeAt: updated.lastUsernameChangeAt });
+    } catch (error: any) {
+      // Unique-index race: two concurrent requests both pass the pre-check.
+      if (error?.code === '23505') {
+        return res.status(409).json({ error: 'That username is already taken.' });
+      }
+      console.error('Error updating username:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -2261,14 +2332,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/users/search', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const { phone } = req.query;
-      
-      if (!phone || typeof phone !== 'string') {
+      const { phone, username } = req.query;
+
+      let user;
+      if (typeof username === 'string' && username.trim()) {
+        const normalized = username.trim().replace(/^@/, '').toLowerCase();
+        user = await storage.getUserByUsername(normalized);
+      } else if (typeof phone === 'string' && phone) {
+        user = await storage.getUserByPhone(phone);
+      } else {
         return res.json([]);
       }
 
-      const user = await storage.getUserByPhone(phone);
-      
       if (!user || user.id === req.userId) {
         return res.json([]);
       }
@@ -2276,6 +2351,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json([{
         id: user.id,
         displayName: user.displayName,
+        username: user.username,
         phoneNumber: user.phoneNumber,
         avatarIndex: user.avatarIndex,
         isVip: user.isVip,
@@ -2301,6 +2377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         phoneNumber: user.phoneNumber,
+        username: user.username ?? null,
         virtualNumber: virtualNumber?.phoneNumber,
         preferredNumberType: user.preferredNumberType || 'personal',
         // Build 63 Phase A — the sender's client reads this to decide

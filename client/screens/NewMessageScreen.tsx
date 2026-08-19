@@ -59,6 +59,7 @@ const getFlagEmoji = (countryCode: string) => {
 interface SearchResult {
   id: string;
   displayName: string;
+  username?: string | null;
   phoneNumber: string;
   avatarIndex: number;
   isVip: boolean;
@@ -85,6 +86,8 @@ export default function NewMessageScreen() {
   const [hasSearched, setHasSearched] = useState(false);
   const [searchedNumber, setSearchedNumber] = useState("");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [searchMode, setSearchMode] = useState<"phone" | "username">("phone");
+  const [usernameQuery, setUsernameQuery] = useState("");
 
   const { data: geoData } = useQuery<GeoPermissionsResponse>({
     queryKey: ['/api/auth/geo-permissions'],
@@ -127,20 +130,25 @@ export default function NewMessageScreen() {
   };
 
   const handleSearch = async () => {
-    if (phoneNumber.length < 6) return;
+    const isUsernameMode = searchMode === "username";
+    const cleanedUsername = usernameQuery.trim().replace(/^@/, "");
+    if (isUsernameMode ? cleanedUsername.length < 3 : phoneNumber.length < 6) return;
 
     setIsSearching(true);
     setHasSearched(true);
-    const fullNumber = getFullPhoneNumber();
+    const fullNumber = isUsernameMode ? "" : getFullPhoneNumber();
     setSearchedNumber(fullNumber);
 
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
-      const response = await fetch(new URL(`/api/users/search?phone=${encodeURIComponent(fullNumber)}`, baseUrl), {
+      const query = isUsernameMode
+        ? `username=${encodeURIComponent(cleanedUsername)}`
+        : `phone=${encodeURIComponent(fullNumber)}`;
+      const response = await fetch(new URL(`/api/users/search?${query}`, baseUrl), {
         headers: { 'Authorization': `Bearer ${token}` },
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setSearchResults(data);
@@ -273,6 +281,11 @@ export default function NewMessageScreen() {
           <ThemedText type="body" style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
             {item.displayName}
           </ThemedText>
+          {item.username ? (
+            <ThemedText type="small" style={{ color: theme.primary, fontWeight: "600" }} numberOfLines={1}>
+              @{item.username}
+            </ThemedText>
+          ) : null}
           {item.isVip ? (
             <Feather name="award" size={14} color={theme.accent} />
           ) : null}
@@ -322,57 +335,118 @@ export default function NewMessageScreen() {
     <>
       <View style={[styles.container, { backgroundColor: theme.backgroundRoot, paddingTop: topPadding }]}>
         <View style={styles.searchContainer}>
-          <ThemedText type="small" style={[styles.label, { color: theme.textSecondary }]}>
-            ENTER PHONE NUMBER
-          </ThemedText>
-          
-          <View style={styles.inputRow}>
-            <Pressable 
-              style={[styles.countryCode, { backgroundColor: theme.backgroundDefault }]}
-              onPress={() => setShowCountryPicker(true)}
-            >
-              <ThemedText style={{ marginRight: Spacing.xs }}>{getFlagEmoji(selectedCountry.code)}</ThemedText>
-              <ThemedText type="body">{selectedCountry.dial}</ThemedText>
-              <Feather name="chevron-down" size={14} color={theme.textSecondary} style={{ marginLeft: 2 }} />
-            </Pressable>
-            
-            <TextInput
-              style={[
-                styles.input,
-                {
-                  backgroundColor: theme.backgroundDefault,
-                  color: theme.text,
-                },
-              ]}
-              placeholder="Phone number"
-              placeholderTextColor={theme.textSecondary}
-              value={phoneNumber}
-              onChangeText={handlePhoneChange}
-              keyboardType="phone-pad"
-              autoFocus
-            />
-            
-            <Pressable
-              style={[
-                styles.searchButton,
-                {
-                  backgroundColor: isValidPhone ? theme.primary : theme.backgroundDefault,
-                },
-              ]}
-              onPress={handleSearch}
-              disabled={!isValidPhone || isSearching}
-            >
-              {isSearching ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Feather
-                  name="search"
-                  size={20}
-                  color={isValidPhone ? "#fff" : theme.textSecondary}
-                />
-              )}
-            </Pressable>
+          <View style={[styles.modeToggle, { backgroundColor: theme.backgroundDefault }]}>
+            {(["phone", "username"] as const).map((mode) => (
+              <Pressable
+                key={mode}
+                style={[styles.modeToggleOption, searchMode === mode && { backgroundColor: theme.primary }]}
+                onPress={() => {
+                  setSearchMode(mode);
+                  setHasSearched(false);
+                  setSearchResults([]);
+                }}
+              >
+                <ThemedText style={{ color: searchMode === mode ? "#fff" : theme.textSecondary, fontWeight: "600" }}>
+                  {mode === "phone" ? "Phone" : "Username"}
+                </ThemedText>
+              </Pressable>
+            ))}
           </View>
+
+          <ThemedText type="small" style={[styles.label, { color: theme.textSecondary }]}>
+            {searchMode === "phone" ? "ENTER PHONE NUMBER" : "ENTER USERNAME"}
+          </ThemedText>
+
+          {searchMode === "phone" ? (
+            <View style={styles.inputRow}>
+              <Pressable
+                style={[styles.countryCode, { backgroundColor: theme.backgroundDefault }]}
+                onPress={() => setShowCountryPicker(true)}
+              >
+                <ThemedText style={{ marginRight: Spacing.xs }}>{getFlagEmoji(selectedCountry.code)}</ThemedText>
+                <ThemedText type="body">{selectedCountry.dial}</ThemedText>
+                <Feather name="chevron-down" size={14} color={theme.textSecondary} style={{ marginLeft: 2 }} />
+              </Pressable>
+
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.backgroundDefault,
+                    color: theme.text,
+                  },
+                ]}
+                placeholder="Phone number"
+                placeholderTextColor={theme.textSecondary}
+                value={phoneNumber}
+                onChangeText={handlePhoneChange}
+                keyboardType="phone-pad"
+                autoFocus
+              />
+
+              <Pressable
+                style={[
+                  styles.searchButton,
+                  {
+                    backgroundColor: isValidPhone ? theme.primary : theme.backgroundDefault,
+                  },
+                ]}
+                onPress={handleSearch}
+                disabled={!isValidPhone || isSearching}
+              >
+                {isSearching ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Feather
+                    name="search"
+                    size={20}
+                    color={isValidPhone ? "#fff" : theme.textSecondary}
+                  />
+                )}
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.backgroundDefault,
+                    color: theme.text,
+                    flex: 1,
+                  },
+                ]}
+                placeholder="@username"
+                placeholderTextColor={theme.textSecondary}
+                value={usernameQuery}
+                onChangeText={(t) => { setUsernameQuery(t.replace(/[^a-zA-Z0-9_@]/g, "")); setHasSearched(false); }}
+                autoCapitalize="none"
+                autoFocus
+                onSubmitEditing={handleSearch}
+              />
+
+              <Pressable
+                style={[
+                  styles.searchButton,
+                  {
+                    backgroundColor: usernameQuery.replace(/^@/, "").length >= 3 ? theme.primary : theme.backgroundDefault,
+                  },
+                ]}
+                onPress={handleSearch}
+                disabled={usernameQuery.replace(/^@/, "").length < 3 || isSearching}
+              >
+                {isSearching ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Feather
+                    name="search"
+                    size={20}
+                    color={usernameQuery.replace(/^@/, "").length >= 3 ? "#fff" : theme.textSecondary}
+                  />
+                )}
+              </Pressable>
+            </View>
+          )}
         </View>
 
         <FlatList
@@ -383,7 +457,17 @@ export default function NewMessageScreen() {
             paddingBottom: insets.bottom + Spacing.xl,
           }}
           ListEmptyComponent={
-            hasSearched && !isSearching ? (
+            hasSearched && !isSearching && searchMode === "username" ? (
+              <View style={styles.emptyContainer}>
+                <Feather name="at-sign" size={48} color={theme.textSecondary} />
+                <ThemedText type="body" style={{ color: theme.text, fontWeight: "600" }}>
+                  No user found
+                </ThemedText>
+                <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: "center" }}>
+                  Nobody on Pryvo is using that username.
+                </ThemedText>
+              </View>
+            ) : hasSearched && !isSearching ? (
               <View style={styles.emptyContainer}>
                 <Feather name="user-plus" size={48} color={theme.primary} />
                 <ThemedText type="body" style={{ color: theme.text, fontWeight: "600" }}>
@@ -526,6 +610,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: Spacing.sm,
   },
+  modeToggle: {
+    flexDirection: "row",
+    borderRadius: BorderRadius.md,
+    padding: 3,
+    alignSelf: "flex-start",
+  },
+  modeToggleOption: {
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.sm,
+  },
   inputRow: {
     flexDirection: "row",
     gap: Spacing.sm,
@@ -579,6 +674,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontWeight: "600",
+    flexShrink: 1,
   },
   emptyContainer: {
     flex: 1,

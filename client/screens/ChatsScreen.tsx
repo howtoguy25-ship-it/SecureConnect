@@ -38,6 +38,7 @@ interface Conversation {
   otherUser: {
     id: string;
     displayName: string;
+    username?: string | null;
     avatarIndex: number;
     isVip: boolean;
   } | null;
@@ -83,6 +84,11 @@ const ConversationItem = memo(({ item, onPress, onLongPress, isTyping, theme }: 
             <ThemedText type="body" style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
               {item.otherUser.displayName || "User"}
             </ThemedText>
+            {item.otherUser.username ? (
+              <ThemedText type="small" style={{ color: theme.primary }} numberOfLines={1}>
+                @{item.otherUser.username}
+              </ThemedText>
+            ) : null}
             {item.otherUser.isVip ? (
               <Feather name="award" size={14} color={theme.accent} />
             ) : null}
@@ -649,6 +655,7 @@ const styles = StyleSheet.create({
   name: {
     fontWeight: "600",
     fontSize: 17,
+    flexShrink: 1,
   },
   previewContainer: {
     flexDirection: "row",

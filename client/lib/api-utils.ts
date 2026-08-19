@@ -115,6 +115,8 @@ export interface User {
   showNotificationPreview?: boolean;
   defaultDisappearingTimer?: number;
   keepMutedChatsArchived?: boolean;
+  username?: string | null;
+  lastUsernameChangeAt?: string | null;
   // Build 63 Phase A — sealed-sender client UI fields. `virtualNumber` is
   // the joined VN row (status, phoneNumber, ...) so the composer can
   // disable itself when the number is released/suspended without a

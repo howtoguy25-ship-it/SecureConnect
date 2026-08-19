@@ -67,6 +67,90 @@ export default function ProfileScreen() {
   const [isSavingName, setIsSavingName] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [isSavingUsername, setIsSavingUsername] = useState(false);
+  const [usernameCheck, setUsernameCheck] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+
+  const usernameChangeInfo = useMemo(() => {
+    if (!user?.username || !user?.lastUsernameChangeAt) {
+      return { canChange: true, daysRemaining: 0 };
+    }
+    const lastChange = new Date(user.lastUsernameChangeAt);
+    const daysSince = (Date.now() - lastChange.getTime()) / (1000 * 60 * 60 * 24);
+    const daysRemaining = Math.max(0, Math.ceil(30 - daysSince));
+    return { canChange: daysSince >= 30, daysRemaining };
+  }, [user?.username, user?.lastUsernameChangeAt]);
+
+  useEffect(() => {
+    const cleaned = newUsername.trim().toLowerCase();
+    if (!showUsernameModal || !cleaned || cleaned === user?.username) {
+      setUsernameCheck("idle");
+      return;
+    }
+    if (!/^[a-z][a-z0-9_]{2,19}$/.test(cleaned)) {
+      setUsernameCheck("invalid");
+      return;
+    }
+    setUsernameCheck("checking");
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiRequest("GET", `/api/users/username-available?username=${encodeURIComponent(cleaned)}`);
+        const data = await res.json();
+        if (!cancelled) setUsernameCheck(data.available ? "available" : "taken");
+      } catch {
+        if (!cancelled) setUsernameCheck("idle");
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [newUsername, showUsernameModal, user?.username]);
+
+  const handleEditUsername = () => {
+    if (!usernameChangeInfo.canChange) {
+      Alert.alert(
+        "Username Change Limit",
+        `You can change your username once every 30 days. Please wait ${usernameChangeInfo.daysRemaining} more day${usernameChangeInfo.daysRemaining === 1 ? '' : 's'}.`
+      );
+      return;
+    }
+    setNewUsername(user?.username || "");
+    setUsernameCheck("idle");
+    setShowUsernameModal(true);
+  };
+
+  const handleSaveUsername = async () => {
+    const cleaned = newUsername.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_]{2,19}$/.test(cleaned)) {
+      Alert.alert("Invalid Username", "Usernames are 3-20 characters, start with a letter, and use only lowercase letters, numbers, and underscores.");
+      return;
+    }
+    if (cleaned === user?.username) {
+      setShowUsernameModal(false);
+      return;
+    }
+    if (usernameCheck === "taken") {
+      Alert.alert("Username Taken", "That username is already in use.");
+      return;
+    }
+    setIsSavingUsername(true);
+    try {
+      const res = await apiRequest("PATCH", "/api/users/me/username", { username: cleaned });
+      if (res.ok) {
+        await refreshUser();
+        setShowUsernameModal(false);
+        Alert.alert("Success", "Your username has been updated!");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        Alert.alert("Error", data.error || "Failed to update your username. Please try again.");
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Failed to update your username. Please try again.");
+    } finally {
+      setIsSavingUsername(false);
+    }
+  };
+
   const nameChangeInfo = useMemo(() => {
     if (!user?.lastNameChangeAt) {
       return { canChange: true, daysRemaining: 0 };
@@ -330,7 +414,24 @@ export default function ProfileScreen() {
             Name change available in {nameChangeInfo.daysRemaining} day{nameChangeInfo.daysRemaining === 1 ? '' : 's'}
           </ThemedText>
         ) : null}
-        
+
+        <Pressable style={styles.usernameRow} onPress={handleEditUsername} hitSlop={6}>
+          {user?.username ? (
+            <View style={[styles.usernameTag, { backgroundColor: theme.primary + "18" }]}>
+              <ThemedText type="small" style={{ color: theme.primary, fontWeight: "700" }}>
+                @{user.username}
+              </ThemedText>
+            </View>
+          ) : (
+            <View style={[styles.usernameTag, { backgroundColor: theme.backgroundDefault }]}>
+              <Feather name="at-sign" size={12} color={theme.textSecondary} />
+              <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: 4 }}>
+                Add username
+              </ThemedText>
+            </View>
+          )}
+        </Pressable>
+
         <Pressable onPress={() => setPhoneRevealed((v) => !v)} hitSlop={8}>
           <View style={styles.phoneRow}>
             <ThemedText type="body" style={{ color: theme.textSecondary, fontSize: 16 }} numberOfLines={1} adjustsFontSizeToFit>
@@ -473,6 +574,82 @@ export default function ProfileScreen() {
                 disabled={isSavingName}
               >
                 {isSavingName ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <ThemedText type="body" style={{ color: "#fff", fontWeight: "600" }}>
+                    Save
+                  </ThemedText>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showUsernameModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowUsernameModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.backgroundSecondary }]}>
+            <ThemedText type="h4" style={styles.modalTitle}>
+              {user?.username ? "Change Username" : "Create a Username"}
+            </ThemedText>
+
+            <TextInput
+              style={[styles.nameInput, {
+                backgroundColor: theme.backgroundDefault,
+                color: theme.text,
+                borderColor:
+                  usernameCheck === "taken" || usernameCheck === "invalid" ? theme.error :
+                  usernameCheck === "available" ? theme.success :
+                  theme.border,
+              }]}
+              value={newUsername}
+              onChangeText={(t) => setNewUsername(t.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase())}
+              placeholder="username"
+              placeholderTextColor={theme.textSecondary}
+              autoFocus
+              autoCapitalize="none"
+              maxLength={20}
+            />
+
+            <ThemedText
+              type="small"
+              style={{
+                color:
+                  usernameCheck === "taken" || usernameCheck === "invalid" ? theme.error :
+                  usernameCheck === "available" ? theme.success :
+                  theme.textSecondary,
+                marginBottom: Spacing.xl,
+              }}
+            >
+              {usernameCheck === "checking" ? "Checking availability…" :
+                usernameCheck === "taken" ? "That username is already taken" :
+                usernameCheck === "invalid" ? "3-20 characters, start with a letter, letters/numbers/underscore only" :
+                usernameCheck === "available" ? "Username is available" :
+                "You can change your username once every 30 days"}
+            </ThemedText>
+
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: theme.backgroundDefault }]}
+                onPress={() => setShowUsernameModal(false)}
+                disabled={isSavingUsername}
+              >
+                <ThemedText type="body" style={{ color: theme.text }}>
+                  Cancel
+                </ThemedText>
+              </Pressable>
+
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: theme.primary, opacity: usernameCheck === "taken" || usernameCheck === "invalid" ? 0.5 : 1 }]}
+                onPress={handleSaveUsername}
+                disabled={isSavingUsername || usernameCheck === "taken" || usernameCheck === "invalid"}
+              >
+                {isSavingUsername ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
                   <ThemedText type="body" style={{ color: "#fff", fontWeight: "600" }}>
@@ -686,6 +863,17 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     justifyContent: "center",
     alignItems: "center",
+  },
+  usernameRow: {
+    marginBottom: Spacing.sm,
+  },
+  usernameTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    paddingVertical: 4,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.full,
   },
   modalOverlay: {
     flex: 1,
