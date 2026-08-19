@@ -456,7 +456,7 @@ export default function RootStackNavigator() {
           <Stack.Screen
             name="SafetyNumber"
             component={SafetyNumberScreen}
-            options={{ headerTitle: "Encryption" }}
+            options={{ headerTitle: "Verify Safety Number" }}
           />
           <Stack.Screen
             name="AppLockSettings"

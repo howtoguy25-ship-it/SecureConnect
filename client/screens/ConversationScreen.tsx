@@ -3583,13 +3583,22 @@ export default function ConversationScreen() {
               headers: { 'Authorization': `Bearer ${token}` },
             },
           );
-          return { id, ok: res.ok };
+          if (res.ok) return { id, ok: true as const, reason: undefined as string | undefined };
+          // Real, distinct reasons from the server (not_found / not_sender /
+          // expired) — previously discarded here, so every failure surfaced
+          // as a misleading generic "check your connection" even when the
+          // actual cause was e.g. the 1-hour delete-for-everyone window
+          // having passed. The single-message delete flow already read this
+          // correctly; the bulk flow just never did.
+          const body = await res.json().catch(() => ({} as any));
+          return { id, ok: false as const, reason: body?.reason as string | undefined };
         } catch {
-          return { id, ok: false };
+          return { id, ok: false as const, reason: undefined as string | undefined };
         }
       }));
 
-      const failedIds = results.filter(r => !r.ok).map(r => r.id);
+      const failed = results.filter(r => !r.ok);
+      const failedIds = failed.map(r => r.id);
 
       if (failedIds.length > 0) {
         const failedSet = new Set(failedIds);
@@ -3615,9 +3624,22 @@ export default function ConversationScreen() {
 
         haptics.warning();
         const failedCount = failedIds.length;
+        const reasons = new Set(failed.map(f => f.reason).filter(Boolean));
+        let detail: string;
+        if (reasons.size === 1 && reasons.has('expired')) {
+          detail = "the 1-hour window for deleting for everyone has passed";
+        } else if (reasons.size === 1 && reasons.has('not_sender')) {
+          detail = "you can only delete your own messages for everyone";
+        } else if (reasons.size === 1 && reasons.has('not_found')) {
+          detail = "they no longer exist";
+        } else if (failed.every(f => !f.reason)) {
+          detail = "please check your connection and try again";
+        } else {
+          detail = "please try again";
+        }
         Alert.alert(
           'Some Messages Not Deleted',
-          `${failedCount} message${failedCount > 1 ? 's' : ''} could not be deleted${forEveryone ? ' for everyone' : ''}. Please check your connection and try again.`,
+          `${failedCount} message${failedCount > 1 ? 's' : ''} could not be deleted${forEveryone ? ' for everyone' : ''} — ${detail}.`,
         );
       } else {
         haptics.success();
@@ -5741,7 +5763,7 @@ export default function ConversationScreen() {
                 </View>
                 <View style={styles.settingsOptionText}>
                   <ThemedText type="body" style={{ fontWeight: "600" }} numberOfLines={1}>
-                    Verify Encryption
+                    Verify Safety Number
                   </ThemedText>
                   <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 2 }} numberOfLines={2}>
                     Compare safety numbers to confirm no one is intercepting this chat
@@ -6210,7 +6232,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.md,
-    marginHorizontal: Spacing.md,
+    // No marginHorizontal here — messageList's contentContainerStyle
+    // already applies Spacing.md of horizontal padding to every item in
+    // this FlatList, including this header. Adding a second margin on top
+    // of that (plus this View's own paddingHorizontal) squeezed the
+    // available text width by an extra 2x Spacing.md on a narrow phone,
+    // which is why the longer "N messages will send once they do" variant
+    // wrapped tight enough to look cut off instead of just wrapping.
   },
   encryptionBannerIcon: {
     marginTop: 2,
@@ -6220,7 +6248,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     flexWrap: 'wrap',
     marginLeft: 6,
-    lineHeight: 16,
+    lineHeight: 18,
   },
   messageList: {
     paddingHorizontal: Spacing.md,
