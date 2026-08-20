@@ -19,7 +19,20 @@ import { Platform } from "react-native";
 export type AppLockMode = "numeric" | "alphanumeric";
 
 const RECORD_KEY = "pryvo_app_lock_v1";
-const FALLBACK_ITERATIONS = 100_000;
+// Records written before this field existed have no `kdfIterations` and
+// must keep verifying against the count they were actually hashed with —
+// this is what that hash was computed at, so it's the correct fallback for
+// old records, never a "current default."
+const LEGACY_FALLBACK_ITERATIONS = 100_000;
+// New PINs use a much lower count. This gate protects a device already in
+// the owner's hand (physical possession + jailbreak/root is the realistic
+// threat model, not a remote brute-force of the SecureStore blob), so the
+// extreme iteration count from backupCrypto's recovery-code KDF — a much
+// higher-value secret — isn't needed here. 100k iterations of pure-JS
+// SHA-512 (no WebCrypto on Hermes) measured several real seconds on
+// ordinary hardware, which read as "the PIN screen takes 20 seconds to
+// load." 20k keeps a meaningful KDF cost while actually being fast.
+const NEW_ITERATIONS = 20_000;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 30_000;
 
@@ -35,6 +48,10 @@ interface AppLockRecord {
   timeoutSeconds: number;
   failedAttempts: number;
   lockedUntil: number | null;
+  // Absent on records written before this field existed — those must be
+  // verified at LEGACY_FALLBACK_ITERATIONS, the count they were actually
+  // hashed with, or the stored hash will never match again.
+  kdfIterations?: number;
 }
 
 async function secureGet(key: string): Promise<string | null> {
@@ -60,7 +77,7 @@ async function secureDelete(key: string): Promise<void> {
   try { await SecureStore.deleteItemAsync(key); } catch {}
 }
 
-async function hashPin(pin: string, saltB64: string): Promise<string> {
+async function hashPin(pin: string, saltB64: string, iterations: number): Promise<string> {
   const salt = naclUtil.decodeBase64(saltB64);
   const pinBytes = naclUtil.decodeUTF8(pin);
 
@@ -88,16 +105,16 @@ async function hashPin(pin: string, saltB64: string): Promise<string> {
   combined.set(pinBytes);
   combined.set(salt, pinBytes.length);
   let derived: Uint8Array = combined;
-  // Hermes has no crypto.subtle, so this fallback runs on EVERY PIN
-  // submit on every device (not just as a rare fallback). Run tight, it
-  // blocks the JS thread for the whole loop — no touch handling, no state
-  // flush, nothing — for as long as it takes, which reads as the app
-  // "freezing" mid-tap. Yielding back to the event loop every YIELD_EVERY
-  // iterations keeps the total work (and therefore the resulting hash)
-  // identical while letting RN actually paint the "checking..." state and
-  // process queued touches between chunks instead of locking up.
-  const YIELD_EVERY = 2000;
-  for (let i = 0; i < FALLBACK_ITERATIONS; i++) {
+  // Hermes has no crypto.subtle, so this fallback runs on EVERY PIN submit
+  // on every device (not just as a rare fallback). A previous version of
+  // this loop yielded every 2,000 iterations to keep the UI responsive —
+  // but on-device, each `setTimeout(resolve, 0)` round-trip through RN's
+  // timer bridge turned out to cost far more than the hashing work itself,
+  // stretching a sub-second computation into the reported "PIN takes 20
+  // seconds." Fewer, bigger chunks keep the UI-responsiveness benefit
+  // without paying that overhead dozens of times over.
+  const YIELD_EVERY = 10_000;
+  for (let i = 0; i < iterations; i++) {
     const hashed = nacl.hash(derived);
     derived = new Uint8Array(hashed.buffer, hashed.byteOffset, hashed.byteLength);
     if (i % YIELD_EVERY === YIELD_EVERY - 1) {
@@ -144,9 +161,9 @@ export async function getAppLockSettings(): Promise<{ mode: AppLockMode; length:
   return { mode: record.mode, length: record.length, timeoutSeconds: record.timeoutSeconds };
 }
 
-export async function setAppLockPin(pin: string, mode: AppLockMode, timeoutSeconds = 0): Promise<void> {
+export async function setAppLockPin(pin: string, mode: AppLockMode, timeoutSeconds = 60): Promise<void> {
   const salt = naclUtil.encodeBase64(nacl.randomBytes(16));
-  const hash = await hashPin(pin, salt);
+  const hash = await hashPin(pin, salt, NEW_ITERATIONS);
   const record: AppLockRecord = {
     hash,
     salt,
@@ -155,6 +172,7 @@ export async function setAppLockPin(pin: string, mode: AppLockMode, timeoutSecon
     timeoutSeconds,
     failedAttempts: 0,
     lockedUntil: null,
+    kdfIterations: NEW_ITERATIONS,
   };
   await writeRecord(record);
   notifyChange();
@@ -184,7 +202,7 @@ export async function verifyAppLockPin(pin: string): Promise<boolean> {
     return false;
   }
 
-  const hash = await hashPin(pin, record.salt);
+  const hash = await hashPin(pin, record.salt, record.kdfIterations ?? LEGACY_FALLBACK_ITERATIONS);
   const matches = hash === record.hash;
 
   if (matches) {

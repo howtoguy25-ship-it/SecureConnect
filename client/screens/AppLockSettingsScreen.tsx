@@ -44,7 +44,10 @@ export default function AppLockSettingsScreen() {
 
   const [isEnabled, setIsEnabled] = useState(false);
   const [currentMode, setCurrentMode] = useState<AppLockMode | null>(null);
-  const [timeoutSeconds, setTimeoutSecondsState] = useState(0);
+  // Defaults new setups to "After 1 minute" rather than "Immediately" — a
+  // brief app-switch (checking a notification, glancing at another app)
+  // shouldn't demand the PIN again; only a genuine minute-plus away does.
+  const [timeoutSeconds, setTimeoutSecondsState] = useState(60);
   const [loading, setLoading] = useState(true);
 
   const [step, setStep] = useState<Step>("status");
@@ -66,7 +69,7 @@ export default function AppLockSettingsScreen() {
     const settings = await getAppLockSettings();
     setIsEnabled(!!settings);
     setCurrentMode(settings?.mode ?? null);
-    setTimeoutSecondsState(settings?.timeoutSeconds ?? 0);
+    setTimeoutSecondsState(settings?.timeoutSeconds ?? 60);
     setLoading(false);
   };
 

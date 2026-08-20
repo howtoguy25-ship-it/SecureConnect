@@ -58,6 +58,11 @@ export function MessageInfoSheet({
                   <ThemedText type="body" style={{ color: theme.textSecondary }}>Read</ThemedText>
                   <ThemedText type="body">{new Date(message.readAt).toLocaleString()}</ThemedText>
                 </View>
+              ) : message.deliveredAt ? (
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <ThemedText type="body" style={{ color: theme.textSecondary }}>Read</ThemedText>
+                  <ThemedText type="body" style={{ color: theme.textSecondary }}>Not read yet</ThemedText>
+                </View>
               ) : null}
               {message.expiresAt ? (
                 <View style={{ flexDirection: "row", justifyContent: "space-between" }}>

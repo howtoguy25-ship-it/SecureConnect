@@ -1140,7 +1140,7 @@ export default function ConversationScreen() {
         }));
       };
 
-      // Sender side: receiver opened the chat → flip ticks to green.
+      // Sender side: receiver opened the chat → flip ticks to orange.
       const messagesReadHandler = (data: { conversationId: string; messageIds: string[]; readerId: string; readAt?: string }) => {
         if (data.conversationId !== conversationId) return;
         if (data.readerId === user?.id) return; // ignore our own marks
@@ -3578,8 +3578,8 @@ export default function ConversationScreen() {
     } else if (status === "read") {
       return (
         <View style={styles.tickContainer}>
-          <Feather name="check" size={14} color="#25D366" />
-          <Feather name="check" size={14} color="#25D366" style={styles.secondTick} />
+          <Feather name="check" size={14} color={theme.warning} />
+          <Feather name="check" size={14} color={theme.warning} style={styles.secondTick} />
         </View>
       );
     }
