@@ -2,7 +2,7 @@
 
 App: Pryvo
 Bundle: `com.adham.salameh.secureconnectchat`
-Build under review: 1.0.5 (65)
+Build under review: 1.0.5 (133)
 
 ---
 
@@ -16,9 +16,20 @@ Field | Value
 ---|---
 Phone number | `555-123-4567`
 Country code | United States (+1)
-Verification code (OTP) | `123456`
+Verification code (OTP) | `123456` — **do not wait for a text message, this code always works immediately, no SMS is ever sent for this number**
 
 (Backup demo number, identical access: `555-000-0000`)
+
+## If a second "Confirm It's You" screen appears asking two security questions
+
+This build should skip that screen entirely for the demo account — but if it
+appears anyway (e.g. on a cached/older build), here are the real, working
+answers:
+
+Field | Value
+---|---
+"What is your favourite dish?" | `pizza`
+"Your 2 memorable words" | `blue sky`
 
 ## Contact information
 
@@ -45,8 +56,8 @@ To sign in:
 2. The App Tracking Transparency prompt appears first — please respond either Allow or Don't Allow; both work fine for testing. This must run before any ads load (Google's required ordering).
 3. On the Welcome screen, tap **Get Started**.
 4. Country: **United States** (+1). Phone number: `5551234567`. Tap **Continue**.
-5. On the OTP screen, enter `123456`. Tap **Verify**.
-6. You'll land on the main Chats screen, signed in as the demo user.
+5. On the OTP screen, **immediately enter `123456` and tap Verify — do not wait for a text message to arrive, none will.** The screen text says "we sent a code" for every phone number (including this one), but for this specific demo number no SMS is ever actually dispatched — `123456` is accepted the instant you submit it. Waiting for an SMS here will time out with nothing arriving; that is expected, not a bug.
+6. You'll land on the main Chats screen, signed in as the demo user. You should NOT see any further "Confirm It's You" / security-question screen — if you do, see the fallback answers in "Demo account credentials" above.
 
 This demo number bypasses the real SMS pipeline. No actual SMS is sent. The bypass is server-side and is intentional — see "Why the demo number works without a real SMS" below.
 
@@ -100,11 +111,16 @@ Pryvo uses standard end-to-end encryption primitives (Signal Protocol, AES-GCM v
 
 If anything below doesn't work as described, please contact us through the email above before rejecting — we monitor it 24/7 during your review window and can usually fix configuration issues within an hour:
 
-- [ ] `5551234567` accepts OTP `123456` and signs in.
+- [ ] `5551234567` accepts OTP `123456` immediately, with no SMS wait.
+- [ ] Sign-in lands directly on the main Chats screen — no second "Confirm It's You" screen. (If it does appear, the answers are `pizza` and `blue sky` — see above.)
 - [ ] The signed-in account shows Pryvo Plus as Active in Settings (no paywall blocks anywhere).
 - [ ] Outbound test calls between the demo account and any other Pryvo user connect within 5 seconds and audio is clear.
-- [ ] Missed calls produce a system message in the chat (this is a new feature in build 65) — tap the bubble to call back.
+- [ ] Missed calls produce a system message in the chat — tap the bubble to call back.
 - [ ] In-app purchases load their prices from App Store Connect (proves IAP wiring is correct).
+
+### 9. What changed since the last review
+
+Your last review flagged two sign-in issues on this account: no code arriving when prompted, and being stuck on a "further verification" screen with no way to answer it. Both are addressed above — the demo OTP was always meant to be entered immediately rather than waited for (now spelled out explicitly in step 5), and the demo account's security-question screen either no longer appears at all, or has real working answers documented if it does. Sorry for the friction on the last round — thank you for your patience.
 
 ### 8. Known cosmetic notes
 
