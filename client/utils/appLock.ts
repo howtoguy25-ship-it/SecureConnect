@@ -28,11 +28,13 @@ const LEGACY_FALLBACK_ITERATIONS = 100_000;
 // the owner's hand (physical possession + jailbreak/root is the realistic
 // threat model, not a remote brute-force of the SecureStore blob), so the
 // extreme iteration count from backupCrypto's recovery-code KDF — a much
-// higher-value secret — isn't needed here. 100k iterations of pure-JS
-// SHA-512 (no WebCrypto on Hermes) measured several real seconds on
-// ordinary hardware, which read as "the PIN screen takes 20 seconds to
-// load." 20k keeps a meaningful KDF cost while actually being fast.
-const NEW_ITERATIONS = 20_000;
+// higher-value secret — isn't needed here. 100k (and even the earlier
+// "fixed" 20k) iterations of pure-JS SHA-512 (no WebCrypto on Hermes)
+// still ran long enough on real devices to read as "the PIN screen takes
+// 20 seconds." 4k is small enough to run fully synchronously (see
+// hashPin below — no yielding needed at this size) while still being a
+// real KDF stretch, not a bare single hash.
+const NEW_ITERATIONS = 4_000;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 30_000;
 
@@ -106,20 +108,20 @@ async function hashPin(pin: string, saltB64: string, iterations: number): Promis
   combined.set(salt, pinBytes.length);
   let derived: Uint8Array = combined;
   // Hermes has no crypto.subtle, so this fallback runs on EVERY PIN submit
-  // on every device (not just as a rare fallback). A previous version of
-  // this loop yielded every 2,000 iterations to keep the UI responsive —
-  // but on-device, each `setTimeout(resolve, 0)` round-trip through RN's
-  // timer bridge turned out to cost far more than the hashing work itself,
-  // stretching a sub-second computation into the reported "PIN takes 20
-  // seconds." Fewer, bigger chunks keep the UI-responsiveness benefit
-  // without paying that overhead dozens of times over.
-  const YIELD_EVERY = 10_000;
+  // on every device (not just as a rare fallback). Two earlier attempts at
+  // "yield periodically so the UI stays responsive" both backfired: each
+  // `setTimeout(resolve, 0)` round-trip through RN's timer bridge cost far
+  // more than the hashing work itself, so more yields — or fewer, bigger
+  // ones — still added up to real seconds of wall-clock time. No more
+  // yielding at all: at NEW_ITERATIONS (4k) the loop finishes fast enough
+  // that blocking the JS thread for it is imperceptible. A pre-existing
+  // PIN still hashed at the old 100k count pays one genuinely slow
+  // synchronous unlock — bounded, not the mystery multiplied-by-yields
+  // slowness — and then self-heals to the fast count (see
+  // verifyAppLockPin) so every unlock after that is instant.
   for (let i = 0; i < iterations; i++) {
     const hashed = nacl.hash(derived);
     derived = new Uint8Array(hashed.buffer, hashed.byteOffset, hashed.byteLength);
-    if (i % YIELD_EVERY === YIELD_EVERY - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
   }
   return naclUtil.encodeBase64(derived.slice(0, 32));
 }
@@ -202,12 +204,24 @@ export async function verifyAppLockPin(pin: string): Promise<boolean> {
     return false;
   }
 
-  const hash = await hashPin(pin, record.salt, record.kdfIterations ?? LEGACY_FALLBACK_ITERATIONS);
+  const recordIterations = record.kdfIterations ?? LEGACY_FALLBACK_ITERATIONS;
+  const hash = await hashPin(pin, record.salt, recordIterations);
   const matches = hash === record.hash;
 
   if (matches) {
     record.failedAttempts = 0;
     record.lockedUntil = null;
+    // Self-healing: a PIN set before NEW_ITERATIONS existed (or set at an
+    // earlier, higher value) just proved itself correct at the slow
+    // count — re-hash it now at the fast count so every unlock after
+    // this one is instant instead of paying the slow path forever. Only
+    // the PIN owner, who just typed it correctly, can trigger this.
+    if (recordIterations > NEW_ITERATIONS) {
+      const newSalt = naclUtil.encodeBase64(nacl.randomBytes(16));
+      record.salt = newSalt;
+      record.hash = await hashPin(pin, newSalt, NEW_ITERATIONS);
+      record.kdfIterations = NEW_ITERATIONS;
+    }
   } else {
     record.failedAttempts = (record.failedAttempts ?? 0) + 1;
     if (record.failedAttempts >= MAX_FAILED_ATTEMPTS) {
