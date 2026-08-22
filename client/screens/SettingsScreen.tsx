@@ -465,7 +465,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#FF9500" }]}>
               <Feather name="music" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Ringtone</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Choose your incoming call sound
@@ -489,7 +489,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: theme.primary }]}>
               <Feather name="shield" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Security</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Encryption, recovery code, trusted devices
@@ -507,7 +507,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: appLockEnabled ? theme.primary : theme.textSecondary }]}>
               <Feather name={appLockEnabled ? "lock" : "unlock"} size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">App Lock</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 {appLockEnabled ? "On — PIN required to open Pryvo" : "Off — require a PIN to open Pryvo"}
@@ -567,7 +567,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#5856D6" }]}>
               <Feather name="eye-off" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Peek Detection</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Hide chats when someone looks over your shoulder
@@ -585,7 +585,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#FF3B30" }]}>
               <Feather name="slash" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Blocked Contacts</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Manage blocked users
@@ -603,7 +603,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#5856D6" }]}>
               <Feather name="mail" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Message Requests</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Control who can message you
@@ -630,7 +630,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#1ABC9C" }]}>
               <Feather name="user-plus" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Friend Requests</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Accept or decline pending requests
@@ -657,7 +657,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#34C759" }]}>
               <Feather name="clock" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Last Seen Privacy</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Control who sees when you were online
@@ -676,7 +676,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: showActiveStatus ? "#34C759" : theme.textSecondary }]}>
               <Feather name="radio" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Active Now</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Let people you chat with see when you're active
@@ -736,7 +736,7 @@ export default function SettingsScreen() {
         <View style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}>
           <View style={styles.settingInfo}>
             <Feather name="phone" size={20} color={theme.text} />
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Phone Number</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 {user?.phoneNumber}
@@ -753,7 +753,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#2563EB" }]}>
               <Feather name="grid" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">My QR Code</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Share your code to connect with friends
@@ -990,7 +990,7 @@ export default function SettingsScreen() {
         <View style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}>
           <View style={styles.settingInfo}>
             <Feather name="info" size={20} color={theme.text} />
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Version</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 {appVersionLabel}
@@ -1040,7 +1040,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#34C759" }]}>
               <Feather name="download" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Download Your Data</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 Get an encrypted copy of your account data
@@ -1058,7 +1058,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconBg, { backgroundColor: "#F7931A" }]}>
               <Feather name="dollar-sign" size={16} color="#fff" />
             </View>
-            <View>
+            <View style={styles.settingTextColumn}>
               <ThemedText type="body">Payment Methods</ThemedText>
               <ThemedText type="small" style={{ color: theme.textSecondary }}>
                 PayPal, PayID, and Bitcoin — share with people you chat with
