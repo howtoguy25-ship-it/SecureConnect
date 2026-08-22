@@ -2393,6 +2393,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ reviewMode: reviewModeEnabled });
   });
 
+  // TEMP DIAGNOSTIC — checks whether the existing Stripe account (used today
+  // only for Checkout subscriptions) already has Connect enabled, before
+  // building a real payout flow on top of it. Unauthenticated because this
+  // needs to be checked from outside the app (no owner session available
+  // there); only reveals a boolean + Stripe's own generic error text, no
+  // secrets. Remove immediately once answered.
+  app.get('/api/diag/stripe-connect-check-temp', async (req, res) => {
+    try {
+      const stripe = await getUncachableStripeClient();
+      try {
+        const testAccount = await stripe.accounts.create({ type: 'express' });
+        await stripe.accounts.del(testAccount.id);
+        return res.json({ connectEnabled: true });
+      } catch (connectError: any) {
+        return res.json({ connectEnabled: false, message: connectError?.message ?? String(connectError) });
+      }
+    } catch (error) {
+      console.error('Error checking Stripe Connect status:', error);
+      res.status(500).json({ error: 'Could not check Stripe Connect status.' });
+    }
+  });
+
   app.post('/api/admin/review-mode', authenticateToken, async (req: AuthRequest, res) => {
     try {
       const requestingUser = await storage.getUser(req.userId!);
