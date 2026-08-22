@@ -916,6 +916,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DO NOT REMOVE — Apple App Review support.
+  // The demo/reviewer account already has security-question answers set
+  // from earlier internal testing (nobody currently signing in with the
+  // public demo OTP knows them), and the client already exempts
+  // isAppleReviewAccount from ever being routed to the "Confirm It's You"
+  // screen (see RootStackNavigator's needsSecurityQuestionsSetup/Verify).
+  // This route exists purely as defense-in-depth for the App Store Connect
+  // reviewer notes: it lets the demo account's answers be overwritten to a
+  // known value we can document verbatim, in case a reviewer's device ever
+  // shows that screen anyway (a stale cached build, a retried older
+  // TestFlight build, etc). The normal /security-questions/set route 400s
+  // once answers already exist, which is why this is a separate endpoint —
+  // and it is hard-locked to the two fixed review/demo phone numbers, so it
+  // can never be used to reset a real user's answers.
+  app.post('/api/auth/security-questions/reset-demo', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user || !isAppleReviewTestNumber(user.phoneNumber)) {
+        return res.status(403).json({ error: 'Not available for this account' });
+      }
+      const { dishAnswer, twoWordsAnswer } = req.body;
+      if (!dishAnswer || typeof dishAnswer !== 'string' || !normalizeSecurityAnswer(dishAnswer)) {
+        return res.status(400).json({ error: 'Please answer the first question.' });
+      }
+      if (!twoWordsAnswer || typeof twoWordsAnswer !== 'string' || !isValidTwoWordAnswer(twoWordsAnswer)) {
+        return res.status(400).json({ error: 'Please enter exactly two words separated by a space.' });
+      }
+      await storage.updateUser(user.id, {
+        securityQ1Hash: hashSecurityAnswer(dishAnswer),
+        securityQ2Hash: hashSecurityAnswer(twoWordsAnswer),
+        securityQuestionsSetAt: new Date(),
+        securityQFailedAttempts: 0,
+        securityQLockedUntil: null,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error resetting demo security questions:', error);
+      res.status(500).json({ error: 'Could not reset security questions' });
+    }
+  });
+
   app.post('/api/auth/security-questions/verify', authenticateToken, async (req: AuthRequest, res) => {
     try {
       const user = await storage.getUser(req.userId!);
