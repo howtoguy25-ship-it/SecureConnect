@@ -1820,7 +1820,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(balance);
     } catch (error) {
       console.error('Error fetching payment balance:', error);
-      res.status(500).json({ error: 'Could not load your balance.' });
+      // TEMP DIAGNOSTIC — remove once the 500 here is root-caused.
+      res.status(500).json({ error: 'Could not load your balance.', debug: error instanceof Error ? error.message : String(error) });
     }
   });
 
