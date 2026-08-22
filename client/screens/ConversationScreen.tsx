@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Modal, Platform, Animated, Alert, ImageBackground, KeyboardAvoidingView, Keyboard, Linking, useWindowDimensions } from "react-native";
+import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Modal, Platform, Animated, Alert, ImageBackground, KeyboardAvoidingView, Keyboard, Linking, useWindowDimensions, LayoutAnimation, UIManager } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, RouteProp, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { NativeStackNavigationProp, NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -234,6 +234,11 @@ export default function ConversationScreen() {
         if (Platform.OS !== "web") {
           ScreenCapture.allowScreenCaptureAsync();
         }
+        // Nothing here ever dismissed the composer's keyboard on the way
+        // out — navigating back (or to any screen with no text input of
+        // its own) while the composer was focused left the keyboard sitting
+        // open on top of a screen it no longer belongs to.
+        Keyboard.dismiss();
       };
     }, [conversationId])
   );
@@ -549,13 +554,27 @@ export default function ConversationScreen() {
   };
 
   useEffect(() => {
+    if (Platform.OS === 'android') {
+      UIManager.setLayoutAnimationEnabledExperimental?.(true);
+    }
+    // The composer/banners below drop their extra bottom safe-area padding
+    // the instant isKeyboardVisible flips (KeyboardAvoidingView's own
+    // "padding" behavior already animates the overall shift smoothly, but
+    // that inner padding toggle was a hard, unanimated snap) — that
+    // mismatch between a smooth shift and an instant snap is what read as
+    // a visible gap/jump right as the keyboard opens or closes. Wrapping
+    // the state change in a LayoutAnimation lets that padding change
+    // animate in step with the keyboard instead.
+    const animatePadding = () => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity));
+    };
     const showSubscription = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => setIsKeyboardVisible(true)
+      () => { animatePadding(); setIsKeyboardVisible(true); }
     );
     const hideSubscription = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setIsKeyboardVisible(false)
+      () => { animatePadding(); setIsKeyboardVisible(false); }
     );
 
     return () => {
@@ -563,6 +582,27 @@ export default function ConversationScreen() {
       hideSubscription.remove();
     };
   }, []);
+
+  // Same "competing native presentations" bug class as closeHoldOverlay
+  // above (see its comment), triggered a different way: the attach/camera/
+  // mic buttons sit right next to the composer TextInput, so tapping one
+  // while the keyboard is still up both (a) blurs the TextInput, kicking
+  // off the keyboard's own native dismiss animation, and (b) immediately
+  // presents another native surface (the attachment Modal's slide-up, or
+  // an ImagePicker/camera permission prompt) in the very same tick. Two
+  // native transitions starting together is exactly the pattern that reads
+  // as "the whole screen is frozen" elsewhere in this file. If the
+  // keyboard is up, dismiss it and let its animation actually finish
+  // before presenting the next thing; if it's already down there's
+  // nothing to race, so run immediately.
+  const presentAfterKeyboard = (action: () => void) => {
+    if (isKeyboardVisible) {
+      Keyboard.dismiss();
+      setTimeout(action, 200);
+    } else {
+      action();
+    }
+  };
 
   const { data: chatBackgroundData } = useQuery<{ chatBackgroundUrl: string | null }>({
     queryKey: ["/api/user/chat-background"],
@@ -4865,15 +4905,15 @@ export default function ConversationScreen() {
             user?.virtualNumber && user.virtualNumber.status === 'active' ? (
               <View style={{
                 flexDirection: 'row',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 paddingHorizontal: Spacing.md,
                 paddingTop: Spacing.xs,
                 paddingBottom: 2,
                 gap: 6,
               }}>
-                <Feather name="lock" size={11} color={theme.textSecondary} />
+                <Feather name="lock" size={11} color={theme.textSecondary} style={{ marginTop: 2 }} />
                 <ThemedText
-                  numberOfLines={1}
+                  numberOfLines={2}
                   style={{ fontSize: 11, color: theme.textSecondary, flex: 1 }}
                 >
                   {otherUserData?.supportsSealedSender
@@ -4973,7 +5013,7 @@ export default function ConversationScreen() {
               ]}
               onPress={() => {
                 if (guardVnInactive()) return;
-                setShowAttachmentMenu(true);
+                presentAfterKeyboard(() => setShowAttachmentMenu(true));
               }}
             >
               <Feather name="plus" size={22} color={theme.primary} />
@@ -5003,7 +5043,7 @@ export default function ConversationScreen() {
               style={[styles.inputActionButton, { opacity: vnInactive ? 0.4 : 1 }]}
               onPress={() => {
                 if (guardVnInactive()) return;
-                handleTakePhoto();
+                presentAfterKeyboard(handleTakePhoto);
               }}
               hitSlop={10}
               scaleValue={0.85}
@@ -5050,7 +5090,7 @@ export default function ConversationScreen() {
                 ]}
                 onPress={() => {
                   if (guardVnInactive()) return;
-                  startVoiceRecording();
+                  presentAfterKeyboard(startVoiceRecording);
                 }}
                 hitSlop={12}
                 scaleValue={0.85}
