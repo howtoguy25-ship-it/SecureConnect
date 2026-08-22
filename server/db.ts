@@ -128,6 +128,29 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS show_active_status boolean DEFAULT true;
     `);
+    // Payment balance ledger (build 133) — same push-can-silently-no-op risk
+    // as everything else here; confirmed live in production via
+    // /api/payments/balance returning "relation \"payment_transactions\"
+    // does not exist" after the app code had already deployed.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        counterparty_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        direction text NOT NULL,
+        method text NOT NULL,
+        amount_minor_units integer NOT NULL,
+        currency text NOT NULL,
+        note text,
+        created_at timestamp DEFAULT now()
+      );
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_payment_tx_user_id ON payment_transactions (user_id);
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_payment_tx_counterparty_id ON payment_transactions (counterparty_id);
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }
