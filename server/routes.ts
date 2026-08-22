@@ -1743,6 +1743,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Payment balance (self-reported ledger, build 133) ───────────────────
+  // Pryvo never touches the actual money — every transfer happens entirely
+  // in PayPal/the banking app/the wallet app via the link-out above. These
+  // routes just let a user record that a transfer happened, so a running
+  // balance can be shown. It is what users tell us happened, not something
+  // Pryvo can verify or a store of real funds.
+  const PAYMENT_METHODS = new Set(['paypal', 'payid', 'btc', 'other']);
+  const PAYMENT_DIRECTIONS = new Set(['sent', 'received']);
+  // Minor-unit denominator per currency (cents for fiat, satoshis for BTC).
+  const PAYMENT_CURRENCY_DECIMALS: Record<string, number> = { AUD: 2, USD: 2, GBP: 2, EUR: 2, NZD: 2, CAD: 2, BTC: 8 };
+
+  app.post('/api/payments/transactions', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { counterpartyId, direction, method, amount, currency, note } = req.body ?? {};
+
+      if (!counterpartyId || typeof counterpartyId !== 'string') {
+        return res.status(400).json({ error: 'A contact is required.' });
+      }
+      if (counterpartyId === req.userId) {
+        return res.status(400).json({ error: "You can't log a payment with yourself." });
+      }
+      const counterparty = await storage.getUser(counterpartyId);
+      if (!counterparty) {
+        return res.status(404).json({ error: 'That contact could not be found.' });
+      }
+      if (typeof direction !== 'string' || !PAYMENT_DIRECTIONS.has(direction)) {
+        return res.status(400).json({ error: 'Direction must be "sent" or "received".' });
+      }
+      if (typeof method !== 'string' || !PAYMENT_METHODS.has(method)) {
+        return res.status(400).json({ error: 'Invalid payment method.' });
+      }
+      const currencyCode = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+      const decimals = PAYMENT_CURRENCY_DECIMALS[currencyCode];
+      if (decimals === undefined) {
+        return res.status(400).json({ error: 'Unsupported currency.' });
+      }
+      const amountNum = typeof amount === 'number' ? amount : parseFloat(amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: 'Enter a valid amount greater than zero.' });
+      }
+      const amountMinorUnits = Math.round(amountNum * Math.pow(10, decimals));
+      if (typeof note === 'string' && note.length > 200) {
+        return res.status(400).json({ error: 'Note is too long.' });
+      }
+
+      const tx = await storage.createPaymentTransaction(req.userId!, {
+        counterpartyId,
+        direction,
+        method,
+        amountMinorUnits,
+        currency: currencyCode,
+        note: typeof note === 'string' ? note.trim() || null : null,
+      });
+      res.json(tx);
+    } catch (error) {
+      console.error('Error logging payment transaction:', error);
+      res.status(500).json({ error: 'Could not log this payment.' });
+    }
+  });
+
+  app.get('/api/payments/transactions', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const counterpartyId = typeof req.query.counterpartyId === 'string' ? req.query.counterpartyId : undefined;
+      const rows = await storage.getPaymentTransactions(req.userId!, counterpartyId);
+      res.json(rows);
+    } catch (error) {
+      console.error('Error fetching payment transactions:', error);
+      res.status(500).json({ error: 'Could not load payment history.' });
+    }
+  });
+
+  app.get('/api/payments/balance', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const balance = await storage.getPaymentBalance(req.userId!);
+      res.json(balance);
+    } catch (error) {
+      console.error('Error fetching payment balance:', error);
+      res.status(500).json({ error: 'Could not load your balance.' });
+    }
+  });
+
   app.post("/api/keys", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const { publicKey } = req.body;

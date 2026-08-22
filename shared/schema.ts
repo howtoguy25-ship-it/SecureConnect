@@ -850,6 +850,54 @@ export const encryptedBackups = pgTable("encrypted_backups", {
 
 export type EncryptedBackup = typeof encryptedBackups.$inferSelect;
 
+// A self-reported record of money sent/received via the external payment
+// methods on the user's profile (PayPal.me / PayID / Bitcoin — see
+// paymentPaypalMeHandle etc. above). Pryvo never touches the actual money —
+// the transfer happens entirely in PayPal/the banking app/the wallet app —
+// this table only lets a user log that it happened so a running balance can
+// be shown per contact. It is a ledger of what users tell us happened, not
+// a record Pryvo can independently verify or a store of real funds.
+export const paymentTransactions = pgTable("payment_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  counterpartyId: varchar("counterparty_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // From userId's point of view: "sent" = userId paid counterpartyId,
+  // "received" = counterpartyId paid userId.
+  direction: text("direction").notNull(),
+  method: text("method").notNull(), // 'paypal' | 'payid' | 'btc' | 'other'
+  // Stored as an integer in the currency's smallest unit (cents for fiat,
+  // satoshis for BTC) to avoid floating-point drift — see PAYMENT_CURRENCY_DECIMALS.
+  amountMinorUnits: integer("amount_minor_units").notNull(),
+  currency: text("currency").notNull(), // 'AUD' | 'USD' | 'BTC' | ...
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_payment_tx_user_id").on(table.userId),
+  index("idx_payment_tx_counterparty_id").on(table.counterpartyId),
+]);
+
+export const paymentTransactionsRelations = relations(paymentTransactions, ({ one }) => ({
+  user: one(users, {
+    fields: [paymentTransactions.userId],
+    references: [users.id],
+  }),
+  counterparty: one(users, {
+    fields: [paymentTransactions.counterpartyId],
+    references: [users.id],
+  }),
+}));
+
+export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
+
+export const insertPaymentTransactionSchema = createInsertSchema(paymentTransactions).pick({
+  counterpartyId: true,
+  direction: true,
+  method: true,
+  amountMinorUnits: true,
+  currency: true,
+  note: true,
+});
+
 // Small durable key/value store for process-wide toggles (currently just
 // App Store Review Mode) that previously lived in a plain in-memory
 // module variable in server/routes.ts and silently reset to the env-var

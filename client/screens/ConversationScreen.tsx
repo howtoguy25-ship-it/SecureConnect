@@ -5237,6 +5237,25 @@ export default function ConversationScreen() {
               </Pressable>
             </View>
 
+            <Pressable
+              style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault, marginBottom: Spacing.sm }]}
+              onPress={() => {
+                setShowPaymentModal(false);
+                navigation.navigate("PaymentBalance", { counterpartyId: otherUserId, counterpartyName: otherUserName });
+              }}
+            >
+              <View style={[styles.attachmentIcon, { backgroundColor: '#34C759' }]}>
+                <Feather name="trending-up" size={20} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ThemedText type="body" style={{ fontWeight: "600" }}>Balance & History</ThemedText>
+                <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                  Log a payment or see your running total with {otherUserName}
+                </ThemedText>
+              </View>
+              <Feather name="chevron-right" size={18} color={theme.textSecondary} />
+            </Pressable>
+
             {!otherUserData?.paymentPaypalMeHandle && !otherUserData?.paymentPayId && !otherUserData?.paymentBtcAddress ? (
               <View style={{ paddingVertical: Spacing.xl, alignItems: "center" }}>
                 <Feather name="dollar-sign" size={32} color={theme.textSecondary} />

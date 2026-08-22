@@ -1,5 +1,5 @@
-import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings, messageSaves } from "@shared/schema";
-import type { User, InsertUser, Message, InsertMessage, Conversation, Call, HiddenLockerItem, VerificationCode, PendingContact, JoinNotification, MessageRequest, Status, StatusView, Friend, LocationShare, LocationRequest, VirtualNumber, ExternalSms, UserBlock, UserReport, InsertUserReport, ScheduledMessage, UserDevice, SignedPrekey, OneTimePrekey, LoginEvent } from "@shared/schema";
+import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings, messageSaves, paymentTransactions } from "@shared/schema";
+import type { User, InsertUser, Message, InsertMessage, Conversation, Call, HiddenLockerItem, VerificationCode, PendingContact, JoinNotification, MessageRequest, Status, StatusView, Friend, LocationShare, LocationRequest, VirtualNumber, ExternalSms, UserBlock, UserReport, InsertUserReport, ScheduledMessage, UserDevice, SignedPrekey, OneTimePrekey, LoginEvent, PaymentTransaction } from "@shared/schema";
 import { gt, lt, lte, ilike } from "drizzle-orm";
 import { db } from "./db";
 import { eq, and, desc, sql, or, inArray, ne, isNull } from "drizzle-orm";
@@ -112,6 +112,20 @@ export interface IStorage {
   unsuspendUser(userId: string): Promise<void>;
   getAppSetting(key: string): Promise<string | undefined>;
   setAppSetting(key: string, value: string): Promise<void>;
+
+  createPaymentTransaction(userId: string, data: {
+    counterpartyId: string;
+    direction: string;
+    method: string;
+    amountMinorUnits: number;
+    currency: string;
+    note?: string | null;
+  }): Promise<PaymentTransaction>;
+  getPaymentTransactions(userId: string, counterpartyId?: string): Promise<PaymentTransaction[]>;
+  getPaymentBalance(userId: string): Promise<{
+    totals: Array<{ currency: string; sentMinorUnits: number; receivedMinorUnits: number; netMinorUnits: number }>;
+    byContact: Array<{ counterpartyId: string; counterpartyName: string | null; currency: string; sentMinorUnits: number; receivedMinorUnits: number; netMinorUnits: number }>;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -123,6 +137,87 @@ export class DatabaseStorage implements IStorage {
   async setAppSetting(key: string, value: string): Promise<void> {
     await db.insert(appSettings).values({ key, value, updatedAt: new Date() })
       .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: new Date() } });
+  }
+
+  async createPaymentTransaction(userId: string, data: {
+    counterpartyId: string;
+    direction: string;
+    method: string;
+    amountMinorUnits: number;
+    currency: string;
+    note?: string | null;
+  }): Promise<PaymentTransaction> {
+    const [row] = await db.insert(paymentTransactions).values({
+      userId,
+      counterpartyId: data.counterpartyId,
+      direction: data.direction,
+      method: data.method,
+      amountMinorUnits: data.amountMinorUnits,
+      currency: data.currency,
+      note: data.note ?? null,
+    }).returning();
+    return row;
+  }
+
+  async getPaymentTransactions(userId: string, counterpartyId?: string): Promise<PaymentTransaction[]> {
+    const conditions = counterpartyId
+      ? and(eq(paymentTransactions.userId, userId), eq(paymentTransactions.counterpartyId, counterpartyId))
+      : eq(paymentTransactions.userId, userId);
+    return await db.select().from(paymentTransactions)
+      .where(conditions)
+      .orderBy(desc(paymentTransactions.createdAt));
+  }
+
+  async getPaymentBalance(userId: string): Promise<{
+    totals: Array<{ currency: string; sentMinorUnits: number; receivedMinorUnits: number; netMinorUnits: number }>;
+    byContact: Array<{ counterpartyId: string; counterpartyName: string | null; currency: string; sentMinorUnits: number; receivedMinorUnits: number; netMinorUnits: number }>;
+  }> {
+    const rows = await db.select().from(paymentTransactions).where(eq(paymentTransactions.userId, userId));
+
+    const totalsMap = new Map<string, { sentMinorUnits: number; receivedMinorUnits: number }>();
+    const byContactMap = new Map<string, { counterpartyId: string; currency: string; sentMinorUnits: number; receivedMinorUnits: number }>();
+
+    for (const row of rows) {
+      const totalsKey = row.currency;
+      const totalsEntry = totalsMap.get(totalsKey) ?? { sentMinorUnits: 0, receivedMinorUnits: 0 };
+      const contactKey = `${row.counterpartyId}|${row.currency}`;
+      const contactEntry = byContactMap.get(contactKey) ?? { counterpartyId: row.counterpartyId, currency: row.currency, sentMinorUnits: 0, receivedMinorUnits: 0 };
+
+      if (row.direction === "sent") {
+        totalsEntry.sentMinorUnits += row.amountMinorUnits;
+        contactEntry.sentMinorUnits += row.amountMinorUnits;
+      } else {
+        totalsEntry.receivedMinorUnits += row.amountMinorUnits;
+        contactEntry.receivedMinorUnits += row.amountMinorUnits;
+      }
+
+      totalsMap.set(totalsKey, totalsEntry);
+      byContactMap.set(contactKey, contactEntry);
+    }
+
+    const totals = Array.from(totalsMap.entries()).map(([currency, v]) => ({
+      currency,
+      sentMinorUnits: v.sentMinorUnits,
+      receivedMinorUnits: v.receivedMinorUnits,
+      netMinorUnits: v.receivedMinorUnits - v.sentMinorUnits,
+    }));
+    const byContactRaw = Array.from(byContactMap.values());
+
+    const counterpartyIds = Array.from(new Set(byContactRaw.map((v) => v.counterpartyId)));
+    const nameById = new Map<string, string | null>();
+    if (counterpartyIds.length > 0) {
+      const people = await db.select({ id: users.id, displayName: users.displayName, phoneNumber: users.phoneNumber })
+        .from(users).where(inArray(users.id, counterpartyIds));
+      for (const p of people) nameById.set(p.id, p.displayName || p.phoneNumber);
+    }
+
+    const byContact = byContactRaw.map((v) => ({
+      ...v,
+      counterpartyName: nameById.get(v.counterpartyId) ?? null,
+      netMinorUnits: v.receivedMinorUnits - v.sentMinorUnits,
+    }));
+
+    return { totals, byContact };
   }
 
   async getUser(id: string): Promise<User | undefined> {

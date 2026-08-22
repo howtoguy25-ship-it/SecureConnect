@@ -49,6 +49,7 @@ import LockedChatsScreen from "@/screens/LockedChatsScreen";
 import ChangePhoneNumberScreen from "@/screens/ChangePhoneNumberScreen";
 import ExportDataScreen from "@/screens/ExportDataScreen";
 import PaymentMethodsScreen from "@/screens/PaymentMethodsScreen";
+import PaymentBalanceScreen from "@/screens/PaymentBalanceScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { useAuth } from "@/contexts/AuthContext";
 import { View } from "react-native";
@@ -113,6 +114,7 @@ export type RootStackParamList = {
   ChangePhoneNumber: undefined;
   ExportData: undefined;
   PaymentMethods: undefined;
+  PaymentBalance: { counterpartyId?: string; counterpartyName?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -482,6 +484,11 @@ export default function RootStackNavigator() {
             name="PaymentMethods"
             component={PaymentMethodsScreen}
             options={{ headerTitle: "Payment Methods" }}
+          />
+          <Stack.Screen
+            name="PaymentBalance"
+            component={PaymentBalanceScreen}
+            options={{ headerTitle: "Payment Balance" }}
           />
         </>
       )}

@@ -1067,6 +1067,24 @@ export default function SettingsScreen() {
           </View>
           <Feather name="chevron-right" size={20} color={theme.textSecondary} />
         </Pressable>
+
+        <Pressable
+          style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}
+          onPress={() => navigation.navigate("PaymentBalance")}
+        >
+          <View style={styles.settingInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#34C759" }]}>
+              <Feather name="trending-up" size={16} color="#fff" />
+            </View>
+            <View style={styles.settingTextColumn}>
+              <ThemedText type="body">Payment Balance</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Track money sent and received with each contact
+              </ThemedText>
+            </View>
+          </View>
+          <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+        </Pressable>
       </View>
 
       <Pressable
