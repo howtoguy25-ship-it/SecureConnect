@@ -20,6 +20,8 @@ import {
 } from "./doubleRatchet";
 import { loadSession, saveSession } from "./keyStorage";
 import { getIdentityKeyPair, getSignedPreKeyPair, getOneTimePreKeyPair, markOneTimePreKeyUsed } from "./prekeyManager";
+import { getCachedIdentityPublicKey } from "./identityKeyCache";
+import { deriveLayer2ConversationKey, layer2Wrap, layer2Unwrap } from "./superEncrypt";
 
 export type EncryptionState =
   | "no_keys"          // recipient has no key bundle yet
@@ -28,8 +30,14 @@ export type EncryptionState =
   | "session_reset";   // local session was reset/corrupted
 
 export interface OutgoingMessage {
-  ciphertext: string;         // JSON-serialised EncryptedEnvelope (base64 fields)
-  encryptionVersion: "v2-signal";
+  // "v2-signal": JSON-serialised EncryptedEnvelope (base64 fields), as-is.
+  // "v3-signal-layer2": that same JSON, wrapped a second time with an
+  // independently-keyed layer-2 secretbox (see superEncrypt.ts) and
+  // base64-encoded whole. Falls back to v2-signal when the peer's
+  // identity key isn't available yet — the ratchet layer alone is
+  // already full E2EE, so layer-2 is a bonus, not a requirement.
+  ciphertext: string;
+  encryptionVersion: "v2-signal" | "v3-signal-layer2";
   e2eeInitEnvelope: X3DHInitEnvelope | null; // non-null only for the very first message
 }
 
@@ -73,11 +81,46 @@ export async function encryptMessage(
   const { newState, envelope: msgEnvelope } = ratchetEncrypt(session, plaintext);
   await saveSession(theirUserId, newState);
 
+  const innerJson = JSON.stringify(msgEnvelope);
+
+  const layer2 = await tryLayer2Wrap(myUserId, theirUserId, innerJson);
+  if (layer2) {
+    return {
+      ciphertext: layer2,
+      encryptionVersion: "v3-signal-layer2",
+      e2eeInitEnvelope: initEnvelope,
+    };
+  }
+
   return {
-    ciphertext: JSON.stringify(msgEnvelope),
+    ciphertext: innerJson,
     encryptionVersion: "v2-signal",
     e2eeInitEnvelope: initEnvelope,
   };
+}
+
+/**
+ * Best-effort layer-2 wrap of an already-serialised inner envelope.
+ * Returns null (never throws) if either side's identity key isn't
+ * available — the ratchet layer already provides full E2EE on its own,
+ * so a layer-2 failure should never block sending a message.
+ */
+async function tryLayer2Wrap(
+  myUserId: string,
+  theirUserId: string,
+  innerJson: string,
+): Promise<string | null> {
+  try {
+    const myIKPair = await getIdentityKeyPair();
+    if (!myIKPair) return null;
+    const theirIdentityPublic = await getCachedIdentityPublicKey(theirUserId);
+    if (!theirIdentityPublic) return null;
+    const convoKey = deriveLayer2ConversationKey(myIKPair.secretKey, theirIdentityPublic, myUserId, theirUserId);
+    const wrapped = layer2Wrap(naclUtil.decodeUTF8(innerJson), convoKey);
+    return naclUtil.encodeBase64(wrapped);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -93,7 +136,7 @@ export async function decryptMessage(
   theirUserId: string,
   incoming: IncomingMessage
 ): Promise<string> {
-  if (incoming.encryptionVersion !== "v2-signal") {
+  if (incoming.encryptionVersion !== "v2-signal" && incoming.encryptionVersion !== "v3-signal-layer2") {
     throw new Error("legacy");
   }
 
@@ -107,9 +150,22 @@ export async function decryptMessage(
 
   if (!session) throw new Error("No session and no init envelope");
 
+  let innerJson = incoming.ciphertext;
+  if (incoming.encryptionVersion === "v3-signal-layer2") {
+    const myIKPair = await getIdentityKeyPair();
+    const theirIdentityPublic = await getCachedIdentityPublicKey(theirUserId);
+    if (!myIKPair || !theirIdentityPublic) {
+      throw new Error("Cannot unwrap layer-2 payload — missing identity key material");
+    }
+    const convoKey = deriveLayer2ConversationKey(myIKPair.secretKey, theirIdentityPublic, myUserId, theirUserId);
+    const unwrapped = layer2Unwrap(naclUtil.decodeBase64(incoming.ciphertext), convoKey);
+    if (!unwrapped) throw new Error("Layer-2 unwrap failed — tampered or wrong key");
+    innerJson = naclUtil.encodeUTF8(unwrapped);
+  }
+
   let envelope: EncryptedEnvelope;
   try {
-    envelope = JSON.parse(incoming.ciphertext) as EncryptedEnvelope;
+    envelope = JSON.parse(innerJson) as EncryptedEnvelope;
   } catch {
     throw new Error("Malformed ciphertext payload");
   }

@@ -2931,7 +2931,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // audit table.
   app.post('/api/messages/send-sealed', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const { conversationId, receiverId, content, e2eeInitEnvelope, replyToMessageId } = req.body;
+      const { conversationId, receiverId, content, encryptionVersion, e2eeInitEnvelope, replyToMessageId } = req.body;
       if (!conversationId || !receiverId || !content) {
         return res.status(400).json({ error: 'conversationId, receiverId, and content are required' });
       }
@@ -3032,6 +3032,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         receiverId,
         outerSenderVirtualNumberId: sender.virtualNumberId,
         content,
+        encryptionVersion,
         e2eeInitEnvelope,
         replyToMessageId: replyToMessageId ?? null,
       });

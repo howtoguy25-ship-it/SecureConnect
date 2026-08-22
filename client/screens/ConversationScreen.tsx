@@ -1305,7 +1305,10 @@ export default function ConversationScreen() {
           encryptionVersion: (msg as any).encryptionVersion ?? "v2-signal",
           e2eeInitEnvelope: (msg as any).e2eeInitEnvelope ?? null,
         };
-        if (incoming.encryptionVersion === "v2-signal") {
+        // v3-signal-layer2 messages carry an extra independently-keyed outer
+        // wrap (see superEncrypt.ts) — signalDecrypt() unwraps it internally
+        // before ratchet-decrypting, so both versions route the same way.
+        if (incoming.encryptionVersion === "v2-signal" || incoming.encryptionVersion === "v3-signal-layer2") {
           // Build 63 Phase A: sealed-sender messages arrive with
           // `senderId: null` for the recipient. The peer in a 1:1 chat
           // is unambiguous — it's `otherUserId`. Falling back to
@@ -1330,6 +1333,11 @@ export default function ConversationScreen() {
             }
             return await signalDecrypt(user.id, theirId, incoming);
           }
+          // Own message fetched fresh from server (not optimistic local
+          // state) — the ratchet message key was consumed on send and
+          // can't be recovered, so just show the "we sent this encrypted"
+          // placeholder instead of attempting to decrypt it.
+          if (incoming.encryptionVersion === "v3-signal-layer2") return "[Sent encrypted]";
           const parsed = JSON.parse(msg.content);
           if (parsed?.header?.v === 2) return "[Sent encrypted]";
         }
@@ -1389,6 +1397,8 @@ export default function ConversationScreen() {
         token,
         apiBaseUrl: getApiUrl(),
         cacheKey: msgId,
+        myUserId: user?.id,
+        theirUserId: otherUserId,
       });
       mediaFetchState.current.delete(msgId);
       setDecryptedMediaUris(prev => ({ ...prev, [msgId]: localUri }));
@@ -1491,6 +1501,7 @@ export default function ConversationScreen() {
           conversationId,
           receiverId: otherUserId,
           content: enc.ciphertext,
+          encryptionVersion: enc.encryptionVersion,
           e2eeInitEnvelope: enc.e2eeInitEnvelope,
         });
         if (sealedResult.ok) return sealedResult.message;
@@ -1607,6 +1618,7 @@ export default function ConversationScreen() {
         conversationId,
         receiverId: otherUserId,
         content: outgoing.ciphertext,
+        encryptionVersion: outgoing.encryptionVersion,
         e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
       });
       if (sealedResult.ok) {
@@ -2025,6 +2037,8 @@ export default function ConversationScreen() {
             apiBaseUrl: baseUrl,
             name: fileName,
             waveform,
+            myUserId: user?.id,
+            theirUserId: otherUserId,
           });
           const envelopeText = buildMediaEnvelope(envelope);
 

@@ -108,6 +108,7 @@ export interface SealedSendPayload {
   conversationId: string;
   receiverId: string;
   content: string; // Signal ciphertext (the inner encrypted payload)
+  encryptionVersion?: string;
   e2eeInitEnvelope?: unknown;
   replyToMessageId?: string;
 }

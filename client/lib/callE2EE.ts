@@ -27,8 +27,8 @@
 
 import nacl from "tweetnacl";
 import naclUtil from "tweetnacl-util";
-import { ensureSigningKeyPair } from "@/utils/crypto/prekeyManager";
-import { getCachedSigningPublicKey } from "@/utils/crypto/identityKeyCache";
+import { ensureSigningKeyPair, getIdentityKeyPair } from "@/utils/crypto/prekeyManager";
+import { getCachedSigningPublicKey, getCachedIdentityPublicKey } from "@/utils/crypto/identityKeyCache";
 
 export interface CallKeyPair {
   publicKey: Uint8Array;
@@ -197,13 +197,46 @@ export async function deriveCallKey(
   mySecretKey: Uint8Array,
   peerPublicKey: Uint8Array,
   callId: string,
+  // Layer-2: a second, independent secret mixed into the same key
+  // derivation — a static-static X25519 DH between both parties' *long-term*
+  // identity keys (see superEncrypt.ts's deriveLayer2ConversationKey; the
+  // same primitive used for messages/media). Combining it here rather than
+  // encrypting frames twice keeps the cost a one-time key derivation, not a
+  // second per-frame crypto pass — real-time video can't absorb that. If the
+  // ephemeral exchange above were ever compromised (a bug, a future break),
+  // an attacker would still need this independently-derived secret too.
+  layer2Ikm?: Uint8Array,
 ): Promise<Uint8Array> {
   // X25519 shared secret (32 bytes).
   const shared = nacl.scalarMult(mySecretKey, peerPublicKey);
+  const ikm = layer2Ikm ? concatBytes(shared, layer2Ikm) : shared;
   // Salt with the callId so the same peer-pair across two different
   // calls yields different LiveKit keys.
   const salt = new TextEncoder().encode(callId);
-  return hkdfSha256(shared, salt, INFO);
+  return hkdfSha256(ikm, salt, INFO);
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+/** Best-effort static-static X25519 DH between both parties' long-term
+ * identity keys, for mixing into deriveCallKey. Returns null (never
+ * throws) if either identity key isn't available yet — the caller treats
+ * that as "proceed on the ephemeral exchange alone," not a hard failure. */
+async function tryDeriveCallLayer2Ikm(peerUserId: string): Promise<Uint8Array | null> {
+  try {
+    const myIKPair = await getIdentityKeyPair();
+    if (!myIKPair) return null;
+    const theirIdentityPublic = await getCachedIdentityPublicKey(peerUserId);
+    if (!theirIdentityPublic) return null;
+    return nacl.scalarMult(myIKPair.secretKey, theirIdentityPublic);
+  } catch {
+    return null;
+  }
 }
 
 // End-to-end glue for the call screen: generate a keypair, post our
@@ -359,7 +392,15 @@ export async function negotiateCallKey(opts: {
                 return null;
               }
             }
-            return await deriveCallKey(myKp.secretKey, peerPub, callId);
+            // Layer-2: mix in a static-static X25519 DH between both
+            // parties' long-term identity keys (the same keys the
+            // signature check above and Safety Number both rely on) —
+            // independent of the ephemeral key exchange above. Best-effort:
+            // if either identity key isn't available, the call still
+            // proceeds on the ephemeral-only key rather than failing
+            // closed — that key exchange is already authenticated above.
+            const layer2Ikm = peerUserId ? await tryDeriveCallLayer2Ikm(peerUserId) : null;
+            return await deriveCallKey(myKp.secretKey, peerPub, callId, layer2Ikm ?? undefined);
           }
         }
       } catch (e) {

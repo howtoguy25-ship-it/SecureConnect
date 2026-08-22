@@ -1965,6 +1965,7 @@ export class DatabaseStorage implements IStorage {
     receiverId: string;
     outerSenderVirtualNumberId: string;
     content: string;                      // Signal ciphertext (base64)
+    encryptionVersion?: string;
     e2eeInitEnvelope?: unknown;
     replyToMessageId?: string | null;
     expiresAt?: Date | null;
@@ -1986,7 +1987,7 @@ export class DatabaseStorage implements IStorage {
       receiverId: input.receiverId,
       content: input.content,
       isEncrypted: true,
-      encryptionVersion: 'v2-signal',
+      encryptionVersion: input.encryptionVersion ?? 'v2-signal',
       e2eeInitEnvelope: input.e2eeInitEnvelope ?? null,
       replyToMessageId: input.replyToMessageId ?? null,
       replyToPreview: null,

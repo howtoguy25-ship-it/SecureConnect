@@ -39,6 +39,9 @@ import {
   generateMediaKey,
   MAX_FILE_SIZE,
 } from "./mediaEncryption";
+import { getIdentityKeyPair } from "./prekeyManager";
+import { getCachedIdentityPublicKey } from "./identityKeyCache";
+import { deriveLayer2ConversationKey, layer2Wrap, layer2Unwrap } from "./superEncrypt";
 
 export { MAX_FILE_SIZE };
 
@@ -80,7 +83,13 @@ async function fetchWithUploadTimeout(
 }
 
 export interface MediaEnvelope {
-  v: 1;
+  // 1 = SCM1 ciphertext uploaded as-is. 2 = the object at `path` is ALSO
+  // wrapped in a second, independently-keyed layer-2 secretbox (see
+  // superEncrypt.ts) on top of the SCM1 ciphertext — the extra encryption
+  // layer applied to actual file bytes, not just the key-delivery envelope
+  // (which already rides inside the layer-2-wrapped message text). Both
+  // versions decrypt fine; v2 just needs one extra unwrap step first.
+  v: 1 | 2;
   /** Base64 mediaKey (32 bytes). Must never leave the encrypted message body. */
   mk: string;
   /** Server-relative object path, e.g. "/objects/uploads/<uuid>" */
@@ -118,7 +127,7 @@ export function parseMediaEnvelope(body: string | null | undefined): MediaEnvelo
   try {
     const json = body.slice(MEDIA_ENVELOPE_PREFIX.length);
     const parsed = JSON.parse(json) as MediaEnvelope;
-    if (parsed?.v !== 1) return null;
+    if (parsed?.v !== 1 && parsed?.v !== 2) return null;
     if (typeof parsed.mk !== "string" || typeof parsed.path !== "string") return null;
     if (parsed.mt !== "image" && parsed.mt !== "video" && parsed.mt !== "audio" && parsed.mt !== "file") return null;
     if (typeof parsed.size !== "number" || parsed.size < 0 || parsed.size > MAX_FILE_SIZE) {
@@ -163,8 +172,19 @@ export async function uploadEncryptedMedia(args: {
    * contrast, always generates its own single-use key here.
    */
   mediaKey?: Uint8Array;
+  /**
+   * Both userIds of a 1:1 conversation — when both are provided AND the
+   * recipient's identity key is available, the uploaded ciphertext gets a
+   * second, independently-keyed layer-2 wrap on top of the normal SCM1
+   * encryption (see superEncrypt.ts), and the envelope is marked v:2.
+   * Omitted by callers with no single "other party" (Stories/Status,
+   * which already have their own per-viewer key-wrapping scheme) — those
+   * stay on the existing v:1 format, unaffected.
+   */
+  myUserId?: string;
+  theirUserId?: string;
 }): Promise<UploadResult> {
-  const { uri, mediaType, token, apiBaseUrl, ext, name, waveform } = args;
+  const { uri, mediaType, token, apiBaseUrl, ext, name, waveform, myUserId, theirUserId } = args;
 
   // 1. Read plaintext bytes.
   const plaintext = await readFileBytes(uri);
@@ -177,7 +197,20 @@ export async function uploadEncryptedMedia(args: {
 
   // 2. Encrypt.
   const mediaKey = args.mediaKey ?? generateMediaKey();
-  const { ciphertext } = encryptMedia(plaintext, mediaKey);
+  const { ciphertext: innerCiphertext } = encryptMedia(plaintext, mediaKey);
+
+  // 2b. Layer-2: best-effort, never blocks the send if identity keys
+  // aren't available yet — the SCM1 encryption above is already full
+  // client-side encryption on its own.
+  let ciphertext: Uint8Array = innerCiphertext;
+  let envelopeVersion: 1 | 2 = 1;
+  if (myUserId && theirUserId) {
+    const convoKey = await tryDeriveConvoKey(myUserId, theirUserId);
+    if (convoKey) {
+      ciphertext = layer2Wrap(innerCiphertext, convoKey);
+      envelopeVersion = 2;
+    }
+  }
 
   // 3. Get signed PUT URL.
   const uploadUrlRes = await fetchWithUploadTimeout(new URL("/api/objects/upload", apiBaseUrl).toString(), {
@@ -220,7 +253,7 @@ export async function uploadEncryptedMedia(args: {
   const { objectPath } = (await aclRes.json()) as { objectPath: string };
 
   const envelope: MediaEnvelope = {
-    v: 1,
+    v: envelopeVersion,
     mk: naclUtil.encodeBase64(mediaKey),
     path: objectPath,
     mt: mediaType,
@@ -250,8 +283,12 @@ export async function fetchAndDecryptEncryptedMedia(args: {
   apiBaseUrl: string;
   /** Stable id used in the cache filename (typically the messageId). */
   cacheKey: string;
+  /** Both userIds — required to unwrap a v:2 (layer-2-wrapped) envelope.
+   * See uploadEncryptedMedia's matching params. */
+  myUserId?: string;
+  theirUserId?: string;
 }): Promise<string> {
-  const { envelope, token, apiBaseUrl, cacheKey } = args;
+  const { envelope, token, apiBaseUrl, cacheKey, myUserId, theirUserId } = args;
 
   // Ciphertext fetch through the rate-limited authenticated endpoint.
   // envelope.path is like "/objects/uploads/<uuid>"; we prepend
@@ -263,7 +300,20 @@ export async function fetchAndDecryptEncryptedMedia(args: {
   if (!res.ok) {
     throw new Error(`Encrypted media fetch failed (${res.status})`);
   }
-  const cipherBuf = new Uint8Array(await res.arrayBuffer());
+  let cipherBuf: Uint8Array<ArrayBufferLike> = new Uint8Array(await res.arrayBuffer());
+
+  if (envelope.v === 2) {
+    if (!myUserId || !theirUserId) {
+      throw new Error("Cannot unwrap layer-2 media — missing conversation identity");
+    }
+    const convoKey = await tryDeriveConvoKey(myUserId, theirUserId);
+    if (!convoKey) {
+      throw new Error("Cannot unwrap layer-2 media — peer identity key unavailable");
+    }
+    const unwrapped = layer2Unwrap(cipherBuf, convoKey);
+    if (!unwrapped) throw new Error("Layer-2 media unwrap failed — tampered or wrong key");
+    cipherBuf = unwrapped;
+  }
 
   // Decrypt.
   const mediaKey = naclUtil.decodeBase64(envelope.mk);
@@ -272,6 +322,20 @@ export async function fetchAndDecryptEncryptedMedia(args: {
 
   // Write to cache.
   return writeCacheFile(cacheKey, envelope, plaintext);
+}
+
+/** Shared by upload + download: derive the layer-2 conversation key from
+ * both parties' identity keys, or null if either isn't available yet. */
+async function tryDeriveConvoKey(myUserId: string, theirUserId: string): Promise<Uint8Array | null> {
+  try {
+    const myIKPair = await getIdentityKeyPair();
+    if (!myIKPair) return null;
+    const theirIdentityPublic = await getCachedIdentityPublicKey(theirUserId);
+    if (!theirIdentityPublic) return null;
+    return deriveLayer2ConversationKey(myIKPair.secretKey, theirIdentityPublic, myUserId, theirUserId);
+  } catch {
+    return null;
+  }
 }
 
 // ─── I/O helpers ─────────────────────────────────────────────────────────────
