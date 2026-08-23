@@ -90,7 +90,18 @@ module.exports = () => {
         "react-native-iap",
         "./plugins/withCallKeepVoip.js",
         "expo-apple-authentication",
-        "@stripe/stripe-react-native",
+        [
+          "@stripe/stripe-react-native",
+          {
+            // We don't implement Apple/Google Pay in this build (card entry
+            // only) — this identifier is still required by the plugin
+            // itself (it hard-throws with no null-check if omitted, even
+            // when unused) and just becomes an unused entitlement until/
+            // unless Apple Pay is actually wired up later.
+            merchantIdentifier: "merchant.com.adham.salameh.secureconnectchat",
+            enableGooglePay: false,
+          },
+        ],
         ...(googleIosUrlScheme
           ? [["@react-native-google-signin/google-signin", { iosUrlScheme: googleIosUrlScheme }]]
           : []),
