@@ -57,6 +57,16 @@ export const users = pgTable("users", {
   paymentPaypalMeHandle: text("payment_paypal_me_handle"),
   paymentPayId: text("payment_pay_id"),
   paymentBtcAddress: text("payment_btc_address"),
+  // ── Real money movement via Stripe Connect (build 134) ──────────────────
+  // Unlike the link-out fields above, this IS real custody: a Stripe
+  // Express account this user owns and controls (Stripe holds the funds
+  // and handles KYC/payouts, never Pryvo). stripeConnectPayoutsEnabled is
+  // a cache of Stripe's own `payouts_enabled` flag on that account —
+  // refreshed on demand via /api/payments/stripe/connect/status — so the
+  // sender-side "can I pay this person" check doesn't need a live Stripe
+  // call on every render.
+  stripeConnectAccountId: text("stripe_connect_account_id"),
+  stripeConnectPayoutsEnabled: boolean("stripe_connect_payouts_enabled").default(false),
   pushToken: text("push_token"),
   // Separate from pushToken (Expo's regular push service) — a PushKit VoIP
   // token, which can only be delivered via a direct APNs VoIP push, not
@@ -870,6 +880,11 @@ export const paymentTransactions = pgTable("payment_transactions", {
   amountMinorUnits: integer("amount_minor_units").notNull(),
   currency: text("currency").notNull(), // 'AUD' | 'USD' | 'BTC' | ...
   note: text("note"),
+  // Set only for method: 'stripe' rows — the PaymentIntent that actually
+  // moved this money, so /pay/confirm can detect a duplicate confirm
+  // (e.g. a retried client request) and never double-log the same real
+  // transfer. Null for every self-reported (paypal/payid/btc/other) row.
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_payment_tx_user_id").on(table.userId),

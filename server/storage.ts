@@ -120,8 +120,11 @@ export interface IStorage {
     amountMinorUnits: number;
     currency: string;
     note?: string | null;
+    stripePaymentIntentId?: string | null;
   }): Promise<PaymentTransaction>;
   getPaymentTransactions(userId: string, counterpartyId?: string): Promise<PaymentTransaction[]>;
+  getPaymentTransactionByStripeIntent(userId: string, paymentIntentId: string): Promise<PaymentTransaction | undefined>;
+  getUserByStripeConnectAccountId(accountId: string): Promise<User | undefined>;
   getPaymentBalance(userId: string): Promise<{
     totals: Array<{ currency: string; sentMinorUnits: number; receivedMinorUnits: number; netMinorUnits: number }>;
     byContact: Array<{ counterpartyId: string; counterpartyName: string | null; currency: string; sentMinorUnits: number; receivedMinorUnits: number; netMinorUnits: number }>;
@@ -146,6 +149,7 @@ export class DatabaseStorage implements IStorage {
     amountMinorUnits: number;
     currency: string;
     note?: string | null;
+    stripePaymentIntentId?: string | null;
   }): Promise<PaymentTransaction> {
     const [row] = await db.insert(paymentTransactions).values({
       userId,
@@ -155,6 +159,7 @@ export class DatabaseStorage implements IStorage {
       amountMinorUnits: data.amountMinorUnits,
       currency: data.currency,
       note: data.note ?? null,
+      stripePaymentIntentId: data.stripePaymentIntentId ?? null,
     }).returning();
     return row;
   }
@@ -166,6 +171,17 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(paymentTransactions)
       .where(conditions)
       .orderBy(desc(paymentTransactions.createdAt));
+  }
+
+  async getPaymentTransactionByStripeIntent(userId: string, paymentIntentId: string): Promise<PaymentTransaction | undefined> {
+    const [row] = await db.select().from(paymentTransactions)
+      .where(and(eq(paymentTransactions.userId, userId), eq(paymentTransactions.stripePaymentIntentId, paymentIntentId)));
+    return row || undefined;
+  }
+
+  async getUserByStripeConnectAccountId(accountId: string): Promise<User | undefined> {
+    const [row] = await db.select().from(users).where(eq(users.stripeConnectAccountId, accountId));
+    return row || undefined;
   }
 
   async getPaymentBalance(userId: string): Promise<{

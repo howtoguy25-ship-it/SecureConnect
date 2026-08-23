@@ -317,6 +317,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(200).send(html);
   });
 
+  // Stripe Connect Express onboarding redirects the browser here when the
+  // user finishes (or needs to redo) the hosted flow. The client doesn't
+  // rely on this page for anything functional — it just re-polls
+  // /api/payments/stripe/connect/status when the in-app browser is
+  // dismissed — this exists purely so the browser tab doesn't land on a
+  // dead URL after Stripe redirects.
+  const stripeConnectRedirectPage = (message: string) => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pryvo</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;background:#0b0b12;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:24px}</style>
+</head><body><div><p style="font-size:18px">${message}</p><p style="color:#9a9aa8">You can close this tab and return to Pryvo.</p></div></body></html>`;
+
+  app.get('/stripe/connect/return', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(stripeConnectRedirectPage("You're connected."));
+  });
+
+  app.get('/stripe/connect/refresh', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(stripeConnectRedirectPage('That link expired — please reopen "Connect Bank Account" in Pryvo.'));
+  });
+
   // Support page (same as privacy for App Store Connect)
   app.get('/support', (req, res) => {
     const supportPath = path.resolve(process.cwd(), 'server', 'templates', 'support.html');
@@ -1749,7 +1771,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // routes just let a user record that a transfer happened, so a running
   // balance can be shown. It is what users tell us happened, not something
   // Pryvo can verify or a store of real funds.
-  const PAYMENT_METHODS = new Set(['paypal', 'payid', 'btc', 'other']);
+  const PAYMENT_METHODS = new Set(['paypal', 'payid', 'btc', 'other', 'stripe']);
   const PAYMENT_DIRECTIONS = new Set(['sent', 'received']);
   // Minor-unit denominator per currency (cents for fiat, satoshis for BTC).
   const PAYMENT_CURRENCY_DECIMALS: Record<string, number> = { AUD: 2, USD: 2, GBP: 2, EUR: 2, NZD: 2, CAD: 2, BTC: 8 };
@@ -1821,6 +1843,214 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching payment balance:', error);
       res.status(500).json({ error: 'Could not load your balance.' });
+    }
+  });
+
+  // ─── Real money movement via Stripe Connect (build 134) ───────────────────
+  // Unlike everything above (which is self-reported bookkeeping for
+  // transfers that happen entirely outside Pryvo), this is the real thing:
+  // Stripe holds the money and does KYC/payouts as a Connect Express
+  // platform. Pryvo never touches funds directly — every dollar goes
+  // customer -> Stripe -> recipient's own Stripe-held balance -> their bank,
+  // on Stripe's own payout schedule.
+
+  app.get('/api/payments/stripe/publishable-key', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const key = await getStripePublishableKey();
+      res.json({ publishableKey: key });
+    } catch (error) {
+      console.error('Error fetching Stripe publishable key:', error);
+      res.status(500).json({ error: 'Stripe is not configured.' });
+    }
+  });
+
+  // Creates (if needed) this user's own Connect Express account and returns
+  // a fresh Stripe-hosted onboarding link — the real "sign in and continue"
+  // flow. Account Links expire quickly (~a few minutes), so this always
+  // mints a new one rather than caching.
+  app.post('/api/payments/stripe/connect/start', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const stripe = await getUncachableStripeClient();
+      let accountId = user.stripeConnectAccountId;
+
+      if (!accountId) {
+        const account = await stripe.accounts.create({
+          type: 'express',
+          capabilities: {
+            transfers: { requested: true },
+            card_payments: { requested: true },
+          },
+        });
+        accountId = account.id;
+        await storage.updateUser(user.id, { stripeConnectAccountId: accountId });
+      }
+
+      const origin = getAppBaseUrl();
+      const link = await stripe.accountLinks.create({
+        account: accountId,
+        refresh_url: `${origin}/stripe/connect/refresh`,
+        return_url: `${origin}/stripe/connect/return`,
+        type: 'account_onboarding',
+      });
+      res.json({ url: link.url });
+    } catch (error: any) {
+      console.error('Error starting Stripe Connect onboarding:', error);
+      res.status(500).json({ error: error?.message || 'Could not start onboarding.' });
+    }
+  });
+
+  // Re-checks the account with Stripe (the source of truth) and refreshes
+  // the cached payouts_enabled flag on the user row. Called after the user
+  // returns from the hosted onboarding flow, and any time the sender-side
+  // "can I pay this person" check needs a fresh answer.
+  app.get('/api/payments/stripe/connect/status', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const user = await storage.getUser(req.userId!);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (!user.stripeConnectAccountId) {
+        return res.json({ connected: false, payoutsEnabled: false, detailsSubmitted: false });
+      }
+      const stripe = await getUncachableStripeClient();
+      const account = await stripe.accounts.retrieve(user.stripeConnectAccountId);
+      const payoutsEnabled = !!account.payouts_enabled;
+      if (payoutsEnabled !== user.stripeConnectPayoutsEnabled) {
+        await storage.updateUser(user.id, { stripeConnectPayoutsEnabled: payoutsEnabled });
+      }
+      res.json({
+        connected: true,
+        payoutsEnabled,
+        detailsSubmitted: !!account.details_submitted,
+        requirementsDue: account.requirements?.currently_due ?? [],
+      });
+    } catch (error: any) {
+      console.error('Error checking Stripe Connect status:', error);
+      res.status(500).json({ error: error?.message || 'Could not check connection status.' });
+    }
+  });
+
+  // Lets the SENDER check whether a specific contact can actually receive a
+  // real payment before the "Pay with Card" option is even shown.
+  app.get('/api/payments/stripe/recipient-status', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const counterpartyId = typeof req.query.counterpartyId === 'string' ? req.query.counterpartyId : undefined;
+      if (!counterpartyId) return res.status(400).json({ error: 'counterpartyId is required.' });
+      const recipient = await storage.getUser(counterpartyId);
+      if (!recipient) return res.status(404).json({ error: 'Contact not found.' });
+      res.json({ payoutsEnabled: !!recipient.stripeConnectPayoutsEnabled });
+    } catch (error) {
+      console.error('Error checking recipient Stripe status:', error);
+      res.status(500).json({ error: 'Could not check recipient status.' });
+    }
+  });
+
+  const STRIPE_FIAT_DECIMALS: Record<string, number> = { AUD: 2, USD: 2, GBP: 2, EUR: 2, NZD: 2, CAD: 2 };
+
+  // Creates a PaymentIntent that, on success, automatically routes the
+  // money to the recipient's Connect account (a "destination charge") —
+  // Stripe moves it, not Pryvo. The client confirms this PaymentIntent
+  // with its own card entry UI (PaymentSheet); this route only ever hands
+  // back a client_secret, never touches card details.
+  app.post('/api/payments/stripe/pay/intent', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { counterpartyId, amount, currency } = req.body ?? {};
+      if (!counterpartyId || typeof counterpartyId !== 'string') {
+        return res.status(400).json({ error: 'A recipient is required.' });
+      }
+      if (counterpartyId === req.userId) {
+        return res.status(400).json({ error: "You can't pay yourself." });
+      }
+      const recipient = await storage.getUser(counterpartyId);
+      if (!recipient || !recipient.stripeConnectAccountId || !recipient.stripeConnectPayoutsEnabled) {
+        return res.status(400).json({ error: 'This contact has not set up real payments yet.' });
+      }
+      const currencyCode = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+      const decimals = STRIPE_FIAT_DECIMALS[currencyCode];
+      if (decimals === undefined) {
+        return res.status(400).json({ error: 'Unsupported currency for card payments.' });
+      }
+      const amountNum = typeof amount === 'number' ? amount : parseFloat(amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: 'Enter a valid amount greater than zero.' });
+      }
+      const amountMinorUnits = Math.round(amountNum * Math.pow(10, decimals));
+
+      const stripe = await getUncachableStripeClient();
+      const intent = await stripe.paymentIntents.create({
+        amount: amountMinorUnits,
+        currency: currencyCode.toLowerCase(),
+        automatic_payment_methods: { enabled: true },
+        transfer_data: { destination: recipient.stripeConnectAccountId },
+        metadata: { senderId: req.userId!, counterpartyId },
+      });
+      res.json({ clientSecret: intent.client_secret, paymentIntentId: intent.id });
+    } catch (error: any) {
+      console.error('Error creating Stripe payment intent:', error);
+      res.status(500).json({ error: error?.message || 'Could not start payment.' });
+    }
+  });
+
+  // Confirms a real transfer happened by asking Stripe directly (never
+  // trusting the client's word that a payment "succeeded"), then logs it
+  // into the SAME balance ledger used by the self-reported methods — both
+  // sides of the ledger get written here, since a Stripe-verified payment
+  // is proof for both parties at once (unlike a self-reported PayPal/PayID
+  // entry, which only the person who logged it vouches for).
+  app.post('/api/payments/stripe/pay/confirm', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { paymentIntentId } = req.body ?? {};
+      if (!paymentIntentId || typeof paymentIntentId !== 'string') {
+        return res.status(400).json({ error: 'paymentIntentId is required.' });
+      }
+
+      const existing = await storage.getPaymentTransactionByStripeIntent(req.userId!, paymentIntentId);
+      if (existing) {
+        return res.json(existing);
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      if (intent.status !== 'succeeded') {
+        return res.status(400).json({ error: `Payment has not succeeded yet (status: ${intent.status}).` });
+      }
+      if (intent.metadata?.senderId !== req.userId) {
+        return res.status(403).json({ error: 'This payment does not belong to you.' });
+      }
+      const counterpartyId = intent.metadata?.counterpartyId;
+      const recipient = counterpartyId ? await storage.getUser(counterpartyId) : undefined;
+      if (!recipient) {
+        return res.status(400).json({ error: 'Could not resolve the recipient for this payment.' });
+      }
+
+      const currency = intent.currency.toUpperCase();
+      const amountMinorUnits = intent.amount;
+
+      const senderTx = await storage.createPaymentTransaction(req.userId!, {
+        counterpartyId: recipient.id,
+        direction: 'sent',
+        method: 'stripe',
+        amountMinorUnits,
+        currency,
+        stripePaymentIntentId: paymentIntentId,
+      });
+      // Mirror row for the recipient so their balance reflects it too,
+      // without them having to log anything — a Stripe-verified payment is
+      // proof enough for both sides.
+      await storage.createPaymentTransaction(recipient.id, {
+        counterpartyId: req.userId!,
+        direction: 'received',
+        method: 'stripe',
+        amountMinorUnits,
+        currency,
+        stripePaymentIntentId: paymentIntentId,
+      });
+
+      res.json(senderTx);
+    } catch (error: any) {
+      console.error('Error confirming Stripe payment:', error);
+      res.status(500).json({ error: error?.message || 'Could not confirm this payment.' });
     }
   });
 

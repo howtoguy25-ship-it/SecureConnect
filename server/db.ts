@@ -151,6 +151,16 @@ export async function ensureUserRecoverySchema(): Promise<void> {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_payment_tx_counterparty_id ON payment_transactions (counterparty_id);
     `);
+    // Real money movement via Stripe Connect (build 134).
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS stripe_connect_account_id text,
+        ADD COLUMN IF NOT EXISTS stripe_connect_payouts_enabled boolean DEFAULT false;
+    `);
+    await pool.query(`
+      ALTER TABLE payment_transactions
+        ADD COLUMN IF NOT EXISTS stripe_payment_intent_id text;
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

@@ -21,7 +21,7 @@ module.exports = () => {
       ios: {
         supportsTablet: true,
         requireFullScreen: false,
-        buildNumber: "133",
+        buildNumber: "134",
         bundleIdentifier: "com.adham.salameh.secureconnectchat",
         icon: "./assets/images/icon.png",
         privacyManifests: {
@@ -90,6 +90,7 @@ module.exports = () => {
         "react-native-iap",
         "./plugins/withCallKeepVoip.js",
         "expo-apple-authentication",
+        "@stripe/stripe-react-native",
         ...(googleIosUrlScheme
           ? [["@react-native-google-signin/google-signin", { iosUrlScheme: googleIosUrlScheme }]]
           : []),

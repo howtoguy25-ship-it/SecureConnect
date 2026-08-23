@@ -11,6 +11,7 @@ import { Spacing, BorderRadius } from "@/constants/theme";
 import { RootStackParamList } from "@/navigation/RootStackNavigator";
 import { Feather } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/AuthContext";
+import { useStripePayments } from "@/hooks/useStripePayments";
 import { getApiUrl, apiRequest, fetchWithTimeout } from "@/lib/query-client";
 import { getStoredToken } from "@/lib/auth";
 import * as ImagePicker from "expo-image-picker";
@@ -207,6 +208,7 @@ export default function ConversationScreen() {
   const headerHeight = useHeaderHeight();
   const { theme, isDark } = useTheme();
   const { user } = useAuth();
+  const { payWithCard } = useStripePayments();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
   // Real (natural) pixel dimensions of each image bubble, captured once via
@@ -260,6 +262,10 @@ export default function ConversationScreen() {
   const [isSending, setIsSending] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [stripeRecipientReady, setStripeRecipientReady] = useState(false);
+  const [showStripePayForm, setShowStripePayForm] = useState(false);
+  const [stripePayAmount, setStripePayAmount] = useState("");
+  const [isStripePaying, setIsStripePaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [pendingRecordingUri, setPendingRecordingUri] = useState<string | null>(null);
@@ -2626,7 +2632,62 @@ export default function ConversationScreen() {
 
   const handleOpenPayment = () => {
     setShowAttachmentMenu(false);
+    setShowStripePayForm(false);
+    setStripePayAmount("");
     setShowPaymentModal(true);
+    (async () => {
+      try {
+        const res = await apiRequest("GET", `/api/payments/stripe/recipient-status?counterpartyId=${encodeURIComponent(otherUserId)}`);
+        const data = await res.json();
+        setStripeRecipientReady(!!data.payoutsEnabled);
+      } catch {
+        setStripeRecipientReady(false);
+      }
+    })();
+  };
+
+  const handleStripePay = async () => {
+    const amountNum = parseFloat(stripePayAmount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      Alert.alert("Invalid amount", "Enter an amount greater than zero.");
+      return;
+    }
+    setIsStripePaying(true);
+    try {
+      const intentRes = await apiRequest("POST", "/api/payments/stripe/pay/intent", {
+        counterpartyId: otherUserId,
+        amount: amountNum,
+        currency: "AUD",
+      });
+      const intentData = await intentRes.json();
+      if (!intentRes.ok) throw new Error(intentData.error || "Could not start payment.");
+
+      const result = await payWithCard(intentData.clientSecret);
+      if (result.canceled) {
+        setIsStripePaying(false);
+        return;
+      }
+      if (!result.success) {
+        throw new Error(result.error || "Payment failed.");
+      }
+
+      const confirmRes = await apiRequest("POST", "/api/payments/stripe/pay/confirm", {
+        paymentIntentId: intentData.paymentIntentId,
+      });
+      if (!confirmRes.ok) {
+        const confirmData = await confirmRes.json().catch(() => ({}));
+        throw new Error(confirmData.error || "Payment succeeded but could not be recorded.");
+      }
+
+      setShowPaymentModal(false);
+      setShowStripePayForm(false);
+      setStripePayAmount("");
+      Alert.alert("Payment Sent", `You sent ${otherUserName} $${amountNum.toFixed(2)} AUD.`);
+    } catch (error: any) {
+      Alert.alert("Payment Failed", error?.message || "Something went wrong.");
+    } finally {
+      setIsStripePaying(false);
+    }
   };
 
   const handlePayViaPaypal = () => {
@@ -5237,26 +5298,80 @@ export default function ConversationScreen() {
               </Pressable>
             </View>
 
-            <Pressable
-              style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault, marginBottom: Spacing.sm }]}
-              onPress={() => {
-                setShowPaymentModal(false);
-                navigation.navigate("PaymentBalance", { counterpartyId: otherUserId, counterpartyName: otherUserName });
-              }}
-            >
-              <View style={[styles.attachmentIcon, { backgroundColor: '#34C759' }]}>
-                <Feather name="trending-up" size={20} color="#fff" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <ThemedText type="body" style={{ fontWeight: "600" }}>Balance & History</ThemedText>
+            {showStripePayForm ? (
+              <View style={{ gap: Spacing.md, paddingBottom: Spacing.md }}>
                 <ThemedText type="small" style={{ color: theme.textSecondary }}>
-                  Log a payment or see your running total with {otherUserName}
+                  This is a real payment — Stripe handles your card and sends the money directly to {otherUserName}'s connected account.
                 </ThemedText>
+                <View style={[styles.inputWrapper, { backgroundColor: theme.backgroundDefault, borderColor: theme.border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md }]}>
+                  <ThemedText type="body" style={{ color: theme.textSecondary, marginRight: 4 }}>AUD $</ThemedText>
+                  <TextInput
+                    value={stripePayAmount}
+                    onChangeText={setStripePayAmount}
+                    placeholder="0.00"
+                    placeholderTextColor={theme.textSecondary}
+                    keyboardType="decimal-pad"
+                    style={{ flex: 1, color: theme.text, fontSize: 16, paddingVertical: 12 }}
+                    autoFocus
+                  />
+                </View>
+                <Pressable
+                  onPress={handleStripePay}
+                  disabled={isStripePaying}
+                  style={[styles.paymentOptionRow, { backgroundColor: theme.primary, justifyContent: 'center', opacity: isStripePaying ? 0.7 : 1 }]}
+                >
+                  {isStripePaying ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>Pay {stripePayAmount ? `$${stripePayAmount}` : ''}</ThemedText>
+                  )}
+                </Pressable>
+                <Pressable onPress={() => setShowStripePayForm(false)} disabled={isStripePaying}>
+                  <ThemedText type="small" style={{ color: theme.textSecondary, textAlign: 'center' }}>Cancel</ThemedText>
+                </Pressable>
               </View>
-              <Feather name="chevron-right" size={18} color={theme.textSecondary} />
-            </Pressable>
+            ) : (
+              <>
+                {stripeRecipientReady ? (
+                  <Pressable
+                    style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault, marginBottom: Spacing.sm }]}
+                    onPress={() => setShowStripePayForm(true)}
+                  >
+                    <View style={[styles.attachmentIcon, { backgroundColor: '#635BFF' }]}>
+                      <Feather name="credit-card" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="body" style={{ fontWeight: "600" }}>Pay with Card (real, instant)</ThemedText>
+                      <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                        Real money, sent directly to {otherUserName} via Stripe
+                      </ThemedText>
+                    </View>
+                    <Feather name="chevron-right" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                ) : null}
 
-            {!otherUserData?.paymentPaypalMeHandle && !otherUserData?.paymentPayId && !otherUserData?.paymentBtcAddress ? (
+                <Pressable
+                  style={[styles.paymentOptionRow, { backgroundColor: theme.backgroundDefault, marginBottom: Spacing.sm }]}
+                  onPress={() => {
+                    setShowPaymentModal(false);
+                    navigation.navigate("PaymentBalance", { counterpartyId: otherUserId, counterpartyName: otherUserName });
+                  }}
+                >
+                  <View style={[styles.attachmentIcon, { backgroundColor: '#34C759' }]}>
+                    <Feather name="trending-up" size={20} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText type="body" style={{ fontWeight: "600" }}>Balance & History</ThemedText>
+                    <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                      Log a payment or see your running total with {otherUserName}
+                    </ThemedText>
+                  </View>
+                  <Feather name="chevron-right" size={18} color={theme.textSecondary} />
+                </Pressable>
+              </>
+            )}
+
+            {showStripePayForm ? null : !otherUserData?.paymentPaypalMeHandle && !otherUserData?.paymentPayId && !otherUserData?.paymentBtcAddress ? (
               <View style={{ paddingVertical: Spacing.xl, alignItems: "center" }}>
                 <Feather name="dollar-sign" size={32} color={theme.textSecondary} />
                 <ThemedText type="body" style={{ color: theme.textSecondary, textAlign: "center", marginTop: Spacing.md }}>
