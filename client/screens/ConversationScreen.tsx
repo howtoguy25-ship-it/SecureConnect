@@ -2193,7 +2193,35 @@ export default function ConversationScreen() {
           if (message?.id) {
             decryptCacheRef.current[message.id] = envelopeText;
             setDecryptedCache(prev => ({ ...prev, [message.id]: envelopeText }));
-            setDecryptedMediaUris(prev => ({ ...prev, [message.id]: uri }));
+            if (type === 'audio' && Platform.OS !== 'web') {
+              // expo-audio writes recordings into the OS cache directory
+              // (appContext.fileSystem.cachesDirectory on iOS) — a location
+              // the OS is explicitly free to purge at will, unlike the
+              // app's own managed decrypted-media cache. Priming straight
+              // to that raw `uri` meant a sender's own voice bubble pointed
+              // at a file with no owner and no fallback: once the OS
+              // reclaimed it, playback failed permanently with nothing to
+              // re-fetch from (there's no server round-trip needed for your
+              // own already-known plaintext, so the normal error->retry
+              // path below never engaged either). Copying it into the same
+              // cache directory + naming convention normal decrypt output
+              // uses puts it under the app's own management, consistent
+              // with every other cached voice message.
+              (async () => {
+                try {
+                  const dir = `${FileSystem.cacheDirectory}decrypted-media/`;
+                  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+                  const stablePath = `${dir}${message.id}.m4a`;
+                  await FileSystem.copyAsync({ from: uri, to: stablePath });
+                  setDecryptedMediaUris(prev => ({ ...prev, [message.id]: stablePath }));
+                } catch (copyErr) {
+                  console.error('[voice] failed to cache sent recording, falling back to raw uri:', copyErr);
+                  setDecryptedMediaUris(prev => ({ ...prev, [message.id]: uri }));
+                }
+              })();
+            } else {
+              setDecryptedMediaUris(prev => ({ ...prev, [message.id]: uri }));
+            }
           }
           if (mediaReplySnapshot) setReplyTo(null);
           flatListRef.current?.scrollToEnd({ animated: true });
@@ -3039,7 +3067,17 @@ export default function ConversationScreen() {
       console.log('Playing voice message from URL:', audioUrl);
 
       const player = createAudioPlayer({ uri: audioUrl });
+      // expo-audio's AudioStatus has no error field and fires no failure
+      // event — a player pointed at a missing/corrupt local file (the exact
+      // failure mode the caching fix above targets, for whatever case still
+      // slips through) just silently never starts, with nothing to catch.
+      // startedPlayingRef flips true the first time a real playbackStatusUpdate
+      // reports playing — if that hasn't happened shortly after play(), treat
+      // it as a load failure instead of leaving the bubble looking "pressed"
+      // forever with no sound and no error.
+      const startedPlayingRef = { current: false };
       messageSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
+        if (status.playing) startedPlayingRef.current = true;
         if (status.duration > 0) {
           setPlayingMessageProgress(Math.min(1, status.currentTime / status.duration));
         }
@@ -3061,6 +3099,34 @@ export default function ConversationScreen() {
       setPlayingMessageProgress(0);
       setPlayingMessageElapsedSec(0);
       haptics.light();
+
+      setTimeout(() => {
+        // Only act if this is still the same load attempt — a tap-to-pause,
+        // a switch to a different bubble, or a normal finish would all have
+        // already moved loadedMessageIdRef off this messageId by now.
+        if (startedPlayingRef.current) return;
+        if (loadedMessageIdRef.current !== messageId) return;
+        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl);
+        try { messageSoundSubRef.current?.remove(); } catch {}
+        try { player.release(); } catch {}
+        messageSoundRef.current = null;
+        messageSoundSubRef.current = null;
+        loadedMessageIdRef.current = null;
+        setPlayingMessageId((prev) => (prev === messageId ? null : prev));
+        setPlayingMessageProgress(0);
+        setPlayingMessageElapsedSec(0);
+        // Drop the cached local copy so the next tap does a genuine
+        // re-fetch+decrypt from the server instead of pointing at the same
+        // dead file again — the existing decrypt-media effect picks this
+        // back up automatically once the cache entry is gone.
+        setDecryptedMediaUris(prev => {
+          if (!(messageId in prev)) return prev;
+          const next = { ...prev };
+          delete next[messageId];
+          return next;
+        });
+        Alert.alert('Playback Error', 'Could not play the voice message. Tap it again to retry.');
+      }, 3000);
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
