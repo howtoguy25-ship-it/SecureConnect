@@ -64,7 +64,12 @@ export default function ExportDataScreen() {
           throw new Error("Couldn't save the file on web. Please try again.");
         }
       } else {
-        const path = `${FileSystem.cacheDirectory}${fileName}`;
+        // documentDirectory, not cacheDirectory — the same directory that
+        // turned out to be getting purged by iOS fast enough to break voice
+        // playback (see encryptedMediaClient.ts). Sharing.shareAsync right
+        // below reads this file a moment later; no reason to risk the same
+        // failure class here too.
+        const path = `${FileSystem.documentDirectory}${fileName}`;
         // UTF8 is writeAsStringAsync's default encoding when omitted — no
         // need to reference FileSystem.EncodingType (whose declarations
         // don't resolve under the /legacy import path; see the pre-existing

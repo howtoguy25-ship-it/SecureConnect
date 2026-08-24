@@ -73,9 +73,6 @@ export default function PaymentBalanceScreen() {
   const [note, setNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [connectStatus, setConnectStatus] = useState<{ connected: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean } | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
-
   const load = useCallback(async () => {
     try {
       const balanceRes = await apiRequest("GET", "/api/payments/balance");
@@ -87,10 +84,6 @@ export default function PaymentBalanceScreen() {
         const txRes = await apiRequest("GET", `/api/payments/transactions?counterpartyId=${encodeURIComponent(counterpartyId)}`);
         const txData = await txRes.json();
         setTransactions(Array.isArray(txData) ? txData : []);
-      } else if (Platform.OS !== "web") {
-        const statusRes = await apiRequest("GET", "/api/payments/stripe/connect/status");
-        const statusData = await statusRes.json();
-        setConnectStatus(statusData);
       }
     } catch (error) {
       console.error("[PaymentBalance] load failed:", error);
@@ -100,24 +93,6 @@ export default function PaymentBalanceScreen() {
   }, [counterpartyId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  const handleConnectBankAccount = async () => {
-    setIsConnecting(true);
-    try {
-      const res = await apiRequest("POST", "/api/payments/stripe/connect/start");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not start onboarding.");
-      const WebBrowser = await import("expo-web-browser");
-      await WebBrowser.openBrowserAsync(data.url);
-      // The user could have finished (or bailed) in the browser — either
-      // way, re-check with Stripe directly rather than assuming.
-      await load();
-    } catch (error: any) {
-      showAlert("Error", error?.message || "Could not start onboarding.");
-    } finally {
-      setIsConnecting(false);
-    }
-  };
 
   const handleLog = async () => {
     if (!counterpartyId) return;
@@ -281,36 +256,6 @@ export default function PaymentBalanceScreen() {
             </>
           ) : (
             <>
-              {Platform.OS !== "web" ? (
-                <View style={[styles.infoCard, { backgroundColor: theme.backgroundDefault, borderColor: theme.border, marginBottom: Spacing.xl }]}>
-                  <ThemedText type="h4" style={{ marginBottom: Spacing.xs }}>Get Paid for Real</ThemedText>
-                  {connectStatus?.payoutsEnabled ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Feather name="check-circle" size={16} color="#34C759" />
-                      <ThemedText type="small" style={{ color: "#34C759" }}>Connected — you can receive real payments</ThemedText>
-                    </View>
-                  ) : (
-                    <>
-                      <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.sm }}>
-                        {connectStatus?.connected
-                          ? "You started setting up real payments but haven't finished — Stripe still needs a bit more info."
-                          : "Connect a bank account via Stripe so people can pay you for real, right inside a chat."}
-                      </ThemedText>
-                      <Pressable
-                        onPress={handleConnectBankAccount}
-                        disabled={isConnecting}
-                        style={[styles.primaryBtn, { backgroundColor: theme.primary, opacity: isConnecting ? 0.7 : 1, marginTop: 0 }]}
-                      >
-                        {isConnecting ? <ActivityIndicator color="#fff" /> : (
-                          <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>
-                            {connectStatus?.connected ? "Finish Setup" : "Connect Bank Account"}
-                          </ThemedText>
-                        )}
-                      </Pressable>
-                    </>
-                  )}
-                </View>
-              ) : null}
               <ThemedText type="h4" style={{ marginBottom: Spacing.sm }}>Your totals</ThemedText>
               {totals.length === 0 ? (
                 <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.lg }}>

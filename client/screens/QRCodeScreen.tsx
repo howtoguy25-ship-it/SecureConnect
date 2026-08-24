@@ -122,7 +122,19 @@ export default function QRCodeScreen() {
         }
         
         const scannedUser = await userResponse.json();
-        
+
+        // The scan screen's own hint says "add a friend" — this used to only
+        // open a chat and never actually called the real friends system
+        // (POST /api/friends, the same endpoint the Add Friend flow
+        // elsewhere in the app uses), so a scanned QR code never showed up
+        // as a friend anywhere. Best-effort: a failure here (already
+        // friends, blocked, etc.) shouldn't stop the chat from opening.
+        try {
+          await apiRequest('POST', '/api/friends', { friendId: scannedUserId });
+        } catch (friendErr) {
+          console.warn('[QR scan] friend request failed (continuing to open chat):', friendErr);
+        }
+
         const conversationRes = await apiRequest('POST', '/api/conversations', { otherUserId: scannedUserId });
         
         if (!conversationRes.ok) {
