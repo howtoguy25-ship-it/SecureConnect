@@ -3276,7 +3276,22 @@ export default function ConversationScreen() {
             fileStr = `file check failed: ${String(e).slice(0, 60)}`;
           }
         }
-        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, statusStr, fileStr);
+        // The single most useful fact missing from every prior report: WHICH
+        // OTA update this device is actually running when it failed. expo-
+        // updates lags a launch behind by default (fixed elsewhere this
+        // session, but that fix itself needed two relaunches to take hold),
+        // so without this there's no way to tell "still on an old bundle"
+        // apart from "this exact fix genuinely didn't work" — this update ID
+        // can be matched directly against the ID `eas update` printed for
+        // any given ship.
+        let updateStr = 'update: unavailable';
+        try {
+          const Updates = await import('expo-updates');
+          updateStr = `update=${Updates.updateId ?? 'embedded/none'}`;
+        } catch (e) {
+          updateStr = `update check failed: ${String(e).slice(0, 60)}`;
+        }
+        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, statusStr, fileStr, updateStr);
         try { messageSoundSubRef.current?.remove(); } catch {}
         try { player.release(); } catch {}
         messageSoundRef.current = null;
@@ -3294,7 +3309,7 @@ export default function ConversationScreen() {
         });
         Alert.alert(
           'Playback Error',
-          `Could not play the voice message. Tap it again to retry.\n\n[debug: ${statusStr} | ${fileStr}]`,
+          `Could not play the voice message. Tap it again to retry.\n\n[debug: ${statusStr} | ${fileStr} | ${updateStr}]`,
         );
       })();
     } catch (error: any) {
