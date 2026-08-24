@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Modal, Platform, Animated, Alert, ImageBackground, KeyboardAvoidingView, Keyboard, Linking, useWindowDimensions, LayoutAnimation, UIManager } from "react-native";
+import { View, StyleSheet, FlatList, TextInput, Pressable, ActivityIndicator, Modal, Platform, Animated, Alert, KeyboardAvoidingView, Keyboard, Linking, useWindowDimensions, LayoutAnimation, UIManager } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, RouteProp, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { NativeStackNavigationProp, NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -194,6 +194,16 @@ function fallbackWaveformFor(messageId: string): number[] {
     bars.push(0.25 + (seed % 1000) / 1000 * 0.6);
   }
   return bars;
+}
+
+// Live elapsed-time label shown in place of the static recorded-length
+// label while a voice message is actually playing — ticks up with
+// playingMessageElapsedSec instead of always reading the fixed duration.
+function formatVoiceElapsed(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export default function ConversationScreen() {
@@ -404,6 +414,10 @@ export default function ConversationScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [playingMessageProgress, setPlayingMessageProgress] = useState(0);
+  // Raw elapsed seconds, kept alongside the 0-1 progress fraction so the
+  // bubble can show a live "0:07" ticking counter during playback instead
+  // of just the static recorded-length label.
+  const [playingMessageElapsedSec, setPlayingMessageElapsedSec] = useState(0);
   const messageSoundRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const messageSoundSubRef = useRef<{ remove: () => void } | null>(null);
   // Which message's audio is currently loaded into messageSoundRef — lets a
@@ -3029,12 +3043,14 @@ export default function ConversationScreen() {
         if (status.duration > 0) {
           setPlayingMessageProgress(Math.min(1, status.currentTime / status.duration));
         }
+        setPlayingMessageElapsedSec(status.currentTime);
         // Reached the end (not just a tap-to-pause) — reset fully so the
         // next tap starts over from the beginning instead of trying to
         // "resume" a finished player.
         if (!status.playing && status.duration > 0 && status.currentTime >= status.duration - 0.05) {
           setPlayingMessageId((prev) => (prev === messageId ? null : prev));
           setPlayingMessageProgress(0);
+          setPlayingMessageElapsedSec(0);
           loadedMessageIdRef.current = null;
         }
       });
@@ -3043,6 +3059,7 @@ export default function ConversationScreen() {
       player.play();
       setPlayingMessageId(messageId);
       setPlayingMessageProgress(0);
+      setPlayingMessageElapsedSec(0);
       haptics.light();
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
@@ -4229,7 +4246,7 @@ export default function ConversationScreen() {
                   })}
                 </View>
                 <ThemedText style={[styles.voiceDuration, { color: isOwn ? 'rgba(255,255,255,0.8)' : theme.textSecondary }]}>
-                  {displayContent || '0:00'}
+                  {playingMessageId === item.id ? formatVoiceElapsed(playingMessageElapsedSec) : (displayContent || '0:00')}
                 </ThemedText>
               </Pressable>
               {item.transcription ? (
@@ -4735,23 +4752,30 @@ export default function ConversationScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
     >
-      {chatBackgroundUrl?.startsWith('color:') ? (
-        <View style={[styles.backgroundImage, { backgroundColor: chatBackgroundUrl.slice('color:'.length) }]}>
-          {chatContent}
-        </View>
-      ) : chatBackgroundUrl ? (
-        <ImageBackground
-          source={{ uri: chatBackgroundUrl }}
-          style={styles.backgroundImage}
-          resizeMode="cover"
-        >
-          <View style={styles.backgroundOverlay}>
-            {chatContent}
-          </View>
-        </ImageBackground>
-      ) : (
-        chatContent
-      )}
+      {/* chatContent (and the FlatList inside it) stays at a single, stable
+          JSX position with a single stable parent, regardless of which
+          background is active. It previously sat inside three mutually
+          exclusive branches (plain View / ImageBackground+overlay / bare),
+          which are different element types at the same position — React
+          unmounts and remounts everything below a type change like that,
+          so switching backgrounds silently destroyed and recreated the
+          FlatList, resetting it to the top and leaving didInitialScrollRef
+          still true (it belonged to the FlatList instance that just got
+          torn down), so the normal scroll-to-bottom-on-mount logic never
+          re-ran for the fresh one. Layering the background as an absolutely
+          positioned sibling behind chatContent instead means changing it
+          never touches the FlatList at all. */}
+      <View style={{ flex: 1 }}>
+        {chatBackgroundUrl?.startsWith('color:') ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: chatBackgroundUrl.slice('color:'.length) }]} />
+        ) : chatBackgroundUrl ? (
+          <>
+            <Image source={{ uri: chatBackgroundUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            <View style={[StyleSheet.absoluteFill, styles.backgroundOverlay]} />
+          </>
+        ) : null}
+        {chatContent}
+      </View>
 
       {isOtherUserTyping ? (
         <View style={[styles.typingIndicator, { backgroundColor: theme.backgroundSecondary }]}>
@@ -7109,11 +7133,7 @@ const styles = StyleSheet.create({
   messageOptionText: {
     flex: 1,
   },
-  backgroundImage: {
-    flex: 1,
-  },
   backgroundOverlay: {
-    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   chatSettingsBackdrop: {
