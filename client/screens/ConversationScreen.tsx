@@ -3150,26 +3150,53 @@ export default function ConversationScreen() {
         // already moved loadedMessageIdRef off this messageId by now.
         if (startedPlayingRef.current) return;
         if (loadedMessageIdRef.current !== messageId) return;
-        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, JSON.stringify(player.currentStatus));
-        try { messageSoundSubRef.current?.remove(); } catch {}
-        try { player.release(); } catch {}
-        messageSoundRef.current = null;
-        messageSoundSubRef.current = null;
-        loadedMessageIdRef.current = null;
-        setPlayingMessageId((prev) => (prev === messageId ? null : prev));
-        setPlayingMessageProgress(0);
-        setPlayingMessageElapsedSec(0);
-        // Drop the cached local copy so the next tap does a genuine
-        // re-fetch+decrypt from the server instead of pointing at the same
-        // dead file again — the existing decrypt-media effect picks this
-        // back up automatically once the cache entry is gone.
-        setDecryptedMediaUris(prev => {
-          if (!(messageId in prev)) return prev;
-          const next = { ...prev };
-          delete next[messageId];
-          return next;
-        });
-        Alert.alert('Playback Error', 'Could not play the voice message. Tap it again to retry.');
+        // Every prior fix attempt for this bug was a guess made without
+        // real device data — no console access to the user's phone exists
+        // in this loop. Instead of guessing again, gather everything
+        // observable about THIS failure (native player state, whether the
+        // local file genuinely exists and its size) and put it directly in
+        // the alert the user already sees, so a screenshot is a complete
+        // diagnostic report instead of just a symptom.
+        (async () => {
+          let statusStr = 'status: unavailable';
+          try {
+            statusStr = `state=${player.currentStatus?.playbackState} reason=${player.currentStatus?.reasonForWaitingToPlay} loaded=${player.currentStatus?.isLoaded} duration=${player.currentStatus?.duration}`;
+          } catch (e) {
+            statusStr = `status read failed: ${String(e).slice(0, 60)}`;
+          }
+          let fileStr = 'file: n/a (remote url)';
+          if (audioUrl.startsWith('file://')) {
+            try {
+              const info = await FileSystem.getInfoAsync(audioUrl);
+              fileStr = info.exists ? `file: exists, ${(info as any).size ?? '?'} bytes` : 'file: MISSING';
+            } catch (e) {
+              fileStr = `file check failed: ${String(e).slice(0, 60)}`;
+            }
+          }
+          console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, statusStr, fileStr);
+          try { messageSoundSubRef.current?.remove(); } catch {}
+          try { player.release(); } catch {}
+          messageSoundRef.current = null;
+          messageSoundSubRef.current = null;
+          loadedMessageIdRef.current = null;
+          setPlayingMessageId((prev) => (prev === messageId ? null : prev));
+          setPlayingMessageProgress(0);
+          setPlayingMessageElapsedSec(0);
+          // Drop the cached local copy so the next tap does a genuine
+          // re-fetch+decrypt from the server instead of pointing at the same
+          // dead file again — the existing decrypt-media effect picks this
+          // back up automatically once the cache entry is gone.
+          setDecryptedMediaUris(prev => {
+            if (!(messageId in prev)) return prev;
+            const next = { ...prev };
+            delete next[messageId];
+            return next;
+          });
+          Alert.alert(
+            'Playback Error',
+            `Could not play the voice message. Tap it again to retry.\n\n[debug: ${statusStr} | ${fileStr}]`,
+          );
+        })();
       }, 3000);
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
