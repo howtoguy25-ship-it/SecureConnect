@@ -2578,7 +2578,17 @@ export default function ConversationScreen() {
       });
 
       const player = createAudioPlayer({ uri: pendingRecordingUri });
+      // Same "confirmed, not optimistic" fix as handleVoicePress: only flip
+      // the play/pause icon once a real playbackStatusUpdate reports audio
+      // is actually out, instead of the instant play() is called — a stuck
+      // OS audio session (the same class of bug fixed there) would otherwise
+      // show this icon as "playing" for a preview that's silent too.
+      const startedPlayingRef = { current: false };
       previewSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
+        if (status.playing && !startedPlayingRef.current) {
+          startedPlayingRef.current = true;
+          setIsPlayingPreview(true);
+        }
         // Real playback position, not a guess — drives the waveform's
         // "played so far" fill as the recording actually plays.
         if (status.duration > 0) {
@@ -2591,7 +2601,31 @@ export default function ConversationScreen() {
       });
       previewSoundRef.current = player;
       player.play();
-      setIsPlayingPreview(true);
+
+      setTimeout(() => {
+        if (startedPlayingRef.current) return;
+        if (previewSoundRef.current !== player) return;
+        // Same two failure classes as handleVoicePress, same automatic
+        // recovery — this is a freshly-recorded local file so a bad-file
+        // retry can't help (there's nothing else to re-fetch), but a
+        // stuck-session retry can.
+        (async () => {
+          try {
+            const { setIsAudioActiveAsync } = await import('expo-audio');
+            await setIsAudioActiveAsync(false);
+            await new Promise((resolve) => setTimeout(resolve, 150));
+            await setAudioModeAsync({
+              allowsRecording: false,
+              playsInSilentMode: true,
+              interruptionMode: 'duckOthers',
+              shouldRouteThroughEarpiece: false,
+            });
+            player.play();
+          } catch (e) {
+            console.error('[voice preview] auto-recovery attempt failed:', e);
+          }
+        })();
+      }, 1200);
     } catch (error) {
       console.error('Failed to play preview:', error);
     }
@@ -3121,7 +3155,18 @@ export default function ConversationScreen() {
       // forever with no sound and no error.
       const startedPlayingRef = { current: false };
       messageSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
-        if (status.playing) startedPlayingRef.current = true;
+        if (status.playing && !startedPlayingRef.current) {
+          // First real confirmation that audio is actually coming out — this
+          // is the ONLY place the pause icon and spinner should flip, so the
+          // icon is never a promise the player hasn't kept yet. Previously
+          // this was set optimistically the instant play() was *called*,
+          // which is exactly why the icon could show "playing" for a couple
+          // of seconds with no sound: the icon and the auto-recovery/failure
+          // path disagreed about what "playing" meant.
+          startedPlayingRef.current = true;
+          setLoadingVoiceId((prev) => (prev === messageId ? null : prev));
+          setPlayingMessageId(messageId);
+        }
         if (status.duration > 0) {
           setPlayingMessageProgress(Math.min(1, status.currentTime / status.duration));
         }
@@ -3139,7 +3184,6 @@ export default function ConversationScreen() {
       messageSoundRef.current = player;
       loadedMessageIdRef.current = messageId;
       player.play();
-      setPlayingMessageId(messageId);
       setPlayingMessageProgress(0);
       setPlayingMessageElapsedSec(0);
       haptics.light();
@@ -3230,6 +3274,7 @@ export default function ConversationScreen() {
         messageSoundSubRef.current = null;
         loadedMessageIdRef.current = null;
         setPlayingMessageId((prev) => (prev === messageId ? null : prev));
+        setLoadingVoiceId((prev) => (prev === messageId ? null : prev));
         setPlayingMessageProgress(0);
         setPlayingMessageElapsedSec(0);
         setDecryptedMediaUris(prev => {
@@ -3246,10 +3291,18 @@ export default function ConversationScreen() {
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
+      setLoadingVoiceId((prev) => (prev === messageId ? null : prev));
       Alert.alert('Playback Error', 'Could not play the voice message.');
     } finally {
+      // Deliberately NOT clearing loadingVoiceId here: the spinner now stays
+      // up until the playbackStatusUpdate listener confirms real audio is
+      // playing, or the auto-recovery watchdog above gives up — both clear
+      // it themselves. Clearing it here (this block runs synchronously,
+      // immediately after kicking off that still-pending async work) would
+      // drop the spinner and show the "play" icon while a load is still
+      // being verified, which is the same kind of premature/misleading
+      // state the optimistic "pause" icon used to show.
       isLoadingVoiceRef.current = false;
-      setLoadingVoiceId(null);
     }
   };
 
