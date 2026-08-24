@@ -2554,6 +2554,18 @@ export default function ConversationScreen() {
         previewSoundRef.current.release();
       }
 
+      // Was relying on whatever mode stopVoiceRecording left the shared
+      // session in (allowsRecording: false only — no explicit playback
+      // routing) — same earpiece-routing risk as the sent-message player,
+      // just for the preview-before-send player. See handleVoicePress's
+      // matching call for the full explanation.
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        interruptionMode: 'duckOthers',
+        shouldRouteThroughEarpiece: false,
+      });
+
       const player = createAudioPlayer({ uri: pendingRecordingUri });
       previewSoundSubRef.current = player.addListener('playbackStatusUpdate', (status: { playing: boolean; duration: number; currentTime: number }) => {
         // Real playback position, not a guess — drives the waveform's
@@ -3050,6 +3062,15 @@ export default function ConversationScreen() {
         allowsRecording: false,
         playsInSilentMode: true,
         interruptionMode: 'duckOthers',
+        // The play/pause icon toggling correctly while nothing is audible
+        // is the textbook symptom of audio routing to the earpiece speaker
+        // (built for holding to your ear during a call) instead of the
+        // main one — LiveKit's WebRTC engine, initialized at app start for
+        // real-time calls, configures the shared OS audio session in a
+        // call-oriented way that can leak into unrelated playback like
+        // this. Explicit false forces the main speaker regardless of
+        // whatever the session was left in.
+        shouldRouteThroughEarpiece: false,
       });
 
       // Build full URL if mediaUrl is a relative path
