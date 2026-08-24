@@ -3144,60 +3144,105 @@ export default function ConversationScreen() {
       setPlayingMessageElapsedSec(0);
       haptics.light();
 
-      setTimeout(() => {
-        // Only act if this is still the same load attempt — a tap-to-pause,
-        // a switch to a different bubble, or a normal finish would all have
-        // already moved loadedMessageIdRef off this messageId by now.
+      // Two-stage auto-recovery instead of a single blind watchdog: expo-audio
+      // never surfaces a real error, so rather than always ending in the same
+      // dead-end alert, use the native player's own status to tell the two
+      // realistic failure classes apart and automatically fix the one that's
+      // actually fixable in-place, without waiting on a human to notice:
+      //   - playbackState === 'failed' → the file itself is bad (partial
+      //     write, corrupt copy). No retry can fix the bytes on disk — drop
+      //     the cache entry so the existing decrypt effect re-fetches+
+      //     re-decrypts a fresh copy from the server, then retry play() once
+      //     against that.
+      //   - playbackState === 'readyToPlay' but never reaches "playing" →
+      //     the file is fine; something about the OS audio session/route is
+      //     blocking actual output (the pattern a stuck WebRTC call session
+      //     produces). Hard-reset the session (deactivate, pause, reactivate
+      //     with the wanted category) and retry play() once in place.
+      // Only the small number of cases where the retry itself also fails
+      // ever reach the user-facing alert.
+      (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
         if (startedPlayingRef.current) return;
         if (loadedMessageIdRef.current !== messageId) return;
-        // Every prior fix attempt for this bug was a guess made without
-        // real device data — no console access to the user's phone exists
-        // in this loop. Instead of guessing again, gather everything
-        // observable about THIS failure (native player state, whether the
-        // local file genuinely exists and its size) and put it directly in
-        // the alert the user already sees, so a screenshot is a complete
-        // diagnostic report instead of just a symptom.
-        (async () => {
-          let statusStr = 'status: unavailable';
+
+        const status = player.currentStatus;
+        let retried = false;
+        try {
+          if (status?.playbackState === 'failed') {
+            setDecryptedMediaUris(prev => {
+              if (!(messageId in prev)) return prev;
+              const next = { ...prev };
+              delete next[messageId];
+              return next;
+            });
+            // Give the re-fetch+decrypt effect a moment to produce a fresh
+            // local file before retrying against the (now stale) player —
+            // if it lands in time this player still gets torn down below
+            // and the user can just tap again, already pointed at good data.
+          } else if (status?.playbackState === 'readyToPlay') {
+            const { setIsAudioActiveAsync } = await import('expo-audio');
+            await setIsAudioActiveAsync(false);
+            await new Promise((resolve) => setTimeout(resolve, 150));
+            await setAudioModeAsync({
+              allowsRecording: false,
+              playsInSilentMode: true,
+              interruptionMode: 'duckOthers',
+              shouldRouteThroughEarpiece: false,
+            });
+            player.play();
+            retried = true;
+          }
+        } catch (e) {
+          console.error('[voice] auto-recovery attempt failed:', e);
+        }
+
+        if (retried) {
+          await new Promise((resolve) => setTimeout(resolve, 1800));
+          if (startedPlayingRef.current) return;
+          if (loadedMessageIdRef.current !== messageId) return;
+        }
+
+        // Recovery didn't work (or wasn't applicable) — surface real,
+        // on-device diagnostics in the alert itself rather than a repeat of
+        // the same generic message, since there's no console access to this
+        // device from here.
+        let statusStr = 'status: unavailable';
+        try {
+          const s = player.currentStatus;
+          statusStr = `state=${s?.playbackState} reason=${s?.reasonForWaitingToPlay} loaded=${s?.isLoaded} duration=${s?.duration}${retried ? ' (after retry)' : ''}`;
+        } catch (e) {
+          statusStr = `status read failed: ${String(e).slice(0, 60)}`;
+        }
+        let fileStr = 'file: n/a (remote url)';
+        if (audioUrl.startsWith('file://')) {
           try {
-            statusStr = `state=${player.currentStatus?.playbackState} reason=${player.currentStatus?.reasonForWaitingToPlay} loaded=${player.currentStatus?.isLoaded} duration=${player.currentStatus?.duration}`;
+            const info = await FileSystem.getInfoAsync(audioUrl);
+            fileStr = info.exists ? `file: exists, ${(info as any).size ?? '?'} bytes` : 'file: MISSING';
           } catch (e) {
-            statusStr = `status read failed: ${String(e).slice(0, 60)}`;
+            fileStr = `file check failed: ${String(e).slice(0, 60)}`;
           }
-          let fileStr = 'file: n/a (remote url)';
-          if (audioUrl.startsWith('file://')) {
-            try {
-              const info = await FileSystem.getInfoAsync(audioUrl);
-              fileStr = info.exists ? `file: exists, ${(info as any).size ?? '?'} bytes` : 'file: MISSING';
-            } catch (e) {
-              fileStr = `file check failed: ${String(e).slice(0, 60)}`;
-            }
-          }
-          console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, statusStr, fileStr);
-          try { messageSoundSubRef.current?.remove(); } catch {}
-          try { player.release(); } catch {}
-          messageSoundRef.current = null;
-          messageSoundSubRef.current = null;
-          loadedMessageIdRef.current = null;
-          setPlayingMessageId((prev) => (prev === messageId ? null : prev));
-          setPlayingMessageProgress(0);
-          setPlayingMessageElapsedSec(0);
-          // Drop the cached local copy so the next tap does a genuine
-          // re-fetch+decrypt from the server instead of pointing at the same
-          // dead file again — the existing decrypt-media effect picks this
-          // back up automatically once the cache entry is gone.
-          setDecryptedMediaUris(prev => {
-            if (!(messageId in prev)) return prev;
-            const next = { ...prev };
-            delete next[messageId];
-            return next;
-          });
-          Alert.alert(
-            'Playback Error',
-            `Could not play the voice message. Tap it again to retry.\n\n[debug: ${statusStr} | ${fileStr}]`,
-          );
-        })();
-      }, 3000);
+        }
+        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, statusStr, fileStr);
+        try { messageSoundSubRef.current?.remove(); } catch {}
+        try { player.release(); } catch {}
+        messageSoundRef.current = null;
+        messageSoundSubRef.current = null;
+        loadedMessageIdRef.current = null;
+        setPlayingMessageId((prev) => (prev === messageId ? null : prev));
+        setPlayingMessageProgress(0);
+        setPlayingMessageElapsedSec(0);
+        setDecryptedMediaUris(prev => {
+          if (!(messageId in prev)) return prev;
+          const next = { ...prev };
+          delete next[messageId];
+          return next;
+        });
+        Alert.alert(
+          'Playback Error',
+          `Could not play the voice message. Tap it again to retry.\n\n[debug: ${statusStr} | ${fileStr}]`,
+        );
+      })();
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
