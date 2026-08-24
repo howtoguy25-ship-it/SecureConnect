@@ -2209,11 +2209,20 @@ export default function ConversationScreen() {
               // convention normal decrypt output uses — puts it under the
               // app's own management, consistent with every other cached
               // received bubble.
+              //
+              // Uses documentDirectory, not cacheDirectory, despite the
+              // "cache" framing above — confirmed live on a real device (via
+              // an on-device diagnostic) that iOS purges cacheDirectory
+              // aggressively enough under real storage pressure to make a
+              // just-written file disappear within seconds, which is what
+              // was actually causing persistent playback failures. Matches
+              // encryptedMediaClient.ts's writeCacheFile, which uses the same
+              // directory for the receive side for the identical reason.
               const nameExt = envelope.name?.includes('.') ? envelope.name.split('.').pop() : undefined;
               const ext = envelope.ext || nameExt || (type === 'image' ? 'jpg' : type === 'video' ? 'mp4' : type === 'audio' ? 'm4a' : 'bin');
               (async () => {
                 try {
-                  const dir = `${FileSystem.cacheDirectory}decrypted-media/`;
+                  const dir = `${FileSystem.documentDirectory}decrypted-media/`;
                   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
                   const stablePath = `${dir}${message.id}.${ext}`;
                   await FileSystem.copyAsync({ from: uri, to: stablePath });

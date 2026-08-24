@@ -21,13 +21,20 @@
  *      (see `parseMediaEnvelope` / `buildMediaEnvelope` below)
  *   2. GET /api/media/encrypted/<objectPath> with Bearer token (rate-limited)
  *   3. decryptMedia() → plaintext bytes
- *   4. Write plaintext to FileSystem.cacheDirectory/decrypted-media/<id>.<ext>
+ *   4. Write plaintext to FileSystem.documentDirectory/decrypted-media/<id>.<ext>
  *   5. Return local file URI for <Image> / video / audio rendering
  *
- * "Session-only" cache: lives in FileSystem.cacheDirectory which Expo / iOS /
- * Android may evict at will. We additionally keep an in-memory id→uri map at
- * the call-site (see ConversationScreen) so re-renders inside the same screen
- * lifetime are O(1), but nothing here is meant to survive an app restart.
+ * Deliberately NOT FileSystem.cacheDirectory, despite the name "cache":
+ * empirically confirmed (a device reporting the just-written file as
+ * missing seconds later, via a live diagnostic) that iOS purges Caches
+ * aggressively enough under real-world storage pressure to make playback
+ * fail almost immediately after writing — the opposite of "session-only,
+ * evicted eventually." documentDirectory isn't purged by the OS. This is
+ * still derived data, not the source of truth (that's the encrypted blob
+ * on the server + the key living inside the E2EE message envelope), and
+ * wipeDecryptedMediaCache() below still deletes it on logout — it just
+ * needs to reliably survive from write to the next read a few seconds
+ * later, which cacheDirectory was not doing.
  */
 
 import * as FileSystem from "expo-file-system/legacy";
@@ -372,7 +379,7 @@ async function writeCacheFile(
     return URL.createObjectURL(blob);
   }
 
-  const dir = `${FileSystem.cacheDirectory}${CACHE_SUBDIR}/`;
+  const dir = `${FileSystem.documentDirectory}${CACHE_SUBDIR}/`;
   try {
     await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
   } catch {
@@ -407,7 +414,7 @@ export async function wipeDecryptedMediaCache(): Promise<void> {
     return;
   }
   try {
-    const dir = `${FileSystem.cacheDirectory}${CACHE_SUBDIR}/`;
+    const dir = `${FileSystem.documentDirectory}${CACHE_SUBDIR}/`;
     const info = await FileSystem.getInfoAsync(dir);
     if (info.exists) {
       await FileSystem.deleteAsync(dir, { idempotent: true });
