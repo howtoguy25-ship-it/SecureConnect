@@ -112,6 +112,37 @@ function PreKeyMaintenanceGuard() {
   return null;
 }
 
+// expo-updates' default behavior (checkAutomatically: ON_LOAD) downloads a
+// newly published OTA update in the background on launch but keeps running
+// the bundle already loaded for THIS session — the fetched update only
+// becomes active on the NEXT cold launch after that. That means a single
+// force-quit-and-reopen after an OTA ships is not enough to actually run
+// the new code; it takes two. That mismatch between "an update shipped" and
+// "the device is running it" cost real time this session chasing bugs that
+// may have already been fixed but hadn't taken effect yet on the test
+// device. Checking and reloading explicitly here collapses that gap to one
+// launch: if a newer update is already available by the time the app is
+// opened, apply it immediately instead of waiting for a second relaunch.
+// Best-effort and silent — no network, no update available, Updates being
+// disabled (Expo Go, dev client, web) all just no-op.
+async function checkForOTAUpdateAndReload() {
+  if (Platform.OS === 'web') return;
+  try {
+    const Updates = await import('expo-updates');
+    if (!Updates.isEnabled) return;
+    const result = await Updates.checkForUpdateAsync();
+    if (!result.isAvailable) {
+      logCheckpoint('ota_update_check_none_available');
+      return;
+    }
+    await Updates.fetchUpdateAsync();
+    logCheckpoint('ota_update_fetched_reloading');
+    await Updates.reloadAsync();
+  } catch (e) {
+    logCheckpoint(`ota_update_check_skipped: ${String(e).slice(0, 80)}`);
+  }
+}
+
 async function initApp() {
   try {
     logCheckpoint('init_app_start');
@@ -188,6 +219,12 @@ export default function MainApp() {
 
     if (!hasInit.current) {
       hasInit.current = true;
+      // Fired immediately, not deferred like initApp below — this is a race
+      // against the user reaching a screen (e.g. tapping a voice message)
+      // before a background reload would be jarring instead of invisible.
+      // Doing it first, before any UI has rendered, is the only time a
+      // reload is truly free.
+      void checkForOTAUpdateAndReload();
       InteractionManager.runAfterInteractions(() => {
         deferToNextFrame(() => {
           initApp();
