@@ -774,3 +774,33 @@ class LiveKitService {
 }
 
 export const livekitService = new LiveKitService();
+
+// react-native-webrtc's RTCAudioSession (bundled inside @livekit/react-native)
+// takes ownership of the shared AVAudioSession the moment
+// AudioSession.startAudioSession() runs for a call, and configures it in a
+// call-oriented category (playAndRecord/voiceChat). livekitService.disconnect()
+// releases that ownership via stopAudioSession() on the normal hangup path,
+// but any exit that skips a clean disconnect (app killed mid-call, a call
+// screen unmounting after an error, a race between navigation and the
+// disconnect promise) can leave WebRTC still holding the session — every
+// unrelated local playback (voice-message bubbles) started afterward then
+// silently fails to produce audio or even reach a "playing" state, because
+// expo-audio's own setCategory/setActive calls are configuring a session
+// WebRTC still considers itself in control of.
+//
+// Safe to call unconditionally before any non-call audio playback: a no-op
+// (resolves immediately, no error) when LiveKit was never initialized or no
+// audio session was ever started, and idempotent if called more than once.
+export async function releaseCallAudioSession(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (!livekitInitPromise) return;
+  try {
+    const lk: any = await livekitInitPromise;
+    const AudioSession = lk?.AudioSession;
+    if (AudioSession && typeof AudioSession.stopAudioSession === 'function') {
+      await AudioSession.stopAudioSession();
+    }
+  } catch (e) {
+    console.warn('[LiveKit] releaseCallAudioSession failed (non-fatal):', e);
+  }
+}

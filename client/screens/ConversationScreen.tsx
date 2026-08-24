@@ -2193,29 +2193,33 @@ export default function ConversationScreen() {
           if (message?.id) {
             decryptCacheRef.current[message.id] = envelopeText;
             setDecryptedCache(prev => ({ ...prev, [message.id]: envelopeText }));
-            if (type === 'audio' && Platform.OS !== 'web') {
-              // expo-audio writes recordings into the OS cache directory
-              // (appContext.fileSystem.cachesDirectory on iOS) — a location
-              // the OS is explicitly free to purge at will, unlike the
-              // app's own managed decrypted-media cache. Priming straight
-              // to that raw `uri` meant a sender's own voice bubble pointed
-              // at a file with no owner and no fallback: once the OS
-              // reclaimed it, playback failed permanently with nothing to
-              // re-fetch from (there's no server round-trip needed for your
-              // own already-known plaintext, so the normal error->retry
-              // path below never engaged either). Copying it into the same
-              // cache directory + naming convention normal decrypt output
-              // uses puts it under the app's own management, consistent
-              // with every other cached voice message.
+            if (Platform.OS !== 'web') {
+              // ImagePicker/camera/document-picker/expo-audio all hand back a
+              // URI in a location the OS is free to purge at will (temp/cache
+              // dirs outside the app's own management), for every media type
+              // — not just voice, where this was first caught. Priming
+              // straight to that raw `uri` meant a sender's own bubble
+              // (image, video, or file — same as voice) pointed at a file
+              // with no owner and no fallback: once the OS reclaimed it, the
+              // bubble failed to load permanently with nothing to re-fetch
+              // from (there's no server round-trip needed for your own
+              // already-known plaintext, so the normal error->retry path
+              // never engaged either). Copying it into the app's own managed
+              // decrypted-media cache — the same directory + naming
+              // convention normal decrypt output uses — puts it under the
+              // app's own management, consistent with every other cached
+              // received bubble.
+              const nameExt = envelope.name?.includes('.') ? envelope.name.split('.').pop() : undefined;
+              const ext = envelope.ext || nameExt || (type === 'image' ? 'jpg' : type === 'video' ? 'mp4' : type === 'audio' ? 'm4a' : 'bin');
               (async () => {
                 try {
                   const dir = `${FileSystem.cacheDirectory}decrypted-media/`;
                   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-                  const stablePath = `${dir}${message.id}.m4a`;
+                  const stablePath = `${dir}${message.id}.${ext}`;
                   await FileSystem.copyAsync({ from: uri, to: stablePath });
                   setDecryptedMediaUris(prev => ({ ...prev, [message.id]: stablePath }));
                 } catch (copyErr) {
-                  console.error('[voice] failed to cache sent recording, falling back to raw uri:', copyErr);
+                  console.error(`[${type}] failed to cache sent media, falling back to raw uri:`, copyErr);
                   setDecryptedMediaUris(prev => ({ ...prev, [message.id]: uri }));
                 }
               })();
@@ -2559,6 +2563,13 @@ export default function ConversationScreen() {
       // routing) — same earpiece-routing risk as the sent-message player,
       // just for the preview-before-send player. See handleVoicePress's
       // matching call for the full explanation.
+      try {
+        const { releaseCallAudioSession } = await import('@/services/livekitService');
+        await releaseCallAudioSession();
+      } catch {
+        // Best-effort — never block playback on this.
+      }
+
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
@@ -3058,6 +3069,18 @@ export default function ConversationScreen() {
         loadedMessageIdRef.current = null;
       }
 
+      // If a call left WebRTC still holding the shared AVAudioSession (any
+      // exit that skipped a clean disconnect — killed app, error mid-call),
+      // expo-audio's setAudioModeAsync below configures a session WebRTC
+      // still thinks it owns, and playback silently never starts. Always
+      // safe: a no-op when no call session was ever active.
+      try {
+        const { releaseCallAudioSession } = await import('@/services/livekitService');
+        await releaseCallAudioSession();
+      } catch {
+        // Best-effort — never block playback on this.
+      }
+
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
@@ -3127,7 +3150,7 @@ export default function ConversationScreen() {
         // already moved loadedMessageIdRef off this messageId by now.
         if (startedPlayingRef.current) return;
         if (loadedMessageIdRef.current !== messageId) return;
-        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl);
+        console.error('[voice] player never reported playing — treating as a failed load:', audioUrl, JSON.stringify(player.currentStatus));
         try { messageSoundSubRef.current?.remove(); } catch {}
         try { player.release(); } catch {}
         messageSoundRef.current = null;
