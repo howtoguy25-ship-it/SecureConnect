@@ -172,8 +172,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // receiving notifications, bumps tokenVersion so the JWT we're about to
     // discard is dead. Fire-and-forget with a short timeout — never block
     // the local wipe on a network round trip.
+    //
+    // getStoredToken() itself was previously called bare here, with no
+    // timeout — every OTHER place this codebase reads from SecureStore at a
+    // sensitive moment (the startup auth-load effect above) wraps it in
+    // withTimeout specifically because a slow/blocked Keychain access is a
+    // known, real risk, not a hypothetical one. Skipping that guard here
+    // meant a hang on this one read left `await getStoredToken()` never
+    // resolving — which meant `setUser(null)` at the bottom of this
+    // function, the ONLY thing that actually dismisses AppLockScreen (it
+    // renders purely off `user` from AuthContext), never ran either. That's
+    // "Forgot PIN doesn't sign me out": not a rejected promise doing the
+    // wrong thing, a pending one silently doing nothing forever, with no
+    // error, no timeout, no way out except force-quitting the app.
     try {
-      const storedToken = await getStoredToken();
+      const storedToken = await withTimeout(getStoredToken(), 800, null, "logout_getStoredToken");
       if (storedToken) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 3000);
@@ -196,10 +209,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try { queryClient.cancelQueries(); } catch {}
     try { queryClient.clear(); } catch {}
     try { disconnectSocket(); } catch {}
-    try { await clearAuth(); } catch {}
+    // Same reasoning as the token read above — clearAuth() and
+    // clearAppLockPin() both touch SecureStore too, so both get the same
+    // bounded-wait treatment. A local wipe that only partially completes is
+    // an acceptable, already-tolerated outcome (each step here is
+    // individually best-effort); a user permanently trapped behind a lock
+    // screen that will never ask for their PIN correctly again is not.
+    try { await withTimeout(clearAuth(), 1500, undefined, "logout_clearAuth"); } catch {}
     // A device-only PIN from a previous account shouldn't carry over to
     // whoever signs in next on this device.
-    try { await clearAppLockPin(); } catch {}
+    try { await withTimeout(clearAppLockPin(), 800, undefined, "logout_clearAppLockPin"); } catch {}
     // State change LAST so the navigator only swaps once the cleanup is done.
     setUser(null);
     setToken(null);
