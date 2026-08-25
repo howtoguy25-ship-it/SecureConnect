@@ -400,6 +400,26 @@ async function writeCacheFile(
   await FileSystem.writeAsStringAsync(path, naclUtil.encodeBase64(plaintext), {
     encoding: FileSystem.EncodingType.Base64,
   });
+
+  // Verify immediately, in the same call, instead of trusting that a
+  // non-throwing writeAsStringAsync means the bytes actually landed on
+  // disk. Every previous investigation into "voice message file: MISSING"
+  // assumed the write succeeded (nothing here ever threw) and chased
+  // theories about WHERE it was written instead of WHETHER it was — moving
+  // directories, retrying playback, fixing an unrelated silent-wipe bug —
+  // none of which could have helped if the write itself is the actual
+  // failure point. This turns that into a real, catchable, specific error
+  // the very first time it's still missing a moment later, instead of a
+  // phantom "success" that only surfaces as a dead player 1-3 seconds into
+  // playback with no indication of why.
+  const verifyInfo = await FileSystem.getInfoAsync(path);
+  if (!verifyInfo.exists) {
+    throw new Error(`writeAsStringAsync reported success but ${path} does not exist immediately after (dir=${dir}, plaintextBytes=${plaintext.length})`);
+  }
+  if ((verifyInfo as any).size !== plaintext.length) {
+    throw new Error(`writeAsStringAsync wrote the wrong size: expected ${plaintext.length} bytes, found ${(verifyInfo as any).size} at ${path}`);
+  }
+
   return path;
 }
 

@@ -444,6 +444,11 @@ export default function ConversationScreen() {
   // a sibling counter (mediaFetchTick) bumps to trigger re-render when state
   // transitions matter for the UI.
   const mediaFetchState = useRef<Map<string, 'loading' | 'error'>>(new Map());
+  // Sibling to mediaFetchState — the actual caught error message for a
+  // failed fetch/decrypt/write, so it can be shown directly in the bubble's
+  // error UI instead of only console.warn (which no one testing a shipped
+  // build can ever see).
+  const mediaFetchErrorMessage = useRef<Map<string, string>>(new Map());
   const [mediaFetchTick, setMediaFetchTick] = useState(0);
   const bumpMediaFetchTick = useCallback(() => setMediaFetchTick(t => t + 1), []);
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
@@ -1461,19 +1466,22 @@ export default function ConversationScreen() {
         theirUserId: otherUserId,
       });
       mediaFetchState.current.delete(msgId);
+      mediaFetchErrorMessage.current.delete(msgId);
       setDecryptedMediaUris(prev => ({ ...prev, [msgId]: localUri }));
-    } catch (e) {
+    } catch (e: any) {
       // Terminal error — surface a retry affordance instead of hanging on a
       // forever spinner. Re-triggering goes through retryEnvelopeMedia below
       // which clears the 'error' marker so the next attempt runs cleanly.
       mediaFetchState.current.set(msgId, 'error');
+      mediaFetchErrorMessage.current.set(msgId, String(e?.message ?? e).slice(0, 200));
       bumpMediaFetchTick();
-      if (__DEV__) console.warn('[E2EE media] fetch failed:', e);
+      console.error('[E2EE media] fetch failed:', e);
     }
   }, [decryptedMediaUris, bumpMediaFetchTick]);
 
   const retryEnvelopeMedia = useCallback((msgId: string, envelope: MediaEnvelope) => {
     mediaFetchState.current.delete(msgId);
+    mediaFetchErrorMessage.current.delete(msgId);
     void fetchEnvelopeMedia(msgId, envelope);
   }, [fetchEnvelopeMedia]);
 
@@ -4382,12 +4390,18 @@ export default function ConversationScreen() {
               void mediaFetchTick;
               const fetchState = mediaFetchState.current.get(item.id);
               if (fetchState === 'error') {
+                const errMsg = mediaFetchErrorMessage.current.get(item.id);
                 return (
                   <View style={[styles.mediaContainer, { padding: Spacing.md, alignItems: 'center' }]}>
                     <Feather name="alert-circle" size={20} color={isOwn ? '#fff' : theme.primary} />
                     <ThemedText style={{ color: isOwn ? 'rgba(255,255,255,0.9)' : theme.textSecondary, fontSize: 12, marginTop: 6 }}>
                       Encrypted media unavailable
                     </ThemedText>
+                    {errMsg ? (
+                      <ThemedText style={{ color: isOwn ? 'rgba(255,255,255,0.6)' : theme.textSecondary, fontSize: 10, marginTop: 4, textAlign: 'center' }}>
+                        {errMsg}
+                      </ThemedText>
+                    ) : null}
                     <Pressable
                       onPress={() => retryEnvelopeMedia(item.id, mediaEnvelope)}
                       style={{ marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.md, backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : theme.primary }}
@@ -6720,7 +6734,11 @@ export default function ConversationScreen() {
       onRequestClose={() => setFullscreenImageUri(null)}
     >
       <Pressable style={styles.fullscreenImageBackdrop} onPress={() => setFullscreenImageUri(null)}>
-        <Pressable style={styles.fullscreenImageClose} onPress={() => setFullscreenImageUri(null)} hitSlop={12}>
+        <Pressable
+          style={[styles.fullscreenImageClose, { top: insets.top + Spacing.md }]}
+          onPress={() => setFullscreenImageUri(null)}
+          hitSlop={12}
+        >
           <Feather name="x" size={22} color="#fff" />
         </Pressable>
         {fullscreenImageUri ? (
