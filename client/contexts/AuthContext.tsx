@@ -6,7 +6,7 @@ import { logCheckpoint, withTimeout, deferToNextFrame } from "@/lib/launchInstru
 import { registerDeviceAndUploadPrekeys, replenishOneTimePreKeysIfNeeded } from "../utils/crypto/prekeyManager";
 import * as Application from "expo-application";
 import { Platform, Alert } from "react-native";
-import { setSuspensionListener } from "@/lib/api-utils";
+import { setSuspensionListener, setSessionInvalidatedListener } from "@/lib/api-utils";
 import { clearAppLockPin } from "@/utils/appLock";
 
 const API_BASE = getApiUrl();
@@ -228,6 +228,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSuspensionListener(null);
       setSocketSuspensionListener(null);
     };
+  }, []);
+
+  // A 401/403 on the startup /me refresh means the server considers this
+  // token dead (expired, revoked, tokenVersion bumped elsewhere). Route it
+  // through the same real logout() the suspension handler above uses —
+  // full server notify + query cache clear + socket disconnect + local
+  // wipe + React state reset — instead of letting the low-level module
+  // that noticed it wipe local storage on its own while this component's
+  // state still says "logged in". See notifySessionInvalidated's doc
+  // comment in api-utils.ts for the bug this replaced.
+  const sessionInvalidatedHandled = useRef(false);
+  useEffect(() => {
+    const handler = () => {
+      if (sessionInvalidatedHandled.current) return;
+      if (loggedOut.current) return;
+      sessionInvalidatedHandled.current = true;
+      logout()
+        .catch(() => {})
+        .finally(() => { sessionInvalidatedHandled.current = false; });
+    };
+    setSessionInvalidatedListener(handler);
+    return () => setSessionInvalidatedListener(null);
   }, []);
 
   async function refreshUser() {

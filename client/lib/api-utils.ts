@@ -238,6 +238,32 @@ export function setSuspensionListener(fn: SuspensionListener | null) {
   suspensionListener = fn;
 }
 
+// A 401/403 on the startup /api/auth/me check (see fetchCurrentUser in
+// auth.ts) used to call the low-level clearAuth() directly — wiping the
+// stored token, E2EE keys, AND the entire decrypted-media cache — without
+// updating AuthContext's React state at all. The user stayed looking
+// "logged in" (same chat list, same screen) because `user`/`token` state
+// had already been set from local storage earlier in the same startup
+// sequence, but every persisted credential and every cached decrypted
+// voice/image/video file underneath that UI had just been silently
+// deleted. Any voice message opened after that point would decrypt fine
+// moments later but be reported "missing" on disk as soon as the write
+// finished, indistinguishable from a real caching bug. Mirrors
+// setSuspensionListener's pattern: the low-level module raises the event,
+// AuthContext (which owns the real, visible, consistent logout() — server
+// notify, query cache clear, socket disconnect, then React state last) is
+// the only thing that acts on it, instead of a background module quietly
+// tearing down local state out from under a UI that still thinks it's
+// authenticated.
+type SessionInvalidatedListener = () => void;
+let sessionInvalidatedListener: SessionInvalidatedListener | null = null;
+export function setSessionInvalidatedListener(fn: SessionInvalidatedListener | null) {
+  sessionInvalidatedListener = fn;
+}
+export function notifySessionInvalidated() {
+  try { sessionInvalidatedListener?.(); } catch {}
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;

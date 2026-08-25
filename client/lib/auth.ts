@@ -7,6 +7,7 @@ import {
   clearAuth as clearAuthUtil,
   getStoredUser as getStoredUserUtil,
   storeUser as storeUserUtil,
+  notifySessionInvalidated,
   User,
 } from './api-utils';
 
@@ -271,7 +272,20 @@ export async function fetchCurrentUser(): Promise<User | null> {
     });
 
     if (response.status === 401 || response.status === 403) {
-      await clearAuth();
+      // Used to call clearAuth() directly here — wiping the stored token,
+      // E2EE keys, and the whole decrypted-media cache while AuthContext's
+      // React state (already populated from local storage earlier in the
+      // same startup sequence) kept showing the user as logged in. The chat
+      // list still rendered normally; every cached voice/image/video file
+      // underneath it had just been deleted, so anything opened afterward
+      // would decrypt fine and then be reported missing on disk moments
+      // later — indistinguishable from a real caching bug from inside a
+      // conversation screen. Routing through AuthContext's real logout()
+      // instead (see setSessionInvalidatedListener in api-utils.ts) makes
+      // this a full, visible, consistent sign-out — server notify, query
+      // cache clear, socket disconnect, THEN local wipe, THEN a login
+      // screen the user actually sees — instead of a silent partial one.
+      notifySessionInvalidated();
       return null;
     }
 

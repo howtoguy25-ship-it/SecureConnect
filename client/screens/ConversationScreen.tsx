@@ -4273,12 +4273,13 @@ export default function ConversationScreen() {
             borderColor: theme.primary + '40',
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <Feather name="volume-2" size={12} color={theme.primary} />
             <ThemedText style={{ color: theme.primary, fontSize: 11, fontWeight: '700' }}>
               PRYVO TEAM
             </ThemedText>
           </View>
+          <View style={{ height: 1, backgroundColor: theme.primary + '30', marginBottom: 6 }} />
           <ThemedText style={{ color: theme.text, fontSize: 14, textAlign: 'center' }}>
             {item.content}
           </ThemedText>
