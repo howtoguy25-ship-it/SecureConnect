@@ -161,6 +161,15 @@ export async function ensureUserRecoverySchema(): Promise<void> {
       ALTER TABLE payment_transactions
         ADD COLUMN IF NOT EXISTS stripe_payment_intent_id text;
     `);
+    // Owner-panel sign-in status tracking (build 135) — see the field
+    // comments in shared/schema.ts for what these actually represent
+    // (best-effort, stateless-JWT auth has no real session to query).
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS is_signed_in boolean DEFAULT false,
+        ADD COLUMN IF NOT EXISTS last_sign_in_at timestamp,
+        ADD COLUMN IF NOT EXISTS last_sign_out_at timestamp;
+    `);
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }

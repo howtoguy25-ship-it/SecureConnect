@@ -38,6 +38,8 @@ import { ScrollView } from "react-native";
 import { GifPicker } from "@/components/GifPicker";
 import { MessageHoldOverlay, type BubbleLayout, type HoldAction, type HoldMessage } from "@/components/MessageHoldOverlay";
 import { PinnedMessageBanner } from "@/components/PinnedMessageBanner";
+import { ChatVideoThumb, ChatFullscreenVideoPlayer } from "@/components/ChatVideoMedia";
+import { VoiceScrubber } from "@/components/VoiceScrubber";
 import { ReplyPreviewBar } from "@/components/ReplyPreviewBar";
 import { MessageInfoSheet } from "@/components/MessageInfoSheet";
 import { DeleteConfirmSheet } from "@/components/DeleteConfirmSheet";
@@ -230,6 +232,7 @@ export default function ConversationScreen() {
   // Local uri of the image currently shown in the full-screen viewer, or
   // null when closed. Tapping a photo bubble previously did nothing at all.
   const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
+  const [fullscreenVideoUri, setFullscreenVideoUri] = useState<string | null>(null);
   
   const { conversationId, otherUserId, otherUserName } = route.params;
   const queryClient = useQueryClient();
@@ -3309,22 +3312,43 @@ export default function ConversationScreen() {
         setLoadingVoiceId((prev) => (prev === messageId ? null : prev));
         setPlayingMessageProgress(0);
         setPlayingMessageElapsedSec(0);
+        // Clearing the cache entry (rather than an Alert) is the actual fix
+        // here: it drops this message back into the existing "envelope
+        // present but no local file yet" branch, which the decrypt-media
+        // effect already watches and re-fetches from automatically — a real
+        // inline retry with its own loading spinner, not a modal dialog the
+        // user has to dismiss before they can even see the bubble again. If
+        // THAT re-fetch also fails, it lands in the same
+        // "Encrypted media unavailable" + Retry inline state already used
+        // for genuine fetch/decrypt failures — pre-seeded here with this
+        // richer playback-specific diagnostic so that state doesn't just
+        // say "fetch failed" with no detail.
+        mediaFetchErrorMessage.current.set(messageId, `Playback failed: ${statusStr} | ${fileStr} | ${updateStr}`.slice(0, 200));
         setDecryptedMediaUris(prev => {
           if (!(messageId in prev)) return prev;
           const next = { ...prev };
           delete next[messageId];
           return next;
         });
-        Alert.alert(
-          'Playback Error',
-          `Could not play the voice message. Tap it again to retry.\n\n[debug: ${statusStr} | ${fileStr} | ${updateStr}]`,
-        );
       })();
     } catch (error: any) {
       console.error('Failed to play voice message:', error);
       console.error('Media URL was:', mediaUrl);
       setLoadingVoiceId((prev) => (prev === messageId ? null : prev));
-      Alert.alert('Playback Error', 'Could not play the voice message.');
+      // Same inline-error approach as the watchdog path above: clearing the
+      // cached URI is what actually makes the "Encrypted media unavailable"
+      // state render at all (it only shows when there's no local URI yet) —
+      // setting mediaFetchState alone would be invisible while the old
+      // (failing-to-load) URI was still considered valid.
+      mediaFetchErrorMessage.current.set(messageId, `Playback failed: ${String(error?.message ?? error).slice(0, 160)}`);
+      mediaFetchState.current.set(messageId, 'error');
+      setDecryptedMediaUris(prev => {
+        if (!(messageId in prev)) return prev;
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+      bumpMediaFetchTick();
     } finally {
       // Deliberately NOT clearing loadingVoiceId here: the spinner now stays
       // up until the playbackStatusUpdate listener confirms real audio is
@@ -3336,6 +3360,20 @@ export default function ConversationScreen() {
       // state the optimistic "pause" icon used to show.
       isLoadingVoiceRef.current = false;
     }
+  };
+
+  // Only ever meaningful against the currently-loaded player — a bubble
+  // that isn't loaded (never played, or a different message is active) has
+  // nothing to seek. Silently no-ops rather than erroring, since the
+  // scrubber itself can't tell loaded state apart from not-yet-tapped.
+  const handleVoiceSeek = (messageId: string, fraction: number) => {
+    if (loadedMessageIdRef.current !== messageId || !messageSoundRef.current) return;
+    const duration = messageSoundRef.current.duration;
+    if (!duration || !Number.isFinite(duration) || duration <= 0) return;
+    const seconds = fraction * duration;
+    messageSoundRef.current.seekTo(seconds);
+    setPlayingMessageProgress(fraction);
+    setPlayingMessageElapsedSec(seconds);
   };
 
   const handleLongPressMessage = (message: Message) => {
@@ -4323,6 +4361,16 @@ export default function ConversationScreen() {
     // Hide the envelope JSON itself from the text-bubble path; if no caption
     // was attached, displayContent ends up null and the text block is skipped.
     const displayContent = mediaEnvelope ? null : (statusReply ? statusReply.text : rawDisplayContent);
+    // A photo/video with no caption was still wrapped in the same padded,
+    // colored bubble chrome as a text message — the media rendered "inside
+    // a text bubble" instead of as its own chrome-less media view (the
+    // Signal/WhatsApp convention). Only affects image/video/gif with no
+    // caption text; voice and file bubbles keep their pill/row chrome,
+    // which is the correct convention for those.
+    const isPureMediaBubble =
+      hasMedia &&
+      (effectiveMediaType === 'image' || effectiveMediaType === 'video' || effectiveMediaType === 'gif') &&
+      !displayContent;
 
     const isSaved = savedMessageIds.has(item.id);
 
@@ -4367,9 +4415,9 @@ export default function ConversationScreen() {
           style={[
             styles.messageBubble,
             isOwn ? styles.ownBubble : styles.otherBubble,
-            {
-              backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary,
-            },
+            isPureMediaBubble
+              ? styles.pureMediaBubble
+              : { backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary },
             isSaved && { borderWidth: 2, borderColor: '#FFD60A' },
             isSelected && { opacity: 0.8 },
             // Disable native browser text-selection / iOS callout on long-press.
@@ -4444,7 +4492,15 @@ export default function ConversationScreen() {
               }}
               style={[
                 styles.mediaContainer,
-                { backgroundColor: isOwn ? theme.primary : theme.backgroundSecondary },
+                // Previously matched the bubble's own accent/secondary
+                // color, which read as "photo inside a colored bubble" —
+                // exactly the chrome-around-media look Signal/WhatsApp
+                // avoid. A neutral surface color (only ever visible as a
+                // brief loading-state background before the real aspect
+                // ratio is known, or as letterboxing that contentFit=contain
+                // essentially never produces once it is) reads as a media
+                // frame instead of a themed message bubble.
+                { backgroundColor: theme.backgroundDefault },
                 computeImageBubbleSize(imageNaturalSizes[item.id]),
               ]}
             >
@@ -4466,12 +4522,24 @@ export default function ConversationScreen() {
             </Pressable>
           ) : null}
           
-          {hasMedia && effectiveMediaType === 'video' ? (
-            <View style={styles.mediaContainer}>
-              <View style={[styles.videoPlaceholder, { backgroundColor: theme.backgroundDefault }]}>
-                <Feather name="play-circle" size={40} color={theme.primary} />
-              </View>
-            </View>
+          {hasMedia && effectiveMediaType === 'video' && effectiveMediaUrl ? (
+            // Previously just a static play-icon placeholder with no real
+            // thumbnail, no duration, and no tap handler at all — a video
+            // message could never actually be opened or played from chat.
+            // ChatVideoThumb extracts a real preview frame and duration
+            // (the same proven pattern already used for Status video
+            // tiles), and tapping it opens a real full-screen player.
+            <ChatVideoThumb
+              uri={effectiveMediaUrl}
+              style={[styles.mediaContainer, computeImageBubbleSize(imageNaturalSizes[item.id])]}
+              onPress={() => {
+                if (isSelectMode) {
+                  toggleMessageSelection(item.id);
+                  return;
+                }
+                setFullscreenVideoUri(effectiveMediaUrl);
+              }}
+            />
           ) : null}
           
           {hasMedia && effectiveMediaType === 'audio' && effectiveMediaUrl ? (
@@ -4500,25 +4568,14 @@ export default function ConversationScreen() {
                     />
                   )}
                 </View>
-                <View style={styles.waveformPlaceholder}>
-                  {(mediaEnvelope?.wf && mediaEnvelope.wf.length > 0 ? mediaEnvelope.wf : fallbackWaveformFor(item.id)).map((level, i, arr) => {
-                    const isPlaying = playingMessageId === item.id;
-                    const played = isPlaying && i / arr.length <= playingMessageProgress;
-                    return (
-                      <View
-                        key={i}
-                        style={[
-                          styles.waveformBar,
-                          {
-                            height: 8 + level * 16,
-                            backgroundColor: isOwn ? 'rgba(255,255,255,0.5)' : theme.textSecondary,
-                            opacity: isPlaying ? (played ? 1 : 0.4) : 0.6,
-                          },
-                        ]}
-                      />
-                    );
-                  })}
-                </View>
+                <VoiceScrubber
+                  bars={mediaEnvelope?.wf && mediaEnvelope.wf.length > 0 ? mediaEnvelope.wf : fallbackWaveformFor(item.id)}
+                  progress={playingMessageProgress}
+                  isPlaying={playingMessageId === item.id}
+                  filledColor={isOwn ? 'rgba(255,255,255,0.5)' : theme.textSecondary}
+                  unfilledColor={isOwn ? 'rgba(255,255,255,0.5)' : theme.textSecondary}
+                  onSeek={(fraction) => handleVoiceSeek(item.id, fraction)}
+                />
                 <ThemedText style={[styles.voiceDuration, { color: isOwn ? 'rgba(255,255,255,0.8)' : theme.textSecondary }]}>
                   {playingMessageId === item.id ? formatVoiceElapsed(playingMessageElapsedSec) : (displayContent || '0:00')}
                 </ThemedText>
@@ -6750,6 +6807,11 @@ export default function ConversationScreen() {
         ) : null}
       </Pressable>
     </Modal>
+
+    <ChatFullscreenVideoPlayer
+      uri={fullscreenVideoUri}
+      onClose={() => setFullscreenVideoUri(null)}
+    />
     </View>
   );
 }
@@ -6864,6 +6926,14 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     maxWidth: "100%",
   },
+  // A caption-less photo/video message drops the padded, colored
+  // text-bubble chrome entirely — the media itself (already rounded via
+  // mediaContainer) IS the bubble, matching Signal/WhatsApp convention
+  // instead of framing media inside a second, redundant bubble.
+  pureMediaBubble: {
+    padding: 0,
+    backgroundColor: "transparent",
+  },
   ownBubble: {
     borderBottomRightRadius: 4,
   },
@@ -6953,13 +7023,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 1,
-  },
-  videoPlaceholder: {
-    width: 200,
-    height: 150,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
   },
   voiceMessageContainer: {
     flexDirection: "row",

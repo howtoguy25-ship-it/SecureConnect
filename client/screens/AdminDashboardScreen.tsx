@@ -53,6 +53,20 @@ interface AdminUser {
   createdAt: string;
   isSuspended: boolean;
   suspensionReason: string | null;
+  isSignedIn: boolean;
+  lastSignInAt: string | null;
+  lastSignOutAt: string | null;
+}
+
+function formatSignInTimestamp(iso: string | null): string {
+  if (!iso) return "Never";
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 interface AdminReport {
@@ -98,6 +112,9 @@ export default function AdminDashboardScreen() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [showUsers, setShowUsers] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [showSignInStatus, setShowSignInStatus] = useState(false);
+  const [signInStatusFilter, setSignInStatusFilter] = useState<"all" | "signedIn" | "signedOut">("all");
+  const [expandedSignInRowId, setExpandedSignInRowId] = useState<string | null>(null);
 
   const [reports, setReports] = useState<AdminReport[] | null>(null);
   const [loadingReports, setLoadingReports] = useState(true);
@@ -180,6 +197,27 @@ export default function AdminDashboardScreen() {
         if (res.ok) setUsers(await res.json());
       } catch {
         showAlert("Error", "Failed to load users");
+      } finally {
+        setLoadingUsers(false);
+      }
+    }
+  };
+
+  // Shares the same /api/admin/users response as "Registered Users" above
+  // (it already carries isSignedIn/lastSignInAt/lastSignOutAt) — a second
+  // network round trip for the same data would be pure waste.
+  const handleLoadSignInStatus = async () => {
+    const next = !showSignInStatus;
+    setShowSignInStatus(next);
+    if (next && !users) {
+      setLoadingUsers(true);
+      try {
+        const res = await fetchWithTimeout(new URL("/api/admin/users", getApiUrl()).toString(), {
+          headers: authHeaders,
+        });
+        if (res.ok) setUsers(await res.json());
+      } catch {
+        showAlert("Error", "Failed to load sign-in status");
       } finally {
         setLoadingUsers(false);
       }
@@ -384,6 +422,117 @@ export default function AdminDashboardScreen() {
         ) : null}
       </View>
 
+      <ThemedText type="small" style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.xl }]}>
+        SIGN-IN STATUS
+      </ThemedText>
+      <View style={[styles.card, { backgroundColor: theme.backgroundDefault }]}>
+        <Pressable style={styles.row} onPress={handleLoadSignInStatus}>
+          <View style={styles.rowInfo}>
+            <View style={[styles.iconBg, { backgroundColor: "#5856D6" }]}>
+              <Feather name="log-in" size={16} color="#fff" />
+            </View>
+            <View>
+              <ThemedText type="body">Sign-In Status</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                {users ? `${users.filter((u) => u.isSignedIn).length} signed in of ${users.length}` : "Live sign-in/sign-out per user"}
+              </ThemedText>
+            </View>
+          </View>
+          <Feather name={showSignInStatus ? "chevron-up" : "chevron-down"} size={20} color={theme.textSecondary} />
+        </Pressable>
+
+        {showSignInStatus ? (
+          loadingUsers ? (
+            <View style={styles.loadingBlock}>
+              <ActivityIndicator size="small" color={theme.primary} />
+            </View>
+          ) : users && users.length > 0 ? (
+            <>
+              <View style={styles.filterToggle}>
+                {(["all", "signedIn", "signedOut"] as const).map((f) => (
+                  <Pressable
+                    key={f}
+                    style={[styles.filterOption, signInStatusFilter === f && { backgroundColor: theme.primary }]}
+                    onPress={() => setSignInStatusFilter(f)}
+                  >
+                    <ThemedText type="small" style={{ color: signInStatusFilter === f ? "#fff" : theme.textSecondary }}>
+                      {f === "all" ? "All" : f === "signedIn" ? "Signed In" : "Signed Out"}
+                    </ThemedText>
+                  </Pressable>
+                ))}
+              </View>
+              {users
+                .filter((u) =>
+                  signInStatusFilter === "all"
+                    ? true
+                    : signInStatusFilter === "signedIn"
+                    ? u.isSignedIn
+                    : !u.isSignedIn,
+                )
+                // Signed-in-first, per owner convenience — within each group,
+                // most recently active first.
+                .sort((a, b) => {
+                  if (a.isSignedIn !== b.isSignedIn) return a.isSignedIn ? -1 : 1;
+                  const aTime = new Date(a.lastSignInAt ?? 0).getTime();
+                  const bTime = new Date(b.lastSignInAt ?? 0).getTime();
+                  return bTime - aTime;
+                })
+                .map((u) => {
+                  const expanded = expandedSignInRowId === u.id;
+                  return (
+                    <Pressable
+                      key={u.id}
+                      style={[styles.userItem, { borderTopColor: theme.border }]}
+                      onPress={() => setExpandedSignInRowId(expanded ? null : u.id)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <ThemedText type="body" style={{ fontWeight: "500" }}>{u.displayName}</ThemedText>
+                          <View
+                            style={[
+                              styles.signInBadge,
+                              { backgroundColor: u.isSignedIn ? "#34C75920" : "#8E8E9320" },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.signInDot,
+                                { backgroundColor: u.isSignedIn ? "#34C759" : "#8E8E93" },
+                              ]}
+                            />
+                            <ThemedText
+                              type="small"
+                              style={{ color: u.isSignedIn ? "#34C759" : "#8E8E93", fontWeight: "700", fontSize: 10 }}
+                            >
+                              {u.isSignedIn ? "SIGNED IN" : "SIGNED OUT"}
+                            </ThemedText>
+                          </View>
+                        </View>
+                        <ThemedText type="small" style={{ color: theme.textSecondary }}>{u.phoneNumber}</ThemedText>
+                        {expanded ? (
+                          <View style={{ marginTop: 4, gap: 2 }}>
+                            <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                              Signed in: {formatSignInTimestamp(u.lastSignInAt)}
+                            </ThemedText>
+                            <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                              Signed out: {formatSignInTimestamp(u.lastSignOutAt)}
+                            </ThemedText>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Feather name={expanded ? "chevron-up" : "chevron-down"} size={16} color={theme.textSecondary} />
+                    </Pressable>
+                  );
+                })}
+            </>
+          ) : (
+            <ThemedText type="small" style={{ color: theme.textSecondary, padding: Spacing.md }}>
+              No users found.
+            </ThemedText>
+          )
+        ) : null}
+      </View>
+
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: Spacing.xl, marginBottom: Spacing.sm }}>
         <ThemedText type="small" style={[styles.sectionTitle, { color: theme.textSecondary, marginBottom: 0 }]}>
           MODERATION QUEUE
@@ -567,6 +716,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  signInBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  signInDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   filterToggle: {
     flexDirection: "row",

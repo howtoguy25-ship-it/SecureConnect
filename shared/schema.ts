@@ -113,6 +113,20 @@ export const users = pgTable("users", {
   securityQFailedAttempts: integer("security_q_failed_attempts").default(0),
   securityQLockedUntil: timestamp("security_q_locked_until"),
   tokenVersion: integer("token_version").default(0),
+  // ── Sign-in status tracking (owner-panel visibility, build 135) ─────────
+  // isSignedIn is a best-effort LIVE indicator, not a real server session —
+  // this app's auth is a stateless JWT (see tokenVersion above), so there is
+  // no actual session to query. Set true on successful OTP verification/
+  // OAuth sign-in, false on explicit logout AND on every tokenVersion bump
+  // (suspension, forced logout-everywhere, account deletion) so a user
+  // whose token was invalidated some other way doesn't stay stuck showing
+  // "Signed In" indefinitely. An app force-quit/deleted without a proper
+  // logout unavoidably still shows stale "Signed In" until that user's next
+  // real sign-out or tokenVersion bump — there is no server-side signal for
+  // "the app was deleted," same limitation every stateless-JWT app has.
+  isSignedIn: boolean("is_signed_in").default(false),
+  lastSignInAt: timestamp("last_sign_in_at"),
+  lastSignOutAt: timestamp("last_sign_out_at"),
   isSuspended: boolean("is_suspended").default(false),
   suspendedAt: timestamp("suspended_at"),
   suspensionReason: text("suspension_reason"),

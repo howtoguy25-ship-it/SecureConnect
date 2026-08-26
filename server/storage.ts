@@ -68,7 +68,7 @@ export interface IStorage {
   declineMessageRequest(requestId: string, userId: string): Promise<void>;
   getPendingRequestForRecipient(conversationId: string, receiverUserId: string): Promise<string | null>;
   findUsersByPhoneNumbers(phoneNumbers: string[], excludeUserId: string): Promise<User[]>;
-  listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt' | 'isSuspended' | 'suspensionReason' | 'pushToken' | 'notificationsEnabled'>[]>;
+  listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt' | 'isSuspended' | 'suspensionReason' | 'pushToken' | 'notificationsEnabled' | 'isSignedIn' | 'lastSignInAt' | 'lastSignOutAt'>[]>;
   deleteUserAccount(userId: string): Promise<void>;
 
   // Account deletion (build 62) — two-phase: request → 30-day grace → tombstone.
@@ -1374,7 +1374,7 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt' | 'isSuspended' | 'suspensionReason' | 'pushToken' | 'notificationsEnabled'>[]> {
+  async listAllUsers(): Promise<Pick<User, 'id' | 'phoneNumber' | 'displayName' | 'createdAt' | 'isSuspended' | 'suspensionReason' | 'pushToken' | 'notificationsEnabled' | 'isSignedIn' | 'lastSignInAt' | 'lastSignOutAt'>[]> {
     const allUsers = await db.select({
       id: users.id,
       phoneNumber: users.phoneNumber,
@@ -1384,6 +1384,9 @@ export class DatabaseStorage implements IStorage {
       suspensionReason: users.suspensionReason,
       pushToken: users.pushToken,
       notificationsEnabled: users.notificationsEnabled,
+      isSignedIn: users.isSignedIn,
+      lastSignInAt: users.lastSignInAt,
+      lastSignOutAt: users.lastSignOutAt,
     })
       .from(users)
       .orderBy(desc(users.createdAt));
@@ -2377,6 +2380,10 @@ export class DatabaseStorage implements IStorage {
       suspendedAt: new Date(),
       suspensionReason: reason,
       tokenVersion: nextTv,
+      // Force-logged-out from every device — reflect that in the owner
+      // panel's sign-in status instead of leaving it stuck "Signed In".
+      isSignedIn: false,
+      lastSignOutAt: new Date(),
     }).where(eq(users.id, userId));
   }
 

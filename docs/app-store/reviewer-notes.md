@@ -14,10 +14,9 @@ Build under review: 1.0.5 (133)
 
 Field | Value
 ---|---
-Phone number | `555-123-4567` (US, +1)
-Verification code (OTP) | `123456`
-
-Backup demo number, identical access: `555-000-0000`
+Phone number (active Pryvo Plus subscription) | `555-123-4567` (US, +1)
+Phone number (no active subscription — to test the paywall/upgrade screen) | `555-000-0000` (US, +1)
+Verification code (OTP), same for both | `123456`
 
 ## Contact information
 
@@ -33,6 +32,8 @@ Phone | (your reachable number)
 Hi App Review team,
 
 **How to sign in:** Tap Get Started → country United States (+1) → phone `5551234567` → Continue. On the code screen, **enter `123456` right away — don't wait for a text, none is sent for this number.** That's expected, not a bug. You'll land straight on the Chats screen, fully signed in with Pryvo Plus active.
+
+**To test the paywall/upgrade flow:** sign out and repeat the same steps with `5550000000` instead — same fixed code `123456`, no SMS sent. This account intentionally has no active subscription, so the upgrade/paywall screen is reachable exactly as an ordinary non-subscribed user would see it.
 
 **If a "Confirm It's You" screen with two security questions appears:** it shouldn't for this account, but if it does, the answers are:
 - Favourite dish: `pizza`

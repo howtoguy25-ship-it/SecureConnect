@@ -513,6 +513,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (existingUser) {
       const tokenVersion = existingUser.tokenVersion ?? 0;
       const token = jwt.sign({ userId: existingUser.id, tv: tokenVersion }, JWT_SECRET, { expiresIn: '30d' });
+      storage.updateUser(existingUser.id, { isSignedIn: true, lastSignInAt: new Date() })
+        .catch(err => console.error('Failed to record sign-in status (OAuth):', err));
       const ipAddress = getClientIp(req);
       storage.recordLoginEvent({
         userId: existingUser.id,
@@ -726,11 +728,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Grant VIP access to Apple review test accounts and VIP phone numbers
-      const grantVip = isDemoBypass || isAppleReviewTestNumber(phoneNumber) || isVipPhoneNumber(phoneNumber);
+      // Grant VIP access to VIP phone numbers and ONE of the two Apple
+      // review demo numbers. Apple's own rejection (Guideline 2.1a,
+      // Submission abdaa4fc-d799-46aa-be94-b2b1a932db59) was explicit: both
+      // demo accounts previously had active subscriptions, leaving the
+      // reviewer no way to see the paywall/upgrade flow at all. 555-000-0000
+      // is now deliberately kept OFF VIP so it always represents an
+      // expired/no-subscription account; 555-123-4567 stays the
+      // active-subscription demo. Never grant VIP retroactively to
+      // 555-000-0000 either, in case a prior deployment already had — see
+      // the explicit demotion a few lines below.
+      const isExpiredSubscriptionDemoNumber = phoneNumber.replace(/\D/g, '').endsWith('5550000000');
+      const grantVip = !isExpiredSubscriptionDemoNumber && (isDemoBypass || isAppleReviewTestNumber(phoneNumber) || isVipPhoneNumber(phoneNumber));
       if (grantVip && !user.isVip) {
         user = await storage.updateUser(user.id, { isVip: true, vipStartedAt: new Date() }) || user;
         console.log(`[AUTO VIP] Granted VIP access to: ${phoneNumber}`);
+      } else if (isExpiredSubscriptionDemoNumber && user.isVip) {
+        // Demote if a previous deployment/version already granted this
+        // number VIP — it must show the paywall for App Review.
+        user = await storage.updateUser(user.id, { isVip: false }) || user;
+        console.log(`[APPLE REVIEW] Demoted expired-subscription demo account from VIP: ${phoneNumber}`);
       }
 
       // Attach the verified Apple/Google identity to whichever account this
@@ -752,6 +769,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const tokenVersion = user.tokenVersion ?? 0;
       const token = jwt.sign({ userId: user.id, tv: tokenVersion, did: deviceId ?? undefined }, JWT_SECRET, { expiresIn: '30d' });
+      storage.updateUser(user.id, { isSignedIn: true, lastSignInAt: new Date() })
+        .catch(err => console.error('Failed to record sign-in status:', err));
 
       // Auto-generate a Safe Code for first-time signups so the user is
       // immediately routed through the SafeCodeScreen (gate fires on
@@ -1269,7 +1288,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // not block the client-side wipe in AuthContext.logout().
   app.post('/api/auth/logout', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      await storage.updateUser(req.userId!, { pushToken: null });
+      await storage.updateUser(req.userId!, { pushToken: null, isSignedIn: false, lastSignOutAt: new Date() });
       await storage.bumpTokenVersion(req.userId!, req.deviceId ?? null);
       try {
         if (socketIO) {
@@ -2682,6 +2701,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdAt: user.createdAt,
         isSuspended: !!user.isSuspended,
         suspensionReason: user.suspensionReason ?? null,
+        // Sign-In Status (owner panel) — see shared/schema.ts's field
+        // comments for what this actually represents: a best-effort live
+        // indicator, not a real server session (this app's auth is a
+        // stateless JWT).
+        isSignedIn: !!user.isSignedIn,
+        lastSignInAt: user.lastSignInAt ?? null,
+        lastSignOutAt: user.lastSignOutAt ?? null,
       })));
     } catch (error) {
       console.error('Error fetching admin users:', error);
