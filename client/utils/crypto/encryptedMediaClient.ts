@@ -347,12 +347,40 @@ async function tryDeriveConvoKey(myUserId: string, theirUserId: string): Promise
 
 // ─── I/O helpers ─────────────────────────────────────────────────────────────
 
+// A freshly-captured camera photo/video (expo-image-picker's
+// launchCameraAsync) hands back a URI the instant the picker UI resolves —
+// on some devices, under memory pressure, or immediately after a fast
+// capture, the OS write to that path isn't guaranteed to have finished
+// flushing yet. Reading it a beat too early doesn't throw a clear error; it
+// just reads a truncated/empty file, which the caller only discovers much
+// later (a confusing "Could not send encrypted media" failure with no
+// indication the underlying read was ever the problem). A gallery-picked
+// file has already existed on disk for a while, so this loop resolves on
+// its first check for that path — this only ever matters for a genuine
+// still-being-written file. ~600ms worst case before giving up.
+async function waitForFileReady(uri: string, maxAttempts = 6, intervalMs = 100): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info.exists && (info as any).size > 0) return;
+    } catch {
+      // Not ready yet or a transient stat error — fall through to retry.
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  const info = await FileSystem.getInfoAsync(uri).catch(() => ({ exists: false } as any));
+  if (!info.exists || !(info as any).size) {
+    throw new Error(`Captured file never finished writing: ${uri}`);
+  }
+}
+
 async function readFileBytes(uri: string): Promise<Uint8Array> {
   if (Platform.OS === "web") {
     const res = await fetch(uri);
     if (!res.ok) throw new Error(`Failed to read web file: ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   }
+  await waitForFileReady(uri);
   const b64 = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });

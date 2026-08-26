@@ -2090,6 +2090,36 @@ export default function ConversationScreen() {
     setIsSending(true);
     haptics.medium();
 
+    // Previously nothing appeared in the thread at all between capture and
+    // the server round-trip completing — a photo/video send that failed
+    // (or was just slow) looked completely blank/frozen, with the only
+    // feedback a modal Alert if and when it eventually failed. An
+    // optimistic bubble showing the actual captured file immediately (the
+    // existing image/video renderers already handle a local file:// uri
+    // exactly like a remote one) plus the same 'sending' status text
+    // messages already use gives real, immediate feedback — and on
+    // failure it flips to 'failed' with the existing inline retry
+    // affordance instead of only a dialog.
+    const tempId = `temp-media-${Date.now()}`;
+    const optimisticCreatedAt = new Date().toISOString();
+    const optimisticMessage: Message = {
+      id: tempId,
+      senderId: user?.id || '',
+      content: null,
+      mediaUrl: uri,
+      mediaType: type,
+      status: 'sending',
+      createdAt: optimisticCreatedAt,
+      isHidden: false,
+      transcription: null,
+    };
+    setMessages((prev) => [...prev, optimisticMessage]);
+    flatListRef.current?.scrollToEnd({ animated: true });
+
+    const markFailed = () => {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)));
+    };
+
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
@@ -2148,8 +2178,14 @@ export default function ConversationScreen() {
               // gives it the same lasting "queued" bubble text sends already
               // get, so it's still visibly pending if the user reopens this
               // conversation later, and doesn't look like it silently
-              // vanished.
-              setMessages(prev => [...prev, buildQueuedMediaPlaceholder(queuedItem, user?.id ?? "")]);
+              // vanished. Swaps out the 'sending' optimistic bubble added at
+              // the top of this function (a different tempId — queuedItem's
+              // own id is what queuedSendFlushEffect keys off later) rather
+              // than appending a second bubble alongside it.
+              setMessages(prev => [
+                ...prev.filter(m => m.id !== tempId),
+                buildQueuedMediaPlaceholder(queuedItem, user?.id ?? ""),
+              ]);
               haptics.light();
               Alert.alert(
                 'Waiting to Send',
@@ -2188,15 +2224,17 @@ export default function ConversationScreen() {
             // sendTextLikeMessage returns null on any non-OK response.
             // The ciphertext blob already in GCS is orphaned (pure
             // ciphertext, no metadata — acceptable), but we must not
-            // pretend the send succeeded.
+            // pretend the send succeeded. Flips the optimistic bubble to
+            // 'failed' (real inline retry, see the footer's status==='failed'
+            // branch below) instead of only a modal — the bubble with the
+            // actual photo/video stays visible with a tap-to-retry, matching
+            // Signal/WhatsApp instead of a dialog with nothing to look at
+            // once dismissed.
             console.error('[E2EE media] send-sealed/legacy POST rejected');
-            Alert.alert(
-              'Send failed',
-              'Could not send encrypted media. Please try again.',
-            );
+            markFailed();
             return;
           }
-          setMessages((prev) => [...prev, message]);
+          setMessages((prev) => prev.map((m) => (m.id === tempId ? message : m)));
           // Prime caches so the sender doesn't have to round-trip through
           // /api/media/encrypted to see their own bubble. The envelope's
           // own `path` + `mk` are already known locally, so we just stash
@@ -2254,12 +2292,13 @@ export default function ConversationScreen() {
         } catch (encMediaErr) {
           // Encrypted path failed — log and fall through. We deliberately do
           // NOT silently downgrade to plaintext upload for a privacy product;
-          // surface the failure and abort the send.
+          // surface the failure and abort the send. This is the exact path a
+          // camera capture read too early (before the file finished
+          // writing) used to hit — waitForFileReady in encryptedMediaClient
+          // targets that specifically now, but any other real failure still
+          // lands here and gets the same inline retry instead of a dialog.
           console.error('[E2EE media] send failed:', encMediaErr);
-          Alert.alert(
-            'Send failed',
-            'Could not send encrypted media. Please try again.',
-          );
+          markFailed();
           return;
         }
       }
@@ -4336,7 +4375,12 @@ export default function ConversationScreen() {
       );
     }
 
-    const rawDisplayContent = isOwn && (item.status === 'sending' || item.status === 'queued')
+    // 'failed' included alongside 'sending'/'queued' — a failed optimistic
+    // media bubble (see uploadAndSendMedia) has item.content === null (it
+    // was never turned into ciphertext, or the ciphertext it did produce is
+    // irrelevant now), so falling through to tryDecrypt(null, ...) below
+    // would either throw or just fail to resolve any media/caption at all.
+    const rawDisplayContent = isOwn && (item.status === 'sending' || item.status === 'queued' || item.status === 'failed')
       ? item.content
       : (decryptedCache[item.id] ?? tryDecrypt(item.content, item.id));
 
@@ -4851,10 +4895,19 @@ export default function ConversationScreen() {
                 <Feather name="clock" size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
               )
             ) : item.status === 'failed' ? (
-              <AnimatedPressable 
+              <AnimatedPressable
                 onPress={() => {
                   setMessages((prev) => prev.filter((m) => m.id !== item.id));
-                  setNewMessage(displayContent || '');
+                  // A failed photo/video/file/voice send still has its local
+                  // uri on the bubble — re-run the real send against that
+                  // same file instead of the text-only "put it back in the
+                  // composer" behavior, which made no sense for media (there
+                  // was nothing textual to retry).
+                  if (item.mediaUrl && item.mediaType) {
+                    uploadAndSendMedia(item.mediaUrl, item.mediaType as 'image' | 'video' | 'audio' | 'file');
+                  } else {
+                    setNewMessage(displayContent || '');
+                  }
                 }}
                 style={styles.retryButton}
                 scaleValue={0.9}
