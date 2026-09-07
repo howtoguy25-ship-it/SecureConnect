@@ -1,5 +1,6 @@
-import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings, messageSaves, paymentTransactions } from "@shared/schema";
-import type { User, InsertUser, Message, InsertMessage, Conversation, Call, HiddenLockerItem, VerificationCode, PendingContact, JoinNotification, MessageRequest, Status, StatusView, Friend, LocationShare, LocationRequest, VirtualNumber, ExternalSms, UserBlock, UserReport, InsertUserReport, ScheduledMessage, UserDevice, SignedPrekey, OneTimePrekey, LoginEvent, PaymentTransaction } from "@shared/schema";
+import { users, conversations, conversationParticipants, messages, calls, hiddenLockerItems, verificationCodes, pendingContacts, joinNotifications, messageRequests, statuses, statusViews, statusAllowedViewers, statusMutes, friends, locationShares, locationRequests, virtualNumbers, externalSms, userBlocks, userReports, scheduledMessages, userDevices, signedPrekeys, oneTimePrekeys, encryptedBackups, loginEvents, appSettings, messageSaves, paymentTransactions, messageReactions } from "@shared/schema";
+import type { User, InsertUser, Message, InsertMessage, Conversation, Call, HiddenLockerItem, VerificationCode, PendingContact, JoinNotification, MessageRequest, Status, StatusView, Friend, LocationShare, LocationRequest, VirtualNumber, ExternalSms, UserBlock, UserReport, InsertUserReport, ScheduledMessage, UserDevice, SignedPrekey, OneTimePrekey, LoginEvent, PaymentTransaction, MessageReaction } from "@shared/schema";
+import { encryptLoginField, decryptLoginField } from "./loginMetadataCrypto";
 import { gt, lt, lte, ilike } from "drizzle-orm";
 import { db } from "./db";
 import { eq, and, desc, sql, or, inArray, ne, isNull } from "drizzle-orm";
@@ -29,7 +30,9 @@ export interface IStorage {
   getMessage(id: string): Promise<Message | undefined>;
   deleteMessage(id: string): Promise<void>;
   updateMessageStatus(id: string, status: string): Promise<void>;
-  addMessageReaction(messageId: string, userId: string, emoji: string): Promise<Message | undefined>;
+  upsertMessageReaction(messageId: string, userId: string, ciphertext: string, encryptionVersion: string, e2eeInitEnvelope: unknown): Promise<MessageReaction>;
+  removeMessageReaction(messageId: string, userId: string): Promise<void>;
+  getMessageReactionsForConversation(conversationId: string): Promise<MessageReaction[]>;
   markMessagesRead(conversationId: string, userId: string): Promise<void>;
   
   getCalls(userId: string): Promise<Call[]>;
@@ -654,30 +657,44 @@ export class DatabaseStorage implements IStorage {
     return !!row;
   }
 
-  async addMessageReaction(messageId: string, userId: string, emoji: string): Promise<Message | undefined> {
-    const msg = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
-    if (!msg[0]) return undefined;
-
-    const current: Record<string, string[]> = (msg[0].reactions as Record<string, string[]>) || {};
-    const updated: Record<string, string[]> = { ...current };
-
-    if (updated[emoji]?.includes(userId)) {
-      updated[emoji] = updated[emoji].filter((id) => id !== userId);
-      if (updated[emoji].length === 0) delete updated[emoji];
-    } else {
-      for (const key of Object.keys(updated)) {
-        updated[key] = updated[key].filter((id) => id !== userId);
-        if (updated[key].length === 0) delete updated[key];
-      }
-      updated[emoji] = [...(updated[emoji] || []), userId];
-    }
-
+  // E2EE reactions (build 135) — one ciphertext row per (message, user); see
+  // shared/schema.ts's messageReactions comment. `upsert` replaces a user's
+  // prior reaction on this message (the old plaintext toggle's "only one
+  // reaction per user per message" behavior, preserved) rather than adding a
+  // second row, since the unique index on (message_id, user_id) means a
+  // plain insert would conflict instead of updating.
+  async upsertMessageReaction(messageId: string, userId: string, ciphertext: string, encryptionVersion: string, e2eeInitEnvelope: unknown): Promise<MessageReaction> {
     const [result] = await db
-      .update(messages)
-      .set({ reactions: updated })
-      .where(eq(messages.id, messageId))
+      .insert(messageReactions)
+      .values({ messageId, userId, ciphertext, encryptionVersion, e2eeInitEnvelope: e2eeInitEnvelope ?? null })
+      .onConflictDoUpdate({
+        target: [messageReactions.messageId, messageReactions.userId],
+        set: { ciphertext, encryptionVersion, e2eeInitEnvelope: e2eeInitEnvelope ?? null },
+      })
       .returning();
     return result;
+  }
+
+  async removeMessageReaction(messageId: string, userId: string): Promise<void> {
+    await db.delete(messageReactions).where(and(
+      eq(messageReactions.messageId, messageId),
+      eq(messageReactions.userId, userId),
+    ));
+  }
+
+  async getMessageReactionsForConversation(conversationId: string): Promise<MessageReaction[]> {
+    return await db.select({
+      id: messageReactions.id,
+      messageId: messageReactions.messageId,
+      userId: messageReactions.userId,
+      ciphertext: messageReactions.ciphertext,
+      encryptionVersion: messageReactions.encryptionVersion,
+      e2eeInitEnvelope: messageReactions.e2eeInitEnvelope,
+      createdAt: messageReactions.createdAt,
+    })
+      .from(messageReactions)
+      .innerJoin(messages, eq(messageReactions.messageId, messages.id))
+      .where(eq(messages.conversationId, conversationId));
   }
 
   async getMessage(id: string): Promise<Message | undefined> {
@@ -2881,21 +2898,39 @@ export class DatabaseStorage implements IStorage {
     const [event] = await db.insert(loginEvents).values({
       userId: data.userId,
       deviceId: data.deviceId ?? null,
+      deviceName: encryptLoginField(data.deviceName ?? null),
+      platform: encryptLoginField(data.platform ?? null),
+      ipAddress: encryptLoginField(data.ipAddress ?? null),
+      userAgent: encryptLoginField(data.userAgent ?? null),
+      isNewDevice: data.isNewDevice ?? false,
+      isCurrentSession: true,
+    }).returning();
+    // Return the plaintext values the caller just passed in, not the
+    // encrypted row straight from the DB — callers (e.g. the new-device
+    // email alert) need the readable device name/platform, and re-deriving
+    // that via a decrypt round-trip immediately after encrypting it would
+    // be pointless.
+    return {
+      ...event,
       deviceName: data.deviceName ?? null,
       platform: data.platform ?? null,
       ipAddress: data.ipAddress ?? null,
       userAgent: data.userAgent ?? null,
-      isNewDevice: data.isNewDevice ?? false,
-      isCurrentSession: true,
-    }).returning();
-    return event;
+    };
   }
 
   async getLoginEvents(userId: string, limit: number = 50): Promise<LoginEvent[]> {
-    return await db.select().from(loginEvents)
+    const events = await db.select().from(loginEvents)
       .where(eq(loginEvents.userId, userId))
       .orderBy(desc(loginEvents.createdAt))
       .limit(limit);
+    return events.map(e => ({
+      ...e,
+      deviceName: decryptLoginField(e.deviceName),
+      platform: decryptLoginField(e.platform),
+      ipAddress: decryptLoginField(e.ipAddress),
+      userAgent: decryptLoginField(e.userAgent),
+    }));
   }
 
   async bumpTokenVersion(userId: string, currentDeviceId?: string | null): Promise<number> {

@@ -1090,13 +1090,22 @@ export default function ConversationScreen() {
             }, 1000);
           });
         });
-        const initialReactions: Record<string, Record<string, string[]>> = {};
-        filtered.forEach((msg: Message & { reactions?: Record<string, string[]> | null }) => {
-          if (msg.reactions && typeof msg.reactions === 'object') {
-            initialReactions[msg.id] = msg.reactions as Record<string, string[]>;
+        // Reactions are fetched and decrypted separately (E2EE, build 135)
+        // — the old plaintext `messages.reactions` column is no longer
+        // written to, so it's not read here anymore.
+        try {
+          const reactionsRes = await fetchWithTimeout(new URL(`/api/conversations/${conversationId}/reactions`, baseUrl), {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (reactionsRes.ok) {
+            const { reactions: rawReactions } = await reactionsRes.json();
+            await hydrateReactionsMap(Array.isArray(rawReactions) ? rawReactions : []);
+          } else {
+            setReactionsMap({});
           }
-        });
-        setReactionsMap(initialReactions);
+        } catch {
+          setReactionsMap({});
+        }
 
         // Land on the most recent message on open, same as every other
         // chat app — without this, opening a conversation with more
@@ -1248,11 +1257,48 @@ export default function ConversationScreen() {
       socket.on('user-stop-typing', stopTypingHandler);
       socket.on('message-status', messageStatusHandler);
       socket.on('messages-read', messagesReadHandler);
-      socket.on('message-reaction', (data: { messageId: string; reactions: Record<string, string[]> | null; userId: string; emoji: string }) => {
-        setReactionsMap(prev => ({
-          ...prev,
-          [data.messageId]: data.reactions ?? {},
-        }));
+      socket.on('message-reaction', (data: { messageId: string; userId: string; ciphertext: string; encryptionVersion: string; e2eeInitEnvelope: unknown }) => {
+        // Our own reaction ciphertext can't be decrypted (Double Ratchet
+        // forward secrecy — see hydrateReactionsMap) and was already
+        // applied optimistically in handleReact when we sent it.
+        if (!user?.id || data.userId === user.id) return;
+        (async () => {
+          try {
+            const plaintext = await signalDecrypt(user.id!, data.userId, {
+              ciphertext: data.ciphertext,
+              encryptionVersion: data.encryptionVersion,
+              e2eeInitEnvelope: data.e2eeInitEnvelope as any,
+            });
+            const parsed = JSON.parse(plaintext);
+            const emoji = typeof parsed?.emoji === 'string' ? parsed.emoji : null;
+            if (!emoji) return;
+            setReactionsMap(prev => {
+              const next = { ...prev };
+              const msgReactions: Record<string, string[]> = { ...(next[data.messageId] || {}) };
+              for (const key of Object.keys(msgReactions)) {
+                msgReactions[key] = msgReactions[key].filter(id => id !== data.userId);
+                if (msgReactions[key].length === 0) delete msgReactions[key];
+              }
+              msgReactions[emoji] = [...(msgReactions[emoji] || []), data.userId];
+              next[data.messageId] = msgReactions;
+              return next;
+            });
+          } catch (err) {
+            console.error('Failed to decrypt incoming reaction', err);
+          }
+        })();
+      });
+      socket.on('message-reaction-removed', (data: { messageId: string; userId: string }) => {
+        setReactionsMap(prev => {
+          const next = { ...prev };
+          const msgReactions: Record<string, string[]> = { ...(next[data.messageId] || {}) };
+          for (const key of Object.keys(msgReactions)) {
+            msgReactions[key] = msgReactions[key].filter(id => id !== data.userId);
+            if (msgReactions[key].length === 0) delete msgReactions[key];
+          }
+          next[data.messageId] = msgReactions;
+          return next;
+        });
       });
 
       socket.on('message-pinned', (data: { conversationId: string; messageId: string }) => {
@@ -1317,6 +1363,8 @@ export default function ConversationScreen() {
         }
         socket.off('message-pinned');
         socket.off('message-unpinned');
+        socket.off('message-reaction');
+        socket.off('message-reaction-removed');
         socket.off('message-deleted-for-everyone');
         socket.off('messages-expired');
         socket.off('disappearing-timer-changed');
@@ -1413,6 +1461,56 @@ export default function ConversationScreen() {
     } catch {}
     return msg.content;
   }, [otherUserId, user?.id]);
+
+  // E2EE reactions (build 135). Keyed per-conversation, holds this user's
+  // OWN reaction choices in plaintext {messageId: emoji} — see
+  // hydrateReactionsMap below for why: the server only ever stores/relays
+  // ciphertext, and a Double Ratchet message key is deleted immediately
+  // after the sender uses it to encrypt, so a sender can never decrypt
+  // their own sent ciphertext again (the same forward-secrecy tradeoff
+  // already accepted for message bodies — see decryptMessageAsync's
+  // "[Sent encrypted]" placeholder above). Recording the plaintext locally
+  // at the moment it's chosen is the only way this device can keep
+  // showing your own reaction after the app restarts.
+  const ownReactionsStorageKey = `own-reactions-${conversationId}`;
+
+  const hydrateReactionsMap = useCallback(async (
+    rows: { messageId: string; userId: string; ciphertext: string; encryptionVersion: string; e2eeInitEnvelope: unknown }[],
+  ) => {
+    if (!user?.id) { setReactionsMap({}); return; }
+    let ownReactions: Record<string, string> = {};
+    try {
+      const raw = await AsyncStorage.getItem(ownReactionsStorageKey);
+      if (raw) ownReactions = JSON.parse(raw);
+    } catch {}
+
+    const map: Record<string, Record<string, string[]>> = {};
+    for (const row of rows) {
+      let emoji: string | null = null;
+      if (row.userId === user.id) {
+        emoji = ownReactions[row.messageId] ?? null;
+      } else {
+        try {
+          const plaintext = await signalDecrypt(user.id, row.userId, {
+            ciphertext: row.ciphertext,
+            encryptionVersion: row.encryptionVersion,
+            e2eeInitEnvelope: row.e2eeInitEnvelope as any,
+          });
+          const parsed = JSON.parse(plaintext);
+          if (typeof parsed?.emoji === 'string') emoji = parsed.emoji;
+        } catch (err) {
+          console.error('Failed to decrypt reaction', err);
+        }
+      }
+      if (!emoji) continue;
+      if (!map[row.messageId]) map[row.messageId] = {};
+      if (!map[row.messageId][emoji]) map[row.messageId][emoji] = [];
+      if (!map[row.messageId][emoji].includes(row.userId)) {
+        map[row.messageId][emoji].push(row.userId);
+      }
+    }
+    setReactionsMap(map);
+  }, [user?.id, ownReactionsStorageKey]);
 
   const decryptCacheRef = useRef<Record<string, string>>({});
   const tryDecrypt = useCallback((content: string | null, msgId?: string): string | null => {
@@ -3474,25 +3572,82 @@ export default function ConversationScreen() {
 
   const handleReact = async (emoji: string, overrideMessageId?: string) => {
     const messageId = overrideMessageId ?? reactionPickerMessageId ?? holdMessage?.id ?? null;
-    if (!messageId) return;
+    if (!messageId || !user?.id || !otherUserId) return;
     setReactionPickerMessageId(null);
+
+    const prevMapEntry = reactionsMap[messageId] || {};
+    let currentEmoji: string | null = null;
+    for (const [key, ids] of Object.entries(prevMapEntry)) {
+      if (ids.includes(user.id)) { currentEmoji = key; break; }
+    }
+    const isRemoving = currentEmoji === emoji;
+
+    // Optimistic local update. This is also the only moment this device
+    // ever learns the plaintext of its OWN reaction — the server only
+    // stores/relays ciphertext from here on, and Double Ratchet forward
+    // secrecy means we could never decrypt our own sent ciphertext again
+    // to recover it later.
+    setReactionsMap(prev => {
+      const next = { ...prev };
+      const msgReactions: Record<string, string[]> = { ...(next[messageId] || {}) };
+      for (const key of Object.keys(msgReactions)) {
+        msgReactions[key] = msgReactions[key].filter(id => id !== user.id);
+        if (msgReactions[key].length === 0) delete msgReactions[key];
+      }
+      if (!isRemoving) {
+        msgReactions[emoji] = [...(msgReactions[emoji] || []), user.id];
+      }
+      next[messageId] = msgReactions;
+      return next;
+    });
+
+    let prevOwnRaw: string | null = null;
+    try {
+      prevOwnRaw = await AsyncStorage.getItem(ownReactionsStorageKey);
+      const ownReactions: Record<string, string> = prevOwnRaw ? JSON.parse(prevOwnRaw) : {};
+      if (isRemoving) {
+        delete ownReactions[messageId];
+      } else {
+        ownReactions[messageId] = emoji;
+      }
+      await AsyncStorage.setItem(ownReactionsStorageKey, JSON.stringify(ownReactions));
+    } catch {}
+
+    const rollback = () => {
+      setReactionsMap(prev => ({ ...prev, [messageId]: prevMapEntry }));
+      if (prevOwnRaw !== null) {
+        AsyncStorage.setItem(ownReactionsStorageKey, prevOwnRaw).catch(() => {});
+      }
+    };
+
     try {
       const token = await getStoredToken();
       const url = new URL(`/api/messages/${messageId}/react`, getApiUrl());
+      if (isRemoving) {
+        const response = await fetch(url.toString(), {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!response.ok) rollback();
+        return;
+      }
+      const outgoing = await signalEncrypt(user.id, otherUserId, JSON.stringify({ emoji }), preKeyBundle);
       const response = await fetch(url.toString(), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ emoji }),
+        body: JSON.stringify({
+          ciphertext: outgoing.ciphertext,
+          encryptionVersion: outgoing.encryptionVersion,
+          e2eeInitEnvelope: outgoing.e2eeInitEnvelope,
+        }),
       });
-      if (response.ok) {
-        const { reactions } = await response.json();
-        setReactionsMap(prev => ({ ...prev, [messageId]: reactions ?? {} }));
-      }
+      if (!response.ok) rollback();
     } catch (error) {
       console.error('Error sending reaction:', error);
+      rollback();
     }
   };
 

@@ -294,6 +294,37 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+// ── E2EE message reactions (build 135) ──────────────────────────────────────
+// Previously `messages.reactions` was a plaintext jsonb map the server
+// could read directly — real, working, but genuinely just plain data at
+// rest, unlike message content. Reactions now travel the same way a
+// message body does: one row per (message, reactor), holding a Signal-
+// ratchet ciphertext of a tiny `__SC_REACTION_V1__{"emoji":"..."}` envelope
+// instead of the emoji itself. The server only ever sees which user
+// reacted to which message and when — never which emoji — and only relays
+// ciphertext for the client to decrypt and reassemble into the same
+// {emoji: [userIds]} shape the UI already used. One row per user per
+// message (matches the existing one-reaction-per-user toggle behavior);
+// removing a reaction deletes the row rather than encrypting a tombstone.
+// `messages.reactions` itself is left in place, unused, rather than
+// dropped — safer than a destructive migration for a column nothing
+// reads anymore.
+export const messageReactions = pgTable("message_reactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  ciphertext: text("ciphertext").notNull(),
+  encryptionVersion: text("encryption_version").notNull(),
+  e2eeInitEnvelope: jsonb("e2ee_init_envelope"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_message_reactions_message_id").on(table.messageId),
+  index("idx_message_reactions_user_id").on(table.userId),
+]);
+
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export const insertMessageReactionSchema = createInsertSchema(messageReactions).omit({ id: true, createdAt: true });
+
 export const hiddenLockerItems = pgTable("hidden_locker_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

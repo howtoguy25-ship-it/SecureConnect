@@ -4042,34 +4042,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // E2EE reactions (build 135): the body carries a Signal-ratchet ciphertext
+  // of a `__SC_REACTION_V1__{"emoji":"..."}` envelope, never the emoji
+  // itself — this route (and the socket broadcast below) never sees which
+  // emoji was picked, only that this user reacted to this message.
   app.post('/api/messages/:id/react', authenticateToken, async (req: AuthRequest, res) => {
     try {
       const messageId = req.params.id;
-      const { emoji } = req.body;
+      const { ciphertext, encryptionVersion, e2eeInitEnvelope } = req.body;
       const userId = req.userId!;
 
-      if (!emoji || typeof emoji !== 'string') {
-        return res.status(400).json({ error: 'emoji is required' });
+      if (!ciphertext || typeof ciphertext !== 'string') {
+        return res.status(400).json({ error: 'ciphertext is required' });
+      }
+      if (!encryptionVersion || typeof encryptionVersion !== 'string') {
+        return res.status(400).json({ error: 'encryptionVersion is required' });
       }
 
-      const updated = await storage.addMessageReaction(messageId, userId, emoji);
-      if (!updated) {
+      const message = await storage.getMessage(messageId);
+      if (!message) {
         return res.status(404).json({ error: 'Message not found' });
       }
+      const isParticipant = await storage.isConversationParticipant(message.conversationId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'Not a participant in this conversation' });
+      }
+
+      const reaction = await storage.upsertMessageReaction(messageId, userId, ciphertext, encryptionVersion, e2eeInitEnvelope ?? null);
 
       const io = getIO();
-      if (io && updated.conversationId) {
-        io.to(`conversation:${updated.conversationId}`).emit('message-reaction', {
+      if (io && message.conversationId) {
+        io.to(`conversation:${message.conversationId}`).emit('message-reaction', {
           messageId,
-          reactions: updated.reactions,
           userId,
-          emoji,
+          ciphertext: reaction.ciphertext,
+          encryptionVersion: reaction.encryptionVersion,
+          e2eeInitEnvelope: reaction.e2eeInitEnvelope,
         });
       }
 
-      res.json({ reactions: updated.reactions });
+      res.json({ success: true });
     } catch (error) {
       console.error('Error reacting to message:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/messages/:id/react', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const messageId = req.params.id;
+      const userId = req.userId!;
+
+      const message = await storage.getMessage(messageId);
+      if (!message) {
+        return res.status(404).json({ error: 'Message not found' });
+      }
+      const isParticipant = await storage.isConversationParticipant(message.conversationId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'Not a participant in this conversation' });
+      }
+
+      await storage.removeMessageReaction(messageId, userId);
+
+      const io = getIO();
+      if (io && message.conversationId) {
+        io.to(`conversation:${message.conversationId}`).emit('message-reaction-removed', {
+          messageId,
+          userId,
+        });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error removing reaction:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Batch fetch: the client calls this once per conversation open to rebuild
+  // its local reactionsMap, then relies on the socket events above for
+  // anything that changes while it's connected.
+  app.get('/api/conversations/:id/reactions', authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const conversationId = req.params.id;
+      const userId = req.userId!;
+      const isParticipant = await storage.isConversationParticipant(conversationId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'Not a participant in this conversation' });
+      }
+      const reactions = await storage.getMessageReactionsForConversation(conversationId);
+      res.json({
+        reactions: reactions.map(r => ({
+          messageId: r.messageId,
+          userId: r.userId,
+          ciphertext: r.ciphertext,
+          encryptionVersion: r.encryptionVersion,
+          e2eeInitEnvelope: r.e2eeInitEnvelope,
+        })),
+      });
+    } catch (error) {
+      console.error('Error fetching conversation reactions:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

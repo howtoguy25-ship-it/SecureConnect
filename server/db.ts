@@ -170,6 +170,41 @@ export async function ensureUserRecoverySchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS last_sign_in_at timestamp,
         ADD COLUMN IF NOT EXISTS last_sign_out_at timestamp;
     `);
+    // E2EE message reactions (build 135) — replaces the plaintext
+    // messages.reactions jsonb column with per-user ciphertext rows. See
+    // shared/schema.ts's messageReactions comment for the full design.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS message_reactions (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        message_id varchar NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        ciphertext text NOT NULL,
+        encryption_version text NOT NULL,
+        e2ee_init_envelope jsonb,
+        created_at timestamp DEFAULT now()
+      );
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_message_reactions_msg_user
+        ON message_reactions (message_id, user_id);
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions (message_id);
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_message_reactions_user_id ON message_reactions (user_id);
+    `);
+    // Login metadata at rest (build 135) — device/platform/ip on
+    // login_events are now stored encrypted with a server-held key
+    // (pgcrypto-free: encryption happens in the app layer, see
+    // encryptLoginField/decryptLoginField in server/loginMetadataCrypto.ts)
+    // rather than plaintext. This is NOT end-to-end encryption — the server
+    // can still decrypt it, same as before, for the concurrent-session-
+    // hijack detection feature that has to compare these values. It
+    // protects against a stolen database backup or raw-row DB access (an
+    // insider, a leaked pg_dump) exposing IPs/devices in plaintext, which
+    // the old column type did nothing to prevent. deviceId is left
+    // plaintext — see loginMetadataCrypto.ts's header comment for why.
   } catch (error) {
     console.error('ensureUserRecoverySchema failed (server will still start, but auth may 500 until this is fixed):', error);
   }
