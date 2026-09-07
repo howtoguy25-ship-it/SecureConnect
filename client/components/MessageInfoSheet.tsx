@@ -43,34 +43,34 @@ export function MessageInfoSheet({
           </ThemedText>
           {message ? (
             <View style={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", gap: Spacing.sm }}>
                 <ThemedText type="body" style={{ color: theme.textSecondary }}>Sent</ThemedText>
-                <ThemedText type="body">{new Date(message.createdAt).toLocaleString()}</ThemedText>
+                <ThemedText type="body" numberOfLines={1} style={{ flexShrink: 1, textAlign: "right" }}>{new Date(message.createdAt).toLocaleString()}</ThemedText>
               </View>
               {message.deliveredAt ? (
-                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: Spacing.sm }}>
                   <ThemedText type="body" style={{ color: theme.textSecondary }}>Delivered</ThemedText>
-                  <ThemedText type="body">{new Date(message.deliveredAt).toLocaleString()}</ThemedText>
+                  <ThemedText type="body" numberOfLines={1} style={{ flexShrink: 1, textAlign: "right" }}>{new Date(message.deliveredAt).toLocaleString()}</ThemedText>
                 </View>
               ) : null}
               {message.readAt ? (
-                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: Spacing.sm }}>
                   <ThemedText type="body" style={{ color: theme.textSecondary }}>Read</ThemedText>
-                  <ThemedText type="body">{new Date(message.readAt).toLocaleString()}</ThemedText>
+                  <ThemedText type="body" numberOfLines={1} style={{ flexShrink: 1, textAlign: "right" }}>{new Date(message.readAt).toLocaleString()}</ThemedText>
                 </View>
               ) : message.deliveredAt ? (
-                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: Spacing.sm }}>
                   <ThemedText type="body" style={{ color: theme.textSecondary }}>Read</ThemedText>
                   <ThemedText type="body" style={{ color: theme.textSecondary }}>Not read yet</ThemedText>
                 </View>
               ) : null}
               {message.expiresAt ? (
-                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: Spacing.sm }}>
                   <ThemedText type="body" style={{ color: theme.textSecondary }}>Expires</ThemedText>
-                  <ThemedText type="body">{new Date(message.expiresAt).toLocaleString()}</ThemedText>
+                  <ThemedText type="body" numberOfLines={1} style={{ flexShrink: 1, textAlign: "right" }}>{new Date(message.expiresAt).toLocaleString()}</ThemedText>
                 </View>
               ) : null}
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", gap: Spacing.sm }}>
                 <ThemedText type="body" style={{ color: theme.textSecondary }}>Encryption</ThemedText>
                 <ThemedText type="body">End-to-end (Pryvo)</ThemedText>
               </View>
