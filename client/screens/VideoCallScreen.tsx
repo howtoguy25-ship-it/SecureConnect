@@ -667,7 +667,12 @@ export default function VideoCallScreen() {
             <View style={[styles.largeAvatar, { backgroundColor: avatarColor }]}>
               <Feather name="user" size={80} color="#fff" />
             </View>
-            <ThemedText type="body" style={{ color: "rgba(255,255,255,0.8)", marginTop: Spacing.md }}>
+            <ThemedText
+              type="body"
+              style={{ color: "rgba(255,255,255,0.8)", marginTop: Spacing.md, paddingHorizontal: Spacing.xl }}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
               {receiverName}
             </ThemedText>
             {remoteIsMuted ? (
@@ -938,6 +943,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
+    maxWidth: "100%",
   },
   lockIcon: {
     width: 24,

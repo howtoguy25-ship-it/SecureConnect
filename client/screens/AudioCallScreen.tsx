@@ -367,7 +367,7 @@ export default function AudioCallScreen() {
             ) : null}
           </View>
 
-          <ThemedText type="h2" style={styles.name}>
+          <ThemedText type="h2" style={styles.name} numberOfLines={1} ellipsizeMode="tail">
             {receiverName}
           </ThemedText>
 
@@ -380,7 +380,12 @@ export default function AudioCallScreen() {
           {isFullyConnected && remoteIsMuted ? (
             <View style={[styles.remoteMutedBadge, { backgroundColor: theme.backgroundSecondary }]}>
               <Feather name="mic-off" size={12} color={theme.textSecondary} />
-              <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: 4 }}>
+              <ThemedText
+                type="small"
+                style={{ color: theme.textSecondary, marginLeft: 4, flexShrink: 1 }}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {receiverName} is muted
               </ThemedText>
             </View>
@@ -390,7 +395,12 @@ export default function AudioCallScreen() {
             <View style={[styles.lockIcon, { backgroundColor: theme.success + "20" }]}>
               <Feather name="lock" size={12} color={theme.success} />
             </View>
-            <ThemedText type="body" style={{ color: connectionError ? theme.error : theme.textSecondary }}>
+            <ThemedText
+              type="body"
+              style={{ color: connectionError ? theme.error : theme.textSecondary, flexShrink: 1 }}
+              numberOfLines={2}
+              ellipsizeMode="tail"
+            >
               {getStatusText()}
             </ThemedText>
           </View>
@@ -570,6 +580,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
+    maxWidth: "100%",
   },
   lockIcon: {
     width: 24,
