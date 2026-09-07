@@ -1699,6 +1699,7 @@ const styles = StyleSheet.create({
   statusName: {
     color: "#fff",
     fontWeight: "600",
+    flexShrink: 1,
   },
   caption: {
     color: "#fff",
