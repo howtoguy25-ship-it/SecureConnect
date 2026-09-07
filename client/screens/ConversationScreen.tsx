@@ -5041,7 +5041,9 @@ export default function ConversationScreen() {
                   <Feather name="clock" size={12} color={isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary} />
                   <ThemedText
                     type="small"
-                    style={{ color: isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary, marginLeft: 4 }}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    style={{ color: isOwn ? "rgba(255,255,255,0.7)" : theme.textSecondary, marginLeft: 4, flexShrink: 1 }}
                   >
                     Waiting for {otherUserName} to finish setup
                   </ThemedText>
@@ -5114,7 +5116,7 @@ export default function ConversationScreen() {
             </ThemedText>
           </View>
           <View style={styles.headerInfo}>
-            <ThemedText type="body" style={styles.headerName}>
+            <ThemedText type="body" style={styles.headerName} numberOfLines={1} ellipsizeMode="tail">
               {otherUserName}
             </ThemedText>
             {isPeerActive ? (
@@ -5323,7 +5325,7 @@ export default function ConversationScreen() {
             <Animated.View style={[styles.typingDot, { backgroundColor: theme.primary, opacity: 0.7 }]} />
             <Animated.View style={[styles.typingDot, { backgroundColor: theme.primary, opacity: 0.4 }]} />
           </View>
-          <ThemedText style={[styles.typingText, { color: theme.textSecondary }]}>
+          <ThemedText style={[styles.typingText, { color: theme.textSecondary }]} numberOfLines={1} ellipsizeMode="tail">
             {otherUserName} is typing...
           </ThemedText>
         </View>
@@ -5853,7 +5855,7 @@ export default function ConversationScreen() {
         <Pressable style={styles.modalOverlay} onPress={() => setShowPaymentModal(false)}>
           <View style={[styles.attachmentMenu, { backgroundColor: theme.backgroundSecondary, paddingBottom: insets.bottom + Spacing.lg }]}>
             <View style={styles.attachmentHeader}>
-              <ThemedText style={[styles.attachmentTitle, { color: theme.text }]}>
+              <ThemedText style={[styles.attachmentTitle, { color: theme.text, flexShrink: 1 }]} numberOfLines={1} ellipsizeMode="tail">
                 Send Payment to {otherUserName}
               </ThemedText>
               <Pressable onPress={() => setShowPaymentModal(false)}>
@@ -5953,7 +5955,7 @@ export default function ConversationScreen() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <ThemedText type="body" style={{ fontWeight: "600" }}>PayPal</ThemedText>
-                      <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                      <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={1}>
                         paypal.me/{otherUserData.paymentPaypalMeHandle}
                       </ThemedText>
                     </View>
@@ -7052,6 +7054,7 @@ const styles = StyleSheet.create({
   },
   headerInfo: {
     alignItems: "flex-start",
+    flexShrink: 1,
   },
   headerName: {
     fontWeight: "600",
@@ -7505,6 +7508,7 @@ const styles = StyleSheet.create({
   typingText: {
     fontSize: 13,
     fontStyle: "italic",
+    flexShrink: 1,
   },
   modalOverlay: {
     flex: 1,

@@ -385,7 +385,14 @@ export default function AdminDashboardScreen() {
               <View key={u.id} style={[styles.userItem, { borderTopColor: theme.border }]}>
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <ThemedText type="body" style={{ fontWeight: "500" }}>{u.displayName}</ThemedText>
+                    <ThemedText
+                      type="body"
+                      style={{ fontWeight: "500", flexShrink: 1 }}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {u.displayName}
+                    </ThemedText>
                     {u.isSuspended ? (
                       <View style={styles.suspendedBadge}>
                         <ThemedText type="small" style={{ color: "#FF3B30", fontWeight: "700", fontSize: 10 }}>
@@ -487,7 +494,14 @@ export default function AdminDashboardScreen() {
                     >
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <ThemedText type="body" style={{ fontWeight: "500" }}>{u.displayName}</ThemedText>
+                          <ThemedText
+                            type="body"
+                            style={{ fontWeight: "500", flexShrink: 1 }}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                          >
+                            {u.displayName}
+                          </ThemedText>
                           <View
                             style={[
                               styles.signInBadge,

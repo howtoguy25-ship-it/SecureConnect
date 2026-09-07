@@ -378,7 +378,12 @@ export default function WelcomeScreen() {
           {announcementData ? (
             <View style={styles.announcementBar}>
               <View style={styles.announcementDot} />
-              <ThemedText type="small" style={styles.announcementText}>
+              <ThemedText
+                type="small"
+                style={styles.announcementText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {announcementData.activeUsers.toLocaleString()} users online
                 {announcementData.recentMessage ? ` - ${announcementData.recentMessage}` : ''}
               </ThemedText>
@@ -693,6 +698,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     marginBottom: Spacing.xl,
     alignSelf: "center",
+    maxWidth: "100%",
   },
   announcementDot: {
     width: 8,
@@ -704,6 +710,7 @@ const styles = StyleSheet.create({
   announcementText: {
     color: "rgba(255,255,255,0.95)",
     fontWeight: "500",
+    flexShrink: 1,
   },
   brandingContainer: {
     alignItems: "center",

@@ -289,7 +289,12 @@ export default function AdminReportsScreen() {
                 {item.actionTaken ? (
                   <View style={[styles.actionRow, { borderTopColor: theme.border }]}>
                     <Feather name="info" size={14} color={theme.textSecondary} />
-                    <ThemedText type="small" style={{ color: theme.textSecondary, marginLeft: 6 }}>
+                    <ThemedText
+                      type="small"
+                      style={{ color: theme.textSecondary, marginLeft: 6, flexShrink: 1 }}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                    >
                       {item.actionTaken} · {formatWhen(item.reviewedAt)}
                     </ThemedText>
                   </View>
