@@ -212,7 +212,7 @@ export default function QRCodeScreen() {
             
             <View style={styles.usernameRow}>
               <Feather name="lock" size={14} color="#fff" />
-              <ThemedText type="body" style={styles.username}>
+              <ThemedText type="body" style={styles.username} numberOfLines={1} ellipsizeMode="tail">
                 {username}
               </ThemedText>
             </View>
@@ -348,11 +348,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: Spacing.lg,
     gap: Spacing.xs,
+    maxWidth: "100%",
   },
   username: {
     color: "#fff",
     fontWeight: "600",
     fontSize: 16,
+    flexShrink: 1,
   },
   actions: {
     flexDirection: "row",

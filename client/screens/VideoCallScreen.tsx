@@ -617,7 +617,12 @@ export default function VideoCallScreen() {
               <Feather name="user" size={64} color="#fff" />
             </View>
 
-            <ThemedText type="h2" style={[styles.name, { color: "#fff" }]}>
+            <ThemedText
+              type="h2"
+              style={[styles.name, { color: "#fff" }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
               {receiverName}
             </ThemedText>
 
@@ -631,7 +636,12 @@ export default function VideoCallScreen() {
               <View style={[styles.lockIcon, { backgroundColor: "rgba(76, 217, 100, 0.2)" }]}>
                 <Feather name="lock" size={12} color="#4CD964" />
               </View>
-              <ThemedText type="body" style={{ color: connectionError ? "#FF6B6B" : "rgba(255,255,255,0.7)" }}>
+              <ThemedText
+                type="body"
+                style={{ color: connectionError ? "#FF6B6B" : "rgba(255,255,255,0.7)", flexShrink: 1 }}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+              >
                 {getStatusText()}
               </ThemedText>
             </View>
@@ -907,7 +917,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  callerInfo: { alignItems: "center" },
+  callerInfo: { alignItems: "center", paddingHorizontal: Spacing.xl, maxWidth: "100%" },
   avatar: {
     width: 140,
     height: 140,

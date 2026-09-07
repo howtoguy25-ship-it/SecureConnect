@@ -1409,7 +1409,7 @@ export default function StatusScreen() {
         presentationStyle="fullScreen"
       >
         <View style={[styles.statusViewerContainer, { backgroundColor: "#000" }]}>
-          <View style={styles.statusViewerHeader}>
+          <View style={[styles.statusViewerHeader, { top: insets.top + Spacing.md }]}>
             <Pressable onPress={closeStatusViewer} style={styles.closeButton}>
               <Feather name="x" size={28} color="#fff" />
             </Pressable>
@@ -1801,7 +1801,6 @@ const styles = StyleSheet.create({
   },
   statusViewerHeader: {
     position: "absolute",
-    top: 60,
     left: 0,
     right: 0,
     flexDirection: "row",

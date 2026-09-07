@@ -165,7 +165,7 @@ export default function MessageRequestsScreen() {
           <Feather name="user" size={20} color="#fff" />
         </View>
         <View style={styles.requestInfo}>
-          <ThemedText type="body" style={{ fontWeight: "600" }}>
+          <ThemedText type="body" style={{ fontWeight: "600" }} numberOfLines={1} ellipsizeMode="tail">
             {item.senderName}
           </ThemedText>
           <ThemedText type="small" style={{ color: theme.textSecondary }}>

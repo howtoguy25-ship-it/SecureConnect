@@ -133,7 +133,7 @@ export default function FriendRequestsScreen() {
           )}
         </View>
         <View style={styles.requestInfo}>
-          <ThemedText type="body" style={{ fontWeight: "600" }}>
+          <ThemedText type="body" style={{ fontWeight: "600" }} numberOfLines={1} ellipsizeMode="tail">
             {item.displayName || "Someone"}
           </ThemedText>
           <ThemedText type="small" style={{ color: theme.textSecondary }}>

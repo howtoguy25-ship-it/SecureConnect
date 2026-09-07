@@ -383,6 +383,8 @@ export default function CallsScreen() {
           <ThemedText
             type="body"
             style={[styles.name, { color: missed ? theme.error : theme.text }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
             {otherUserName}
           </ThemedText>
@@ -469,7 +471,7 @@ export default function CallsScreen() {
       }}
     >
       <ThemedText style={styles.countryFlag}>{getFlagEmoji(item.code)}</ThemedText>
-      <ThemedText type="body" style={styles.countryName}>{item.name}</ThemedText>
+      <ThemedText type="body" style={styles.countryName} numberOfLines={1} ellipsizeMode="tail">{item.name}</ThemedText>
       <ThemedText type="body" style={{ color: theme.textSecondary }}>{item.dial}</ThemedText>
     </Pressable>
   );

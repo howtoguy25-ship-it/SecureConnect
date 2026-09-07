@@ -245,7 +245,7 @@ export default function ForwardPickerScreen() {
                 </ThemedText>
               </View>
               <View style={{ flex: 1 }}>
-                <ThemedText type="body" style={{ fontWeight: "600" }}>
+                <ThemedText type="body" style={{ fontWeight: "600" }} numberOfLines={1} ellipsizeMode="tail">
                   {item.otherUserName}
                 </ThemedText>
                 {item.lastMessage ? (

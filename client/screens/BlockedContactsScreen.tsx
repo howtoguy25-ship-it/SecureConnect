@@ -101,10 +101,10 @@ export default function BlockedContactsScreen() {
             </ThemedText>
           </View>
           <View style={styles.contactInfo}>
-            <ThemedText type="body" style={{ fontWeight: "500" }}>
+            <ThemedText type="body" style={{ fontWeight: "500" }} numberOfLines={1} ellipsizeMode="tail">
               {item.user.displayName || "Unknown"}
             </ThemedText>
-            <ThemedText type="small" style={{ color: theme.textSecondary }}>
+            <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={1}>
               {item.user.phoneNumber}
             </ThemedText>
             <ThemedText type="small" style={{ color: theme.textSecondary, fontSize: 11 }}>

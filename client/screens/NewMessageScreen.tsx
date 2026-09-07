@@ -324,7 +324,7 @@ export default function NewMessageScreen() {
       }}
     >
       <ThemedText style={styles.countryFlag}>{getFlagEmoji(item.code)}</ThemedText>
-      <ThemedText type="body" style={styles.countryName}>{item.name}</ThemedText>
+      <ThemedText type="body" style={styles.countryName} numberOfLines={1} ellipsizeMode="tail">{item.name}</ThemedText>
       <ThemedText type="body" style={{ color: theme.textSecondary }}>{item.dial}</ThemedText>
     </Pressable>
   );
