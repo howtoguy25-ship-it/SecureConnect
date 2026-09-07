@@ -401,10 +401,10 @@ export default function ProfileScreen() {
           style={styles.nameRow} 
           onPress={handleEditName}
         >
-          <ThemedText type="h3" style={styles.name}>
+          <ThemedText type="h3" style={[styles.name, { flexShrink: 1 }]} numberOfLines={1} ellipsizeMode="tail">
             {user?.displayName || "User"}
           </ThemedText>
-          <View style={[styles.editNameButton, { backgroundColor: theme.backgroundDefault }]}>
+          <View style={[styles.editNameButton, { backgroundColor: theme.backgroundDefault, flexShrink: 0 }]}>
             <Feather name="edit-2" size={14} color={nameChangeInfo.canChange ? theme.primary : theme.textSecondary} />
           </View>
         </Pressable>
@@ -856,6 +856,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.sm,
     marginBottom: Spacing.sm,
+    maxWidth: "100%",
   },
   editNameButton: {
     width: 28,
