@@ -3117,8 +3117,10 @@ export default function ConversationScreen() {
       if (message) {
         setMessages((prev) => [...prev, message]);
       }
+      return true;
     } catch (err) {
       console.error('sendOneContactCard error:', err);
+      return false;
     }
   };
 
@@ -3185,10 +3187,20 @@ export default function ConversationScreen() {
   const sendSelectedContacts = async () => {
     const picks = deviceContacts.filter((c) => selectedContactIds.has(c.id));
     setShowContactPicker(false);
+    let failed = 0;
     for (const c of picks) {
-      await sendOneContactCard(c.name, c.phone);
+      const ok = await sendOneContactCard(c.name, c.phone);
+      if (!ok) failed++;
     }
     flatListRef.current?.scrollToEnd({ animated: true });
+    if (failed > 0) {
+      Alert.alert(
+        'Could Not Send',
+        failed === picks.length
+          ? 'Your contact could not be sent. Please try again.'
+          : `${failed} of ${picks.length} contacts could not be sent.`,
+      );
+    }
   };
 
   const emojiCategories = {
@@ -3662,6 +3674,8 @@ export default function ConversationScreen() {
       haptics.success();
     } catch (error) {
       console.error('Error copying message:', error);
+      haptics.error();
+      Alert.alert('Could Not Copy', 'Please try again.');
     }
     setShowMessageOptions(false);
     setSelectedMessage(null);
@@ -4022,9 +4036,12 @@ export default function ConversationScreen() {
       if (res.ok) {
         setPinnedMessageId(isUnpin ? null : id);
         haptics.success();
+      } else {
+        Alert.alert('Could Not Pin', 'Please check your connection and try again.');
       }
     } catch (e) {
       console.error('pin err', e);
+      Alert.alert('Could Not Pin', 'Please check your connection and try again.');
     }
   };
 
