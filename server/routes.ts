@@ -3194,7 +3194,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get numberType from query parameter, default to 'personal'
       const numberType = (req.query.numberType as string) || 'personal';
       const conversations = await storage.getConversations(req.userId!, numberType);
-      
+
+      // Same sealed-sender contract as GET /:id/messages — a sealed
+      // lastMessage's real senderId must never reach a non-sender recipient
+      // here either, now that this route also surfaces the last message's
+      // ciphertext for client-side preview decryption.
+      const { sanitizeOneForRecipient } = await import('./sealedSender');
+      for (const conv of conversations) {
+        if (conv.lastMessage) {
+          conv.lastMessage = await sanitizeOneForRecipient(conv.lastMessage, req.userId!);
+        }
+      }
+
       // Inject mock conversations for Apple reviewers in dev mode (only for personal mode)
       const isReviewer = await isAppleReviewerUser(req.userId!);
       if (isReviewer && isDevMode() && numberType === 'personal') {

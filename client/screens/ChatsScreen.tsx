@@ -19,6 +19,7 @@ import { AnimatedPressable } from "@/components/AnimatedPressable";
 import { ChatItemSkeleton } from "@/components/Skeleton";
 import { AdBanner } from "@/components/AdBanner";
 import { getSocket } from "@/lib/socket";
+import { decryptMessage as signalDecrypt } from "@/utils/crypto/signalProtocol";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -35,6 +36,20 @@ interface Conversation {
   id: string;
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
+  // Raw ciphertext of the actual last message — the server can't produce a
+  // real preview itself (E2EE means it never sees the plaintext), so
+  // lastMessagePreview is only ever a generic type-based string ("Encrypted
+  // message"/"Sent a photo"). This is decrypted client-side, once, right
+  // after fetch, to replace it with the real text for text messages sent
+  // by the other person (see decryptListPreviews below).
+  lastMessage?: {
+    id: string;
+    content: string | null;
+    encryptionVersion: string | null;
+    e2eeInitEnvelope: unknown;
+    senderId: string | null;
+    mediaType: string | null;
+  } | null;
   otherUser: {
     id: string;
     displayName: string;
@@ -246,14 +261,53 @@ export default function ChatsScreen() {
       });
       
       if (response.ok) {
-        const data = await response.json();
+        const data: Conversation[] = await response.json();
         setConversations(data);
+        void decryptListPreviews(data);
       }
     } catch (error) {
       console.error('Error fetching conversations:', error);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
+    }
+  };
+
+  // Real per-row preview text, decrypted locally — see the Conversation
+  // interface's lastMessage comment for why the server can't do this
+  // itself. Only attempted for plain-text messages (mediaType null) sent
+  // by the OTHER participant: media rows already get a good type-based
+  // label from lastMessagePreview ("Sent a photo"), and a message this
+  // device itself sent can never be decrypted again (Double Ratchet
+  // forward secrecy consumes the key on send — same limitation already
+  // accepted for the conversation view's own "[Sent encrypted]" bubbles),
+  // so those rows just keep their existing generic preview untouched.
+  const decryptListPreviews = async (list: Conversation[]) => {
+    if (!user?.id) return;
+    for (const conv of list) {
+      const lm = conv.lastMessage;
+      const otherId = conv.otherUser?.id;
+      if (!lm || !otherId || !lm.content) continue;
+      if (lm.mediaType) continue;
+      if (lm.senderId === user.id) continue;
+      if (lm.encryptionVersion !== 'v2-signal' && lm.encryptionVersion !== 'v3-signal-layer2') continue;
+      try {
+        const theirId = lm.senderId ?? otherId; // sealed-sender rows arrive with senderId stripped
+        const plaintext = await signalDecrypt(user.id, theirId, {
+          ciphertext: lm.content,
+          encryptionVersion: lm.encryptionVersion,
+          e2eeInitEnvelope: lm.e2eeInitEnvelope as any,
+        });
+        setConversations((prev) => prev.map((c) => (
+          c.id === conv.id && c.lastMessage?.id === lm.id
+            ? { ...c, lastMessagePreview: plaintext }
+            : c
+        )));
+      } catch {
+        // No session yet, wrong/rotated keys, tampered payload — keep the
+        // existing generic preview rather than showing raw ciphertext or
+        // an error string in the chat list.
+      }
     }
   };
 

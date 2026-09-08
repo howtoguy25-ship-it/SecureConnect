@@ -405,12 +405,54 @@ export class DatabaseStorage implements IStorage {
       ));
     const pendingForMeSet = new Set(pendingForMe.map(r => r.conversationId));
 
+    // Step 4: the actual last message's ciphertext for each conversation, so
+    // the client can decrypt a REAL preview locally (the same way it renders
+    // any other message) instead of only ever showing the generic
+    // server-computed lastMessagePreview string ("Encrypted message"/"Sent a
+    // photo"/etc.) — that string exists for the notification/no-session case
+    // and stays as the client-side fallback, but the whole point of E2EE is
+    // that the server never learns the plaintext, so it was never able to
+    // produce anything better than a generic placeholder itself. This is
+    // still just ciphertext leaving the server — no different in kind from
+    // what GET /:id/messages already returns for every message in a
+    // conversation this user is already a participant in.
+    const lastMessageRows = await db.execute<{
+      id: string;
+      conversation_id: string;
+      content: string | null;
+      encryption_version: string | null;
+      e2ee_init_envelope: unknown;
+      sender_id: string;
+      media_type: string | null;
+      sealed_sender: boolean | null;
+      outer_sender_virtual_number_id: string | null;
+    }>(sql`
+      SELECT DISTINCT ON (conversation_id) id, conversation_id, content, encryption_version, e2ee_init_envelope, sender_id, media_type, sealed_sender, outer_sender_virtual_number_id
+      FROM messages
+      WHERE conversation_id = ANY(${conversationIds})
+      ORDER BY conversation_id, created_at DESC
+    `);
+    const lastMessageMap = new Map<string, { id: string; content: string | null; encryptionVersion: string | null; e2eeInitEnvelope: unknown; senderId: string; mediaType: string | null; sealedSender: boolean; outerSenderVirtualNumberId: string | null }>();
+    for (const row of lastMessageRows.rows) {
+      lastMessageMap.set(row.conversation_id, {
+        id: row.id,
+        content: row.content,
+        encryptionVersion: row.encryption_version,
+        e2eeInitEnvelope: row.e2ee_init_envelope,
+        senderId: row.sender_id,
+        mediaType: row.media_type,
+        sealedSender: row.sealed_sender === true,
+        outerSenderVirtualNumberId: row.outer_sender_virtual_number_id,
+      });
+    }
+
     // Combine results
     const results = filteredParticipations.map(p => ({
       id: p.convId,
       numberType: p.convNumberType,
       lastMessageAt: p.convLastMessageAt,
       lastMessagePreview: p.convLastMessagePreview,
+      lastMessage: lastMessageMap.get(p.conversationId) || null,
       createdAt: p.convCreatedAt,
       otherUser: otherUserMap.get(p.conversationId) || null,
       unreadCount: p.unreadCount || 0,
