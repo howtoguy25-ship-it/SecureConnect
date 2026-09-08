@@ -1666,16 +1666,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.userId!);
       if (!user) return res.status(404).json({ error: 'User not found' });
 
-      const [personalConvos, appConvos, friendsList, blocked] = await Promise.all([
+      // 'app' is not a real numberType anywhere else in this codebase — the
+      // only two are 'personal' and 'virtual' (see e.g. ChatsScreen's
+      // numberMode, or the conversations.numberType column comment). This
+      // was silently fetching zero conversations for this half of the
+      // export ('app' never matches any real conversation row), so any
+      // history over the user's Pryvo virtual number was missing from
+      // their own "download your data" export.
+      const [personalConvos, virtualConvos, friendsList, blocked] = await Promise.all([
         storage.getConversations(req.userId!, 'personal'),
-        storage.getConversations(req.userId!, 'app'),
+        storage.getConversations(req.userId!, 'virtual'),
         storage.getFriends(req.userId!),
         storage.getBlockedUsers(req.userId!),
       ]);
 
       const virtualNumber = user.virtualNumberId ? await storage.getVirtualNumber(user.virtualNumberId) : null;
 
-      const conversationSummaries = [...personalConvos, ...appConvos].map((c: any) => ({
+      const conversationSummaries = [...personalConvos, ...virtualConvos].map((c: any) => ({
         withDisplayName: c.otherUser?.displayName ?? null,
         withPhoneNumber: c.otherUser?.phoneNumber ?? null,
         numberType: c.numberType,
