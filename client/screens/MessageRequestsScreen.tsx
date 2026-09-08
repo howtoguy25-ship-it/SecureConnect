@@ -105,7 +105,7 @@ export default function MessageRequestsScreen() {
         const data = await response.json();
         haptics.success();
         setRequests(prev => prev.filter(r => r.id !== request.id));
-        
+
         if (data.conversationId) {
           navigation.navigate("Conversation", {
             conversationId: data.conversationId,
@@ -113,9 +113,12 @@ export default function MessageRequestsScreen() {
             otherUserName: request.senderName,
           });
         }
+      } else {
+        Alert.alert('Error', 'Could not accept this request. Please try again.');
       }
     } catch (error) {
       console.error('Error accepting request:', error);
+      Alert.alert('Error', 'Could not accept this request. Please try again.');
     }
   };
 
@@ -132,14 +135,19 @@ export default function MessageRequestsScreen() {
             try {
               const token = await getStoredToken();
               const baseUrl = getApiUrl();
-              await fetch(new URL(`/api/message-requests/${requestId}/decline`, baseUrl), {
+              const response = await fetch(new URL(`/api/message-requests/${requestId}/decline`, baseUrl), {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
               });
-              haptics.warning();
-              setRequests(prev => prev.filter(r => r.id !== requestId));
+              if (response.ok) {
+                haptics.warning();
+                setRequests(prev => prev.filter(r => r.id !== requestId));
+              } else {
+                Alert.alert('Error', 'Could not decline this request. Please try again.');
+              }
             } catch (error) {
               console.error('Error declining request:', error);
+              Alert.alert('Error', 'Could not decline this request. Please try again.');
             }
           },
         },

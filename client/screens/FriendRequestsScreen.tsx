@@ -94,14 +94,19 @@ export default function FriendRequestsScreen() {
             try {
               const token = await getStoredToken();
               const baseUrl = getApiUrl();
-              await fetch(new URL(`/api/friends/requests/${requestId}/decline`, baseUrl), {
+              const response = await fetch(new URL(`/api/friends/requests/${requestId}/decline`, baseUrl), {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
               });
-              haptics.warning();
-              setRequests(prev => prev.filter(r => r.id !== requestId));
+              if (response.ok) {
+                haptics.warning();
+                setRequests(prev => prev.filter(r => r.id !== requestId));
+              } else {
+                Alert.alert('Error', 'Could not decline this request. Please try again.');
+              }
             } catch (error) {
               console.error('Error declining friend request:', error);
+              Alert.alert('Error', 'Could not decline this request. Please try again.');
             } finally {
               setBusyId(null);
             }

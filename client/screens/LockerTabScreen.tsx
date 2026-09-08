@@ -173,18 +173,28 @@ export default function LockerTabScreen() {
   };
 
   const handleDeleteItem = async (id: string) => {
-    try {
-      const token = await getStoredToken();
-      const baseUrl = getApiUrl();
-      await fetch(new URL(`/api/locker/${id}`, baseUrl), {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      
-      setItems((prev) => prev.filter((item) => item.id !== id));
-    } catch (error) {
-      console.error('Error deleting item:', error);
-    }
+    const doDelete = async () => {
+      try {
+        const token = await getStoredToken();
+        const baseUrl = getApiUrl();
+        const response = await fetch(new URL(`/api/locker/${id}`, baseUrl), {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (response.ok) {
+          setItems((prev) => prev.filter((item) => item.id !== id));
+        } else {
+          Alert.alert('Error', 'Failed to delete item. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error deleting item:', error);
+        Alert.alert('Error', 'Failed to delete item. Please try again.');
+      }
+    };
+    Alert.alert('Delete Item', 'Remove this item from your locker? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: doDelete },
+    ]);
   };
 
   const handleChangePin = async () => {
