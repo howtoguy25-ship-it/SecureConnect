@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, StyleSheet, TextInput, Pressable, Alert, Platform, Animated, ActivityIndicator } from "react-native";
+import { View, StyleSheet, TextInput, Pressable, Alert, Platform, Animated, ActivityIndicator, KeyboardAvoidingView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/ThemedText";
 import { PinPad } from "@/components/PinPad";
@@ -114,95 +114,125 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
   };
 
   return (
-    <View style={[styles.overlay, { backgroundColor: theme.backgroundRoot, paddingTop: insets.top + Spacing.xl, paddingBottom: insets.bottom + Spacing.xl }]}>
-      <View style={styles.header}>
-        <View style={[styles.iconRing, { borderColor: theme.primary + "40", backgroundColor: theme.primary + "15" }]}>
-          <Feather name="lock" size={28} color={theme.primary} />
-        </View>
-        <ThemedText type="h2" style={{ marginTop: Spacing.md, fontWeight: "700" }}>
-          Pryvo Locked
-        </ThemedText>
-        <ThemedText type="body" style={{ color: theme.textSecondary, marginTop: 4 }}>
-          {mode === "numeric" ? "Enter your PIN" : "Enter your passcode"}
-        </ThemedText>
-      </View>
-
-      <Animated.View
-        style={[
-          styles.body,
-          {
-            transform: [
-              {
-                translateX: shakeAnim.interpolate({
-                  inputRange: [-1, 0, 1],
-                  outputRange: [-10, 0, 10],
-                }),
-              },
-            ],
-          },
-        ]}
+    <View style={[styles.overlay, { backgroundColor: theme.backgroundRoot }]}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
       >
-        {!settingsLoaded ? (
-          <ActivityIndicator size="large" color={theme.primary} />
-        ) : lockoutSeconds > 0 ? (
-          <View style={styles.lockoutBox}>
-            <Feather name="clock" size={22} color={theme.error} />
-            <ThemedText type="body" style={{ color: theme.error, marginTop: Spacing.sm, textAlign: "center" }}>
-              Too many attempts.{"\n"}Try again in {lockoutSeconds}s
-            </ThemedText>
-          </View>
-        ) : mode === "numeric" ? (
-          <PinPad
-            value={entered}
-            onChange={(v) => {
-              setError(null);
-              setEntered(v);
-            }}
-            maxLength={pinLength ?? 8}
-            theme={theme}
-            disabled={isChecking}
-          />
-        ) : (
-          <View style={styles.alphaWrap}>
-            <TextInput
-              value={entered}
-              onChangeText={(v) => {
-                setError(null);
-                setEntered(v);
-              }}
-              secureTextEntry
-              autoFocus
-              editable={!isChecking}
-              placeholder="Passcode"
-              placeholderTextColor={theme.textSecondary}
-              style={[styles.alphaInput, { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundTertiary }]}
-              onSubmitEditing={() => attemptUnlock(entered)}
-              returnKeyType="done"
-            />
-            <Pressable
-              style={[styles.unlockButton, { backgroundColor: entered.length > 0 ? theme.primary : theme.border }]}
-              onPress={() => attemptUnlock(entered)}
-              disabled={entered.length === 0 || isChecking}
-            >
-              <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>
-                Unlock
+        <View
+          style={[
+            styles.content,
+            { paddingTop: insets.top + Spacing["2xl"], paddingBottom: insets.bottom + Spacing.lg },
+          ]}
+        >
+          <View style={styles.centerGroup}>
+            <View style={styles.header}>
+              <View style={[styles.iconGlow, { backgroundColor: theme.primary + "0D" }]}>
+                <View style={[styles.iconRing, { borderColor: theme.primary + "40", backgroundColor: theme.primary + "1A" }]}>
+                  <Feather name="lock" size={30} color={theme.primary} />
+                </View>
+              </View>
+              <ThemedText type="h1" style={{ marginTop: Spacing.lg, fontWeight: "800" }}>
+                Pryvo Locked
               </ThemedText>
-            </Pressable>
+              <ThemedText type="body" style={{ color: theme.textSecondary, marginTop: 6 }}>
+                {mode === "numeric" ? "Enter your PIN to continue" : "Enter your passcode to continue"}
+              </ThemedText>
+            </View>
+
+            <Animated.View
+              style={[
+                styles.body,
+                {
+                  transform: [
+                    {
+                      translateX: shakeAnim.interpolate({
+                        inputRange: [-1, 0, 1],
+                        outputRange: [-10, 0, 10],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              {!settingsLoaded ? (
+                <ActivityIndicator size="large" color={theme.primary} />
+              ) : lockoutSeconds > 0 ? (
+                <View style={[styles.lockoutBox, { backgroundColor: theme.error + "12", borderColor: theme.error + "30" }]}>
+                  <Feather name="clock" size={22} color={theme.error} />
+                  <ThemedText type="body" style={{ color: theme.error, marginTop: Spacing.sm, textAlign: "center" }}>
+                    Too many attempts.{"\n"}Try again in {lockoutSeconds}s
+                  </ThemedText>
+                </View>
+              ) : mode === "numeric" ? (
+                <PinPad
+                  value={entered}
+                  onChange={(v) => {
+                    setError(null);
+                    setEntered(v);
+                  }}
+                  maxLength={pinLength ?? 8}
+                  theme={theme}
+                  disabled={isChecking}
+                />
+              ) : (
+                <View style={styles.alphaWrap}>
+                  <View style={[styles.alphaInputWrap, { borderColor: theme.border, backgroundColor: theme.backgroundSecondary }]}>
+                    <Feather name="key" size={18} color={theme.textSecondary} style={styles.alphaInputIcon} />
+                    <TextInput
+                      value={entered}
+                      onChangeText={(v) => {
+                        setError(null);
+                        setEntered(v);
+                      }}
+                      secureTextEntry
+                      autoFocus
+                      editable={!isChecking}
+                      placeholder="Passcode"
+                      placeholderTextColor={theme.textSecondary}
+                      style={[styles.alphaInput, { color: theme.text }]}
+                      onSubmitEditing={() => attemptUnlock(entered)}
+                      returnKeyType="done"
+                    />
+                  </View>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.unlockButton,
+                      { backgroundColor: entered.length > 0 ? theme.primary : theme.border, opacity: pressed ? 0.85 : 1 },
+                    ]}
+                    onPress={() => attemptUnlock(entered)}
+                    disabled={entered.length === 0 || isChecking}
+                  >
+                    {isChecking ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Feather name="unlock" size={17} color="#fff" style={{ marginRight: 8 }} />
+                        <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>
+                          Unlock
+                        </ThemedText>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              )}
+
+              {error ? (
+                <ThemedText type="small" style={{ color: theme.error, marginTop: Spacing.md, textAlign: "center" }}>
+                  {error}
+                </ThemedText>
+              ) : null}
+            </Animated.View>
           </View>
-        )}
 
-        {error ? (
-          <ThemedText type="small" style={{ color: theme.error, marginTop: Spacing.md, textAlign: "center" }}>
-            {error}
-          </ThemedText>
-        ) : null}
-      </Animated.View>
-
-      <Pressable onPress={handleForgotPin} style={styles.forgotButton} hitSlop={12}>
-        <ThemedText type="small" style={{ color: theme.textSecondary, fontWeight: "600" }}>
-          Forgot PIN?
-        </ThemedText>
-      </Pressable>
+          <Pressable onPress={handleForgotPin} style={styles.forgotButton} hitSlop={12}>
+            <ThemedText type="small" style={{ color: theme.textSecondary, fontWeight: "600" }}>
+              Forgot PIN?
+            </ThemedText>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -211,16 +241,40 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 999,
+  },
+  flex: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: Spacing.xl,
   },
+  // The whole icon/title/input/button group is centered as ONE block
+  // (rather than the header pinned to the top and the input pinned to
+  // dead-center of the full screen, which is what produced the huge
+  // empty gap between them) — reads as one intentional card instead of
+  // three disconnected pieces floating in a mostly-empty screen.
+  centerGroup: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
   header: {
     alignItems: "center",
   },
+  iconGlow: {
+    width: 108,
+    height: 108,
+    borderRadius: BorderRadius.full,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   iconRing: {
-    width: 64,
-    height: 64,
+    width: 68,
+    height: 68,
     borderRadius: BorderRadius.full,
     borderWidth: 2,
     justifyContent: "center",
@@ -229,34 +283,46 @@ const styles = StyleSheet.create({
   body: {
     alignItems: "center",
     justifyContent: "center",
-    flex: 1,
+    marginTop: Spacing["2xl"],
   },
   lockoutBox: {
     alignItems: "center",
     paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
   },
   alphaWrap: {
     width: "100%",
     alignItems: "center",
     gap: Spacing.md,
   },
-  alphaInput: {
+  alphaInputWrap: {
     width: "100%",
     maxWidth: 320,
+    flexDirection: "row",
+    alignItems: "center",
     borderWidth: 1,
-    borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.lg,
+  },
+  alphaInputIcon: {
+    marginRight: Spacing.sm,
+  },
+  alphaInput: {
+    flex: 1,
+    paddingVertical: Spacing.md,
     fontSize: 16,
-    textAlign: "center",
     letterSpacing: 2,
   },
   unlockButton: {
     width: "100%",
     maxWidth: 320,
+    flexDirection: "row",
     paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.full,
     alignItems: "center",
+    justifyContent: "center",
   },
   forgotButton: {
     paddingVertical: Spacing.sm,
