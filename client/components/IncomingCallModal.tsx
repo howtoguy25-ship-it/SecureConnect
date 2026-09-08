@@ -124,7 +124,7 @@ export default function IncomingCallModal() {
 
           <View style={[styles.actions, { paddingBottom: insets.bottom + Spacing["4xl"] }]}>
             <Pressable
-              style={[styles.rejectButton, { backgroundColor: '#FF3B30' }]}
+              style={[styles.rejectButton, { backgroundColor: theme.error }]}
               onPress={handleReject}
             >
               <Feather name="phone-off" size={32} color="#fff" />

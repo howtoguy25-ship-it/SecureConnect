@@ -70,10 +70,10 @@ export function DeleteConfirmSheet({
                 <View style={[sheetStyles.divider, { backgroundColor: theme.border }]} />
                 <Row
                   icon="alert-octagon"
-                  iconColor="#FF3B30"
-                  iconBg="#FF3B301a"
+                  iconColor={theme.error}
+                  iconBg={theme.error + "1a"}
                   title="Delete for everyone"
-                  titleColor="#FF3B30"
+                  titleColor={theme.error}
                   subtitle={within1h ? "Remove for both sides" : "Window expired — over 1 hour old"}
                   theme={theme}
                   disabled={!within1h}
