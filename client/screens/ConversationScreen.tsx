@@ -4768,10 +4768,34 @@ export default function ConversationScreen() {
                     );
                   }
                 }}
+                onError={(e) => {
+                  // Without this, a local file that decrypted+wrote fine
+                  // (encryptedMediaClient already verifies the write itself)
+                  // but that expo-image's native decoder can't actually
+                  // render for some reason had no failure path at all —
+                  // neither onLoad nor any error state ever fired, so the
+                  // bubble just stayed a permanently blank
+                  // theme.backgroundDefault square forever with nothing to
+                  // tap and no indication anything was wrong. Legacy
+                  // plaintext messages (no mediaEnvelope) have no
+                  // encrypted-fetch retry path to fall back into, so this
+                  // only re-arms the retry state for real E2EE media.
+                  console.error('[image] failed to render decrypted local file:', effectiveMediaUrl, e.error);
+                  if (!mediaEnvelope) return;
+                  mediaFetchState.current.set(item.id, 'error');
+                  mediaFetchErrorMessage.current.set(item.id, `Image failed to load: ${String(e.error).slice(0, 160)}`);
+                  setDecryptedMediaUris((prev) => {
+                    if (!(item.id in prev)) return prev;
+                    const next = { ...prev };
+                    delete next[item.id];
+                    return next;
+                  });
+                  bumpMediaFetchTick();
+                }}
               />
             </Pressable>
           ) : null}
-          
+
           {hasMedia && effectiveMediaType === 'video' && effectiveMediaUrl ? (
             // Previously just a static play-icon placeholder with no real
             // thumbnail, no duration, and no tap handler at all — a video
