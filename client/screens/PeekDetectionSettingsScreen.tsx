@@ -140,6 +140,7 @@ export default function PeekDetectionSettingsScreen() {
             value={enabled}
             onValueChange={handleToggle}
             trackColor={{ false: theme.border, true: theme.primary }}
+            accessibilityLabel="Peek Detection"
           />
         </View>
       </View>

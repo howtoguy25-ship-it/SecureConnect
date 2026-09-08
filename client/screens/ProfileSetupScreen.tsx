@@ -119,6 +119,9 @@ export default function ProfileSetupScreen() {
             <Pressable
               key={index}
               onPress={() => setAvatarIndex(index)}
+              accessibilityRole="button"
+              accessibilityLabel={`Avatar color ${index + 1}`}
+              accessibilityState={{ selected: index === avatarIndex }}
               style={[
                 styles.avatarOption,
                 {

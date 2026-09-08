@@ -311,6 +311,8 @@ export const MessageHoldOverlay: React.FC<Props> = ({
                     },
                     pressed && { transform: [{ scale: 0.9 }] },
                   ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`React with ${emoji}`}
                 >
                   <ThemedText style={styles.reactionEmoji}>{emoji}</ThemedText>
                 </Pressable>

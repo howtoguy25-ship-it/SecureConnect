@@ -62,7 +62,7 @@ export default function TrustedDevicesScreen() {
     getDeviceId().then(setCurrentDeviceId).catch(() => {});
   }, []);
 
-  const { data: devices, isLoading, error } = useQuery<Device[]>({
+  const { data: devices, isLoading, error, refetch } = useQuery<Device[]>({
     queryKey: ["/api/e2ee/devices"],
     queryFn: async () => {
       const token = await getStoredToken();
@@ -169,6 +169,9 @@ export default function TrustedDevicesScreen() {
         <Pressable
           onPress={() => confirmRevoke(item)}
           disabled={isRevoking}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isCurrent ? "Revoke this device" : `Revoke device ${item.deviceId.slice(0, 8)}`}
           style={({ pressed }) => [
             styles.revokeBtn,
             { backgroundColor: theme.error + "14", opacity: pressed || isRevoking ? 0.7 : 1 },
@@ -196,6 +199,15 @@ export default function TrustedDevicesScreen() {
           <ThemedText type="body" style={{ color: theme.textSecondary, marginTop: 12 }}>
             Failed to load devices.
           </ThemedText>
+          <Pressable
+            onPress={() => refetch()}
+            style={({ pressed }) => [
+              styles.retryBtn,
+              { backgroundColor: theme.primary, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <ThemedText type="body" style={{ color: "#fff", fontWeight: "600" }}>Retry</ThemedText>
+          </Pressable>
         </View>
       ) : (
         <FlatList
@@ -236,6 +248,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: Spacing.xl,
+  },
+  retryBtn: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: BorderRadius.md,
   },
   infoBar: {
     flexDirection: "row",

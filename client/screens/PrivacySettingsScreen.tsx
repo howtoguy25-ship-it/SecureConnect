@@ -58,6 +58,7 @@ function PrivacyRow({ icon, title, subtitle, value, onValueChange, disabled, the
         onValueChange={onValueChange}
         disabled={!!disabled}
         trackColor={{ false: theme.border, true: theme.primary }}
+        accessibilityLabel={title}
       />
     </View>
   );

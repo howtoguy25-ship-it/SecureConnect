@@ -290,7 +290,8 @@ export default function ProfileScreen() {
             });
             if (!resp.ok) {
               const text = await resp.text().catch(() => "");
-              throw new Error(`Upload failed (${resp.status}) ${text}`.trim());
+              console.error("Avatar upload failed:", resp.status, text);
+              throw new Error(`Upload failed (${resp.status}). Please try again.`);
             }
             const data = await resp.json();
             avatarUrl = data.avatarUrl;
@@ -360,7 +361,12 @@ export default function ProfileScreen() {
       scrollIndicatorInsets={{ bottom: insets.bottom }}
     >
       <View style={styles.profileHeader}>
-        <Pressable onPress={handleChangeAvatar} disabled={isUploadingAvatar}>
+        <Pressable
+          onPress={handleChangeAvatar}
+          disabled={isUploadingAvatar}
+          accessibilityRole="button"
+          accessibilityLabel="Change profile picture"
+        >
           <View style={styles.avatarContainer}>
             {user?.avatarUrl && !avatarLoadFailed ? (
               <Image

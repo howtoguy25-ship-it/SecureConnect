@@ -209,6 +209,18 @@ export default function QRCodeScreen() {
             <View style={styles.qrContainer}>
               {qrDataUrl && !isLoadingQR ? (
                 <Image source={{ uri: qrDataUrl }} style={styles.qrImage} contentFit="contain" />
+              ) : qrLoadFailed && !isLoadingQR ? (
+                <Pressable
+                  onPress={generateQRCode}
+                  style={[styles.qrPlaceholder, { backgroundColor: "#fff" }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading QR code"
+                >
+                  <Feather name="refresh-cw" size={22} color={currentColor.primary} />
+                  <ThemedText type="small" style={{ color: currentColor.primary, marginTop: 6, textAlign: "center" }}>
+                    Couldn't load. Tap to retry.
+                  </ThemedText>
+                </Pressable>
               ) : (
                 <View style={[styles.qrPlaceholder, { backgroundColor: "#fff" }]}>
                   <ActivityIndicator size="large" color={currentColor.primary} />
@@ -347,6 +359,7 @@ const styles = StyleSheet.create({
     height: 180,
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
   },
   usernameRow: {
