@@ -405,6 +405,9 @@ export default function CallsScreen() {
             style={[styles.callButton, { backgroundColor: theme.primary + "15" }]}
             scaleValue={0.85}
             hapticType="light"
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={item.type === "video" ? "Video call" : "Call"}
             onPress={async () => {
               const otherId = isOutgoing ? item.receiverId : item.callerId;
               if (item.type === "video") {
@@ -544,7 +547,13 @@ export default function CallsScreen() {
         <View style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}>
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
             <ThemedText type="body" style={{ fontWeight: "600" }}>Call Details</ThemedText>
-            <Pressable onPress={() => { setShowCallDetail(false); setSelectedCall(null); }} style={styles.closeButton}>
+            <Pressable
+              onPress={() => { setShowCallDetail(false); setSelectedCall(null); }}
+              style={styles.closeButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
               <Feather name="x" size={24} color={theme.text} />
             </Pressable>
           </View>
@@ -678,6 +687,9 @@ export default function CallsScreen() {
           onPress={() => setShowDialer(true)}
           scaleValue={0.9}
           hapticType="medium"
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Dial a number"
         >
           <Feather name="plus" size={28} color="#fff" />
         </AnimatedPressable>
@@ -694,7 +706,13 @@ export default function CallsScreen() {
         <View style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}>
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
             <ThemedText type="body" style={{ fontWeight: "600" }}>Dial Number</ThemedText>
-            <Pressable onPress={() => setShowDialer(false)} style={styles.closeButton}>
+            <Pressable
+              onPress={() => setShowDialer(false)}
+              style={styles.closeButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
               <Feather name="x" size={24} color={theme.text} />
             </Pressable>
           </View>
@@ -731,7 +749,7 @@ export default function CallsScreen() {
               style={({ pressed }) => [
                 styles.dialButton,
                 {
-                  backgroundColor: isValidPhone ? "#34C759" : theme.backgroundDefault,
+                  backgroundColor: isValidPhone ? theme.success : theme.backgroundDefault,
                   opacity: pressed ? 0.8 : 1,
                 },
               ]}
@@ -762,7 +780,13 @@ export default function CallsScreen() {
           <View style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}>
             <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
               <ThemedText type="body" style={{ fontWeight: "600" }}>Select Country</ThemedText>
-              <Pressable onPress={() => setShowCountryPicker(false)} style={styles.closeButton}>
+              <Pressable
+                onPress={() => setShowCountryPicker(false)}
+                style={styles.closeButton}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
                 <Feather name="x" size={24} color={theme.text} />
               </Pressable>
             </View>

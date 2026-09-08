@@ -393,6 +393,9 @@ export default function NewMessageScreen() {
                 ]}
                 onPress={handleSearch}
                 disabled={!isValidPhone || isSearching}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Search"
               >
                 {isSearching ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -434,6 +437,9 @@ export default function NewMessageScreen() {
                 ]}
                 onPress={handleSearch}
                 disabled={usernameQuery.replace(/^@/, "").length < 3 || isSearching}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Search"
               >
                 {isSearching ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -566,6 +572,9 @@ export default function NewMessageScreen() {
                 setCountrySearchQuery("");
               }}
               style={styles.closeButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
             >
               <Feather name="x" size={24} color={theme.text} />
             </Pressable>

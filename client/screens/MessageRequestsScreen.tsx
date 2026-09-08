@@ -77,7 +77,7 @@ export default function MessageRequestsScreen() {
     try {
       const token = await getStoredToken();
       const baseUrl = getApiUrl();
-      await fetch(new URL('/api/message-requests/settings', baseUrl), {
+      const response = await fetch(new URL('/api/message-requests/settings', baseUrl), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -85,10 +85,15 @@ export default function MessageRequestsScreen() {
         },
         body: JSON.stringify({ setting: newSetting }),
       });
-      setSetting(newSetting);
-      haptics.success();
+      if (response.ok) {
+        setSetting(newSetting);
+        haptics.success();
+      } else {
+        Alert.alert('Error', 'Could not update this setting. Please try again.');
+      }
     } catch (error) {
       console.error('Error updating setting:', error);
+      Alert.alert('Error', 'Could not update this setting. Please try again.');
     }
   };
 

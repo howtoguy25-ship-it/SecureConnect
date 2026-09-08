@@ -336,6 +336,9 @@ export default function ChatsScreen() {
         <Pressable
           onPress={() => navigation.navigate("VipUpgrade")}
           style={styles.headerButton}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Menu"
         >
           <Feather name="menu" size={24} color={theme.text} />
         </Pressable>
@@ -561,6 +564,9 @@ export default function ChatsScreen() {
           onPress={() => navigation.navigate("NewMessage")}
           scaleValue={0.9}
           hapticType="medium"
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="New message"
         >
           <Feather name="edit" size={24} color="#fff" />
         </AnimatedPressable>
