@@ -61,7 +61,7 @@ export interface IStorage {
   markPendingContactsNotified(phoneNumber: string): Promise<void>;
   createJoinNotification(userId: string, newUserPhone: string, newUserName?: string): Promise<JoinNotification>;
   getJoinNotifications(userId: string): Promise<JoinNotification[]>;
-  markJoinNotificationRead(id: string): Promise<void>;
+  markJoinNotificationRead(id: string, userId: string): Promise<void>;
   processNewUserJoined(newUserPhone: string, newUserName?: string): Promise<void>;
   
   getMessageRequests(userId: string): Promise<any[]>;
@@ -1216,10 +1216,10 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(joinNotifications.createdAt));
   }
 
-  async markJoinNotificationRead(id: string): Promise<void> {
+  async markJoinNotificationRead(id: string, userId: string): Promise<void> {
     await db.update(joinNotifications)
       .set({ isRead: true })
-      .where(eq(joinNotifications.id, id));
+      .where(and(eq(joinNotifications.id, id), eq(joinNotifications.userId, userId)));
   }
 
   async processNewUserJoined(newUserPhone: string, newUserName?: string): Promise<void> {

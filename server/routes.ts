@@ -3127,7 +3127,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put('/api/notifications/joins/:id/read', authenticateToken, async (req: AuthRequest, res) => {
     try {
-      await storage.markJoinNotificationRead(req.params.id);
+      // Previously updated by id alone — any authenticated user could flip
+      // the isRead flag on another user's notification row.
+      await storage.markJoinNotificationRead(req.params.id, req.userId!);
       res.json({ success: true });
     } catch (error) {
       console.error('Error marking notification read:', error);
@@ -3507,6 +3509,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const isBlocked = await storage.isBlockedByEither(req.userId!, receiverId);
         if (isBlocked) {
           return res.status(403).json({ error: 'Cannot send message. User is blocked.' });
+        }
+      }
+
+      // Broken-access-control fix: this route used to trust the
+      // client-supplied conversationId/receiverId outright. A valid token
+      // holder who merely knew or guessed a conversationId (leaked via
+      // logs, another client bug, or any surface that echoes one) could
+      // inject a message into a conversation between two entirely
+      // different users. Mirrors the identical, already-fixed check on
+      // POST /api/messages/send-sealed — the sender must actually be a
+      // participant in conversationId, and receiverId (if given) must be
+      // the other participant, not an arbitrary third party.
+      if (!isMockConversation(conversationId)) {
+        const senderInConv = await storage.isConversationParticipant(conversationId, req.userId!);
+        if (!senderInConv) {
+          return res.status(403).json({ error: 'Not a participant in this conversation' });
+        }
+        if (receiverId) {
+          const receiverInConv = await storage.isConversationParticipant(conversationId, receiverId);
+          if (!receiverInConv) {
+            return res.status(400).json({ error: 'receiverId is not a participant in this conversation' });
+          }
         }
       }
 
@@ -5923,6 +5947,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { q } = req.query;
       if (!q || typeof q !== 'string') {
         return res.status(400).json({ error: 'Search query required' });
+      }
+      // Without this, any authenticated user who knows/guesses a
+      // conversationId could search another pair's messages — this route
+      // had no participant check at all, unlike GET /:id/messages.
+      const isParticipant = await storage.isConversationParticipant(conversationId, req.userId!);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'Not a participant in this conversation' });
       }
       const results = await storage.searchMessages(conversationId, q);
       res.json(results);
