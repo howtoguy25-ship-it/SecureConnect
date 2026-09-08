@@ -837,6 +837,9 @@ export default function VideoCallScreen() {
                   { backgroundColor: !isVideoEnabled ? "#fff" : "rgba(255,255,255,0.15)" },
                 ]}
                 onPress={handleToggleVideo}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={isVideoEnabled ? "Turn camera off" : "Turn camera on"}
               >
                 <Feather
                   name={isVideoEnabled ? "video" : "video-off"}
@@ -856,6 +859,9 @@ export default function VideoCallScreen() {
                   { backgroundColor: isMuted ? "#fff" : "rgba(255,255,255,0.15)" },
                 ]}
                 onPress={handleToggleMute}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={isMuted ? "Unmute microphone" : "Mute microphone"}
               >
                 <Feather
                   name={isMuted ? "mic-off" : "mic"}
@@ -872,6 +878,9 @@ export default function VideoCallScreen() {
               <Pressable
                 style={[styles.actionButton, { backgroundColor: "rgba(255,255,255,0.15)" }]}
                 onPress={handleFlipCamera}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Flip camera"
               >
                 <Feather name="refresh-cw" size={22} color="#fff" />
               </Pressable>
@@ -884,6 +893,9 @@ export default function VideoCallScreen() {
               <Pressable
                 style={[styles.actionButton, { backgroundColor: "rgba(255,255,255,0.15)" }]}
                 onPress={handleMore}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="More call options"
               >
                 <Feather name="more-horizontal" size={22} color="#fff" />
               </Pressable>
@@ -894,8 +906,11 @@ export default function VideoCallScreen() {
 
             <View style={styles.buttonGroup}>
               <Pressable
-                style={[styles.endButton, { backgroundColor: "#FF3B30" }]}
+                style={[styles.endButton, { backgroundColor: theme.error }]}
                 onPress={handleEndCall}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="End call"
               >
                 {/* The standard "hang up" glyph is a plain handset rotated
                     ~135° (how FaceTime/WhatsApp/Android's own call-end

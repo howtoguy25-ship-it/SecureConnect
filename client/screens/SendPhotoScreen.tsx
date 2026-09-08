@@ -260,7 +260,13 @@ export default function SendPhotoScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.headerButton} onPress={() => navigation.goBack()}>
+        <Pressable
+          style={styles.headerButton}
+          onPress={() => navigation.goBack()}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        >
           <Feather name="x" size={24} color={theme.text} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Send Photo</Text>
@@ -271,6 +277,9 @@ export default function SendPhotoScreen() {
           ]}
           onPress={handleSend}
           disabled={isSending || selectedRecipients.length === 0}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Send photo"
         >
           {isSending ? (
             <ActivityIndicator size="small" color="#FFFFFF" />

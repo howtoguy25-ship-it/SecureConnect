@@ -336,7 +336,7 @@ export default function AdminDashboardScreen() {
           disabled={loadingReviewMode}
         >
           <View style={styles.rowInfo}>
-            <View style={[styles.iconBg, { backgroundColor: reviewMode ? "#34C759" : "#8E8E93" }]}>
+            <View style={[styles.iconBg, { backgroundColor: reviewMode ? theme.success : "#8E8E93" }]}>
               <Feather name="eye" size={16} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
@@ -350,7 +350,7 @@ export default function AdminDashboardScreen() {
             <ActivityIndicator size="small" color={theme.primary} />
           ) : (
             <View pointerEvents="none">
-              <Switch value={reviewMode} trackColor={{ false: "#767577", true: "#34C759" }} />
+              <Switch value={reviewMode} trackColor={{ false: "#767577", true: theme.success }} />
             </View>
           )}
         </Pressable>
@@ -394,8 +394,8 @@ export default function AdminDashboardScreen() {
                       {u.displayName}
                     </ThemedText>
                     {u.isSuspended ? (
-                      <View style={styles.suspendedBadge}>
-                        <ThemedText type="small" style={{ color: "#FF3B30", fontWeight: "700", fontSize: 10 }}>
+                      <View style={[styles.suspendedBadge, { backgroundColor: theme.error + "20" }]}>
+                        <ThemedText type="small" style={{ color: theme.error, fontWeight: "700", fontSize: 10 }}>
                           SUSPENDED
                         </ThemedText>
                       </View>
@@ -407,14 +407,14 @@ export default function AdminDashboardScreen() {
                   </ThemedText>
                 </View>
                 <Pressable
-                  style={[styles.actionBtn, { backgroundColor: u.isSuspended ? theme.backgroundSecondary : "#FF3B3020" }]}
+                  style={[styles.actionBtn, { backgroundColor: u.isSuspended ? theme.backgroundSecondary : theme.error + "20" }]}
                   onPress={() => handleSuspendUser(u)}
                   disabled={suspendingUserId === u.id}
                 >
                   {suspendingUserId === u.id ? (
                     <ActivityIndicator size="small" color={theme.textSecondary} />
                   ) : (
-                    <ThemedText type="small" style={{ color: u.isSuspended ? theme.text : "#FF3B30" }}>
+                    <ThemedText type="small" style={{ color: u.isSuspended ? theme.text : theme.error }}>
                       {u.isSuspended ? "Unsuspend" : "Suspend"}
                     </ThemedText>
                   )}
@@ -505,18 +505,18 @@ export default function AdminDashboardScreen() {
                           <View
                             style={[
                               styles.signInBadge,
-                              { backgroundColor: u.isSignedIn ? "#34C75920" : "#8E8E9320" },
+                              { backgroundColor: u.isSignedIn ? theme.success + "20" : "#8E8E9320" },
                             ]}
                           >
                             <View
                               style={[
                                 styles.signInDot,
-                                { backgroundColor: u.isSignedIn ? "#34C759" : "#8E8E93" },
+                                { backgroundColor: u.isSignedIn ? theme.success : "#8E8E93" },
                               ]}
                             />
                             <ThemedText
                               type="small"
-                              style={{ color: u.isSignedIn ? "#34C759" : "#8E8E93", fontWeight: "700", fontSize: 10 }}
+                              style={{ color: u.isSignedIn ? theme.success : "#8E8E93", fontWeight: "700", fontSize: 10 }}
                             >
                               {u.isSignedIn ? "SIGNED IN" : "SIGNED OUT"}
                             </ThemedText>
@@ -612,8 +612,8 @@ export default function AdminDashboardScreen() {
                   <Pressable style={[styles.actionBtn, { backgroundColor: theme.backgroundSecondary }]} onPress={() => handleReportAction(report, "warn")}>
                     <ThemedText type="small">Warn</ThemedText>
                   </Pressable>
-                  <Pressable style={[styles.actionBtn, { backgroundColor: "#FF3B3020" }]} onPress={() => handleReportAction(report, "suspend")}>
-                    <ThemedText type="small" style={{ color: "#FF3B30" }}>Suspend</ThemedText>
+                  <Pressable style={[styles.actionBtn, { backgroundColor: theme.error + "20" }]} onPress={() => handleReportAction(report, "suspend")}>
+                    <ThemedText type="small" style={{ color: theme.error }}>Suspend</ThemedText>
                   </Pressable>
                 </View>
               ) : null}

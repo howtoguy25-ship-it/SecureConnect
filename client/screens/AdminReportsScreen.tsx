@@ -254,7 +254,7 @@ export default function AdminReportsScreen() {
                     </ThemedText>
                   </View>
                   {suspended ? (
-                    <View style={[styles.reasonChip, { backgroundColor: "#FF3B30" }]}>
+                    <View style={[styles.reasonChip, { backgroundColor: theme.error }]}>
                       <ThemedText type="small" style={{ color: "#fff", fontWeight: "700" }}>
                         Suspended
                       </ThemedText>

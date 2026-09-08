@@ -469,6 +469,9 @@ export default function AudioCallScreen() {
                   { backgroundColor: isMuted ? theme.text : theme.backgroundSecondary },
                 ]}
                 onPress={handleToggleMute}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={isMuted ? "Unmute microphone" : "Mute microphone"}
               >
                 <Feather
                   name={isMuted ? "mic-off" : "mic"}
@@ -488,6 +491,9 @@ export default function AudioCallScreen() {
                   { backgroundColor: isSpeaker ? theme.text : theme.backgroundSecondary },
                 ]}
                 onPress={handleToggleSpeaker}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={isSpeaker ? "Turn speaker off" : "Turn speaker on"}
               >
                 <Feather
                   name="volume-2"
@@ -504,6 +510,9 @@ export default function AudioCallScreen() {
               <Pressable
                 style={[styles.actionButton, { backgroundColor: theme.backgroundSecondary }]}
                 onPress={handleMore}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="More call options"
               >
                 <Feather name="more-horizontal" size={22} color={theme.text} />
               </Pressable>
@@ -514,8 +523,11 @@ export default function AudioCallScreen() {
 
             <View style={styles.buttonGroup}>
               <Pressable
-                style={[styles.endButton, { backgroundColor: "#FF3B30" }]}
+                style={[styles.endButton, { backgroundColor: theme.error }]}
                 onPress={handleEndCall}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="End call"
               >
                 {/* See VideoCallScreen's End button for why: a rotated plain
                     handset matches the standard hang-up glyph, "phone-off"

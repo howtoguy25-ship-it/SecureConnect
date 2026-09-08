@@ -600,6 +600,9 @@ export default function CameraScreen() {
         <Pressable
           style={[styles.closeButton, { top: insets.top + Spacing.md }]}
           onPress={() => navigation.goBack()}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Close camera"
         >
           <Feather name="x" size={24} color="#FFFFFF" />
         </Pressable>
@@ -667,6 +670,9 @@ export default function CameraScreen() {
         <Pressable
           style={[styles.closeButton, { top: insets.top + Spacing.md }]}
           onPress={() => navigation.goBack()}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Close camera"
         >
           <Feather name="x" size={24} color="#FFFFFF" />
         </Pressable>
@@ -729,6 +735,11 @@ export default function CameraScreen() {
               ]}
               onPress={handleCaptureButtonPress}
               disabled={isCapturing}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                mode === "picture" ? "Take photo" : isRecording ? "Stop recording" : "Start recording"
+              }
             >
               {isCapturing ? (
                 <ActivityIndicator size="small" color="#000" />
@@ -745,6 +756,9 @@ export default function CameraScreen() {
               style={[styles.flipButton, isRecording && { opacity: 0.4 }]}
               onPress={toggleCameraFacing}
               disabled={isRecording}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Flip camera"
             >
               <Feather name="refresh-cw" size={24} color="#FFFFFF" />
             </Pressable>

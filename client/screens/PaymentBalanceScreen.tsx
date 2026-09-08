@@ -159,7 +159,7 @@ export default function PaymentBalanceScreen() {
                     <ThemedText type="body" style={{ fontWeight: "600" }}>{c.currency}</ThemedText>
                     <ThemedText
                       type="body"
-                      style={{ fontWeight: "700", color: c.netMinorUnits >= 0 ? "#34C759" : "#FF3B30" }}
+                      style={{ fontWeight: "700", color: c.netMinorUnits >= 0 ? theme.success : theme.error }}
                     >
                       {c.netMinorUnits >= 0 ? "+" : ""}{formatMinorUnits(c.netMinorUnits, c.currency)}
                     </ThemedText>
@@ -246,7 +246,7 @@ export default function PaymentBalanceScreen() {
                           {tx.note ? ` · ${tx.note}` : ""}
                         </ThemedText>
                       </View>
-                      <ThemedText type="body" style={{ fontWeight: "700", color: tx.direction === "received" ? "#34C759" : theme.text }}>
+                      <ThemedText type="body" style={{ fontWeight: "700", color: tx.direction === "received" ? theme.success : theme.text }}>
                         {formatMinorUnits(tx.amountMinorUnits, tx.currency)}
                       </ThemedText>
                     </View>
@@ -267,7 +267,7 @@ export default function PaymentBalanceScreen() {
                     <ThemedText type="body" style={{ fontWeight: "600" }}>{t.currency}</ThemedText>
                     <ThemedText
                       type="body"
-                      style={{ fontWeight: "700", color: t.netMinorUnits >= 0 ? "#34C759" : "#FF3B30" }}
+                      style={{ fontWeight: "700", color: t.netMinorUnits >= 0 ? theme.success : theme.error }}
                     >
                       {t.netMinorUnits >= 0 ? "+" : ""}{formatMinorUnits(t.netMinorUnits, t.currency)}
                     </ThemedText>
@@ -287,7 +287,7 @@ export default function PaymentBalanceScreen() {
                       <ThemedText type="body" numberOfLines={1} style={{ flex: 1 }}>{c.counterpartyName ?? "Unknown"}</ThemedText>
                       <ThemedText
                         type="body"
-                        style={{ fontWeight: "700", color: c.netMinorUnits >= 0 ? "#34C759" : "#FF3B30" }}
+                        style={{ fontWeight: "700", color: c.netMinorUnits >= 0 ? theme.success : theme.error }}
                       >
                         {c.netMinorUnits >= 0 ? "+" : ""}{formatMinorUnits(c.netMinorUnits, c.currency)}
                       </ThemedText>

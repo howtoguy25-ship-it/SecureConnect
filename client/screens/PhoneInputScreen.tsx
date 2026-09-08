@@ -451,6 +451,9 @@ export default function PhoneInputScreen() {
                 setSearchQuery("");
               }}
               style={styles.closeButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close country picker"
             >
               <Feather name="x" size={24} color={theme.text} />
             </Pressable>
