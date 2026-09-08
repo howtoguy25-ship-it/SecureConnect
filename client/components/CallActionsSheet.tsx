@@ -122,7 +122,7 @@ export function CallActionsSheet({
             style={[styles.option, { backgroundColor: theme.backgroundSecondary }]}
             onPress={handleCarrierCall}
           >
-            <View style={[styles.iconContainer, { backgroundColor: "#34C759" }]}>
+            <View style={[styles.iconContainer, { backgroundColor: theme.success }]}>
               <Feather name="phone-forwarded" size={24} color="#fff" />
             </View>
             <View style={styles.optionContent}>

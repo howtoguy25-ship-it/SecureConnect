@@ -436,7 +436,7 @@ export const MessageHoldOverlay: React.FC<Props> = ({
                   <ThemedText
                     style={[
                       styles.menuLabel,
-                      { color: action.destructive ? '#FF3B30' : theme.text },
+                      { color: action.destructive ? theme.error : theme.text },
                     ]}
                   >
                     {action.label}
@@ -444,7 +444,7 @@ export const MessageHoldOverlay: React.FC<Props> = ({
                   <Feather
                     name={action.icon}
                     size={18}
-                    color={action.destructive ? '#FF3B30' : action.color ?? theme.text}
+                    color={action.destructive ? theme.error : action.color ?? theme.text}
                   />
                 </Pressable>
               ))}

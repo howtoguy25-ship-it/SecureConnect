@@ -152,7 +152,7 @@ export default function StorySettingsScreen() {
           }
           disabled={saving}
         >
-          <ThemedText type="body" style={{ color: storiesOn ? "#FF3B30" : theme.primary, fontWeight: "600" }}>
+          <ThemedText type="body" style={{ color: storiesOn ? theme.error : theme.primary, fontWeight: "600" }}>
             {storiesOn ? "Turn Off Stories" : "Turn On Stories"}
           </ThemedText>
         </Pressable>
