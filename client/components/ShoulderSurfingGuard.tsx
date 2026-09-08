@@ -140,6 +140,18 @@ export function ShoulderSurfingGuard() {
       if (!mounted) return;
       setFeatureEnabled(enabled);
       setCooldownSeconds(cooldown);
+      // This component's own `permission` snapshot (from its separate
+      // useCameraPermissions() call) is otherwise only refreshed on an
+      // AppState foreground transition. PeekDetectionSettingsScreen
+      // requests and confirms camera permission itself right before
+      // calling setPeekDetectionEnabled(true) — which fires this same
+      // settings-changed notification — but that grant only updates ITS
+      // OWN hook instance, not this one. Without this, turning the
+      // feature on and going straight to a chat (the obvious way anyone
+      // would actually test it) left `active` computed as false — a
+      // stale "not granted" — until the app happened to background and
+      // foreground once. Re-checking here closes that gap immediately.
+      getCameraPermission().catch(() => {});
     };
     load();
     const unsubscribe = subscribePeekSettingsChanged(load);
@@ -147,7 +159,7 @@ export function ShoulderSurfingGuard() {
       mounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [getCameraPermission]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
