@@ -3386,13 +3386,28 @@ export default function ConversationScreen() {
       //     the cache entry so the existing decrypt effect re-fetches+
       //     re-decrypts a fresh copy from the server, then retry play() once
       //     against that.
-      //   - playbackState === 'readyToPlay' but never reaches "playing" →
-      //     the file is fine; something about the OS audio session/route is
-      //     blocking actual output (the pattern a stuck WebRTC call session
-      //     produces). Hard-reset the session (deactivate, pause, reactivate
-      //     with the wanted category) and retry play() once in place.
+      //   - isLoaded but never reaches "playing" → the file is fine;
+      //     something about the OS audio session/route is blocking actual
+      //     output (the pattern a stuck WebRTC call session produces).
+      //     Hard-reset the session (deactivate, pause, reactivate with the
+      //     wanted category) and retry play() once in place.
       // Only the small number of cases where the retry itself also fails
       // ever reach the user-facing alert.
+      //
+      // isLoaded (not playbackState === 'readyToPlay') is deliberate: on
+      // iOS, expo-audio's isLoaded IS literally `status === .readyToPlay`,
+      // so checking it here is equivalent to the old check on that
+      // platform — but on Android, playbackState comes from ExoPlayer's
+      // Player.STATE_* constants stringified as "ready"/"buffering"/
+      // "idle"/"ended" (see expo-audio's AudioPlayer.kt), never
+      // "readyToPlay". The old string comparison could never match on
+      // Android, so this whole recovery branch silently never ran there —
+      // any voice message that took a beat longer than 1200ms to start
+      // (or one genuinely stuck on a session/routing issue) just got torn
+      // down and reset with no retry attempted, which is exactly "loads
+      // briefly, then stops" with nothing ever fixing it. isLoaded is a
+      // real boolean on both platforms and isn't tied to either one's
+      // native status vocabulary.
       (async () => {
         await new Promise((resolve) => setTimeout(resolve, 1200));
         if (startedPlayingRef.current) return;
@@ -3412,7 +3427,7 @@ export default function ConversationScreen() {
             // local file before retrying against the (now stale) player —
             // if it lands in time this player still gets torn down below
             // and the user can just tap again, already pointed at good data.
-          } else if (status?.playbackState === 'readyToPlay') {
+          } else if (status?.isLoaded) {
             const { setIsAudioActiveAsync } = await import('expo-audio');
             await setIsAudioActiveAsync(false);
             await new Promise((resolve) => setTimeout(resolve, 150));
