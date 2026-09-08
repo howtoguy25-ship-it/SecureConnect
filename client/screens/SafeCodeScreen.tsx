@@ -81,7 +81,7 @@ export default function SafeCodeScreen() {
         if (err?.message?.toLowerCase?.().includes("already")) {
           setCode(null);
         } else {
-          Alert.alert("Error", "Failed to load Safe Code. Please try again.");
+          Alert.alert("Error", "Failed to load Account ID. Please try again.");
         }
       }
     } finally {

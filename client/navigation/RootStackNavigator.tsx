@@ -390,8 +390,8 @@ export default function RootStackNavigator() {
           <Stack.Screen
             name="SafeCode"
             component={SafeCodeScreen}
-            options={{ 
-              headerTitle: "Safe Code",
+            options={{
+              headerTitle: "Account ID",
             }}
           />
           <Stack.Screen

@@ -87,8 +87,8 @@ export default function SecurityScreen() {
         />
         <Row
           icon="shield"
-          label="Safe Code"
-          subtitle="Personal recovery code for your account"
+          label="Account ID"
+          subtitle="Used with your security questions to recover your account"
           onPress={() => navigation.navigate("SafeCode")}
         />
       </View>

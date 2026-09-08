@@ -402,6 +402,25 @@ export default function ConversationScreen() {
   // drives the waveform preview after stopping — real captured amplitude,
   // not a random placeholder.
   const recorderState = useAudioRecorderState(audioRecorder, 100);
+  // If this screen unmounts mid-recording (user navigates away, an
+  // incoming call takes over the screen, etc.) neither stopVoiceRecording
+  // nor cancelVoiceRecording ever runs — both are only wired to explicit
+  // button presses. Without this, the interval would tick on after unmount
+  // and, worse, the actual microphone recording would keep running
+  // indefinitely in the background since nothing ever called
+  // audioRecorder.stop(). recordingTimer.current (a ref, always current at
+  // cleanup time regardless of when this effect was set up) is non-null
+  // exactly while a recording is in progress.
+  useEffect(() => {
+    return () => {
+      if (recordingTimer.current) {
+        clearInterval(recordingTimer.current);
+        recordingTimer.current = null;
+        audioRecorder.stop().catch(() => {});
+        setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+      }
+    };
+  }, [audioRecorder]);
   // Live waveform shown WHILE recording (not just in the after-stop
   // preview). Recomputed from the full history captured so far on every
   // metering tick, so it always reflects the whole recording's real
