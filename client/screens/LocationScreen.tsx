@@ -283,6 +283,9 @@ export default function LocationScreen() {
       setIsSharing(sharing);
       queryClient.invalidateQueries({ queryKey: ["/api/location/me"] });
     },
+    onError: () => {
+      Alert.alert("Error", "Couldn't update location sharing. Please try again.");
+    },
   });
 
   const requestLocationMutation = useMutation({
@@ -293,6 +296,9 @@ export default function LocationScreen() {
       queryClient.invalidateQueries({ queryKey: ["/api/location/requests"] });
       Alert.alert("Request Sent", "Your location request has been sent.");
     },
+    onError: () => {
+      Alert.alert("Error", "Couldn't send the location request. Please try again.");
+    },
   });
 
   const respondToRequestMutation = useMutation({
@@ -302,6 +308,9 @@ export default function LocationScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/location/requests"] });
       queryClient.invalidateQueries({ queryKey: ["/api/location/friends"] });
+    },
+    onError: () => {
+      Alert.alert("Error", "Couldn't respond to the request. Please try again.");
     },
   });
 
@@ -576,7 +585,24 @@ export default function LocationScreen() {
                 styles.toggleButton,
                 { backgroundColor: isSharing ? theme.success : theme.backgroundTertiary },
               ]}
-              onPress={() => toggleSharingMutation.mutate(!isSharing)}
+              onPress={() => {
+                // Flipping this on without real permission would leave the
+                // toggle showing "sharing" while watchPositionAsync's own
+                // `locationPermission === "granted"` guard silently refuses
+                // to ever send an update — sharing looks on but never works.
+                if (!isSharing && locationPermission !== "granted") {
+                  Alert.alert(
+                    "Location Access Needed",
+                    "Turn on location access for Pryvo in your device settings to share your location with friends.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "Open Settings", onPress: () => Linking.openSettings() },
+                    ],
+                  );
+                  return;
+                }
+                toggleSharingMutation.mutate(!isSharing);
+              }}
             >
               <View
                 style={[
@@ -615,12 +641,18 @@ export default function LocationScreen() {
                     <Pressable
                       style={[styles.actionButton, { backgroundColor: theme.success }]}
                       onPress={() => respondToRequestMutation.mutate({ requestId: item.id, accept: true })}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Accept location request"
                     >
                       <Feather name="check" size={20} color="#fff" />
                     </Pressable>
                     <Pressable
                       style={[styles.actionButton, { backgroundColor: theme.error }]}
                       onPress={() => respondToRequestMutation.mutate({ requestId: item.id, accept: false })}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Decline location request"
                     >
                       <Feather name="x" size={20} color="#fff" />
                     </Pressable>

@@ -53,6 +53,8 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
               opacity: pressed ? 0.8 : 1,
             },
           ]}
+          accessibilityRole="button"
+          accessibilityLabel="View error details"
         >
           <Feather name="alert-circle" size={20} color={theme.text} />
         </Pressable>
@@ -106,6 +108,9 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
                     styles.closeButton,
                     { opacity: pressed ? 0.6 : 1 },
                   ]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
                 >
                   <Feather name="x" size={24} color={theme.text} />
                 </Pressable>

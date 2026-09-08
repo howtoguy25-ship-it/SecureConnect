@@ -70,6 +70,8 @@ export function PinPad({ value, onChange, maxLength = 8, theme, disabled }: PinP
                   ]}
                   onPress={() => handlePress(key)}
                   disabled={disabled}
+                  accessibilityRole="button"
+                  accessibilityLabel={key === "backspace" ? "Backspace" : key}
                 >
                   {key === "backspace" ? (
                     <Feather name="delete" size={22} color={theme.text} />

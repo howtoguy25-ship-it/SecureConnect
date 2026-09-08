@@ -102,7 +102,7 @@ function StatusViewersModal({
       <View style={[viewerStyles.container, { backgroundColor: theme.backgroundRoot }]}>
         <View style={[viewerStyles.header, { borderBottomColor: theme.border }]}>
           <ThemedText type="h3">Viewers</ThemedText>
-          <Pressable onPress={onClose}>
+          <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
             <Feather name="x" size={24} color={theme.text} />
           </Pressable>
         </View>
@@ -970,7 +970,9 @@ export default function StatusScreen() {
         Alert.alert("Muted", `You will no longer see status updates from ${targetName}.`);
       }
     } catch {
-      if (Platform.OS !== "web") {
+      if (Platform.OS === "web") {
+        window.alert("Could not mute this user. Please try again.");
+      } else {
         Alert.alert("Error", "Could not mute this user. Please try again.");
       }
     }
@@ -1410,11 +1412,17 @@ export default function StatusScreen() {
       >
         <View style={[styles.statusViewerContainer, { backgroundColor: "#000" }]}>
           <View style={[styles.statusViewerHeader, { top: insets.top + Spacing.md }]}>
-            <Pressable onPress={closeStatusViewer} style={styles.closeButton}>
+            <Pressable
+              onPress={closeStatusViewer}
+              style={styles.closeButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
               <Feather name="x" size={28} color="#fff" />
             </Pressable>
             <View style={{ flex: 1 }} />
-            <Pressable 
+            <Pressable
               onPress={() => {
                 if (!viewingStatus) return;
                 const doDelete = () => deleteStatusMutation.mutate(viewingStatus.id);
@@ -1434,8 +1442,11 @@ export default function StatusScreen() {
                 }
               }}
               style={styles.deleteButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Delete status"
             >
-              <Feather name="trash-2" size={24} color="#ff3b30" />
+              <Feather name="trash-2" size={24} color={theme.error} />
             </Pressable>
           </View>
 

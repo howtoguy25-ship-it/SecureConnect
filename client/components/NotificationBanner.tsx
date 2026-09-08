@@ -137,7 +137,7 @@ export function NotificationBanner({ notification, onDismiss }: NotificationBann
           </ThemedText>
         </View>
 
-        <Pressable style={styles.dismissButton} onPress={dismiss} hitSlop={8}>
+        <Pressable style={styles.dismissButton} onPress={dismiss} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss notification">
           <Feather name="x" size={18} color={theme.textSecondary} />
         </Pressable>
       </Pressable>

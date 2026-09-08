@@ -38,6 +38,7 @@ export default function QRCodeScreen() {
   const username = user?.displayName || "User";
   const shareLink = `https://secureconnect.app/user/${user?.id}`;
   const [isLoadingQR, setIsLoadingQR] = useState(false);
+  const [qrLoadFailed, setQrLoadFailed] = useState(false);
 
   useEffect(() => {
     generateQRCode();
@@ -45,26 +46,31 @@ export default function QRCodeScreen() {
 
   const generateQRCode = async () => {
     if (!user?.id || !token) return;
-    
+
     setIsLoadingQR(true);
+    setQrLoadFailed(false);
     try {
       const url = new URL(`/api/qrcode/${user.id}`, getApiUrl());
       url.searchParams.set('color', currentColor.primary);
-      
+
       const response = await fetch(url.toString(), {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch QR code');
       }
-      
+
       const data = await response.json();
       setQrDataUrl(data.dataUrl);
     } catch (error) {
+      // Without surfacing this, the screen was left showing a spinner
+      // forever with no indication anything had gone wrong and no way to
+      // retry other than backgrounding the app.
       console.error("Error generating QR code:", error);
+      setQrLoadFailed(true);
     } finally {
       setIsLoadingQR(false);
     }

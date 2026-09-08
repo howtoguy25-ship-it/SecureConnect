@@ -372,10 +372,11 @@ export default function SettingsScreen() {
                     // the user's intent here so the "Notifications saved"
                     // message is truthful and the toggle reflects state on
                     // their next sign-in from the native app.
+                    let persisted = false;
                     try {
                       const tok = await getStoredToken();
                       if (tok) {
-                        await fetch(new URL('/api/notifications/settings', getApiUrl()).toString(), {
+                        const persistResp = await fetch(new URL('/api/notifications/settings', getApiUrl()).toString(), {
                           method: 'PUT',
                           headers: {
                             'Content-Type': 'application/json',
@@ -383,15 +384,21 @@ export default function SettingsScreen() {
                           },
                           body: JSON.stringify({ enabled: true }),
                         });
+                        if (!persistResp.ok) throw new Error('Failed to save notification preference');
+                        persisted = true;
                       }
                       await refreshUser?.();
                     } catch (err) {
                       console.log('[Settings] Failed to persist web notification preference:', err);
                     }
-                    Alert.alert(
-                      "Notifications saved",
-                      "Push notifications can't be enabled in your browser. We've saved your preference — you'll get alerts on the Pryvo mobile app once you sign in there.",
-                    );
+                    if (persisted) {
+                      Alert.alert(
+                        "Notifications saved",
+                        "Push notifications can't be enabled in your browser. We've saved your preference — you'll get alerts on the Pryvo mobile app once you sign in there.",
+                      );
+                    } else {
+                      window.alert("Couldn't update notification settings. Please try again.");
+                    }
                   }
                   return;
                 }
@@ -447,6 +454,7 @@ export default function SettingsScreen() {
               trackColor={{ false: theme.border, true: theme.primary }}
               ios_backgroundColor={theme.border}
               style={Platform.OS === "ios" ? { transform: [{ scaleX: 0.9 }, { scaleY: 0.9 }] } : undefined}
+              accessibilityLabel="Push Notifications"
             />
           </View>
         </Pressable>
@@ -532,6 +540,7 @@ export default function SettingsScreen() {
             value={readReceipts}
             onValueChange={setReadReceipts}
             trackColor={{ false: theme.border, true: theme.primary }}
+            accessibilityLabel="Read Receipts"
           />
         </View>
 
@@ -555,6 +564,7 @@ export default function SettingsScreen() {
             <Switch
               value={keepMutedArchived}
               trackColor={{ false: theme.border, true: theme.primary }}
+              accessibilityLabel="Keep Muted Chats Archived"
             />
           </View>
         </Pressable>
@@ -673,7 +683,7 @@ export default function SettingsScreen() {
           disabled={isSavingActiveStatus}
         >
           <View style={styles.settingInfo}>
-            <View style={[styles.iconBg, { backgroundColor: showActiveStatus ? "#34C759" : theme.textSecondary }]}>
+            <View style={[styles.iconBg, { backgroundColor: showActiveStatus ? theme.success : theme.textSecondary }]}>
               <Feather name="radio" size={16} color="#fff" />
             </View>
             <View style={styles.settingTextColumn}>
@@ -687,6 +697,7 @@ export default function SettingsScreen() {
             <Switch
               value={showActiveStatus}
               trackColor={{ false: theme.border, true: theme.primary }}
+              accessibilityLabel="Active Now"
             />
           </View>
         </Pressable>
@@ -811,7 +822,7 @@ export default function SettingsScreen() {
         {user?.isAdFree && !user?.isVip ? (
           <View style={[styles.settingItem, { backgroundColor: theme.backgroundDefault }]}>
             <View style={styles.settingInfo}>
-              <Feather name="check-circle" size={20} color="#34C759" />
+              <Feather name="check-circle" size={20} color={theme.success} />
               <View>
                 <ThemedText type="body">Ad-Free</ThemedText>
                 <ThemedText type="small" style={{ color: theme.textSecondary }}>
@@ -885,7 +896,7 @@ export default function SettingsScreen() {
             onPress={() => handleToggleReviewMode(!reviewMode)}
           >
             <View style={styles.settingInfo}>
-              <View style={[styles.iconBg, { backgroundColor: reviewMode ? "#34C759" : "#8E8E93" }]}>
+              <View style={[styles.iconBg, { backgroundColor: reviewMode ? theme.success : theme.textSecondary }]}>
                 <Feather name="eye" size={16} color="#fff" />
               </View>
               <View>
@@ -898,7 +909,8 @@ export default function SettingsScreen() {
             <View pointerEvents="none">
               <Switch
                 value={reviewMode}
-                trackColor={{ false: '#767577', true: '#34C759' }}
+                trackColor={{ false: theme.border, true: theme.primary }}
+                accessibilityLabel="App Store Review Mode"
               />
             </View>
           </Pressable>

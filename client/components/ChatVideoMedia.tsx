@@ -114,6 +114,8 @@ export function ChatFullscreenVideoPlayer({
           style={[styles.fullscreenClose, { top: insets.top + Spacing.md }]}
           onPress={onClose}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
           <Feather name="x" size={22} color="#fff" />
         </Pressable>

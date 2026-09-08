@@ -117,7 +117,7 @@ function TapReflexGame({ onBack }: { onBack: () => void }) {
   return (
     <View style={[styles.gameContainer, { backgroundColor: theme.backgroundRoot }]}>
       <View style={[styles.gameHeader, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.backButton} onPress={onBack}>
+        <Pressable style={styles.backButton} onPress={onBack} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={24} color={theme.text} />
         </Pressable>
         <Text style={[styles.gameHeaderTitle, { color: theme.text }]}>Tap Reflex</Text>
@@ -226,11 +226,11 @@ function MemoryMatchGame({ onBack, cardSize }: { onBack: () => void; cardSize: n
   return (
     <View style={[styles.gameContainer, { backgroundColor: theme.backgroundRoot }]}>
       <View style={[styles.gameHeader, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.backButton} onPress={onBack}>
+        <Pressable style={styles.backButton} onPress={onBack} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={24} color={theme.text} />
         </Pressable>
         <Text style={[styles.gameHeaderTitle, { color: theme.text }]}>Memory Match</Text>
-        <Pressable style={styles.backButton} onPress={initializeGame}>
+        <Pressable style={styles.backButton} onPress={initializeGame} accessibilityRole="button" accessibilityLabel="Restart game">
           <Feather name="refresh-cw" size={20} color={theme.text} />
         </Pressable>
       </View>
@@ -356,7 +356,7 @@ function CipherPuzzleGame({ onBack }: { onBack: () => void }) {
   return (
     <View style={[styles.gameContainer, { backgroundColor: theme.backgroundRoot }]}>
       <View style={[styles.gameHeader, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.backButton} onPress={onBack}>
+        <Pressable style={styles.backButton} onPress={onBack} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={24} color={theme.text} />
         </Pressable>
         <Text style={[styles.gameHeaderTitle, { color: theme.text }]}>Cipher Puzzle</Text>
@@ -466,7 +466,13 @@ export default function MiniGamesScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Pressable style={styles.headerBackButton} onPress={() => navigation.goBack()}>
+        <Pressable
+          style={styles.headerBackButton}
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="arrow-left" size={24} color={theme.text} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Mini Games</Text>

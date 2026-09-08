@@ -59,7 +59,7 @@ export default function LastSeenPrivacyScreen() {
       console.error("Error updating privacy:", error);
       setSelected(previous);
       if (Platform.OS === "web") {
-        console.error("Could not save your privacy setting. Please try again.");
+        window.alert("Could not save your privacy setting. Please check your connection and try again.");
       } else {
         Alert.alert("Not saved", "Could not save your privacy setting. Please check your connection and try again.");
       }

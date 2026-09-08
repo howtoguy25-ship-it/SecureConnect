@@ -138,7 +138,13 @@ export function GifPicker({ visible, onClose, onSelectGif }: GifPickerProps) {
         <View style={[styles.container, { backgroundColor: theme.backgroundDefault }]}>
           <View style={styles.header}>
             <ThemedText type="h3">GIFs</ThemedText>
-            <Pressable onPress={onClose} style={styles.closeButton}>
+            <Pressable
+              onPress={onClose}
+              style={styles.closeButton}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
               <Feather name="x" size={24} color={theme.text} />
             </Pressable>
           </View>

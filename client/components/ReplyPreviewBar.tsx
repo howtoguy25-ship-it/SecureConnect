@@ -62,7 +62,7 @@ export function ReplyPreviewBar({
           {preview}
         </ThemedText>
       </View>
-      <Pressable onPress={onClose} hitSlop={10}>
+      <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cancel reply">
         <Feather name="x" size={20} color={theme.textSecondary} />
       </Pressable>
     </View>

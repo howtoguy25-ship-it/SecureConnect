@@ -72,7 +72,7 @@ export function CallActionsSheet({
     >
       <Pressable style={styles.overlay} onPress={onClose}>
         <View style={[styles.sheet, { backgroundColor: theme.backgroundDefault, paddingBottom: insets.bottom + Spacing.lg }]}>
-          <View style={styles.handle} />
+          <View style={[styles.handle, { backgroundColor: theme.border }]} />
           
           <ThemedText type="h4" style={[styles.title, { color: theme.text }]}>
             Call {contactName}
@@ -165,7 +165,6 @@ const styles = StyleSheet.create({
   handle: {
     width: 40,
     height: 4,
-    backgroundColor: "rgba(128,128,128,0.5)",
     borderRadius: 2,
     alignSelf: "center",
     marginBottom: Spacing.lg,

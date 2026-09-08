@@ -376,7 +376,12 @@ export default function VirtualNumberScreen() {
         <View style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}>
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
             <ThemedText type="h3">Choose Your Number</ThemedText>
-            <Pressable onPress={() => setShowNumberPicker(false)}>
+            <Pressable
+              onPress={() => setShowNumberPicker(false)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
               <Feather name="x" size={24} color={theme.text} />
             </Pressable>
           </View>
