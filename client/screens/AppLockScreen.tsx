@@ -199,7 +199,16 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
                   <Pressable
                     style={({ pressed }) => [
                       styles.unlockButton,
-                      { backgroundColor: entered.length > 0 ? theme.primary : theme.border, opacity: pressed ? 0.85 : 1 },
+                      {
+                        backgroundColor: entered.length > 0 ? theme.primary : theme.border,
+                        opacity: pressed ? 0.85 : 1,
+                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                        shadowColor: theme.primary,
+                        shadowOpacity: entered.length > 0 ? 0.35 : 0,
+                        shadowOffset: { width: 0, height: 6 },
+                        shadowRadius: 14,
+                        elevation: entered.length > 0 ? 4 : 0,
+                      },
                     ]}
                     onPress={() => attemptUnlock(entered)}
                     disabled={entered.length === 0 || isChecking}
@@ -208,8 +217,10 @@ export default function AppLockScreen({ onUnlock }: AppLockScreenProps) {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Feather name="unlock" size={17} color="#fff" style={{ marginRight: 8 }} />
-                        <ThemedText type="body" style={{ color: "#fff", fontWeight: "700" }}>
+                        <View style={styles.unlockIconWrap}>
+                          <Feather name="unlock" size={19} color="#fff" />
+                        </View>
+                        <ThemedText type="h4" style={{ color: "#fff", fontWeight: "800", letterSpacing: 0.3 }}>
                           Unlock
                         </ThemedText>
                       </>
@@ -318,11 +329,22 @@ const styles = StyleSheet.create({
   unlockButton: {
     width: "100%",
     maxWidth: 320,
+    minHeight: Spacing.buttonHeight + 8,
     flexDirection: "row",
-    paddingVertical: Spacing.md,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     borderRadius: BorderRadius.full,
     alignItems: "center",
     justifyContent: "center",
+  },
+  unlockIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: BorderRadius.full,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: Spacing.sm,
   },
   forgotButton: {
     paddingVertical: Spacing.sm,
