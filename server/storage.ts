@@ -429,7 +429,7 @@ export class DatabaseStorage implements IStorage {
     }>(sql`
       SELECT DISTINCT ON (conversation_id) id, conversation_id, content, encryption_version, e2ee_init_envelope, sender_id, media_type, sealed_sender, outer_sender_virtual_number_id
       FROM messages
-      WHERE conversation_id = ANY(${conversationIds})
+      WHERE conversation_id = ANY(${conversationIds}::text[])
       ORDER BY conversation_id, created_at DESC
     `);
     const lastMessageMap = new Map<string, { id: string; content: string | null; encryptionVersion: string | null; e2eeInitEnvelope: unknown; senderId: string; mediaType: string | null; sealedSender: boolean; outerSenderVirtualNumberId: string | null }>();
