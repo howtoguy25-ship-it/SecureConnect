@@ -186,7 +186,7 @@ function authenticateToken(req: AuthRequest, res: Response, next: Function) {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tv?: number; did?: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tv?: number; did?: string; su?: boolean };
     req.userId = decoded.userId;
     req.deviceId = decoded.did;
     // Validate token version (allows server-side invalidation of old tokens)
@@ -230,12 +230,31 @@ function authenticateToken(req: AuthRequest, res: Response, next: Function) {
       if (tokenTv < currentTv) {
         return res.status(401).json({ error: 'Session expired. Please sign in again.' });
       }
+      // Real server-side enforcement of the security-questions 2nd factor
+      // (see where this token was signed in /api/auth/verify-code). Fail
+      // closed: anything not explicitly allowlisted is blocked for a
+      // step-up-pending token, so a new sensitive route added later is
+      // blocked by default instead of silently exempt.
+      if (decoded.su === true && !STEP_UP_ALLOWED_PATHS.has(req.path)) {
+        return res.status(403).json({ error: 'Verify your security questions to continue.', stepUpRequired: true });
+      }
       next();
     }).catch(() => res.status(500).json({ error: 'Auth check failed' }));
   } catch (error) {
     return res.status(403).json({ error: 'Invalid token' });
   }
 }
+
+// Routes a step-up-pending token (security questions not yet re-verified
+// this session — see authenticateToken) may still call. Everything else —
+// messages, calls, contacts, media, settings, all of it — is blocked until
+// verification succeeds and a fresh unrestricted token is issued.
+const STEP_UP_ALLOWED_PATHS = new Set([
+  '/api/auth/me',
+  '/api/auth/logout',
+  '/api/auth/security-questions/verify',
+  '/api/auth/security-questions/reset-demo',
+]);
 
 function getClientIp(req: Request): string | null {
   const fwd = (req.headers['x-forwarded-for'] as string) || '';
@@ -600,7 +619,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const tokenVersion = user.tokenVersion ?? 0;
-      const token = jwt.sign({ userId: user.id, tv: tokenVersion, did: deviceId ?? undefined }, JWT_SECRET, { expiresIn: '30d' });
+      // Real, server-enforced 2nd factor — not just a client-side screen.
+      // The client has shown a "re-answer your security questions" prompt
+      // on every fresh login for a while, but nothing on the server ever
+      // checked whether that actually happened: the token handed back here
+      // was already fully privileged the instant OTP succeeded, so a
+      // modified client (or literally a direct API call with this token)
+      // could skip the prompt entirely and read messages/calls/contacts
+      // straight away. isNewUser accounts and the Apple-review demo number
+      // are exempt (nothing to verify against yet / shared review account
+      // with no real secret) — see authenticateToken below for enforcement
+      // and /api/auth/security-questions/verify for how this gets lifted.
+      const requiresStepUp = !isNewUser && !!user.securityQ1Hash && !isAppleReviewTestNumber(phoneNumber);
+      const token = jwt.sign(
+        { userId: user.id, tv: tokenVersion, did: deviceId ?? undefined, ...(requiresStepUp ? { su: true } : {}) },
+        JWT_SECRET,
+        { expiresIn: '30d' },
+      );
 
       // Auto-generate a Safe Code for first-time signups so the user is
       // immediately routed through the SafeCodeScreen (gate fires on
@@ -816,7 +851,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       await storage.updateUser(user.id, { securityQFailedAttempts: 0, securityQLockedUntil: null });
-      res.json({ valid: true });
+      // Issue a fresh, unrestricted token (no `su` claim) — the one this
+      // request authenticated with may be step-up-pending (that's exactly
+      // why this endpoint is in STEP_UP_ALLOWED_PATHS), and the client
+      // needs a real replacement to actually gain access, not just a
+      // local flag flip. Carries the same userId/tokenVersion/deviceId so
+      // it's a straight swap from the client's perspective.
+      const freshToken = jwt.sign(
+        { userId: user.id, tv: user.tokenVersion ?? 0, did: req.deviceId ?? undefined },
+        JWT_SECRET,
+        { expiresIn: '30d' },
+      );
+      res.json({ valid: true, token: freshToken });
     } catch (error) {
       console.error('Error verifying security questions:', error);
       res.status(500).json({ error: 'Verification failed' });
@@ -5706,7 +5752,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tv?: number; did?: string };
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tv?: number; did?: string; su?: boolean };
+      // Same step-up gate as authenticateToken (REST) — a token issued
+      // pending security-questions re-verification must not be able to
+      // open a realtime connection either, or it could still receive
+      // 'new-message'/call-signaling events for every conversation the
+      // account is in without ever passing the 2nd factor.
+      if (decoded.su === true) {
+        return next(new Error('step_up_required'));
+      }
       // Enforce token version against current DB value so stale tokens
       // (e.g. after logout-all-others) cannot maintain realtime sessions.
       try {

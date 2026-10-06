@@ -17,7 +17,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { Feather } from "@expo/vector-icons";
 import { apiRequest } from "@/lib/query-client";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, ensureE2EEKeys } from "@/contexts/AuthContext";
 
 function showAlert(title: string, message: string) {
   if (Platform.OS === "web") {
@@ -31,7 +31,7 @@ export default function SecurityQuestionsVerifyScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
-  const { setSecurityQuestionsPending, logout } = useAuth();
+  const { setSecurityQuestionsPending, setToken, logout } = useAuth();
 
   const [dishAnswer, setDishAnswer] = useState("");
   const [twoWordsAnswer, setTwoWordsAnswer] = useState("");
@@ -52,6 +52,20 @@ export default function SecurityQuestionsVerifyScreen() {
       setDishAnswer("");
       setTwoWordsAnswer("");
       if (data?.valid) {
+        // The token this screen authenticated with is step-up-pending (the
+        // server only lets it call this one endpoint — see
+        // STEP_UP_ALLOWED_PATHS). Swap in the fresh, fully-privileged token
+        // the server just issued instead of only flipping a local flag —
+        // without this the old restricted token would keep getting 403s
+        // from every other endpoint the app immediately tries to call.
+        if (typeof data.token === "string" && data.token) {
+          setToken(data.token);
+          try {
+            await ensureE2EEKeys(data.token);
+          } catch (e) {
+            console.log("E2EE setup after step-up failed:", e);
+          }
+        }
         setSecurityQuestionsPending(false);
       } else {
         setError("That doesn't match. Please try again.");
