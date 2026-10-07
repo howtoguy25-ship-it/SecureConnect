@@ -19,6 +19,7 @@ import { apiRequest } from "@/lib/query-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { storeAuth } from "@/lib/auth";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
+import { isSealedLoginField, unsealLoginField } from "@/utils/crypto/prekeyManager";
 
 interface LoginEvent {
   id: string;
@@ -30,6 +31,10 @@ interface LoginEvent {
   isNewDevice: boolean;
   isCurrentSession: boolean;
   createdAt: string;
+  // True when this event's metadata is sealed to a DIFFERENT device's key
+  // (every field is end-to-end encrypted to the specific device it's
+  // about — see server/loginMetadataSeal.ts) and so can't be read here.
+  metadataFromOtherDevice?: boolean;
 }
 
 function formatWhen(iso: string): string {
@@ -65,7 +70,26 @@ export default function LoginHistoryScreen() {
     queryKey: ["/api/auth/login-events"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/auth/login-events");
-      return res.json();
+      const raw: LoginEvent[] = await res.json();
+      // Each field was end-to-end sealed to the specific device it's about
+      // (see loginMetadataSeal.ts / prekeyManager.ts unsealLoginField) — the
+      // server can't decrypt them, so this device must open each one with
+      // its own private key. Entries from a DIFFERENT device won't open
+      // here; that's expected, not an error.
+      return Promise.all(
+        raw.map(async (e) => {
+          const wasSealed = isSealedLoginField(e.deviceName) || isSealedLoginField(e.ipAddress) ||
+            isSealedLoginField(e.platform) || isSealedLoginField(e.userAgent);
+          const [deviceName, platform, ipAddress, userAgent] = await Promise.all([
+            unsealLoginField(e.deviceName),
+            unsealLoginField(e.platform),
+            unsealLoginField(e.ipAddress),
+            unsealLoginField(e.userAgent),
+          ]);
+          const metadataFromOtherDevice = wasSealed && deviceName === null && platform === null && ipAddress === null && userAgent === null;
+          return { ...e, deviceName, platform, ipAddress, userAgent, metadataFromOtherDevice };
+        }),
+      );
     },
   });
 
@@ -130,12 +154,12 @@ export default function LoginHistoryScreen() {
     return (
       <View style={[styles.card, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
         <View style={[styles.iconWrap, { backgroundColor: accent + "18" }]}>
-          <Feather name={platformIcon(item.platform)} size={18} color={accent} />
+          <Feather name={item.metadataFromOtherDevice ? "lock" : platformIcon(item.platform)} size={18} color={accent} />
         </View>
         <View style={styles.body}>
           <View style={styles.headerRow}>
             <ThemedText type="body" style={{ fontWeight: "700", flex: 1 }} numberOfLines={1}>
-              {item.deviceName || "Unknown device"}
+              {item.metadataFromOtherDevice ? "Encrypted sign-in" : (item.deviceName || "Unknown device")}
             </ThemedText>
             {item.isCurrentSession ? (
               <View style={[styles.badge, { backgroundColor: theme.primary + "18" }]}>
@@ -150,7 +174,11 @@ export default function LoginHistoryScreen() {
           <ThemedText type="small" style={{ color: theme.textSecondary }}>
             {formatWhen(item.createdAt)}
           </ThemedText>
-          {item.ipAddress ? (
+          {item.metadataFromOtherDevice ? (
+            <ThemedText type="small" style={{ color: theme.textSecondary, fontStyle: "italic" }}>
+              End-to-end encrypted to that device — view details from there
+            </ThemedText>
+          ) : item.ipAddress ? (
             <ThemedText type="small" style={{ color: theme.textSecondary }}>
               IP {item.ipAddress}
             </ThemedText>

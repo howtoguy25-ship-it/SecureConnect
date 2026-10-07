@@ -85,20 +85,75 @@ export async function getIdentityKeyPair(): Promise<{ publicKey: Uint8Array; sec
   return { publicKey, secretKey };
 }
 
-export async function ensureIdentityKeyPair(token: string, apiBase: string): Promise<{ publicKey: string; secretKey: string }> {
+// ─── Login-event metadata sealing (mirrors server/loginMetadataSeal.ts) ────
+// The server seals login-event fields (IP, device name, platform, user
+// agent) to this device's own public key and can never decrypt them back —
+// see that file for why. Opening them is the client's job.
+
+const SEALED_LOGIN_PREFIX = "e2ee1:";
+
+export function isSealedLoginField(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith(SEALED_LOGIN_PREFIX);
+}
+
+// Returns the plaintext if `value` was sealed to THIS device's key, the
+// value unchanged if it isn't sealed at all (a legacy row written before
+// this feature existed), or null if it's sealed but unopenable here —
+// which just means it belongs to a different device's login, since each
+// field is sealed to the specific device the login event is about.
+export async function unsealLoginField(value: string | null | undefined): Promise<string | null> {
+  if (!isSealedLoginField(value)) return value ?? null;
+  const parts = value!.slice(SEALED_LOGIN_PREFIX.length).split(":");
+  if (parts.length !== 3) return null;
+  const identity = await getIdentityKeyPair();
+  if (!identity) return null;
+  try {
+    const [ephPubB64, nonceB64, cipherB64] = parts;
+    const ephemeralPublicKey = naclUtil.decodeBase64(ephPubB64);
+    const nonce = naclUtil.decodeBase64(nonceB64);
+    const ciphertext = naclUtil.decodeBase64(cipherB64);
+    const opened = nacl.box.open(ciphertext, nonce, ephemeralPublicKey, identity.secretKey);
+    return opened ? naclUtil.encodeUTF8(opened) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Pure local operation — no token, no network. Generates the identity
+// keypair on first call and persists it; every later call just returns the
+// same one. Callable before authentication exists at all, which is the
+// point: the login request itself (verify-code) can now carry this
+// device's public key from the very first call, instead of only being
+// able to register it a request or two later via uploadIdentityKey below.
+// That's what lets the server seal login-event metadata (IP, device name,
+// platform) to this device's key at the moment it writes the row, rather
+// than only after a separate round trip.
+export async function ensureLocalIdentityKeyPair(): Promise<{ publicKey: string; secretKey: string; isNew: boolean }> {
   const existing = await secureGet(KEY_IDENTITY_PRIVATE);
   if (existing) {
     const secretKey = naclUtil.decodeBase64(existing);
     const publicKey = nacl.scalarMult.base(secretKey);
-    return { publicKey: naclUtil.encodeBase64(publicKey), secretKey: existing };
+    return { publicKey: naclUtil.encodeBase64(publicKey), secretKey: existing, isNew: false };
   }
   const kp = nacl.box.keyPair();
   const pub = naclUtil.encodeBase64(kp.publicKey);
   const priv = naclUtil.encodeBase64(kp.secretKey);
   await secureSet(KEY_IDENTITY_PRIVATE, priv);
   await secureSet(KEY_IDENTITY_PUBLIC, pub);
-  await uploadIdentityKey(pub, token, apiBase);
-  return { publicKey: pub, secretKey: priv };
+  return { publicKey: pub, secretKey: priv, isNew: true };
+}
+
+export async function ensureIdentityKeyPair(token: string, apiBase: string): Promise<{ publicKey: string; secretKey: string }> {
+  const pair = await ensureLocalIdentityKeyPair();
+  // Only the very first-ever creation needs an explicit upload — if the
+  // server already has this device's key on file (either from a prior
+  // run of this same path, or because the login request itself already
+  // carried the public key and the server upserted it inline — see
+  // verify-code / recover-complete), re-uploading here would be redundant.
+  if (pair.isNew) {
+    await uploadIdentityKey(pair.publicKey, token, apiBase);
+  }
+  return { publicKey: pair.publicKey, secretKey: pair.secretKey };
 }
 
 async function uploadIdentityKey(publicKey: string, token: string, apiBase: string): Promise<void> {

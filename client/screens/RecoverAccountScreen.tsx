@@ -103,7 +103,17 @@ export default function RecoverAccountScreen() {
     setLoading(true);
     setError("");
     try {
-      const data = await post("/api/auth/recover/complete", { recoveryToken, phoneNumber: newPhone, code });
+      // Same local, pre-auth key generation as the normal login path (see
+      // verifyCode in lib/auth.ts) — lets the server seal this recovery
+      // login event's metadata to this device's own key instead of writing
+      // it in plaintext.
+      let identityPublicKey: string | undefined;
+      try {
+        const { ensureLocalIdentityKeyPair } = await import("@/utils/crypto/prekeyManager");
+        const pair = await ensureLocalIdentityKeyPair();
+        identityPublicKey = pair.publicKey;
+      } catch {}
+      const data = await post("/api/auth/recover/complete", { recoveryToken, phoneNumber: newPhone, code, identityPublicKey });
       if (data?.success && data?.token && data?.user) {
         setToken(data.token);
         try { await ensureE2EEKeys(data.token); } catch {}

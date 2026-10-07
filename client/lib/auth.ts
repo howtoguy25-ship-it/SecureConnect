@@ -119,8 +119,24 @@ export async function verifyCode(phoneNumber: string, code: string): Promise<{ s
       // ignore — server still records login event without device info
     }
 
+    // Generate (or reuse) this device's E2EE identity keypair BEFORE
+    // logging in -- it's a pure local operation, no token required (see
+    // ensureLocalIdentityKeyPair). Sending the public half with the login
+    // request itself is what lets the server seal THIS login event's
+    // IP/device-name/user-agent to a key only this device holds the
+    // private half of, instead of writing them in plaintext because no
+    // device row exists yet at the moment this very first event is logged.
+    let identityPublicKey: string | undefined;
+    try {
+      const { ensureLocalIdentityKeyPair } = await import('@/utils/crypto/prekeyManager');
+      const pair = await ensureLocalIdentityKeyPair();
+      identityPublicKey = pair.publicKey;
+    } catch {
+      // Best-effort — login must never fail because of this.
+    }
+
     const response = await apiRequest('POST', '/api/auth/verify-code', {
-      phoneNumber, code, deviceId, deviceName, platform,
+      phoneNumber, code, deviceId, deviceName, platform, identityPublicKey,
     });
     const data = await response.json();
 

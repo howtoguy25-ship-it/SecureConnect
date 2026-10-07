@@ -3,6 +3,7 @@ import type { User, InsertUser, Message, InsertMessage, Conversation, Call, Hidd
 import { gt, lt, lte, ilike } from "drizzle-orm";
 import { db } from "./db";
 import { eq, and, desc, sql, or, inArray, ne, isNull } from "drizzle-orm";
+import { sealLoginField } from "./loginMetadataSeal";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -76,7 +77,7 @@ export interface IStorage {
   getDueAccountDeletions(limit?: number): Promise<Array<{ id: string }>>;
   executeHardDelete(userId: string): Promise<void>;
 
-  recordLoginEvent(data: { userId: string; deviceId?: string | null; deviceName?: string | null; platform?: string | null; ipAddress?: string | null; userAgent?: string | null; isNewDevice?: boolean }): Promise<LoginEvent>;
+  recordLoginEvent(data: { userId: string; deviceId?: string | null; deviceName?: string | null; platform?: string | null; ipAddress?: string | null; userAgent?: string | null; isNewDevice?: boolean; identityPublicKey?: string | null }): Promise<LoginEvent>;
   getLoginEvents(userId: string, limit?: number): Promise<LoginEvent[]>;
   bumpTokenVersion(userId: string, currentDeviceId?: string | null): Promise<number>;
 
@@ -2625,7 +2626,7 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async recordLoginEvent(data: { userId: string; deviceId?: string | null; deviceName?: string | null; platform?: string | null; ipAddress?: string | null; userAgent?: string | null; isNewDevice?: boolean }): Promise<LoginEvent> {
+  async recordLoginEvent(data: { userId: string; deviceId?: string | null; deviceName?: string | null; platform?: string | null; ipAddress?: string | null; userAgent?: string | null; isNewDevice?: boolean; identityPublicKey?: string | null }): Promise<LoginEvent> {
     // Demote any prior "current" event for the same device — a device only
     // has one active session at a time, the most recent one.
     if (data.deviceId) {
@@ -2637,19 +2638,44 @@ export class DatabaseStorage implements IStorage {
           eq(loginEvents.isCurrentSession, true),
         ));
     }
+
+    // Real E2EE (see loginMetadataSeal.ts), not encryption-at-rest: seal
+    // every one of these fields to the device's own X25519 public key so
+    // only that device — holding the matching private key, which never left
+    // it — can ever read them back. The server cannot decrypt its own
+    // writes here. Prefer the key the CALLER just supplied (the device's
+    // login request itself can carry its freshly-generated public key, see
+    // /api/auth/verify-code) over a DB lookup, since that covers this
+    // device's very first-ever login, before any userDevices row for it
+    // exists. Fall back to the registered key for this deviceId otherwise.
+    let sealKey = data.identityPublicKey ?? null;
+    if (!sealKey && data.deviceId) {
+      const [device] = await db.select().from(userDevices)
+        .where(and(eq(userDevices.userId, data.userId), eq(userDevices.deviceId, data.deviceId)));
+      sealKey = device?.identityPublicKey ?? null;
+    }
+    // No key resolvable at all — leave the field null rather than ever
+    // writing it in plaintext.
+    const seal = (value: string | null | undefined): string | null =>
+      value && sealKey ? sealLoginField(value, sealKey) : null;
+
     const [event] = await db.insert(loginEvents).values({
       userId: data.userId,
       deviceId: data.deviceId ?? null,
-      deviceName: data.deviceName ?? null,
-      platform: data.platform ?? null,
-      ipAddress: data.ipAddress ?? null,
-      userAgent: data.userAgent ?? null,
+      deviceName: seal(data.deviceName),
+      platform: seal(data.platform),
+      ipAddress: seal(data.ipAddress),
+      userAgent: seal(data.userAgent),
       isNewDevice: data.isNewDevice ?? false,
       isCurrentSession: true,
     }).returning();
     return event;
   }
 
+  // These fields are sealed to the device's own key at write time (see
+  // above) — the server never holds anything that can decrypt them, so
+  // there is nothing to decrypt here. Rows are returned exactly as stored;
+  // the client opens them locally with its own private key.
   async getLoginEvents(userId: string, limit: number = 50): Promise<LoginEvent[]> {
     return await db.select().from(loginEvents)
       .where(eq(loginEvents.userId, userId))

@@ -549,7 +549,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/auth/verify-code', async (req, res) => {
     try {
-      const { phoneNumber: rawPhone, code, deviceId, deviceName, platform } = req.body;
+      const { phoneNumber: rawPhone, code, deviceId, deviceName, platform, identityPublicKey } = req.body;
 
       if (!rawPhone || !code || typeof rawPhone !== 'string' || typeof code !== 'string') {
         return res.status(400).json({ error: 'Phone number and code are required' });
@@ -677,6 +677,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress,
         userAgent: typeof userAgent === 'string' ? userAgent : null,
         isNewDevice: isNewDevice && !isNewUser,
+        // Device's own E2EE public key, generated locally before this
+        // request was ever sent (see ensureLocalIdentityKeyPair /
+        // verifyCode) — lets this, the device's very first login event,
+        // be sealed immediately instead of written in plaintext.
+        identityPublicKey: typeof identityPublicKey === 'string' ? identityPublicKey : null,
       }).catch(err => console.error('Failed to record login event:', err));
 
       // Concurrent-session / account-hijack alert: if this account already has
@@ -1002,7 +1007,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/auth/recover/complete', async (req, res) => {
     try {
-      const { recoveryToken, phoneNumber: rawPhone, code, deviceId, deviceName, platform } = req.body;
+      const { recoveryToken, phoneNumber: rawPhone, code, deviceId, deviceName, platform, identityPublicKey } = req.body;
       const userId = verifyRecoveryToken(recoveryToken);
       if (!userId) {
         return res.status(401).json({ error: 'Recovery session expired. Please verify your Account ID and answers again.' });
@@ -1064,6 +1069,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress,
         userAgent: typeof userAgent === 'string' ? userAgent : null,
         isNewDevice: true,
+        identityPublicKey: typeof identityPublicKey === 'string' ? identityPublicKey : null,
       }).catch(err => console.error('Failed to record recovery login event:', err));
 
       res.json({
